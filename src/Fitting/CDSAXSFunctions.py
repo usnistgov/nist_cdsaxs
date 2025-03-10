@@ -29,6 +29,34 @@ def FreeFormTrapezoid(Coord,Qx,Qz,Trapnumber):
     return form
 
 
+def ConeFourierTransform(CPAR,ConeNumber,Qr,Qz,Discretization,SLD):
+    # Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
+    H1 = 0
+    H2 = 0
+    Form=np.zeros([int(len(Qr[:,0])),int(len(Qr[0,:]))])
+    
+    for i in range (ConeNumber):
+        H2=H2+CPAR[i,1]
+        z=np.zeros([int(Discretization[i])])
+        stepsize=CPAR[i,1]/Discretization[i]
+        z=np.arange(H1,H2+0.01,stepsize)
+        if i > 0 :
+            H1=H1+CPAR[i-1,1]
+            
+        z=np.arange(H1,H2+0.01,stepsize)
+        R1=CPAR[i,0]
+        R2=CPAR[i+1,0]
+        if R1==R2:
+            R1=R1+0.000001
+        Slope=(H2-H1)/(R2-R1)
+        for ii in range(len(z)-1):
+            RI1=(z[ii]-H1)/Slope+R1
+            RI2=(z[ii+1]-H1)/Slope+R1
+            fa=2*np.pi*RI1/Qr*sp.jv(1,Qr*RI1)*np.exp(1j*Qz*z[ii])
+            fb=2*np.pi*RI2/Qr*sp.jv(1,Qr*RI2)*np.exp(1j*Qz*z[ii+1])
+            Form=Form+stepsize*(fb+fa)/2*SLD[i]
+    return Form
+
 
 def importCDSAXS1D(Intensitydata,Qxdata,Qzdata):
     # imports data from a 1D grating
