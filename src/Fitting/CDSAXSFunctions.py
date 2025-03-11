@@ -90,6 +90,28 @@ def SymCoordAssign(TPAR,SLD):
  
     return (Coord)
 
+def SymCoordAssign_SingleMaterial(TPAR):
+    # assigns trapezoid coordinates for a symmetric trapezoid
+    # consider combining with SymCoordAssign with SLD as a flag
+    Trapnumber=len(TPAR[:,0])-1
+    Coord=np.zeros([Trapnumber+1,5,1])
+    for T in range (Trapnumber+1):
+        if T==0:
+            Coord[T,0,0]=0
+            Coord[T,1,0]=TPAR[0,0]
+            Coord[T,2,0]=TPAR[0,1]
+            Coord[T,3,0]=0
+            Coord[T,4,0]=1 # SLD - assigned to be 1 for a single material
+        else:
+            Coord[T,0,0]=Coord[T-1,0,0]+0.5*(TPAR[T-1,0]-TPAR[T,0])
+            Coord[T,1,0]=Coord[T,0,0]+TPAR[T,0]
+            Coord[T,2,0]=TPAR[T,1]
+            Coord[T,3,0]=0
+            Coord[T,4,0]=1# SLD - assigned to be 1 for a single material
+ 
+    return (Coord)
+
+
 def SimTrap(FITPAR,Trapnumber):
     TPARs=np.zeros([Trapnumber+1,2])
     TPARs[:,0:2]=np.reshape(FITPAR[0:(Trapnumber+1)*2],(Trapnumber+1,2))
@@ -103,9 +125,21 @@ def SimTrap(FITPAR,Trapnumber):
     SimInt = np.power(Formfactor,2)*SPAR[1]+SPAR[2]
     return SimInt
 
+def SimTrap_SM(FITPAR,Trapnumber):
+    TPARs=np.zeros([Trapnumber+1,2])
+    TPARs[:,0:2]=np.reshape(FITPAR[0:(Trapnumber+1)*2],(Trapnumber+1,2))
+    SPAR=FITPAR[Trapnumber*2+2:Trapnumber*2+5]
+    (Coord)= SymCoordAssign_SingleMaterial(TPARs)
+    F1 = CD.FreeFormTrapezoid(Coord[:,:,0],Qx,Qz,Trapnumber) 
+    
+    M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(SPAR[0],2)),0.5)
+    Formfactor=F1*M
+    Formfactor=abs(Formfactor)
+    SimInt = np.power(Formfactor,2)*SPAR[1]+SPAR[2]
+    return SimInt
 
 def PBA_SymTrap(TPAR,SPAR,Bounds):
-    # Assigns parameter bounds for the MCMC algorithm, this version is
+    # Assigns parameter bounds for the MCMC and DE algorithm, this version is
     # Bounds are assigned from 0.01-0.99
     SPARLB=SPAR[0:4]*(1-Bounds)
     SPARUB=SPAR[0:4]*(1+Bounds)
@@ -124,7 +158,7 @@ def PBA_SymTrap(TPAR,SPAR,Bounds):
 
 #### - Plotting functions
 
-def plotSymTrap(Coord,Trapnumber,Pitch):
+def plotSymTrap(Coord,Trapnumber,Pitch,SampleName):
     Coordp=np.zeros([Trapnumber+1,5,2])
     Coordp[:,:,0]=Coord[:,:,0]
     Coordp[:,:,1]=Coord[:,:,0]
@@ -140,27 +174,33 @@ def plotSymTrap(Coord,Trapnumber,Pitch):
             Lc[i,1]=h
             Rc[i,1]=h
             h=h+Coordp[i,2,S]
-        plt.plot(Lc[:,0],Lc[:,1])
-        plt.plot(Rc[:,0],Rc[:,1])
+        plt.plot(Lc[:,0],Lc[:,1], color='black')
+        plt.plot(Rc[:,0],Rc[:,1], color='black')
         Cc=np.zeros([2,2])
         for i in range(Trapnumber):
             Cc[0,0]=Lc[i+1,0]
             Cc[0,1]=Lc[i+1,1]
             Cc[1,0]=Rc[i+1,0]
             Cc[1,1]=Rc[i+1,1]
-            plt.plot(Cc[:,0],Cc[:,1])
+            plt.plot(Cc[:,0],Cc[:,1], color='black')
+    plt.xlabel('Width (A)')
+    plt.ylabel('Height (A)')             
+
     plt.show()
 
-def PlotQzCut(Qz,FITPAR,Trapnumber,ExpI,numbercuts):
+def PlotQzCut(Qz,FITPAR,Trapnumber,ExpI,numbercuts,scale):
     S=SimTrap(FITPAR,Trapnumber)
-    I=deepcopy(ExpI)    
-    for i in range(0,numbercuts):
-        S[:,i]=S[:,i]/(50.**(i+1))
-        I[:,i]=I[:,i]/(50.**(i+1))
+    I=deepcopy(ExpI)   
+    if scale =='yes': 
+        for i in range(0,numbercuts):
+            S[:,i]=S[:,i]/(50.**(i+1))
+            I[:,i]=I[:,i]/(50.**(i+1))
     for i in range(numbercuts):
         plt.semilogy(Qz[:,i],I[:,i],'.', label='Exp '+str(i))
-        plt.semilogy(Qz[:,i],S[:,i], label='Sim '+str(i))
-    plt.legend(loc='upper right')
+        plt.semilogy(Qz[:,i],S[:,i], label='Sim '+str(i), color='black')
+    #plt.legend(loc='upper right')
+    plt.xlabel('q ($A^{-1}$)')
+    plt.ylabel('Intensity (a.u.)')
     plt.plot()
     
 def PlotQzCut_NoScale(Qz,FITPAR,Trapnumber,ExpI,numbercuts):
@@ -171,3 +211,31 @@ def PlotQzCut_NoScale(Qz,FITPAR,Trapnumber,ExpI,numbercuts):
         plt.semilogy(Qz[:,i],S[:,i], label='Sim '+str(i))
     plt.plot()
 
+def PlotQzCutComp(Qz,FITPAR,Trapnumber,ExpI,numbercuts):
+    colorlist=('black','orange')
+    I=deepcopy(ExpI)
+    for k,v in enumerate(FITPAR):
+        S=SimTrap(v,Trapnumber)
+            
+        for i in range(0,numbercuts):
+            S[:,i]=S[:,i]/(50.**(i+1))
+            I[:,i]=I[:,i]/(50.**(i+1))
+        for i in range(numbercuts):
+            if k==0:
+                plt.semilogy(Qz[:,i],I[:,i],'.')
+                plt.semilogy(Qz[:,i],S[:,i],color=colorlist[k])
+            else:
+                plt.semilogy(Qz[:,i],S[:,i], color=colorlist[k])
+        #plt.legend(loc='upper right')
+    patch1 = mpatches.Patch(color='black', label='Initial')
+    plt.legend(handles=[patch1])
+    patch2 = mpatches.Patch(color='orange', label='Final')
+    plt.legend(handles=[patch2])
+    plt.legend(loc='upper right')
+    plt.plot()
+    
+def TPARfromFITPAR(FITPAR,Trapnumber):
+    TPARs=np.zeros([Trapnumber+1,2])
+    TPARs[:,0:2]=np.reshape(FITPAR[0:(Trapnumber+1)*2],(Trapnumber+1,2))
+    SPAR=FITPAR[Trapnumber*2+2:Trapnumber*2+5]
+    return TPARs,SPAR
