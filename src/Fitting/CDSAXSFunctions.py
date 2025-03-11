@@ -189,9 +189,10 @@ def plotSymTrap(Coord,Trapnumber,Pitch,SampleName):
     plt.ylabel('Height (A)')             
 
     plt.show()
+    plt.close()
 
-def PlotQzCut(Qz,FITPAR,Trapnumber,ExpI,numbercuts,scale):
-    S=SimTrap(FITPAR,Trapnumber)
+def PlotQzCut(Qx,Qz,FITPAR,Trapnumber,ExpI,numbercuts,scale):
+    S=SimTrap_SM(Qx,Qz,FITPAR,Trapnumber)
     I=deepcopy(ExpI)   
     if scale =='yes': 
         for i in range(0,numbercuts):
@@ -205,8 +206,8 @@ def PlotQzCut(Qz,FITPAR,Trapnumber,ExpI,numbercuts,scale):
     plt.ylabel('Intensity (a.u.)')
     plt.plot()
     
-def PlotQzCut_NoScale(Qz,FITPAR,Trapnumber,ExpI,numbercuts):
-    S=SimTrap(FITPAR,Trapnumber)
+def PlotQzCut_NoScale(Qx,Qz,FITPAR,Trapnumber,ExpI,numbercuts):
+    S=SimTrap_SM(Qx,Qz,FITPAR,Trapnumber)
     I=deepcopy(ExpI)    
     for i in range(numbercuts):
         plt.semilogy(Qz[:,i],I[:,i],'.', label='Exp '+str(i))
@@ -241,3 +242,13 @@ def TPARfromFITPAR(FITPAR,Trapnumber):
     TPARs[:,0:2]=np.reshape(FITPAR[0:(Trapnumber+1)*2],(Trapnumber+1,2))
     SPAR=FITPAR[Trapnumber*2+2:Trapnumber*2+5]
     return TPARs,SPAR
+
+def Misfit(Exp,Sim):
+    Chi2= abs(np.log(Exp)-np.log(Sim))
+    #ms=np.zeros([len(Exp[:,1]),len(Exp[1,:]),2])
+    #ms[:,:,0]=Sim
+    #ms[:,:,1]=Exp
+    #MS= np.nanmin(ms,2)
+    #Chi2=np.power((D/MS),2)
+    Chi2[np.isnan(Chi2)]=0
+    return Chi2
