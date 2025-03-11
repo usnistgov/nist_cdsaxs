@@ -65,6 +65,8 @@ def importCDSAXS1D(Intensitydata,Qxdata,Qzdata):
     Qz=np.loadtxt(Qzdata)
     
     Intensity[Intensity == 0]=np.nan # replaces 
+    Qx[Qx == 0]=np.nan
+    Qz[Qz == 0]=np.nan
     return Intensity,Qx,Qz
 
 def SymCoordAssign(TPAR,SLD):
