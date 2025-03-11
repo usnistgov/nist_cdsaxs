@@ -2,6 +2,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from copy import deepcopy
+import scipy.special as sp
+import matplotlib.patches as mpatches
 
 # FreeFormTrapezoid - uses coordinate input to calculate simlate amplitude of the form factor a trapezoid. Coordinates are of the form [xL,xR,H] for each layer. Does not need to be symmetric - code should be checked for computational efficiency
 def FreeFormTrapezoid(Coord,Qx,Qz,Trapnumber):
@@ -112,11 +114,11 @@ def SymCoordAssign_SingleMaterial(TPAR):
     return (Coord)
 
 
-def SimTrap(FITPAR,Trapnumber):
+def SimTrap(Qx,Qz,FITPAR,Trapnumber,SLD):
     TPARs=np.zeros([Trapnumber+1,2])
     TPARs[:,0:2]=np.reshape(FITPAR[0:(Trapnumber+1)*2],(Trapnumber+1,2))
     SPAR=FITPAR[Trapnumber*2+2:Trapnumber*2+5]
-    (Coord)= SymCoordAssign(TPAR,SLD)
+    (Coord)= SymCoordAssign(TPARs,SLD)
     F1 = FreeFormTrapezoid(Coord[:,:,0],Qx,Qz,Trapnumber) 
     
     M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(SPAR[0],2)),0.5)
@@ -125,12 +127,12 @@ def SimTrap(FITPAR,Trapnumber):
     SimInt = np.power(Formfactor,2)*SPAR[1]+SPAR[2]
     return SimInt
 
-def SimTrap_SM(FITPAR,Trapnumber):
+def SimTrap_SM(Qx,Qz,FITPAR,Trapnumber):
     TPARs=np.zeros([Trapnumber+1,2])
     TPARs[:,0:2]=np.reshape(FITPAR[0:(Trapnumber+1)*2],(Trapnumber+1,2))
     SPAR=FITPAR[Trapnumber*2+2:Trapnumber*2+5]
     (Coord)= SymCoordAssign_SingleMaterial(TPARs)
-    F1 = CD.FreeFormTrapezoid(Coord[:,:,0],Qx,Qz,Trapnumber) 
+    F1 = FreeFormTrapezoid(Coord[:,:,0],Qx,Qz,Trapnumber) 
     
     M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(SPAR[0],2)),0.5)
     Formfactor=F1*M
