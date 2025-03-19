@@ -229,6 +229,58 @@ class DatasetGeneralTIFF(object):
                 print('Error, skipping file ' + self.filelist[imgnum])
 
 
+class DatasetGeneralCSV_TIFF(object):
+    """Make sf object for a list of .tif files
+    TODO: this will become the sole future general tiff loader
+
+    List of accepted CSV column headers and definitions:
+        Required
+        --------
+        filename
+        sample_phi_deg : sample rotation angle during cd-saxs measurement in degrees
+
+        Optional
+        --------
+        sample_label : user-specified sample label
+        energy_eV : source energy in eV (cannot be used with wavelength_nm)
+        wavelength_nm : source wavelength in nm (cannot be used with energy_eV)
+        sdd_cm : sample-to-detector distance in cm
+        exposure_time_s : exposture time in s
+        monitor : beam monitor TODO: fix this definition
+        sample_chi_deg : rotation in the sample xy plane about the z axis
+
+    Attributes:
+        filelist: list of .tif files
+        scatteringfilelist: list of sf objects
+        folder: folder with .tif files
+
+    Args:
+        params: namedtuple of user parameters
+        filenames_tif: list of .tif files
+        filename_csv: path of .csv metadata file
+    """
+    def __init__(self, params, filenames_tif, filename_csv):
+        self.filelist = sorted(filenames_tif)
+        self.folder, _ = os.path.split(f ilenames_tif[0])
+        print('Made dataset from ' + self.folder)
+        self.scatteringfilelist = []
+        infoarray = np.genfromtxt(filename_csv, delimiter=',', skip_header=1)
+        if infoarray.ndim == 1:
+            infoarray = [infoarray]
+        for imgnum, row in enumerate(infoarray):
+            # for each tif file, make info dict and str and make ScatteringFile
+            info = {key: row[col] for col, key in enumerate(['Sample Theta', 'mono_act', 'Seconds', 'IC_cntr1'])}
+            infostr = '--- Specific to one image file ---\n'
+            infostr += '\n'.join(['{0}: {1}'.format(key, info[key]) for key in sorted(info)])
+            try:
+                self.scatteringfilelist.append(ScatteringFile('gentiff', self.filelist[imgnum], params, info, infostr))
+            except IndexError:
+                print('Warning: not enough .tif files specified, and the loaded files could have misassigned metadata')
+            except Exception as exception:
+                print(type(exception), exception)
+                print('Error, skipping file ' + self.filelist[imgnum])
+
+
 class DatasetBIN_INFO(object):
     def __init__(self, params, filenames_bin):
         self.filelist = sorted(filenames_bin)
