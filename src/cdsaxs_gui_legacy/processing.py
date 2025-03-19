@@ -229,6 +229,25 @@ class DatasetGeneralTIFF(object):
                 print('Error, skipping file ' + self.filelist[imgnum])
 
 
+class DatasetBIN_INFO(object):
+    def __init__(self, params, filenames_bin):
+        self.filelist = sorted(filenames_bin)
+        self.folder, _ = os.path.split(filenames_bin[0])
+        print('Made dataset from ' + self.folder)
+        self.scatteringfilelist = []
+        for (imgnum, filename_bin) in enumerate(self.filelist):
+            # for each bin file, make info dict and str and make ScatteringFile
+            filename_info = os.path.splitext(filename_bin)[0] + '.info'
+            info = np.genfromtxt(filename_info, delimiter='=', skip_header=1, dtype=str)
+            info = {key: value for key, value in info}
+            info['Sample Theta'] = float(info['Sample Theta ']) if 'Sample Theta ' in info else float(info['Theta '])
+            info['mono_act'] = 24200
+            info['Seconds'] = float(info['LiveTime '])
+            infostr = '--- Specific to one image file ---\n'
+            infostr += '\n'.join(['{0}: {1}'.format(key, info[key]) for key in sorted(info)])
+            self.scatteringfilelist.append(ScatteringFile('bin', self.filelist[imgnum], params, info, infostr))
+
+
 class DatasetFITS(object):
     """Make ScatteringFile object for a list of files or each image in folder (optional range),
     pass the headers from each image file
