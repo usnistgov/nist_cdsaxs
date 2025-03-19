@@ -1,0 +1,127 @@
+<meta charset="utf-8"> 
+
+# Readme for CDSAXS data processing GUI
+version 0.4
+
+## Description
+The CDSAXS data processing GUI is a Python package to load and display critical dimension small angle X-ray scattering (CDSAXS) experimental data, apply corrections, and export reduced data. The package currently is able to load general TIFF files, TIFF files from the Advanced Photon Source (APS) beamline 5ID-D (for hard X-rays), and FITS files from the Advanced Light Source (ALS) beamline 11.0.1.2 (for soft X-rays). The package loads a set of Qxz-Qy data files at different X-ray incident angles, reduces the data to a single Qz-Qx dataset, takes vertical slices (I-Qz) of this dataset, and exports the slices to CSV.
+
+![sample geometry](images/geometry.png)
+
+## Running
+The packaged version can be run by executing mainwindow.exe on Windows or mainwindow_osx on OS X. On other platforms or to run the non-packaged version (which will let the user issue Python commands during runtime or edit the code), Python must be installed (see code_installation.txt for details).
+
+## Data reduction steps and corrections
+
+### Loading
+The user can start by loading a set of raw data files or previously processed data that has been saved by the GUI to the Python "pickle" format. The user may also load a set of saved parameters from a human readable JSON file, which will populate elements of the GUI. For ALS, the user directly selects the .fits files to load which contain their own metadata, while for APS the user selects a .dat file that contains information about how many .tif files to load and the metadata for each file. For APS, note that the order that each file's metadata is listed in must be the same as the alphabetical ordering of the names of the files.
+
+The software can also load a set of general .tif files and a single metadata CSV file with the following four columns: sample theta in degrees (0 is normal incidence), energy in eV, exposure time in seconds, and I0. The first row of the CSV file is ignored but can include the names of these columns for clarity. The remaining rows contain the metadata for each selected .tif file, and the order that each file's metadata is listed in must be the same as the alphabetical ordering of the names of the files.
+
+The software can also load a set of .bin files from our lab instrument (must be double-precision floating point, 195 by 1475 pixels, little-endian) with metadata for the .bin files located in files with same name except for a .info extension.
+
+The parameters displayed in the "sample parameters" section at the time of loading are assigned to each loaded file. (Clicking the "Apply to selected" button will reapply the displayed parameters to each selected file.)
+
+### Qxz-Qy
+On clicking on one of the items in the list of files, data from the file is loaded and rotated so that Qxz is the vertical axis and Qy is horizontal (based on the "peaks direction" setting), and Qxz and Qy axes are generated from the metadata and the user-specified sample parameters. The parameters detector theta0, detector x0, and detector theta scale are specific to ALS experiments where the detector can be moved and are hidden when TIFF files are loaded. The intensity at each pixel is optionally divided by exposure time, I0, and/or beam current, and multiplied by a user-specified factor. Then, to remove noise, the intensity is optionally subtracted by the mean intensity of a region of the data array which should only contain noise (chosen in Settings->Misc settings with a default of the bottom 20 rows). Finally, the Qxz-Qy image is displayed. Multiple filenames can be selected by holding down the Shift or Ctrl key while clicking a filename.
+
+### Qxz-Qy sheared rectangle
+Due to sample misalignment about the z axis, the peaks in the Qxz-Qy image may not run perfectly along the Qxz axis, and often are tilted at an angle that shifts with the incident angle of the X-rays (sample theta). A sheared rectangle subset of the Qxz-Qy image containing the peaks of interest needs to be reduced to I-Qxz. Ideally this sheared rectangle should be narrow to avoid averaging the peaks with too much background.  The height, width, shear angle, and bottom left corner of this sheared rectangle can be defined manually for each file in the "Define Qy integration box" section, or to save the user's time, the shear angle and horizontal location of the bottom left corner can be automatically determined using robust linear regression and the initial values in this section. (Points that the software thinks are peaks will be overlaid by red dots.) Options for the regression can be found in the Settings menu. It is recommended to double check that the automatically determined dimensions for each file appear correct. The data in the sheared rectangle is displayed in the top right plot for ease of viewing. This occurs on clicking a filename or the "make rotated" button.
+
+### I-Qxz
+On clicking a filename or the "integrate to I vs Qxz" button, the mean or sum of the intensity data in the sheared rectangle along the Qy dimension is calculated. A corrected Qxz axis is generated based on the angle of the sheared rectangle. The intensities are then optionally multiplied by the footprint, sample size, substrate attenuation, sample attenuation, and/or polarization corrections, and then plotted. Qx and Qz axes are generated taking into account the "sample theta offset" parameter (the offset between the true and recorded incident angles), and the line plot is displayed at the bottom right.
+
+### Reduction
+Clicking "Integrate and correct files" will execute the above three sections on all selected filenames, allowing data reduction to take place. Clicking "new reduced dataset" requires that all selected filenames have been integrated to I-Qxz, and will gather the selected data into a Qz-Qx scatterplot displayed on the first column of the second tab. A Qz-Qx interpolated image is also generated on the second column of the second tab, by bilinearly interpolating the Qz-Qx scatterplot. Clicking "recorrect files" requires that all selected filenames have been integrated to I-Qxz, and will apply new sample theta offset, footprint, sample size, substrate attenuation, sample attenuation, and/or polarization corrections to the selected filenames based on the values currently displayed in the GUI.
+
+In the scatterplot, each data file corresponds to a line (for hard X-rays) or an arc (for soft X-rays) of points. For measurements at ALS 11.0.1.2, since the detector is relatively small, to capture the higher order diffraction peaks several sets of data must be collected at increasing detector angles, that are all reduced to a single Qz-Qx dataset. Therefore, in the reduced dataset there are arcs that are partially overlapping. The software handles this by cropping the arcs from lower detector angles at the points where they are overlapped by the points from higher detector angles (from data files with similar sample thetas, see misc. settings), favoring higher detector angles because they are typically taken at longer exposure times and have improved signal to noise. Assigning a "cropping group number" other than zero to the data files will tell the software not to crop a given file with data from files with the same or lower cropping group number.
+
+### I-Qz slices
+Ultimately, the data that will be fitted are the vertical slices of the reduced dataset, which have horizontally spaced periodicity corresponding to the pitch of the sample. A list of Qx values denoting the slice centers separated by commas can be manually entered into the text box in the second column of the second tab, or a regularly spaced list generated with the "generate slice center values…" button, or Qx values can be added by clicking the interpolated plot when the "click above plot to add" checkbox is checked. On clicking "draw slices and integrate to I vs Q", the mean of each slice along the Qx dimension is calculated (and optionally subtracted by the mean of the background slices on each side, if the background slice width is not 0). The slices will be added to the list of I-Qz slices in the third column. Multiple slices can be selected and plotted on a log scale at the same time, and each slice will be displayed scaled by an index multiplied by the specified number of decades to avoid overlapping. The user can choose whether to plot the slices of the interpolated or the scatterplot Qz-Qx.
+
+### Exporting
+The user can export the parameters currently displayed in the GUI to a JSON file, the Qz-Qx scatterplot to a CSV file, and most importantly, the I-Qz slices to a set of CSV files through the File menu. Exporting slices will save the currently selected slices to a CSV file with 4 columns per slice: the first row of the file indicates the Qx position of each slice, the second row repeats the labels "mean_theta", "mean_qz", "mean_qy" and "mean_I" for each slice, and the rest of the rows list the mean Qz, Qy and I of the points from the listed incident angle that lie within the slice. The user can also save the current state of the program to a pickle file, but these files may not be completely compatible with newer versions of the program.
+
+## Useful tips
+About the "same settings per file" checkbox:
+
+- It only affects what happens when "integrate and correct files" is clicked (not "recorrect files")
+- If it is not checked, any previously existing parameters for each file will be used, and if the parameters don't exist then the parameters visible in the GUI will be used.
+- If it is checked (default), the currently visible parameters in the middle column of the first tab of the GUI will overwrite any existing parameters saved for each file.
+- Warning: if this and Settings->"manual angle" are checked (which is default), clicking "integrate and correct files" will overwrite the integration box settings such as angle, that may have been manually edited for each file.
+
+A typical workflow would be to define an integration box for one file, then select all files, check one of the auto-angle options and run "integrate and correct files", then go back to "manual angle" and make sure the integration box on a few files looks correct, then select all files and click "new reduced dataset", and finally if the reduced plots look tilted, adjust the "sample theta offset" on all files and click "recorrect files" and "new reduced dataset" again.
+
+## ALS run generator
+This tab lets the user easily build up macro files for ALS 11.0.1.2 by defining parameters for each set of measurements, and exports a tab-delimited .txt file containing the list of measurements to run. Capabilities include the following:
+
+- correcting X, Y, and Z if the rotation axis is not perfectly aligned to the sample
+- using a fixed detector angle or varying detector angles to avoid capturing the lower order peaks and saturating the detector
+- using a fixed exposure time or varying exposure times based on max intensities of short exposure measurements to avoid saturating the detector
+- plotting the expected positions of reduced data and diffraction slices in a Qz-Qx scatterplot
+- adding filler scans to wait while the EPU is switching
+- adding extra scans at normal incidence as a form of incident beam intensity tracking
+
+One possible workflow would be to generate a run for a given energy and EPU with a fixed short exposure time and a large sample theta step to determine the optimal exposure times, append to the text box for each energy and EPU you need, and save the .txt file and run it on the beamline. Then, load the collected .fits files, (optional: load them in the first tab and find the box containing the peaks that you don't want to saturate) generate your main run with the "use exposure scans" checkbox selected, and finally save the .txt file and run it on the beamline.
+
+## CDSAXS measurement geometry and correction equations
+The rows and columns of the data file are converted to $q_{xz}$ and $q_y$ respectively by the following equations ($x_{det}$, $x_{det0}$, $θ_{detscale}$, $θ_{det}$ and $θ_{det0}$ are only nonzero for ALS data, where the detector can rotate about the y axis on the sample):
+
+$$
+q_{xz} = \frac{4π}{λ} \sin⁡ \left[ \frac{1}{2} \left( \arctan \left[ \frac{px_{qxz}a_{px}}{SDD} \right] + θ_{detscale} (θ_{det} - θ_{det0}) \right) \right] \\
+q_y = \frac{4π}{λ} \sin \left[ \frac{1}{2} \arctan \left[ \frac{px_{qy} a_{px}+x_{det}-x_{det0}}{SDD} \right] \right]
+$$
+
+The $q_{xz}​$ axis of each file is converted to $q_z​$ and $q_x​$ in the reduced data with the following:
+
+$$
+q_z = q_{xz} \sin⁡ \left[ θ_{samp} + θ_{samp0} + \frac{θ_{pxxz}}{2} \right] \\
+q_x = q_{xz} \cos⁡ \left[ θ_{samp} + θ_{samp0} + \frac{θ_{pxxz}}{2} \right] \\
+θ_{pxxz} = 2 \arcsin \left[ \frac{q_{xz} λ}{4π} \right]
+$$
+
+The intensity corrections, which optionally multiply the intensity, are listed below. They are derived by taking the ratio of a hypothetical scattered intensity at all angles equal to 0 and at variable angles.
+
+$$
+I_{footprint} = \cos⁡[θ_{samp}] \\
+I_{samplesize} = \frac{erf \left[ \frac{c+w/2}{\sqrt{2} σ} \right] - erf \left[ \frac{c-w/2}{\sqrt{2} σ} \right]}{erf \left[ \frac{(c+w/2) \cos[θ_{samp}]}{\sqrt{2} σ} \right] - erf \left[ \frac{(c-w/2) \cos[θ_{samp}]}{\sqrt{2} σ} \right] } \\
+I_{substrateattenuation} = e^{-μ t (1 - 1/\cos[θ_{samp}]) } \\
+I_{sampleattenuation} = (μ t \ e^{-μ t}) \frac{1/\cos⁡[θ_{samp}] - 1/\cos⁡[θ_{samp} + θ_{px}]}{e^{-μ t/\cos⁡[θ_{samp} + θ_{px}]} - e^{-μ t/\cos⁡[θ_{samp}]} } \\
+I_{polarization} = \frac{1}{f_y \cos^2⁡[θ_{pxy}] + (1-f_y)\cos^2⁡[θ_{pxxz}]}
+$$
+
+The footprint correction takes into account the fact that there is more material to scatter the beam at more grazing angles. The sample size correction considers how the footprint is affected if the sample size is smaller or on the order of the beam width and only needs to be used in this case (σ​ tends to be around 0.1 mm). The attenuation corrections take into account attenuation of the incident beam by the substrate, and attenuation of the incident and scattered beams by the sample, assuming that the incident beam hits the substrate before the sample (for this correction, the sample is approximated as a uniform film). Finally, the polarization correction takes into account that the scattering direction in relation to the incident polarization decreases scattered intensity, and is only needed when using non S-polarized X-rays with a fitting simulation that does not take polarization into account.
+
+### List of Symbols
+- $x, y, z$ : Axes of the sample reference frame
+- $q_x, q_y, q_z, q_{xz}$ : Axes of the scattering vector
+- $λ$ : X-ray wavelength
+- $θ_{samp}$ : X-ray angle of incidence on the sample, where 0 is normal incidence. Note: all angles are defined clockwise with respect to the sample reference frame, with the sample reference frame facing the detector. The raw ALS sample theta is counter-clockwise and equal to $-θ_{samp} - 90$.
+- $θ_{samp0}$ : Offset for $θ_{samp}$
+- $θ_{px}$ : Scattered X-ray angle for a given pixel, where 0 is the angle of the direct beam
+- $θ_{pxxz}$ : Component of $θ_{px}$ in the x-z plane
+- $θ_{pxy}$ : Component of $θ_{px}$ normal to the x-z plane
+- $px_{qxz}, px_{qy}$ : Index of the pixels on the detector along $q_{xz}$ and $q_y$, where 0 is the index of the direct beam if $x_{det}=x_{det0}$ and $θ_{det}=θ_{det0}$
+- $a_{px}$ : Length of a square pixel on the detector
+- $θ_{det}$ : Angle of detector rotation about an axis running through the sample and parallel to $y$, where 0 is normal to the direct beam
+- $θ_{detscale}$ : Scaling factor for $θ_{det}$
+- $θ_{det0}$ : Offset for $θ_{det}$
+- $x_{det}$ : Position of the detector along the $q_y$ axis
+- $x_{det0}$ : Offset for $x_{det}$
+- $SDD$ : Sample-detector distance
+- $f_y$ : For linearly polarized incident X-rays, fraction of electric field polarized in $y$ axis (S-polarization)
+- $μ$ : Sample or substrate attenuation coefficient (Naperian), units of inverse length
+- $t$ : Sample or substrate thickness
+- $w$ : Sample width or diameter for sample size correction
+- $σ$ : Standard deviation of beam width for incident X-rays with Gaussian shape, for sample size correction
+- $c$ : Position of beam center relative to sample center, for sample size correction
+
+## Contact
+- Christopher Liman     christopher.liman@nist.gov
+- Daniel Sunday         daniel.sunday@nist.gov
+- Joseph Kline          r.kline@nist.gov
+
+<!-- Markdeep: -->
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="https://casual-effects.com/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
