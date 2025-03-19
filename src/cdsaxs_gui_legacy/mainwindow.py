@@ -32,7 +32,7 @@ if USE_ASTROPY:
 else:
     import pyfits as fits
 
-from CDSAXS_gui import base, processing, matplotlibwidget, ALS_run_generator
+from cdsaxs_gui_legacy import base, processing, matplotlibwidget, ALS_run_generator
 
 warnings.filterwarnings('ignore')
 datasets = []
@@ -57,7 +57,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if getattr(sys, 'frozen', False):
             self.html_file = os.path.join(self.ui_dir, 'readme_processing.md.html')
         else:
-            self.html_file = os.path.join(self.ui_dir, '..', 'readme_processing.md.html')
+            self.html_file = os.path.join(self.ui_dir, 'readme_processing.md.html')
         uic.loadUi(os.path.join(self.ui_dir, 'CDSAXS_gui_ui.ui'), self)
 #        self.setupUi(self)
         self.selecteddirectory = os.path.expanduser('~')

@@ -36,7 +36,7 @@ if USE_ASTROPY:
 else:
     import pyfits as fits
 
-from CDSAXS_gui import diffraction, base, matplotlibwidget
+from cdsaxs_gui_legacy import diffraction, base, matplotlibwidget
 
 # settings that apply globally, overwritten by GUI
 PEAKS = {'Vertical up': 0, 'Horizontal left': 1, 'Vertical down': 2, 'Horizontal right': 3}
@@ -196,6 +196,42 @@ class DatasetTIFF(object):
 
 class DatasetGeneralTIFF(object):
     """Make sf object for a list of .tif files
+
+    Attributes:
+        filelist: list of .tif files
+        scatteringfilelist: list of sf objects
+        folder: folder with .tif files
+
+    Args:
+        params: namedtuple of user parameters
+        filenames_tif: list of .tif files
+        filename_csv: path of .csv metadata file
+    """
+    def __init__(self, params, filenames_tif, filename_csv):
+        self.filelist = sorted(filenames_tif)
+        self.folder, _ = os.path.split(filenames_tif[0])
+        print('Made dataset from ' + self.folder)
+        self.scatteringfilelist = []
+        infoarray = np.genfromtxt(filename_csv, delimiter=',', skip_header=1)
+        if infoarray.ndim == 1:
+            infoarray = [infoarray]
+        for imgnum, row in enumerate(infoarray):
+            # for each tif file, make info dict and str and make ScatteringFile
+            info = {key: row[col] for col, key in enumerate(['Sample Theta', 'mono_act', 'Seconds', 'IC_cntr1'])}
+            infostr = '--- Specific to one image file ---\n'
+            infostr += '\n'.join(['{0}: {1}'.format(key, info[key]) for key in sorted(info)])
+            try:
+                self.scatteringfilelist.append(ScatteringFile('gentiff', self.filelist[imgnum], params, info, infostr))
+            except IndexError:
+                print('Warning: not enough .tif files specified, and the loaded files could have misassigned metadata')
+            except Exception as exception:
+                print(type(exception), exception)
+                print('Error, skipping file ' + self.filelist[imgnum])
+
+class DatasetGeneralTIFF(object):
+    """
+    Make sf object for data from SMI.
+    TODO: turn this into updated general tiff loader with csv metadata
 
     Attributes:
         filelist: list of .tif files
@@ -1309,7 +1345,7 @@ if __name__ == '__main__':
 
 """
 %load_ext line_profiler
-from CDSAXS_gui import processing
+from cdsaxs_gui_legacy import processing
 %lprun -f processing.plots_calculations_test -f processing.calculations_test -f processing.DataQzQx.__init__ -f \
 processing.DataQzQxInterp.__init__ processing.plots_calculations_test()
 """

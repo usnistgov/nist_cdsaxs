@@ -32,7 +32,7 @@ if (QtCore.QT_VERSION >> 16) == 4:
 else:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 
-from CDSAXS_gui.base import find_closest_index, find_closest_index_2D
+from cdsaxs_gui_legacy.base import find_closest_index, find_closest_index_2D
 
 # sns.set_style('dark')
 # mpl.rcParams['axes.facecolor'] = 'black'

@@ -193,7 +193,7 @@ def fit_datas_two_steps(ys, xs, ys2, xs2, model_classes, prefixes, model_classes
 
 if __name__ == '__main__':
     from lmfit.models import LinearModel, ExponentialModel, GaussianModel, PowerLawModel, ConstantModel, Model
-    from CDSAXS_gui import matplotlibwidget
+    from cdsaxs_gui_legacy import matplotlibwidget
 
     x = np.arange(-50,50)
     y = np.random.rand(100) + 3 * np.exp(-(x - 10) ** 2 / 10) + 2 * np.exp(-(x - 20) ** 2 / 30)

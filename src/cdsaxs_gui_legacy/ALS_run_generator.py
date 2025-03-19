@@ -11,7 +11,7 @@ import io
 import numpy as np
 import pandas as pd
 
-from CDSAXS_gui import diffraction, matplotlibwidget
+from cdsaxs_gui_legacy import diffraction, matplotlibwidget
 
 EV_NM = 1239.84
 
