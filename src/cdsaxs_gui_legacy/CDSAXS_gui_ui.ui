@@ -2945,7 +2945,7 @@
   <customwidget>
    <class>MatplotlibWidget1D</class>
    <extends>QWidget</extends>
-   <header>CDSAXS_gui.matplotlibwidget</header>
+   <header>cdsaxs_gui_legacy.matplotlibwidget</header>
    <container>1</container>
   </customwidget>
   <customwidget>
@@ -2956,13 +2956,13 @@
   <customwidget>
    <class>MatplotlibWidget2D</class>
    <extends>QWidget</extends>
-   <header>CDSAXS_gui.matplotlibwidget</header>
+   <header>cdsaxs_gui_legacy.matplotlibwidget</header>
    <container>1</container>
   </customwidget>
   <customwidget>
    <class>MatplotlibWidget2DWithSlice</class>
    <extends>QWidget</extends>
-   <header>CDSAXS_gui.matplotlibwidget</header>
+   <header>cdsaxs_gui_legacy.matplotlibwidget</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

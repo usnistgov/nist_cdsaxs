@@ -36,7 +36,7 @@ if USE_ASTROPY:
 else:
     import pyfits as fits
 
-from CDSAXS_gui import diffraction, base, matplotlibwidget
+from cdsaxs_gui_legacy import diffraction, base, matplotlibwidget
 
 # settings that apply globally, overwritten by GUI
 PEAKS = {'Vertical up': 0, 'Horizontal left': 1, 'Vertical down': 2, 'Horizontal right': 3}
@@ -1309,7 +1309,7 @@ if __name__ == '__main__':
 
 """
 %load_ext line_profiler
-from CDSAXS_gui import processing
+from cdsaxs_gui_legacy import processing
 %lprun -f processing.plots_calculations_test -f processing.calculations_test -f processing.DataQzQx.__init__ -f \
 processing.DataQzQxInterp.__init__ processing.plots_calculations_test()
 """
