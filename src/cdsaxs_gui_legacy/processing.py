@@ -238,15 +238,14 @@ class DatasetGeneralCSV_TIFF(object):
         --------
         filename
         sample_phi_deg : sample rotation angle during cd-saxs measurement in degrees
+        energy_eV : source energy in eV (cannot be used with wavelength_nm)
+        wavelength_nm : source wavelength in nm (cannot be used with energy_eV)
+        exposure_time_s : exposture time in s
 
         Optional
         --------
         sample_label : user-specified sample label
-        energy_eV : source energy in eV (cannot be used with wavelength_nm)
-        wavelength_nm : source wavelength in nm (cannot be used with energy_eV)
         sdd_cm : sample-to-detector distance in cm
-        exposure_time_s : exposture time in s
-        monitor : beam monitor TODO: fix this definition
         sample_chi_deg : rotation in the sample xy plane about the z axis
 
     Attributes:
@@ -259,27 +258,32 @@ class DatasetGeneralCSV_TIFF(object):
         filenames_tif: list of .tif files
         filename_csv: path of .csv metadata file
     """
-    def __init__(self, params, filenames_tif, filename_csv):
-        self.filelist = sorted(filenames_tif)
-        self.folder, _ = os.path.split(f ilenames_tif[0])
+    def __init__(self, filepath_csv, params):
+
+        # load the csv metadata file that includes the scattering filenames
+        csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
+        header = csv_data[0, :]
+        csv_data = csv_data[1:, :]
+        label2index = {i: keyword for i, keyword in enumerate(header)}
+
+        # extract data directory and list of filepaths to scattering files 
+        self.folder, _ = os.path.split(filepath_csv)
         print('Made dataset from ' + self.folder)
+
+        self.filelist = []
         self.scatteringfilelist = []
-        infoarray = np.genfromtxt(filename_csv, delimiter=',', skip_header=1)
-        if infoarray.ndim == 1:
-            infoarray = [infoarray]
-        for imgnum, row in enumerate(infoarray):
+        # even if only one row, csv_data will always be a 2D array
+        for i, row in enumerate(csv_data):
             # for each tif file, make info dict and str and make ScatteringFile
-            info = {key: row[col] for col, key in enumerate(['Sample Theta', 'mono_act', 'Seconds', 'IC_cntr1'])}
+            info = {}
+            for label in [x for x in header if x != 'filename']:
+                info[label] = float(row[label2index[label]]) if label != 'sample_label' else row[label2index[label]]
             infostr = '--- Specific to one image file ---\n'
             infostr += '\n'.join(['{0}: {1}'.format(key, info[key]) for key in sorted(info)])
-            try:
-                self.scatteringfilelist.append(ScatteringFile('gentiff', self.filelist[imgnum], params, info, infostr))
-            except IndexError:
-                print('Warning: not enough .tif files specified, and the loaded files could have misassigned metadata')
-            except Exception as exception:
-                print(type(exception), exception)
-                print('Error, skipping file ' + self.filelist[imgnum])
 
+            self.filelist.append(os.path.join(self.folder, row[label2index['filename']]))
+            self.scatteringfilelist.append(ScatteringFile('gencsvtiff', self.filelist[-1], params, info, infostr))
+        
 
 class DatasetBIN_INFO(object):
     def __init__(self, params, filenames_bin):
@@ -353,7 +357,7 @@ class ScatteringFile(object):
         dirname, filename, scaling_factor, sample_theta, lambda_nm, energy_ev, dataqxzqy, datarot, ivsqxz
 
     Args:
-        fileformat: 'tiff' or 'fits' or 'gentiff' or 'bin'
+        fileformat: 'tiff' or 'fits' or 'gentiff' or 'gencsvtiff' or 'bin'
         fullfilename: full path of data file
         params: namedtuple of user parameters
         info: dict of instrument parameters for one image, from one row of .dat file, or fits header card
@@ -365,11 +369,24 @@ class ScatteringFile(object):
         self.info = info
         self.infostr = infostr
 
-        self.energy_ev = info['mono_act'] if (fileformat == 'tiff' or fileformat == 'gentiff' or fileformat == 'bin') else info[0]['Beamline Energy']
-        self.lambda_nm = EV_NM / self.energy_ev
+        if (fileformat == 'tiff' or fileformat == 'gentiff' or fileformat == 'bin'):
+            self.energy_ev = info['mono_act']
+            self.lambda_nm = EV_NM / self.energy_ev
+        elif fileformat == 'gencsvtiff':
+            if 'energy_eV' in info.keys():
+                self.energy_ev = info['energy_eV']
+                self.lambda_nm = EV_NM / self.energy_ev
+            elif 'wavelength_nm' in info.keys():
+                self.lambda_nm = info['wavelength_nm']
+                self.energy_ev = EV_NM / self.lambda_nm
+        else:
+            self.energy_ev = info[0]['Beamline Energy']
+            self.lambda_nm = EV_NM / self.energy_ev
+
         self.dirname, self.filename = os.path.split(self.fullfilename)
         self.div_photodiode = div_photodiode
         self.scaling_factor = params.multiply_intensity / div_photodiode
+
         if fileformat == 'tiff':
             self.sample_theta = info['Sample_phi']  # sample_theta=0 should be normal to substrate
             if params.normalize_exposure:
@@ -395,6 +412,12 @@ class ScatteringFile(object):
                 self.scaling_factor /= info['Seconds']
             if params.normalize_I0:
                 self.scaling_factor /= info['IC_cntr1']
+            self.dataqxzqy = DataQxzQy(fileformat, self.sample_theta, fullfilename, params, self.lambda_nm, self.scaling_factor)
+        elif fileformat == 'gencsvtiff':
+            self.sample_theta = info['sample_phi_deg']
+            if params.normalize_exposure:
+                self.scaling_factor /= info['exposture_time_s']
+            params._replace(SDD_cm=info['sdd_cm'])
             self.dataqxzqy = DataQxzQy(fileformat, self.sample_theta, fullfilename, params, self.lambda_nm, self.scaling_factor)
         elif fileformat == 'bin':
             self.sample_theta = info['Sample Theta']

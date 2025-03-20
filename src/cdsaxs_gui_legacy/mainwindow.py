@@ -418,6 +418,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addto_treeWidget_QxzQy(dataset)
         self.statusBar().showMessage('Importing general TIFF done.')
 
+    @Slot()
+    def on_actionImport_general_CSV_TIFF_triggered(self):
+        filename_csv = QtWidgets.QFileDialog.getOpenFileName(parent=self, caption='Choose metadata .csv file to load (same directory as your tif files):',
+                                                             directory=self.selecteddirectory, filter='*.csv')
+        if not (QtCore.QT_VERSION >> 16) == 4:
+            filename_csv = filename_csv[0]
+        if len(filename_csv) == 0:
+            return
+        filename1 = filename_csv[0] if isinstance(filename_csv, list) else filename_csv
+        self.selecteddirectory = QtCore.QFileInfo(filename1).absolutePath()
+        self.statusBar().showMessage("Importing general TIFF selected in CSV...")
+        dataset = processing.DatasetGeneralCSV_TIFF(filename_csv, self.make_params('gencsvtiff'))
+        self.addto_treeWidget_QxzQy(dataset)
+        self.statusBar().showMessage('Importing general CSV/TIFF done.')
+        
+
     def addto_treeWidget_QxzQy(self, dataset):
         datasets.append(dataset)
         top_item = QtWidgets.QTreeWidgetItem([dataset.folder])
@@ -455,6 +471,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     '{0:.4g}'.format(sf.energy_ev),
                     '{0:.4g}'.format(sf.info['Seconds']),
                     '{0:.4g}'.format(sf.info['IC_cntr1']),
+                ])
+            elif sf.fileformat == 'gencsvtiff':
+                item = QtWidgets.QTreeWidgetItem([
+                    str(sf.filename),
+                    '{0:.4g}'.format(sf.sample_theta),
+                    '{0:.4g}'.format(sf.energy_ev),
+                    '{0:.4g}'.format(sf.info['Seconds']),
                 ])
             elif sf.fileformat == 'bin':
                 item = QtWidgets.QTreeWidgetItem([
