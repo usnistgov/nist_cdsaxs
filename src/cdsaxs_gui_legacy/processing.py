@@ -264,7 +264,7 @@ class DatasetGeneralCSV_TIFF(object):
         csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
         header = csv_data[0, :]
         csv_data = csv_data[1:, :]
-        label2index = {i: keyword for i, keyword in enumerate(header)}
+        label2index = {keyword: i for i, keyword in enumerate(header)}
 
         # extract data directory and list of filepaths to scattering files 
         self.folder, _ = os.path.split(filepath_csv)
@@ -447,7 +447,7 @@ class DataQxzQy(object):
         self.detector_theta = detector_theta if fileformat == 'fits' else None
         self.detector_x = detector_x if fileformat == 'fits' else None
         # center of image in pixels with corrections for detector theta, x, and scale
-        if self.fileformat == 'tiff' or self.fileformat == 'gentiff' or self.fileformat == 'bin':
+        if self.fileformat == 'tiff' or self.fileformat == 'gentiff' or self.fileformat == 'gencsvtiff' or self.fileformat == 'bin':
             self.center_qxz_on_img = self.params.center_px[0]
             self.center_qy_on_img = self.params.center_px[1]
         elif self.fileformat == 'fits':
@@ -473,7 +473,7 @@ class DataQxzQy(object):
         Returns: imgdata, qxzs, qys
         """
         num_cw = PEAKS[self.params.peaks_direction]
-        if self.fileformat == 'tiff' or self.fileformat == 'gentiff':
+        if self.fileformat == 'tiff' or self.fileformat == 'gentiff' or self.fileformat == 'gencsvtiff':
             try:
                 imgdata = np.flipud(Image.open(self.fullfilename)) * self.scaling_factor
             except:
@@ -492,7 +492,7 @@ class DataQxzQy(object):
             imgdata -= self.subtract_bottom_value  # subtract average of bottom 20 rows
         qxz_pixels = np.array(range(np.shape(imgdata)[0])) - self.params.center_px[0]
         qy_pixels = np.array(range(np.shape(imgdata)[1])) - self.params.center_px[1]
-        if self.fileformat == 'tiff' or self.fileformat == 'gentiff' or self.fileformat == 'bin':
+        if self.fileformat == 'tiff' or self.fileformat == 'gentiff' or self.fileformat == 'bin' or self.fileformat == 'gencsvtiff':
             qxzs = diffraction.qxz_pixels_to_qxz(qxz_pixels, self.lambda_nm, self.params.pixel_um, self.params.SDD_cm)
             qys = diffraction.qy_pixels_to_qy(qy_pixels, self.lambda_nm, self.params.pixel_um, self.params.SDD_cm)
         elif self.fileformat == 'fits':
