@@ -238,8 +238,8 @@ class DatasetGeneralCSV_TIFF(object):
         --------
         filename
         sample_phi_deg : sample rotation angle during cd-saxs measurement in degrees
-        energy_eV : source energy in eV (cannot be used with wavelength_nm)
-        wavelength_nm : source wavelength in nm (cannot be used with energy_eV)
+        energy_ev : source energy in eV (cannot be used with wavelength_nm)
+        wavelength_nm : source wavelength in nm (cannot be used with energy_ev)
         exposure_time_s : exposture time in s
 
         Optional
@@ -373,8 +373,8 @@ class ScatteringFile(object):
             self.energy_ev = info['mono_act']
             self.lambda_nm = EV_NM / self.energy_ev
         elif fileformat == 'gencsvtiff':
-            if 'energy_eV' in info.keys():
-                self.energy_ev = info['energy_eV']
+            if 'energy_ev' in info.keys():
+                self.energy_ev = info['energy_ev']
                 self.lambda_nm = EV_NM / self.energy_ev
             elif 'wavelength_nm' in info.keys():
                 self.lambda_nm = info['wavelength_nm']
