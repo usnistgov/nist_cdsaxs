@@ -418,6 +418,7 @@ class ScatteringFile(object):
             if params.normalize_exposure:
                 self.scaling_factor /= info['exposure_time_s']
             params._replace(SDD_cm=info['sdd_cm'])
+            print(params)
             self.dataqxzqy = DataQxzQy(fileformat, self.sample_theta, fullfilename, params, self.lambda_nm, self.scaling_factor)
         elif fileformat == 'bin':
             self.sample_theta = info['Sample Theta']
