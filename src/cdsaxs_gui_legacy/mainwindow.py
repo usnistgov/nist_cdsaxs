@@ -477,7 +477,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     str(sf.filename),
                     '{0:.4g}'.format(sf.sample_theta),
                     '{0:.4g}'.format(sf.energy_ev),
-                    '{0:.4g}'.format(sf.info['Seconds']),
+                    '{0:.4g}'.format(sf.info['exposure_time_s']),
                 ])
             elif sf.fileformat == 'bin':
                 item = QtWidgets.QTreeWidgetItem([
