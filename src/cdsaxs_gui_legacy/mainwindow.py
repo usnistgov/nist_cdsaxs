@@ -655,7 +655,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sf.fullfilename = newfullfilename
             self.sf.dataqxzqy.fullfilename = newfullfilename
         # enable/disable input widgets based on fileformat
-        if self.sf.fileformat == 'tiff' or self.sf.fileformat == 'gentiff' or self.sf.fileformat == 'bin':
+        if self.sf.fileformat == 'tiff' or self.sf.fileformat == 'gentiff' or self.sf.fileformat == 'gencsvtiff' or self.sf.fileformat == 'bin':
             self.modify_gui_TIFF()
         elif self.sf.fileformat == 'fits':
             self.modify_gui_FITS()
