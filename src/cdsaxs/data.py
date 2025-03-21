@@ -1,9 +1,9 @@
 """
 This module contains two classes:
 
-DataQxzQy : Class for storing a single scattering image, relevant
+DataQyQxz : Class for storing a single scattering image, relevant
     scattering metadata, and any user-defined parameters.
-Dataset : Class for managing a series of DataQxzQy objects. A new
+Dataset : Class for managing a series of DataQyQxz objects. A new
     Dataset instance is created upon each loading of data by the user
     in the GUI.
 """
@@ -22,7 +22,7 @@ METADATA_KEYWORDS = [
     ]
 
 
-class DataQxzQy():
+class DataQyQxz():
     """
     This class contains the Qxz-Qy image, relevant metadata, and any
     additional user parameters.
@@ -76,7 +76,7 @@ class DataQxzQy():
         metadata: dict,
         params: dict = None,
     ):
-        """Create an instance of DataQxzQy"""
+        """Create an instance of DataQyQxz"""
 
         self.imgdata = imgdata
         self.qxzs = qxzs
@@ -188,13 +188,13 @@ class DataQxzQy():
 
 class Dataset():
     """
-    This class manages at least one instance of DataQxzQy as a dataset.
+    This class manages at least one instance of DataQyQxz as a dataset.
 
     Attributes
     ----------
     data_folder : absolute filepath to data directory
     name : default is data_folder but can be user-specified
-    datas : dictionary of filename keys leading to DataQxzQy objects,
+    datas : dictionary of filename keys leading to DataQyQxz objects,
         one for each scattering file
     """
 
@@ -212,15 +212,15 @@ class Dataset():
 
         self.data = {}
 
-    def add_data(self, filename: str, data: DataQxzQy):
-        """Add a single DataQxzQy instance to the dataset."""
+    def add_data(self, filename: str, data: DataQyQxz):
+        """Add a single DataQyQxz instance to the dataset."""
         if filename in self.datas.keys():
             raise ValueError(
                 f"Data for {filename} is already part of this dataset")
         self.datas[filename] = data
 
     def remove_data(self, filename):
-        """Removes a single DataQxzQy instance from the dataset."""
+        """Removes a single DataQyQxz instance from the dataset."""
         try:
             del self.datas[filename]
         except KeyError:
