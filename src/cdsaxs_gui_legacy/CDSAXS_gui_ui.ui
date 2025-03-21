@@ -2773,6 +2773,7 @@
     </property>
     <addaction name="actionImport_BIN"/>
     <addaction name="actionImport_general_TIFF"/>
+    <addaction name="actionImport_general_CSV_TIFF"/>
     <addaction name="actionImport_TIFF"/>
     <addaction name="actionImport_TIFF_PIL"/>	
     <addaction name="actionImport_FITS"/>
@@ -2933,6 +2934,11 @@
   <action name="actionImport_general_TIFF">
    <property name="text">
     <string>Import general TIFF...</string>
+   </property>
+  </action>
+  <action name="actionImport_general_CSV_TIFF">
+   <property name="text">
+    <string>Import general CSV/TIFF (including SMI)...</string>
    </property>
   </action>
   <action name="actionImport_BIN">
