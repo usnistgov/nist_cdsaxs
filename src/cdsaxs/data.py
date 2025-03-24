@@ -19,7 +19,7 @@ from numpy.typing import NDArray
 METADATA_KEYWORDS = [
         'sample_phi_deg', 'energy_ev', 'wavelength_nm', 'scaling_factor',
         'detector_theta', 'detector_x', 'exposure_time_s', 'sdd_cm',
-        'sample_chi_deg', 'div_photodiode', 'center_px',
+        'sample_chi_deg', 'div_photodiode', 'center_px', 'pixel_size_um'
     ]
 
 
@@ -127,6 +127,8 @@ class DataQyQxz():
         conventions.
         TODO: this will also be affected by detector_x; correct this
 
+        TODO: unclear how this works if beam center is off detector
+
         Parameters
         ----------
         degrees : float
@@ -232,7 +234,7 @@ class Dataset():
         else:
             self.name = self.data_folder
 
-        self.data = {}
+        self.datas = {}
 
     def add_data(self, filename: str, data: DataQyQxz):
         """Add a single DataQyQxz instance to the dataset."""
@@ -246,5 +248,5 @@ class Dataset():
         try:
             del self.datas[filename]
         except KeyError:
-            print(f"Could not delete {filename} data as it was not part of the"
-                  "dataset.")
+            warnings.warn(f"Could not delete {filename} data as it was not "
+                          "part of the dataset.")
