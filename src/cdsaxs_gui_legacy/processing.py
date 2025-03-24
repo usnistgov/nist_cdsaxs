@@ -247,6 +247,7 @@ class DatasetGeneralCSV_TIFF(object):
         sample_label : user-specified sample label
         sdd_cm : sample-to-detector distance in cm
         sample_chi_deg : rotation in the sample xy plane about the z axis
+        bpm : beam position monitor
 
     Attributes:
         filelist: list of .tif files
@@ -417,6 +418,10 @@ class ScatteringFile(object):
             self.sample_theta = info['sample_phi_deg']
             if params.normalize_exposure:
                 self.scaling_factor /= info['exposure_time_s']
+            # this isn't quite correct, just a patch for SMI data
+            # TODO: fix SMI bpm normalization
+            if params.normalize_I0:
+                self.scaling_factor /= info['bpm']
             if 'sdd_cm' in info.keys():
                 params = params._replace(SDD_cm=info['sdd_cm'])
             self.dataqxzqy = DataQxzQy(fileformat, self.sample_theta, fullfilename, params, self.lambda_nm, self.scaling_factor)
