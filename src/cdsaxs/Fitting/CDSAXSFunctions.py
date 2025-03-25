@@ -140,6 +140,8 @@ def SimTrap_SM(Qx,Qz,FITPAR,Trapnumber):
     SimInt = np.power(Formfactor,2)*SPAR[1]+SPAR[2]
     return SimInt
 
+
+
 def PBA_SymTrap(TPAR,SPAR,Bounds):
     # Assigns parameter bounds for the MCMC and DE algorithm, this version is
     # Bounds are assigned from 0.01-0.99
@@ -156,6 +158,9 @@ def PBA_SymTrap(TPAR,SPAR,Bounds):
     FITPARUB=np.append(FITPARUB,SPARUB)
     
     return (FITPAR,FITPARLB,FITPARUB)
+
+
+
 
 
 #### - Plotting functions
@@ -202,7 +207,7 @@ def PlotQzCut(Qx,Qz,FITPAR,Trapnumber,ExpI,numbercuts,scale):
         plt.semilogy(Qz[:,i],I[:,i],'.', label='Exp '+str(i))
         plt.semilogy(Qz[:,i],S[:,i], label='Sim '+str(i), color='black')
     #plt.legend(loc='upper right')
-    plt.xlabel('q ($A^{-1}$)')
+    plt.xlabel('q ($Å^{-1}$)')
     plt.ylabel('Intensity (a.u.)')
     plt.plot()
     
