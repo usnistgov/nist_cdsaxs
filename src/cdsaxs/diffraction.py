@@ -2,7 +2,7 @@ r"""
 This module contains diffraction related equations for the cdsaxs
 package.
 
-:math:`\theta` refers tot eh full scattering angle, and so the
+:math:`\theta` refers to the full scattering angle, and so the
 scattering vector, :math:`q` is calculated by:
 ..math::
 
@@ -15,7 +15,7 @@ import numpy.typing as npt
 def detector_theta_calc(
         detector_thetascale: float,
         detector_theta: float,
-        detector_theta0: float
+        detector_theta0: float = 0
 ):
     """
     Calculates the angle of rotation of the detector about the sample in
@@ -31,10 +31,11 @@ def detector_theta_calc(
         Nominal angle position of the detector rotated about the sample.
         Positive angle direction corresponds to positive qxz direction.
         Units are degrees.
-    detector_theta0 : float
+    detector_theta0 : float, optional
         Nominal angle position of the detector when the direct beam path
         is normal to the detector plane.
         Units are degrees.
+        Default value is 0 degrees.
 
     Returns
     -------
@@ -56,7 +57,7 @@ def center_px_qxz_on_img(
         SDD: float,
         detector_thetascale: float,
         detector_theta: float,
-        detector_theta0: float,
+        detector_theta0: float = 0,
 ):
     """
     Returns the beam center pixel position along qxz on a scattering
@@ -68,8 +69,11 @@ def center_px_qxz_on_img(
     Parameters
     ----------
     center_px_qxz : int
-        Beam center pixel position when the detector is in the 0 angle
+        Beam center pixel position prior to rotation of the detector.
+        is in the 0 angle
         position, i.e., direct beam path normal to the detector plane.
+        If this position is nominally not 0, it can be set with the
+        detector_theta0 argument.
     pixel_size_qxz : float
         Pixel size in the qxz direction.
         Units are in micrometers.
@@ -83,10 +87,11 @@ def center_px_qxz_on_img(
         Nominal angle position of the detector rotated about the sample.
         Positive angle direction corresponds to positive qxz direction.
         Units are degrees.
-    detector_theta0 : float
+    detector_theta0 : float, optional
         Nominal angle position of the detector when the direct beam path
         is normal to the detector plane.
         Units are degrees.
+        Default value is 0 degrees.
 
     Returns
     -------
@@ -335,7 +340,6 @@ def qxz_to_qz_qx(
         provided or kept at the default value of 0, this is equal to the
         value of sample_theta.
 
-    
     """
 
     # positive sample_theta should result in positive qz
@@ -356,7 +360,35 @@ def qxz_to_qz_qx(
     return qzs, qxs, thetas_rad, sample_theta_corr_rad
 
 
-def sample_theta_qx_to_qxz(sample_thetas, qxs, lambda_nm):
+def sample_theta_qx_to_qxz(
+        sample_thetas: npt.NDArray[np.float64],
+        qxs: npt.NDArray[np.float64],
+        lambda_nm: float):
+    r"""
+    Convert sample rotation angle and :math:`q_{x}` to :math:`q_{xz}`.
+
+    Assumes :math:`q_{y}` is zero.
+
+    Parameters
+    ----------
+    Rotation angle of sample about the axis parallel to qy of the
+        detector and passing through the direct beam path. An angle of 0
+        is defined when the sample is in a position of normal incidence.
+        If needed, this can be corrected with an angle offset via the
+        sample_theta_offset parameter.
+        Units are degrees.
+    qxzs : ndarray
+        Scattering vector component in xz direction, :math:`q_{xz}`.
+        Units are in :math:`\AA^{-1}`.
+    wavelength : float
+        Source wavelength.
+        Units are in nanometers.
+    
+    Returns
+    -------
+    ndarray
+        Scattering vector :math:`q_{xz}`.
+    """
     # [] = 10 * [A^-1] * [nm] * sin([deg] * pi / 180)
     a = 10 * qxs * lambda_nm * np.sin(sample_thetas * np.pi / 180)
     # [] = cos([deg] * pi / 180)
@@ -366,6 +398,7 @@ def sample_theta_qx_to_qxz(sample_thetas, qxs, lambda_nm):
         np.pi + b - a - np.cos(sample_thetas * np.pi / 180) * np.sqrt(2) * np.sqrt(
             np.pi ** 2 - 50 * qxs ** 2 * lambda_nm ** 2 + np.pi * b - 2 * np.pi * a))
     return qxzs
+
 
 
 def qxz_to_detector_theta(qxzs, qxzs_px, lambda_nm, pixel_um, SDD_cm, detector_thetascale=1, detector_theta0=0):
@@ -384,6 +417,31 @@ def qx_qz_to_sample_theta(lambda_nm, qxs, qzs):
 
 
 def sample_theta_px_theta_to_qz_qx(sample_thetas, px_thetas, lambda_nm):
+    r"""
+    Convert sample rotation angles and scattering angles to
+    :math:`q_{x}` and :math:`q_{z}`.
+
+    Parameters
+    ----------
+    Rotation angle of sample about the axis parallel to qy of the
+        detector and passing through the direct beam path. An angle of 0
+        is defined when the sample is in a position of normal incidence.
+        If needed, this can be corrected with an angle offset via the
+        sample_theta_offset parameter.
+        Units are degrees.
+    qxzs : ndarray
+        Scattering vector component in xz direction, :math:`q_{xz}`.
+        Units are in :math:`\AA^{-1}`.
+    wavelength : float
+        Source wavelength.
+        Units are in nanometers.
+    
+    Returns
+    -------
+    ndarray
+        Scattering vector :math:`q_{xz}`.
+    """
+
     qxzs = (np.sin(px_thetas * np.pi / 360) * 0.4 * np.pi / lambda_nm)
     qzs = qxzs * np.sin((sample_thetas + px_thetas / 2) * np.pi / 180)
     qxs = qxzs * np.cos((sample_thetas + px_thetas / 2) * np.pi / 180)
