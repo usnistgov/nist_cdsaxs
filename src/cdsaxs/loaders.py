@@ -36,15 +36,15 @@ class TiffTools():
             self.image = image
 
             with tifffile.TiffFile(filepath) as tif:
-                self.header = {tag.name : tag.value
+                self.header = {tag.name: tag.value
                                for tag in tif.pages[0].tags}
 
-    def extract_count_time(self, filepath):
+    def extract_count_time(self):
 
         "Extract count time in seconds from the TIFF file header."
-        
+
         try:
-            keyword, value, units = [
+            key, value, units = [
                 x for x in self.header['ImageDescription'][0].split('#')
                 if 'Exposure_time' in x][0].split()
             if units != 's':
