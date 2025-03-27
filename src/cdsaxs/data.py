@@ -11,6 +11,7 @@ Dataset : Class for managing a series of DataQyQxz objects. A new
 from __future__ import annotations
 
 import os
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,21 +19,21 @@ from numpy.typing import NDArray
 METADATA_KEYWORDS = [
         'sample_phi_deg', 'energy_ev', 'wavelength_nm', 'scaling_factor',
         'detector_theta', 'detector_x', 'exposure_time_s', 'sdd_cm',
-        'sample_chi_deg', 'div_photodiode', 'center_px',
+        'sample_chi_deg', 'div_photodiode', 'center_px', 'pixel_size_um'
     ]
 
 
 class DataQyQxz():
     """
-    This class contains the Qxz-Qy image, relevant metadata, and any
+    This class contains the Qy-Qxz image, relevant metadata, and any
     additional user parameters.
 
     Attributes
     ----------
     imgdata : NDArray
         Scattering image as a 2D NumPy array. The first dimension should
-        correspond to Qxz and the second dimension should correspond to
-        Qy (with respect to the detector coordinates).
+        correspond to Qy and the second dimension should correspond to
+        Qxz (with respect to the detector coordinates).
     qxzs : NDArray
         One-dimensional NumPy array of the scattering vector along the
         xz direction (with respect to detector coordinates).
@@ -63,7 +64,7 @@ class DataQyQxz():
     sdd_cm : sample to detector distance in cm
     sample_chi_deg : rotation about the z-axis (beam direction)
     div_photodiode
-    center_px : [xz, y] beam center pixel location in xz and y
+    center_px : [y, xz] beam center pixel location in y and xz
     """
 
     _current_rotation = 0
@@ -71,12 +72,21 @@ class DataQyQxz():
     def __init__(
         self,
         imgdata: NDArray[np.floating],
-        qxzs: NDArray[np.floating],
         qys: NDArray[np.floating],
+        qxzs: NDArray[np.floating],
         metadata: dict,
         params: dict = None,
     ):
         """Create an instance of DataQyQxz"""
+
+        if imgdata.shape[0] != len(qys) or imgdata.shape[1] != len(qxzs):
+            raise ValueError(
+                "Your image and scattering vector dimensions"
+                f"don't match up. Your image is of shape {imgdata.shape}. The"
+                "first dimension corresponds to qy and the second dimension"
+                "corresponds to qxz. Your qy and qxz scattering vectors are of"
+                f"length {len(qys)} and {len(qxzs)}, respectively."
+            )
 
         self.imgdata = imgdata
         self.qxzs = qxzs
@@ -117,11 +127,14 @@ class DataQyQxz():
         conventions.
         TODO: this will also be affected by detector_x; correct this
 
+        TODO: unclear how this works if beam center is off detector
+
         Parameters
         ----------
         degrees : float
             Number of degrees to rotate the image, should be in
-            increments of 90 degrees.
+            increments of 90 degrees. A negative value will reverse the
+            rotation direction specified by direction, use caution.
         direction : str, optional
             Rotation direction. Default is 'ccw' which indicates a
             counterclockwise rotation. Set as 'cw' to indicate a
@@ -133,27 +146,35 @@ class DataQyQxz():
         qys = np.copy(self.qys)
         center_px = self.metadata['center_px'].copy()
 
-        # determine number of 90 degree rotations
+        if degrees < 0:
+            warnings.warn(
+                "You have provided a negative value for degrees of rotation. "
+                "This will reverse the direction specified in the 'direction' "
+                "argument. For example, a -90 degree rotation "
+                "counter-clockwise is the same as a 90 degree clockwise "
+                "rotation. Did you intend this?"
+            )
+        # determine number of 90 degree rotations clockwise
         k = int(degrees/90) % 4
         if direction == 'cw':
             k *= -1
 
-        if k > 0:
+        if k != 0:
             self.imgdata = np.rot90(imgdata, k=k, axes=(0, 1))
 
-        if k == 1:
+        if k == 1 or k == -3:
             self.qxzs = qys
             self.qys = -1*np.flip(qxzs)
             self.metadata['center_px'] = [
                 len(qxzs)-center_px[1]-1, center_px[0]]
 
-        if k == 2:
+        if k == 2 or k == -2:
             self.qxzs = -1*np.flip(qxzs)
             self.qys = -1*np.flip(qys)
             self.metadata['center_px'] = [
                 len(qys)-center_px[0]-1, len(qxzs)-center_px[1]-1]
 
-        if k == 3:
+        if k == 3 or k == -1:
             self.qxzs = -1*np.flip(qys)
             self.qys = qxzs
             self.metadata['center_px'] = [
@@ -167,8 +188,11 @@ class DataQyQxz():
         rotations that have been done. The beam center will be tracked
         through this rotation and scattering vectors updated.
         """
-        if self._current_rotation > 0:
-            self.rotate_image(-90*self._current_rotation)
+        if self._current_rotation != 0:
+            degrees = -90*self._current_rotation
+            while degrees < 0:
+                degrees += 360
+            self.rotate_image(degrees)
 
     def update_beamcenter(self, qy, qxz):
         """Udpdate the beam center indices."""
@@ -210,7 +234,7 @@ class Dataset():
         else:
             self.name = self.data_folder
 
-        self.data = {}
+        self.datas = {}
 
     def add_data(self, filename: str, data: DataQyQxz):
         """Add a single DataQyQxz instance to the dataset."""
@@ -224,5 +248,5 @@ class Dataset():
         try:
             del self.datas[filename]
         except KeyError:
-            print(f"Could not delete {filename} data as it was not part of the"
-                  "dataset.")
+            warnings.warn(f"Could not delete {filename} data as it was not "
+                          "part of the dataset.")
