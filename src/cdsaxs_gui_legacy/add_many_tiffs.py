@@ -14,6 +14,40 @@ import os
 
 
 def main():
+
+    """
+    This script can be used to combine multible TIFF images into a single
+    image. The images are simply summed together, so be cautious of
+    whether this makes sense for your data. 
+
+    To run the script from the cdsaxs_legacy Python environment:
+    python path/to/add_many_tiffs.py
+
+    You will be prompted to select the location of the CSV input file,
+    the folder in which the original images are stored, and the folder
+    where you would like the combined images exported.
+
+    The CSV input file should contain two columns and no headers.
+    The first column is a list of all original filenames. The second
+    column contains the filename of the combined image the original
+    file should be added to. For example:
+
+    file_sampleA_001.tif, combined_file_sampleA.tif
+    file_sampleA_002.tif, combined_file_sampleA.tif
+    file_sampleB_001.tif, combined_file_sampleB.tif
+    file_sampleB_002.tif, combined_file_sampleB.tif
+    file_sampleB_003.tif, combined_file_sampleB.tif
+    file_sampleA_003.tif, combined_file_sampleA.tif
+
+    In the above sample, the files in rows 1, 2, and 6 will be combined
+    into a single image with the filename 'combined_file_sampleA.tif'
+    while the files in rows 3, 4, and 5 will be combined into a single
+    image with the filename 'combined_file_sampleB.tif'. This
+    demonstrates that you don't have to list the files in any particular
+    order, only that the filename for the combined file be
+    carefully applied to the appropriate rows.
+
+    """
     csv_path = QtWidgets.QFileDialog.getOpenFileName(
         caption='Choose .csv file that lists files to add together:',
     )
