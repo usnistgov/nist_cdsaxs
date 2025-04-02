@@ -78,7 +78,7 @@ class CDSAXS_Model():
         H1 = self.Coord[0,3]
         H2 = self.Coord[0,3]
         self.form=np.zeros([len(self.Qx[:,1]),len(self.Qx[1,:])]) # initialize structure of the amplitude - (labeled form here)
-        for i in range(int(self.Trapnumber)): # edit this to remove the need for the trapnumber variable
+        for i in range(int(self.layers)): # edit this to remove the need for the trapnumber variable
             H2 = H2+self.Coord[i,2]
             if i > 0:
                 H1 = H1+self.Coord[i-1,2] 
@@ -197,7 +197,7 @@ class CDSAXS_Model():
         Formfactor = self.form*M
         Formfactor=abs(Formfactor)
         self.SimInt = np.power(Formfactor,2)*self.I0+self.Bk
-    
+        return self.SimInt
     ### optimization code
     
     def GenBounds(self,limit):
@@ -229,37 +229,63 @@ class CDSAXS_Model():
     ### plotting code
     
     def plotSymTrap(self):
-        Coordp=np.zeros([self.layers+1,5,2])
-        Coordp[:,:,0]=self.Coord[:,:,0]
-        Coordp[:,:,1]=self.Coord[:,:,0]
-        Coordp[:,0:1,1]=Coordp[:,0:1,1]+self.Pitch
+        # Check if self.Coord is initialized properly
+        if not hasattr(self, 'Coord') or self.Coord is None:
+            print("Error: Coordinates not assigned. Call SymCoordAssign_SingleMaterial first.")
+            return
+            
+        # Create a copy of coordinates for plotting
+        Coordp = np.zeros([self.layers+1, 5, 2])
+        for i in range(self.layers+1):
+            for j in range(5):
+                Coordp[i, j, 0] = self.Coord[i, j, 0]
+                Coordp[i, j, 1] = self.Coord[i, j, 0]
+        
+        # Add pitch to specific coordinates
+        Coordp[:, 0:1, 1] = Coordp[:, 0:1, 1] + self.Pitch
+        
         for S in range(1):
-            h=0
-            Lc= np.zeros([self.layers+1,2])
-            Rc= np.zeros([self.layers+1,2])
+            h = 0
+            Lc = np.zeros([self.layers+1, 2])
+            Rc = np.zeros([self.layers+1, 2])
             
             for i in range(self.layers+1):
-                Lc[i,0]=Coordp[i,0,S]
-                Rc[i,0]=Coordp[i,1,S]
-                Lc[i,1]=h
-                Rc[i,1]=h
-                h=h+Coordp[i,2,S]
-            plt.plot(Lc[:,0],Lc[:,1], color='black')
-            plt.plot(Rc[:,0],Rc[:,1], color='black')
-            Cc=np.zeros([2,2])
+                Lc[i, 0] = Coordp[i, 0, S]
+                Rc[i, 0] = Coordp[i, 1, S]
+                Lc[i, 1] = h
+                Rc[i, 1] = h
+                h = h + Coordp[i, 2, S]
+                
+            plt.plot(Lc[:, 0], Lc[:, 1], color='black')
+            plt.plot(Rc[:, 0], Rc[:, 1], color='black')
+            
+            Cc = np.zeros([2, 2])
             for i in range(self.layers):
-                Cc[0,0]=Lc[i+1,0]
-                Cc[0,1]=Lc[i+1,1]
-                Cc[1,0]=Rc[i+1,0]
-                Cc[1,1]=Rc[i+1,1]
-                plt.plot(Cc[:,0],Cc[:,1], color='black')
-        plt.xlabel('Width (Å)')
-        plt.ylabel('Height (Å)')             
-
+                Cc[0, 0] = Lc[i+1, 0]
+                Cc[0, 1] = Lc[i+1, 1]
+                Cc[1, 0] = Rc[i+1, 0]
+                Cc[1, 1] = Rc[i+1, 1]
+                plt.plot(Cc[:, 0], Cc[:, 1], color='black')
+                
+        plt.xlabel('Width (Å)')
+        plt.ylabel('Height (Å)')
         plt.show()
         plt.close()
         
-    
+    def PlotQzCut(self,numbercuts,scale):
+        S=self.SimTrap_SM()
+        I=deepcopy(self.Intensity)   
+        if scale =='yes': 
+            for i in range(0,numbercuts):
+                S[:,i]=S[:,i]/(50.**(i+1))
+                I[:,i]=I[:,i]/(50.**(i+1))
+        for i in range(numbercuts):
+            plt.semilogy(self.Qz[:,i],I[:,i],'.', label='Exp '+str(i))
+            plt.semilogy(self.Qz[:,i],S[:,i], label='Sim '+str(i), color='black')
+        #plt.legend(loc='upper right')
+        plt.xlabel('q ($Å^{-1}$)')
+        plt.ylabel('Intensity (a.u.)')
+        plt.plot()
    
     
     
