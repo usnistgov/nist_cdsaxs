@@ -67,6 +67,8 @@ class CDSAXS_Model():
             self.numberpoints=np.sum(np.isreal(self.Intensity))
             self.SymCoordAssign_SingleMaterial()
             self.SimTrap_SM()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC= self.BIC_calc(self.GF)
    
     def importCDSAXS_GUI(self,Datafile):
         Data=pd.read_csv(Datafile)
@@ -100,7 +102,10 @@ class CDSAXS_Model():
         for k, v in enumerate(qxlist):
             self.Qx[:,k]=self.Qx[:,k]*v     
         self.numberpoints=np.sum(np.isreal(self.Intensity))
-        
+        self.SymCoordAssign_SingleMaterial()
+        self.SimTrap_SM()
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC= self.BIC_calc(self.GF)
 
 
     def importCDSAXSQrQz(self,Intensitydata,Qrdata,Qzdata):
@@ -220,7 +225,7 @@ class CDSAXS_Model():
         
         GF_M[np.isnan(GF_M)]=0
         GF=np.sum(GF_M)
-        return GF
+        return (GF)
             
     def BIC_calc(self, GF):
         k = 2*self.layers+2 # number of fitting parameters
@@ -349,10 +354,9 @@ class CDSAXS_Model():
         return Chi2
    
     def CDSAXS_DiffEvolution(self,limit):
-        self.GF = self.GF_calc(self.SimInt)
-        self.BIC= self.BIC_calc(self.GF)
+        
         self.GenBounds(limit)
-        self.PlotQzCut(14,self.SimInt,'yes')
+        
         self.SimPar_Optimized = differential_evolution(self.SimGF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz),polish=True)
         
         self.PAR_Optimized=np.zeros([self.layers+1,2])
@@ -435,7 +439,9 @@ class CDSAXS_Model():
         plt.xlabel('q ($Å^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
         del I
-        plt.plot()
+        plt.show()
+        plt.close()
+        
    
     
     def PlotQzCutComp(self,numbercuts,scale):
@@ -455,15 +461,91 @@ class CDSAXS_Model():
         del I
         plt.xlabel('q ($Å^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
-        plt.plot()
+        
 
-
+    def combined_plots(self, numbercuts=None, SP=None, scale=None): # Currently creates two identical plots?
+        """
+        Creates a single figure with two subplots side by side:
+        1. Symmetric trapezoid structure (plotSymTrap)
+        2. Qz cuts (PlotQzCut)
+        
+        Parameters:
+        - numbercuts: Number of cuts for PlotQzCut
+        - SP: Data for PlotQzCut
+        - scale: Scaling option for PlotQzCut ('yes' or 'no')
+        """
+        # Create figure with two subplots side by side
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # First subplot: plotSymTrap
+        # Check if self.Coord is initialized properly
+        if not hasattr(self, 'Coord') or self.Coord is None:
+            print("Error: Coordinates not assigned. Call SymCoordAssign_SingleMaterial first.")
+            return
+            
+        # Create a copy of coordinates for plotting
+        Coordp = np.zeros([self.layers+1, 5, 2])
+        for i in range(self.layers+1):
+            for j in range(5):
+                Coordp[i, j, 0] = self.Coord[i, j, 0]
+                Coordp[i, j, 1] = self.Coord[i, j, 0]
+        
+        # Add pitch to specific coordinates
+        Coordp[:, 0:1, 1] = Coordp[:, 0:1, 1] + self.Pitch
+        
+        for S in range(1):
+            h = 0
+            Lc = np.zeros([self.layers+1, 2])
+            Rc = np.zeros([self.layers+1, 2])
+            
+            for i in range(self.layers+1):
+                Lc[i, 0] = Coordp[i, 0, S]
+                Rc[i, 0] = Coordp[i, 1, S]
+                Lc[i, 1] = h
+                Rc[i, 1] = h
+                h = h + Coordp[i, 2, S]
+                
+            ax1.plot(Lc[:, 0], Lc[:, 1], color='black')
+            ax1.plot(Rc[:, 0], Rc[:, 1], color='black')
+            
+            Cc = np.zeros([2, 2])
+            for i in range(self.layers):
+                Cc[0, 0] = Lc[i+1, 0]
+                Cc[0, 1] = Lc[i+1, 1]
+                Cc[1, 0] = Rc[i+1, 0]
+                Cc[1, 1] = Rc[i+1, 1]
+                ax1.plot(Cc[:, 0], Cc[:, 1], color='black')
+                
+        ax1.set_xlabel('Width (Å)')
+        ax1.set_ylabel('Height (Å)')
+        ax1.set_title('Symmetric Trapezoid Structure')
+        
+        # Second subplot: PlotQzCut
+        if SP is not None and numbercuts is not None:
+            S = deepcopy(SP)
+            I = deepcopy(self.Intensity)   
+            if scale == 'yes': 
+                for i in range(0, numbercuts):
+                    S[:, i] = S[:, i]/(50.**(i+1))
+                    I[:, i] = I[:, i]/(50.**(i+1))
+            for i in range(numbercuts):
+                ax2.semilogy(self.Qz[:, i], I[:, i], '.')
+                ax2.semilogy(self.Qz[:, i], S[:, i], color='black')
+            ax2.set_xlabel('q ($Å^{-1}$)')
+            ax2.set_ylabel('Intensity (a.u.)')
+            ax2.set_title('Qz Cuts')
+            #ax2.legend(loc='upper right')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        return fig
 
 ##this class should simplify logging and comparing results
 class CDSAXS_fitter():
     def __init__(self,attribute_name, value):
         setattr(self,attribute_name,value)
-        self.fitlog = pd.DataFrame(columns=["Model",'layers', "GF", "BIC"])
+        self.fitlog = pd.DataFrame(columns=["Model",'layers', "GF_Optimized", "BIC_Optimized"])
         new_row = {'Model': attribute_name, 'layers': value.layers, 'GF': value.GF_Optimized, 'BIC':value.BIC_Optimized}
         self.fitlog.loc[len(self.fitlog)] = new_row
     def add_model(self,attribute_name, value):
