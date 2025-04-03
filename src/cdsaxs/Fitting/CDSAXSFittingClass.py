@@ -335,19 +335,15 @@ class CDSAXS_Model():
         
         self.SimPar_Optimized = differential_evolution(self.SimGF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz),polish=True)
         
-        #self.PAR_Optimized=np.zeros([self.layers+1,2])
-        #self.PAR_Optimized[:,0:2]=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
         self.PAR=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
-        #print('Initial Parameters', self.PAR)
-        #print('OPtimized Parameterrs', self.PAR_Optimized)
+
         [self.I0,self.DW,self.Bk]= self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
                
         self.SymCoordAssign_SingleMaterial()
         self.SimTrap_SM()
-        #self.PlotQzCut(14,self.SimIntOpt,'yes') # I can't get this part to update properly and its driving me a little crazy using a workaround fo rnow
         self.GF = self.GF_calc(self.SimInt)
         self.BIC= self.BIC_calc(self.GF)
-        #print('OPtimized Coordinates', self.Coord_Optimized)
+    
         print('Initial ', self.GF_Initial, ' Final ', self.GF) 
         return (self.PAR,self.I0,self.DW,self.Bk)
         
@@ -421,8 +417,8 @@ class CDSAXS_Model():
    
     
     def PlotQzCutComp(self,numbercuts,scale):
-        S_Init=deepcopy(self.SimInt)
-        S_Opt =deepcopy(self.SimIntOpt)
+        S_Init=deepcopy(self.SimInt_Initial)
+        S_Opt =deepcopy(self.SimInt)
         I=deepcopy(self.Intensity)   
         if scale =='yes': 
             for i in range(0,numbercuts):
