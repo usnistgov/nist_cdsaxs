@@ -37,17 +37,16 @@ class CDSAXS_Model():
         self.geoemtry=geometry
         self.model=model
         self.PAR=PAR
+        self.PAR_Initial=PAR
         self.layers=layers
         self.SLD=SLD
         self.DW=DW
         self.I0=I0
         self.Bk=Bk
+        self.DW_Initial=DW
+        self.I0_Initial=I0
+        self.Bk_Initial=Bk
         self.Pitch=Pitch
-        self.PAR_Optimized=PAR
-        self.SLD_Optimized=SLD
-        self.DW_Optimized=DW
-        self.I0_Optimized=I0
-        self.Bk_Optimized=Bk
         self.SimPar=np.append(self.PAR.ravel(),[self.I0,self.DW,self.Bk])
         
         
@@ -67,8 +66,11 @@ class CDSAXS_Model():
             self.numberpoints=np.sum(np.isreal(self.Intensity))
             self.SymCoordAssign_SingleMaterial()
             self.SimTrap_SM()
+            self.SimInt_Initial=self.SimInt
             self.GF = self.GF_calc(self.SimInt)
+            self.GF_Initial=self.GF
             self.BIC= self.BIC_calc(self.GF)
+            self.GF_Initial=self.BIC
    
     def importCDSAXS_GUI(self,Datafile):
         Data=pd.read_csv(Datafile)
@@ -142,59 +144,7 @@ class CDSAXS_Model():
             A2 = (np.exp(1j*self.Qx*((H1-SL*x1)/SL))/(self.Qx/SL+self.Qz))*(np.exp(-1j*H2*(self.Qx/SL+self.Qz))-np.exp(-1j*H1*(self.Qx/SL+self.Qz)))
             self.form=self.form+(1j/self.Qx)*(A1-A2)*self.Coord[i,4]
         
-    # def FreeFormTrapezoid(self):
-    #     # Pre-allocate memory for result
-    #     self.form = np.zeros([len(self.Qx[:,1]), len(self.Qx[1,:])], dtype=complex)
-        
-    #     H1 = self.Coord[0,3]
-    #     H2 = H1.copy() if isinstance(H1, np.ndarray) else H1
-        
-    #     # Vectorize calculations where possible
-    #     for i in range(int(self.layers)):
-    #         H2 += self.Coord[i,2]
-    #         if i > 0:
-    #             H1 += self.Coord[i-1,2] 
-                
-    #         x1 = self.Coord[i,0]
-    #         x4 = self.Coord[i,1]
-    #         x2 = self.Coord[i+1,0]
-    #         x3 = self.Coord[i+1,1]
-            
-    #         # Avoid division by zero
-    #         x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
-    #         x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
-            
-    #         SL = self.Coord[i,2] / (x2 - x1)
-    #         SR = -self.Coord[i,2] / (x4 - x3)
-            
-    #         # Calculate intermediate values once and reuse
-    #         QxSR = self.Qx / SR
-    #         QxSL = self.Qx / SL
-    #         QxSR_plus_Qz = QxSR + self.Qz
-    #         QxSL_plus_Qz = QxSL + self.Qz
-            
-    #         # Calculate exponential terms once
-    #         exp_H1_SR = np.exp(-1j * H1 * QxSR_plus_Qz)
-    #         exp_H2_SR = np.exp(-1j * H2 * QxSR_plus_Qz)
-    #         exp_H1_SL = np.exp(-1j * H1 * QxSL_plus_Qz)
-    #         exp_H2_SL = np.exp(-1j * H2 * QxSL_plus_Qz)
-            
-    #         # Calculate A1 and A2
-    #         exp_factor_SR = np.exp(1j * self.Qx * ((H1 - SR * x4) / SR))
-    #         exp_factor_SL = np.exp(1j * self.Qx * ((H1 - SL * x1) / SL))
-            
-    #         A1 = (exp_factor_SR / QxSR_plus_Qz) * (exp_H2_SR - exp_H1_SR)
-    #         A2 = (exp_factor_SL / QxSL_plus_Qz) * (exp_H2_SL - exp_H1_SL)
-            
-    #         # Add to form factor
-    #         self.form += (1j / self.Qx) * (A1 - A2) * self.Coord[i,4]
-        
-    #     return self.form
-
-
-
-
-
+    
     def FreeFormTrapezoidOpt(self,Coord,layers,Qx,Qz):
         # this version exists to accomate the form required by the gen algorithm, consider recombining and simplifying if possible
         H1 = Coord[0,3]
@@ -233,7 +183,33 @@ class CDSAXS_Model():
         return BIC
     
     
-    
+    def ConeFourierTransform(self,Discretization):
+        # Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
+        H1 = 0
+        H2 = 0
+        self.Form=np.zeros([int(len(self.Qr[:,0])),int(len(self.Qr[0,:]))])
+        
+        for i in range (self.layers):
+            H2=H2+self.PAR[i,1]
+            z=np.zeros([int(Discretization[i])])
+            stepsize=self.PAR[i,1]/Discretization[i]
+            z=np.arange(H1,H2+0.01,stepsize)
+            if i > 0 :
+                H1=H1+self.PAR[i-1,1]
+                
+            z=np.arange(H1,H2+0.01,stepsize)
+            R1=self.PAR[i,0]
+            R2=self.PAR[i+1,0]
+            if R1==R2:
+                R1=R1+0.000001
+            Slope=(H2-H1)/(R2-R1)
+            for ii in range(len(z)-1):
+                RI1=(z[ii]-H1)/Slope+R1
+                RI2=(z[ii+1]-H1)/Slope+R1
+                fa=2*np.pi*RI1/self.Qr*sp.jv(1,self.Qr*RI1)*np.exp(1j*self.Qz*z[ii])
+                fb=2*np.pi*RI2/self.Qr*sp.jv(1,self.Qr*RI2)*np.exp(1j*self.Qz*z[ii+1])
+                self.Form=self.Form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
+        return self.Form
     
     
 ### Coordinate Assignment Code
@@ -359,21 +335,21 @@ class CDSAXS_Model():
         
         self.SimPar_Optimized = differential_evolution(self.SimGF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz),polish=True)
         
-        self.PAR_Optimized=np.zeros([self.layers+1,2])
-        self.PAR_Optimized[:,0:2]=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
+        #self.PAR_Optimized=np.zeros([self.layers+1,2])
+        #self.PAR_Optimized[:,0:2]=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
+        self.PAR=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
         #print('Initial Parameters', self.PAR)
         #print('OPtimized Parameterrs', self.PAR_Optimized)
-        [self.I0_Optimized,self.DW_Optimized,self.Bk_Optimized]= self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
-        
-       
-        self.Coord_Optimized=self.SymCoordAssign_SingleMaterialOpt(self.PAR_Optimized,self.layers)
-        self.SimIntOpt=self.SimTrap_SMFinal(self.layers,self.Qx,self.Qz)
+        [self.I0,self.DW,self.Bk]= self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
+               
+        self.SymCoordAssign_SingleMaterial()
+        self.SimTrap_SM()
         #self.PlotQzCut(14,self.SimIntOpt,'yes') # I can't get this part to update properly and its driving me a little crazy using a workaround fo rnow
-        self.GF_Optimized = self.GF_calc(self.SimIntOpt)
-        self.BIC_Optimized= self.BIC_calc(self.GF_Optimized)
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC= self.BIC_calc(self.GF)
         #print('OPtimized Coordinates', self.Coord_Optimized)
-        print('Initial ', self.GF, ' Final ', self.GF_Optimized) 
-        return (self.PAR_Optimized,self.I0_Optimized,self.DW_Optimized,self.Bk_Optimized)
+        print('Initial ', self.GF_Initial, ' Final ', self.GF) 
+        return (self.PAR,self.I0,self.DW,self.Bk)
         
         
     ### plotting code
