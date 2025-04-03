@@ -6,7 +6,7 @@ import scipy.special as sp
 import matplotlib.patches as mpatches
 from scipy.optimize import differential_evolution
 import math
-
+import re
 import pandas as pd
 #Examples of assigning attributes names with a variable
 # class MyAttribute:
@@ -68,8 +68,27 @@ class CDSAXS_Model():
             self.SymCoordAssign_SingleMaterial()
             self.SimTrap_SM()
    
-    def importCDSAXS_GUI(self,Datafile,Qxlist,numbercuts):
+    def importCDSAXS_GUI(self,Datafile):
         Data=pd.read_csv(Datafile)
+        # checks the number of cuts
+        num_columns = len(Data.columns)
+        numbercuts =num_columns//2
+               
+        headers = Data.columns.tolist()
+    
+        qxlist = []
+        
+        # Check every other column starting with index 1 (second column)
+        for i in range(1, len(headers), 2):
+            # Look for pattern 'qx = number' in the header
+            match = re.search(r'qx\s*=\s*(\d+\.?\d*)', headers[i])
+            if match:
+                number = float(match.group(1))
+                # Convert to int if it's a whole number
+                if number.is_integer():
+                    number = int(number)
+                qxlist.append(number)
+        #Converts to numpy
         Data1=Data.to_numpy()
         self.Intensity=np.zeros([len(Data1[:,0]),numbercuts])
         self.Qz=np.zeros([len(Data1[:,0]),numbercuts])
@@ -78,7 +97,7 @@ class CDSAXS_Model():
             self.Qz[:,i]=Data1[:,(i*2)]
         self.Qx=self.Qz.copy()
         self.Qx[~np.isnan(self.Qx)] = 1
-        for k, v in enumerate(Qxlist):
+        for k, v in enumerate(qxlist):
             self.Qx[:,k]=self.Qx[:,k]*v     
         self.numberpoints=np.sum(np.isreal(self.Intensity))
         
