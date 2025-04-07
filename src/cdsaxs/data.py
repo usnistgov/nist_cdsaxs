@@ -44,7 +44,7 @@ class DataQyQxz():
         Contains any relevant scattering metadata. These are key : value
         pairs where the key must be in the list below and the value is
         formatted depending on requirements of the parameter.
-    params : dict
+    user_params : dict
         Contains additional user-provided parameters. These may be
         relevant to the user and are shown in the data table of the GUI
         after the required metadata, but are not used for processing
@@ -75,7 +75,7 @@ class DataQyQxz():
         qys: NDArray[np.floating],
         qxzs: NDArray[np.floating],
         metadata: dict,
-        params: dict = None,
+        user_params: dict = None,
     ):
         """Create an instance of DataQyQxz"""
 
@@ -108,7 +108,7 @@ class DataQyQxz():
         if 'scaling_factor' not in self.metadata.keys():
             self.metadata['scaling_factor'] = 1
 
-        self.params = params if params is not None else {}
+        self.user_params = user_params if user_params is not None else {}
 
     def rotate_image(self, degrees, direction='ccw'):
         """
@@ -194,11 +194,6 @@ class DataQyQxz():
                 degrees += 360
             self.rotate_image(degrees)
 
-    def update_beamcenter(self, qy, qxz):
-        """Udpdate the beam center indices."""
-        self.metadata['center_px'] = [qy, qxz]
-        self.recalculate_q()
-
     def recalculate_q(self):
         """
         Recalculate scattering vectors qys and qxzs.
@@ -208,6 +203,101 @@ class DataQyQxz():
         """
         # TODO: implement when working on diffraction.py
         pass
+
+    def update_metadata(self, metadata: dict, overwrite: bool = True):
+        """
+        Add accepted metadata to the class instance. Existing metadata
+        parameters can be updated by keeping the overwrite argument
+        to True.
+
+        Parameters
+        ----------
+        metadata : dict
+            Key : value pairs of accepted metadata (key) and their
+            values. See class docstring for list of accepted keywords.
+        overwrite : bool
+            If set to True, any metadata provided to this method will
+            overwrite the existing value in the instance if it already
+            exists in self.metadata.
+            Default value is True.
+        """
+        if self._check_metadata_keys(metadata):
+            for key, value in metadata.items():
+                if key in self.metadata.keys() and not overwrite:
+                    pass
+                else:
+                    self.metadata[key] = value
+
+    def remove_metadata(self, metadata_keys: list):
+        """
+        Remove accepted metadata from this instance of the class.
+
+        Parameters
+        ----------
+        metadata_keys : list
+            List of metadata to remove from this class instance.
+        """
+        if self._check_metadata({key: 0 for key in metadata_keys}):
+            self.metadata = {
+                key: value for key, value in self.metadata
+                if key not in metadata_keys
+                }
+
+    def _check_metadata_keys(self, metadata):
+        """
+        Check if a metadata dictionary contains any unaccepted metadata
+        keywords.
+        """
+        unaccepted_keywords = [
+            x for x in metadata.keys() if x not in METADATA_KEYWORDS
+        ]
+        if len(unaccepted_keywords) > 0:
+            raise ValueError(
+                "The following metadata keywords are not accepted:\n" +
+                f"{unaccepted_keywords}\n" +
+                "The following are accepted metadata keywords:\n" +
+                f"{METADATA_KEYWORDS}"
+            )
+        return True
+
+    def update_user_params(self, params: dict, overwrite: bool = True):
+        """
+        Add key: value pairs to the user params of this class instance.
+        Existing parameters can be updated by keeping the overwrite
+        argument as True.
+
+        Parameters
+        ----------
+        params : dict
+            Key : value pairs of user-specified parameters for this
+            data instance.
+        overwrite : bool
+            If set to True, any parameters provided to this method will
+            overwrite the existing value in this instance if it already
+            exists in self.uer_params.
+            Default value is True.
+        """
+        for key, value in params.items():
+            if key in self.user_params.keys() and not overwrite:
+                pass
+            else:
+                self.user_params[key] = value
+
+    def remove_user_params(self, param_keys: list):
+        """
+        Remove the identified parameters from user params of this
+        class instance.
+
+        Parameters
+        ----------
+        param_keys : list
+            List of parameters to remove from user_params of this class 
+            instance.
+        """
+        self.user_params = {
+            key: value for key, value in self.user_params
+            if key not in param_keys
+            }
 
 
 class Dataset():
