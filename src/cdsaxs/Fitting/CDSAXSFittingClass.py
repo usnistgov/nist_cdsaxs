@@ -402,30 +402,147 @@ class CDSAXS_Model():
             print(f"Error in FreeFormTrapezoid: {str(e)}")
             return False
     
-    def FreeFormTrapezoidOpt(self,Coord,layers,Qx,Qz):
-        # this version exists to accomate the form required by the gen algorithm, consider recombining and simplifying if possible
-        H1 = Coord[0,3]
-        H2 = Coord[0,3]
-        form=np.zeros([len(Qx[:,1]),len(Qx[1,:])]) # initialize structure of the amplitude - (labeled form here)
-        for i in range(int(layers)): 
-            H2 = H2+Coord[i,2]
-            if i > 0:
-                H1 = H1+Coord[i-1,2] 
-            x1 = Coord[i,0]
-            x4 = Coord[i,1]
-            x2 = Coord[i+1,0]
-            x3 = Coord[i+1,1]
-             # Avoid division by zero
-            x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
-            x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
+    def FreeFormTrapezoidOpt(self, Coord, layers, Qx, Qz):
+        """
+        Optimized version of FreeFormTrapezoid that takes parameters directly
+        instead of using class attributes. Used by genetic algorithm.
+        
+        Parameters:
+        -----------
+        Coord : numpy.ndarray
+            Coordinate array with shape (n, 5) containing trapezoid parameters
+        layers : int
+            Number of layers in the trapezoid structure
+        Qx : numpy.ndarray
+            X-component of scattering vector, 2D array
+        Qz : numpy.ndarray
+            Z-component of scattering vector, 2D array
             
-            SL = Coord[i,2]/(x2-x1)
-            SR = -Coord[i,2]/(x4-x3)
+        Returns:
+        --------
+        numpy.ndarray
+            The calculated form factor for the trapezoid structure
+        """
+        try:
+            # Validate input parameters
+            if not isinstance(Coord, np.ndarray):
+                raise TypeError("Coord must be a numpy array")
+                
+            if len(Coord.shape) != 2 or Coord.shape[1] < 5:
+                raise ValueError(f"Coord must be a 2D array with at least 5 columns, got shape {Coord.shape}")
+                
+            if not isinstance(layers, (int, float)) or layers <= 0:
+                raise ValueError(f"layers must be a positive number, got {layers}")
+                
+            if not isinstance(Qx, np.ndarray) or not isinstance(Qz, np.ndarray):
+                raise TypeError("Qx and Qz must be numpy arrays")
+                
+            if Qx.shape != Qz.shape:
+                raise ValueError(f"Shape mismatch: Qx shape {Qx.shape} different from Qz shape {Qz.shape}")
+                
+            if len(Qx.shape) != 2 or Qx.shape[0] == 0 or Qx.shape[1] == 0:
+                raise ValueError(f"Qx must be a non-empty 2D array, got shape {Qx.shape}")
+                
+            # Check if we have enough layers in Coord
+            if int(layers) + 1 > Coord.shape[0]:
+                raise ValueError(f"Not enough rows in Coord ({Coord.shape[0]}) for {int(layers)} layers")
             
-            A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
-            A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
-            form=form+(1j/Qx)*(A1-A2)*Coord[i,4]
-        return form
+            # Initialize form factor array
+            form = np.zeros([len(Qx[:, 0]), len(Qx[0, :])], dtype=complex)
+            
+            # Starting heights
+            H1 = Coord[0, 3]
+            H2 = Coord[0, 3]
+            
+            # Process each layer
+            for i in range(int(layers)):
+                # Update heights
+                H2 = H2 + Coord[i, 2]
+                if i > 0:
+                    H1 = H1 + Coord[i-1, 2] 
+                
+                # Get coordinates
+                x1 = Coord[i, 0]
+                x4 = Coord[i, 1]
+                
+                # Validate index before accessing
+                if i + 1 >= len(Coord):
+                    raise IndexError(f"Index {i+1} out of bounds for Coord with length {len(Coord)}")
+                    
+                x2 = Coord[i+1, 0]
+                x3 = Coord[i+1, 1]
+                
+                # Avoid division by zero with small offsets
+                if np.isclose(x2, x1):
+                    x2 = x1 - 1e-6
+                if np.isclose(x4, x3):
+                    x4 = x3 - 1e-6
+                
+                # Calculate slopes
+                SL = Coord[i, 2] / (x2 - x1)
+                SR = -Coord[i, 2] / (x4 - x3)
+                
+                # Handle potential division by zero in calculations
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    # Calculate form factors with division safety
+                    QxSR_plus_Qz = Qx / SR + Qz
+                    QxSL_plus_Qz = Qx / SL + Qz
+                    
+                    # Replace zeros to avoid division by zero
+                    QxSR_plus_Qz = np.where(np.isclose(QxSR_plus_Qz, 0), 1e-10, QxSR_plus_Qz)
+                    QxSL_plus_Qz = np.where(np.isclose(QxSL_plus_Qz, 0), 1e-10, QxSL_plus_Qz)
+                    
+                    A1 = (np.exp(1j * Qx * ((H1 - SR * x4) / SR)) / QxSR_plus_Qz) * \
+                        (np.exp(-1j * H2 * QxSR_plus_Qz) - np.exp(-1j * H1 * QxSR_plus_Qz))
+                    
+                    A2 = (np.exp(1j * Qx * ((H1 - SL * x1) / SL)) / QxSL_plus_Qz) * \
+                        (np.exp(-1j * H2 * QxSL_plus_Qz) - np.exp(-1j * H1 * QxSL_plus_Qz))
+                    
+                    # Handle NaN values
+                    A1 = np.nan_to_num(A1)
+                    A2 = np.nan_to_num(A2)
+                
+                # Handle division by zero for Qx
+                Qx_nonzero = np.where(np.isclose(Qx, 0), 1e-10, Qx)
+                
+                # Update form factor
+                form = form + (1j / Qx_nonzero) * (A1 - A2) * Coord[i, 4]
+            
+            return form
+            
+        except Exception as e:
+            print(f"Error in FreeFormTrapezoidOpt: {str(e)}")
+            return None
+        
+        
+    
+    
+    
+    
+    # def FreeFormTrapezoidOpt(self,Coord,layers,Qx,Qz):
+    #     # this version exists to accomate the form required by the gen algorithm, consider recombining and simplifying if possible
+    #     H1 = Coord[0,3]
+    #     H2 = Coord[0,3]
+    #     form=np.zeros([len(Qx[:,1]),len(Qx[1,:])]) # initialize structure of the amplitude - (labeled form here)
+    #     for i in range(int(layers)): 
+    #         H2 = H2+Coord[i,2]
+    #         if i > 0:
+    #             H1 = H1+Coord[i-1,2] 
+    #         x1 = Coord[i,0]
+    #         x4 = Coord[i,1]
+    #         x2 = Coord[i+1,0]
+    #         x3 = Coord[i+1,1]
+    #          # Avoid division by zero
+    #         x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
+    #         x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
+            
+    #         SL = Coord[i,2]/(x2-x1)
+    #         SR = -Coord[i,2]/(x4-x3)
+            
+    #         A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
+    #         A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
+    #         form=form+(1j/Qx)*(A1-A2)*Coord[i,4]
+    #     return form
     
     def GF_calc(self,SimInt):
         GF_M= abs(np.log(self.Intensity)-np.log(SimInt))
