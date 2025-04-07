@@ -229,47 +229,43 @@ class CDSAXS_Model():
         except Exception as e:
             raise RuntimeError(f"Error processing data: {str(e)}")
     
-    # def importCDSAXS_GUI(self,Datafile):
-    #     Data=pd.read_csv(Datafile)
-    #     # checks the number of cuts
-    #     num_columns = len(Data.columns)
-    #     numbercuts =num_columns//2
-               
-    #     headers = Data.columns.tolist()
-    
-    #     qxlist = []
-        
-    #     # Check every other column starting with index 1 (second column)
-    #     for i in range(1, len(headers), 2):
-    #         # Look for pattern 'qx = number' in the header
-    #         match = re.search(r'qx\s*=\s*(\d+\.?\d*)', headers[i])
-    #         if match:
-    #             number = float(match.group(1))
-    #             # Convert to int if it's a whole number
-    #             if number.is_integer():
-    #                 number = int(number)
-    #             qxlist.append(number)
-    #     #Converts to numpy
-    #     Data1=Data.to_numpy()
-    #     self.Intensity=np.zeros([len(Data1[:,0]),numbercuts])
-    #     self.Qz=np.zeros([len(Data1[:,0]),numbercuts])
-    #     for i in range(0,numbercuts):
-    #         self.Intensity[:,i]=Data1[:,(i*2+1)]
-    #         self.Qz[:,i]=Data1[:,(i*2)]
-    #     self.Qx=self.Qz.copy()
-    #     self.Qx[~np.isnan(self.Qx)] = 1
-    #     for k, v in enumerate(qxlist):
-    #         self.Qx[:,k]=self.Qx[:,k]*v     
-    #     self.numberpoints=np.sum(np.isreal(self.Intensity))
-    #     if self.geometry =='trapezoid':
-    #         self.SymCoordAssign_SingleMaterial()
-    #         self.SimTrap_SM()
-    #         self.SimInt_Initial=self.SimInt
-    #         self.GF = self.GF_calc(self.SimInt)
-    #         self.GF_Initial=self.GF
-    #         self.BIC= self.BIC_calc(self.GF)
-    #         self.GF_Initial=self.BIC
-       
+    def convert_Cartesian_Cylindrical(self):
+        """
+        Converts Cartesian coordinates (Qx, Qy) to Cylindrical coordinates (Qr, Alpha)
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qy'):
+                raise AttributeError("Missing required attributes: Qx and Qy must be defined")
+            
+            # Check if arrays are properly initialized and have compatible shapes
+            if not isinstance(self.Qx, np.ndarray) or not isinstance(self.Qy, np.ndarray):
+                raise TypeError("Qx and Qy must be numpy arrays")
+                
+            if self.Qx.shape != self.Qy.shape:
+                raise ValueError(f"Shape mismatch: Qx shape {self.Qx.shape} different from Qy shape {self.Qy.shape}")
+                
+            # Check for NaN or empty arrays
+            if np.all(np.isnan(self.Qx)) or np.all(np.isnan(self.Qy)):
+                raise ValueError("Input arrays contain only NaN values")
+                
+            # Handle division by zero (when Qx = 0)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                Alpha = np.arctan(self.Qy / self.Qx)
+                # Replace NaN resulting from 0/0 with 0 or appropriate value
+                Alpha = np.nan_to_num(Alpha, nan=0.0)
+            
+            # Compute Qr 
+            self.Qr = np.cos(Alpha)
+            
+            # Store Alpha for future use
+            self.Alpha = Alpha
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error in convert_Cartesian_Cylindrical: {str(e)}")
+            return False
               
 
 
