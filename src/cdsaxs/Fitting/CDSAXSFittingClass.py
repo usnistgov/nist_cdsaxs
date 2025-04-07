@@ -8,6 +8,8 @@ from scipy.optimize import differential_evolution
 import math
 import re
 import pandas as pd
+
+import os
 #Examples of assigning attributes names with a variable
 # class MyAttribute:
 #     def __set_name__(self, owner, name):
@@ -129,46 +131,144 @@ class CDSAXS_Model():
     #             self.BIC= self.BIC_calc(self.GF)
     #             self.GF_Initial=self.BIC
    
-    def importCDSAXS_GUI(self,Datafile):
-        Data=pd.read_csv(Datafile)
-        # checks the number of cuts
-        num_columns = len(Data.columns)
-        numbercuts =num_columns//2
-               
-        headers = Data.columns.tolist()
-    
-        qxlist = []
+   
+   
+    def importCDSAXS_GUI(self, Datafile):
+        """
+        Imports CDSAXS data from a GUI-created file with input validation
         
-        # Check every other column starting with index 1 (second column)
-        for i in range(1, len(headers), 2):
-            # Look for pattern 'qx = number' in the header
-            match = re.search(r'qx\s*=\s*(\d+\.?\d*)', headers[i])
-            if match:
-                number = float(match.group(1))
-                # Convert to int if it's a whole number
-                if number.is_integer():
-                    number = int(number)
-                qxlist.append(number)
-        #Converts to numpy
-        Data1=Data.to_numpy()
-        self.Intensity=np.zeros([len(Data1[:,0]),numbercuts])
-        self.Qz=np.zeros([len(Data1[:,0]),numbercuts])
-        for i in range(0,numbercuts):
-            self.Intensity[:,i]=Data1[:,(i*2+1)]
-            self.Qz[:,i]=Data1[:,(i*2)]
-        self.Qx=self.Qz.copy()
-        self.Qx[~np.isnan(self.Qx)] = 1
-        for k, v in enumerate(qxlist):
-            self.Qx[:,k]=self.Qx[:,k]*v     
-        self.numberpoints=np.sum(np.isreal(self.Intensity))
-        if self.geometry =='trapezoid':
-            self.SymCoordAssign_SingleMaterial()
-            self.SimTrap_SM()
-            self.SimInt_Initial=self.SimInt
-            self.GF = self.GF_calc(self.SimInt)
-            self.GF_Initial=self.GF
-            self.BIC= self.BIC_calc(self.GF)
-            self.GF_Initial=self.BIC
+        Parameters:
+        -----------
+        Datafile : str
+            Path to the data file (CSV format)
+        """
+        # Check if input variable exists and is valid
+        if Datafile is None or not isinstance(Datafile, str):
+            raise ValueError("Datafile must be a valid file path")
+        
+        # Check if file exists
+        if not os.path.isfile(Datafile):
+            raise FileNotFoundError(f"File not found: {Datafile}")
+        
+        try:
+            # Import data using pandas
+            Data = pd.read_csv(Datafile)
+            
+            # Check if file has content
+            if Data.empty:
+                raise ValueError("The data file is empty")
+            
+            # Check the number of cuts
+            num_columns = len(Data.columns)
+            if num_columns < 2:
+                raise ValueError("Data must have at least 2 columns")
+                
+            numbercuts = num_columns // 2
+            headers = Data.columns.tolist()
+            
+            # Extract qx values from headers
+            qxlist = []
+            for i in range(1, len(headers), 2):
+                # Look for pattern 'qx = number' in the header
+                match = re.search(r'qx\s*=\s*(\d+\.?\d*)', headers[i])
+                if match:
+                    number = float(match.group(1))
+                    # Convert to int if it's a whole number
+                    if number.is_integer():
+                        number = int(number)
+                    qxlist.append(number)
+            
+            # Check if we found any qx values
+            if not qxlist:
+                raise ValueError("No qx values found in headers")
+                
+            # Convert to numpy array
+            Data1 = Data.to_numpy()
+            
+            # Initialize arrays
+            data_rows = len(Data1[:,0])
+            self.Intensity = np.zeros([data_rows, numbercuts])
+            self.Qz = np.zeros([data_rows, numbercuts])
+            
+            # Fill arrays with data
+            for i in range(0, numbercuts):
+                if (i*2+1) < num_columns:  # Check if column exists
+                    self.Intensity[:,i] = Data1[:,(i*2+1)]
+                    self.Qz[:,i] = Data1[:,(i*2)]
+            
+            # Create Qx array
+            self.Qx = self.Qz.copy()
+            self.Qx[~np.isnan(self.Qx)] = 1
+            
+            # Apply qx values to each column
+            for k, v in enumerate(qxlist):
+                if k < self.Qx.shape[1]:  # Check if column exists
+                    self.Qx[:,k] = self.Qx[:,k] * v
+            
+            # Calculate number of valid points
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            # Execute trapezoid-specific code if that geometry is set
+            if hasattr(self, 'geometry') and self.geometry == 'trapezoid':
+                self.SymCoordAssign_SingleMaterial()
+                self.SimTrap_SM()
+                self.SimInt_Initial = self.SimInt
+                self.GF = self.GF_calc(self.SimInt)
+                self.GF_Initial = self.GF
+                self.BIC = self.BIC_calc(self.GF)
+                self.GF_Initial = self.BIC
+                
+        except pd.errors.EmptyDataError:
+            raise ValueError("The data file is empty or not properly formatted")
+        except pd.errors.ParserError:
+            raise ValueError("Error parsing the CSV file. Check the file format")
+        except Exception as e:
+            raise RuntimeError(f"Error processing data: {str(e)}")
+    
+    # def importCDSAXS_GUI(self,Datafile):
+    #     Data=pd.read_csv(Datafile)
+    #     # checks the number of cuts
+    #     num_columns = len(Data.columns)
+    #     numbercuts =num_columns//2
+               
+    #     headers = Data.columns.tolist()
+    
+    #     qxlist = []
+        
+    #     # Check every other column starting with index 1 (second column)
+    #     for i in range(1, len(headers), 2):
+    #         # Look for pattern 'qx = number' in the header
+    #         match = re.search(r'qx\s*=\s*(\d+\.?\d*)', headers[i])
+    #         if match:
+    #             number = float(match.group(1))
+    #             # Convert to int if it's a whole number
+    #             if number.is_integer():
+    #                 number = int(number)
+    #             qxlist.append(number)
+    #     #Converts to numpy
+    #     Data1=Data.to_numpy()
+    #     self.Intensity=np.zeros([len(Data1[:,0]),numbercuts])
+    #     self.Qz=np.zeros([len(Data1[:,0]),numbercuts])
+    #     for i in range(0,numbercuts):
+    #         self.Intensity[:,i]=Data1[:,(i*2+1)]
+    #         self.Qz[:,i]=Data1[:,(i*2)]
+    #     self.Qx=self.Qz.copy()
+    #     self.Qx[~np.isnan(self.Qx)] = 1
+    #     for k, v in enumerate(qxlist):
+    #         self.Qx[:,k]=self.Qx[:,k]*v     
+    #     self.numberpoints=np.sum(np.isreal(self.Intensity))
+    #     if self.geometry =='trapezoid':
+    #         self.SymCoordAssign_SingleMaterial()
+    #         self.SimTrap_SM()
+    #         self.SimInt_Initial=self.SimInt
+    #         self.GF = self.GF_calc(self.SimInt)
+    #         self.GF_Initial=self.GF
+    #         self.BIC= self.BIC_calc(self.GF)
+    #         self.GF_Initial=self.BIC
        
               
 
