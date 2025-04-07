@@ -487,9 +487,48 @@ class CDSAXS_Model():
             return float('inf')  # Return infinity as a worst-case fit value
             
     def BIC_calc(self, GF):
-        k = 2*self.layers+2 # number of fitting parameters
-        BIC=(self.numberpoints-k)*GF/self.numberpoints+k*math.log(self.numberpoints)
-        return BIC
+        """
+        Calculates the Bayesian Information Criterion (BIC) based on goodness of fit.
+        
+        BIC is a criterion for model selection that balances the goodness of fit with model complexity.
+        It penalizes models with more parameters to prevent overfitting.
+        
+        Parameters:
+        -----------
+        GF : float
+            Goodness of fit value obtained from GF_calc method
+        
+        Returns:
+        --------
+        float
+            BIC value; lower values indicate better models considering both fit and complexity
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'layers'):
+                raise AttributeError("Missing required attribute: layers")
+            if not hasattr(self, 'numberpoints'):
+                raise AttributeError("Missing required attribute: numberpoints")
+                
+            # Check if input is valid
+            if GF is None or not isinstance(GF, (int, float)):
+                raise ValueError(f"GF must be a numeric value, got {type(GF)}")
+                
+            # Check if we have sufficient data points
+            if self.numberpoints <= 0:
+                raise ValueError(f"Invalid number of data points: {self.numberpoints}")
+            
+            # Calculate number of fitting parameters
+            k = 2 * self.layers + 2  # number of fitting parameters
+            
+            # Calculate BIC
+            BIC = (self.numberpoints - k) * GF / self.numberpoints + k * math.log(self.numberpoints)
+            
+            return BIC
+            
+        except Exception as e:
+            print(f"Error in BIC_calc: {str(e)}")
+            return float('inf')  # Return infinity as a worst-case BIC value
     
     
     def ConeFourierTransform(self,Discretization):
