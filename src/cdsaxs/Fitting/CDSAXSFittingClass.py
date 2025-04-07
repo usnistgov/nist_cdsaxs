@@ -48,8 +48,7 @@ class CDSAXS_Model():
         self.Bk_Initial=Bk
         self.Pitch=Pitch
         self.SimPar=np.append(self.PAR.ravel(),[self.I0,self.DW,self.Bk])
-        
-        
+  
         
         
 ### Data imports
@@ -106,8 +105,11 @@ class CDSAXS_Model():
         self.numberpoints=np.sum(np.isreal(self.Intensity))
         self.SymCoordAssign_SingleMaterial()
         self.SimTrap_SM()
+        self.SimInt_Initial=self.SimInt
         self.GF = self.GF_calc(self.SimInt)
+        self.GF_Initial=self.GF
         self.BIC= self.BIC_calc(self.GF)
+        self.GF_Initial=self.BIC
 
 
     def importCDSAXSQrQz(self,Intensitydata,Qrdata,Qzdata):
@@ -211,6 +213,34 @@ class CDSAXS_Model():
                 self.Form=self.Form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
         return self.Form
     
+    def ConeFourierTransformOpt(self,PAR,layers, Qz, Qr,Discretization):
+        # Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
+        H1 = 0
+        H2 = 0
+        Form=np.zeros([int(len(Qr[:,0])),int(len(Qr[0,:]))])
+        
+        for i in range (layers):
+            H2=H2+PAR[i,1]
+            z=np.zeros([int(Discretization[i])])
+            stepsize=PAR[i,1]/Discretization[i]
+            z=np.arange(H1,H2+0.01,stepsize)
+            if i > 0 :
+                H1=H1+PAR[i-1,1]
+                
+            z=np.arange(H1,H2+0.01,stepsize)
+            R1=PAR[i,0]
+            R2=PAR[i+1,0]
+            if R1==R2:
+                R1=R1+0.000001
+            Slope=(H2-H1)/(R2-R1)
+            for ii in range(len(z)-1):
+                RI1=(z[ii]-H1)/Slope+R1
+                RI2=(z[ii+1]-H1)/Slope+R1
+                fa=2*np.pi*RI1/Qr*sp.jv(1,Qr*RI1)*np.exp(1j*Qz*z[ii])
+                fb=2*np.pi*RI2/Qr*sp.jv(1,Qr*RI2)*np.exp(1j*Qz*z[ii+1])
+                Form=Form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
+        return Form
+    
     
 ### Coordinate Assignment Code
     def SymCoordAssign_SingleMaterial(self):
@@ -306,6 +336,20 @@ class CDSAXS_Model():
         Formfactor=abs(Formfactor)
         self.SimIntOpt = np.power(Formfactor,2)*self.I0_Optimized+self.Bk_Optimized
         return self.SimIntOpt
+    
+    def SimCyl_SM(self, Discretization):
+        
+        
+        self.ConeFourierTransform() 
+        
+        M=np.power(np.exp(-1*(np.power(self.Qx,2)+np.power(self.Qz,2))*np.power(self.DW,2)),0.5)
+        Formfactor = self.form*M
+        Formfactor=abs(Formfactor)
+        self.SimInt = np.power(Formfactor,2)*self.I0+self.Bk
+        return self.SimInt
+    
+    
+    
     ### optimization code
     
     def GenBounds(self,limit):
@@ -314,11 +358,26 @@ class CDSAXS_Model():
         upper_bounds=self.SimPar*(1+limit)
         self.bounds = [(lower_bounds[i], upper_bounds[i]) for i in range(len(lower_bounds))]
         
-    def SimGF(self, SimPar, layers, Intensity, Qx, Qz):
+    def SimTrap_GF(self, SimPar, layers, Intensity, Qx, Qz):
         PARs=np.zeros([layers+1,2])
         PARs[:,0:2]=np.reshape(SimPar[0:(layers+1)*2],(layers+1,2))
         [I0,DW,Bk]=SimPar[layers*2+2:layers*2+5]
         (Coord)=self.SymCoordAssign_SingleMaterialOpt(PARs,layers)
+        F1 = self.FreeFormTrapezoidOpt(Coord[:,:,0],layers,Qx,Qz) 
+        M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(DW,2)),0.5)
+        Formfactor=F1*M
+        Formfactor=abs(Formfactor)
+        SimInt = np.power(Formfactor,2)*I0+Bk
+        Chi2= abs(np.log(Intensity)-np.log(SimInt))
+        Chi2[np.isnan(Chi2)]=0
+        Chi2=np.sum(Chi2)
+        return Chi2
+    
+    def SimCyl_GF(self, SimPar, layers, Intensity, Qx, Qz, Discretization):
+        PARs=np.zeros([layers+1,2])
+        PARs[:,0:2]=np.reshape(SimPar[0:(layers+1)*2],(layers+1,2))
+        [I0,DW,Bk]=SimPar[layers*2+2:layers*2+5]
+        ConeFourierTransformOpt(self,PAR,layers, Qz, Qr,Discretization)
         F1 = self.FreeFormTrapezoidOpt(Coord[:,:,0],layers,Qx,Qz) 
         M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(DW,2)),0.5)
         Formfactor=F1*M
@@ -333,7 +392,7 @@ class CDSAXS_Model():
         
         self.GenBounds(limit)
         
-        self.SimPar_Optimized = differential_evolution(self.SimGF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz),polish=True)
+        self.SimPar_Optimized = differential_evolution(self.SimTrap_GF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz),polish=True)
         
         self.PAR=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
 
@@ -343,7 +402,7 @@ class CDSAXS_Model():
         self.SimTrap_SM()
         self.GF = self.GF_calc(self.SimInt)
         self.BIC= self.BIC_calc(self.GF)
-    
+        #self.PlotQzCutComp(10,'yes')
         print('Initial ', self.GF_Initial, ' Final ', self.GF) 
         return (self.PAR,self.I0,self.DW,self.Bk)
         
@@ -427,12 +486,14 @@ class CDSAXS_Model():
                 I[:,i]=I[:,i]/(50.**(i+1))
         for i in range(numbercuts):
             plt.semilogy(self.Qz[:,i],I[:,i],'.', label='Exp '+str(i))
-            plt.semilogy(self.Qz[:,i],S_Init[:,i], label='Sim '+str(i), color='black')
-            plt.semilogy(self.Qz[:,i],S_Opt[:,i], label='Sim '+str(i), color='orange')
+            plt.semilogy(self.Qz[:,i],S_Init[:,i], label='Sim '+str(i), color='black', linestyle='--')
+            plt.semilogy(self.Qz[:,i],S_Opt[:,i], label='Sim '+str(i), color='black')
         #plt.legend(loc='upper right')
         del I
         plt.xlabel('q ($Å^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
+        plt.show()
+        plt.close()
         
 
     def combined_plots(self, numbercuts=None, SP=None, scale=None): # Currently creates two identical plots?
@@ -447,7 +508,7 @@ class CDSAXS_Model():
         - scale: Scaling option for PlotQzCut ('yes' or 'no')
         """
         # Create figure with two subplots side by side
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        fig, ax1 = plt.subplots(1, 2, figsize=(12, 5))
         
         # First subplot: plotSymTrap
         # Check if self.Coord is initialized properly
@@ -477,8 +538,8 @@ class CDSAXS_Model():
                 Rc[i, 1] = h
                 h = h + Coordp[i, 2, S]
                 
-            ax1.plot(Lc[:, 0], Lc[:, 1], color='black')
-            ax1.plot(Rc[:, 0], Rc[:, 1], color='black')
+            ax1[0].plot(Lc[:, 0], Lc[:, 1], color='black')
+            ax1[0].plot(Rc[:, 0], Rc[:, 1], color='black')
             
             Cc = np.zeros([2, 2])
             for i in range(self.layers):
@@ -486,27 +547,27 @@ class CDSAXS_Model():
                 Cc[0, 1] = Lc[i+1, 1]
                 Cc[1, 0] = Rc[i+1, 0]
                 Cc[1, 1] = Rc[i+1, 1]
-                ax1.plot(Cc[:, 0], Cc[:, 1], color='black')
+                ax1[0].plot(Cc[:, 0], Cc[:, 1], color='black')
                 
-        ax1.set_xlabel('Width (Å)')
-        ax1.set_ylabel('Height (Å)')
-        ax1.set_title('Symmetric Trapezoid Structure')
+        ax1[0].set_xlabel('Width (Å)')
+        ax1[0].set_ylabel('Height (Å)')
+        ax1[0].set_title('Symmetric Trapezoid Structure')
         
-        # Second subplot: PlotQzCut
-        if SP is not None and numbercuts is not None:
-            S = deepcopy(SP)
-            I = deepcopy(self.Intensity)   
-            if scale == 'yes': 
-                for i in range(0, numbercuts):
-                    S[:, i] = S[:, i]/(50.**(i+1))
-                    I[:, i] = I[:, i]/(50.**(i+1))
-            for i in range(numbercuts):
-                ax2.semilogy(self.Qz[:, i], I[:, i], '.')
-                ax2.semilogy(self.Qz[:, i], S[:, i], color='black')
-            ax2.set_xlabel('q ($Å^{-1}$)')
-            ax2.set_ylabel('Intensity (a.u.)')
-            ax2.set_title('Qz Cuts')
-            #ax2.legend(loc='upper right')
+        # # Second subplot: PlotQzCut
+        # if SP is not None and numbercuts is not None:
+        #     S = deepcopy(SP)
+        #     I = deepcopy(self.Intensity)   
+        #     if scale == 'yes': 
+        #         for i in range(0, numbercuts):
+        #             S[:, i] = S[:, i]/(50.**(i+1))
+        #             I[:, i] = I[:, i]/(50.**(i+1))
+        #     for i in range(numbercuts):
+        #         ax2.semilogy(self.Qz[:, i], I[:, i], '.')
+        #         ax2.semilogy(self.Qz[:, i], S[:, i], color='black')
+        #     ax2.set_xlabel('q ($Å^{-1}$)')
+        #     ax2.set_ylabel('Intensity (a.u.)')
+        #     ax2.set_title('Qz Cuts')
+        #     #ax2.legend(loc='upper right')
         
         plt.tight_layout()
         plt.show()
@@ -518,11 +579,13 @@ class CDSAXS_fitter():
     def __init__(self,attribute_name, value):
         setattr(self,attribute_name,value)
         self.fitlog = pd.DataFrame(columns=["Model",'layers', "GF_Optimized", "BIC_Optimized"])
-        new_row = {'Model': attribute_name, 'layers': value.layers, 'GF': value.GF_Optimized, 'BIC':value.BIC_Optimized}
+        print(value.GF)
+        new_row = {'Model': attribute_name, 'layers': value.layers, 'GF_Optimized': value.GF, 'BIC_Optimized':value.BIC}
         self.fitlog.loc[len(self.fitlog)] = new_row
+        print(self.fitlog)
     def add_model(self,attribute_name, value):
         setattr(self,attribute_name,value)
-        new_row = {'Model': attribute_name, 'layers': value.layers, 'GF': value.GF_Optimized, 'BIC':value.BIC_Optimized}
+        new_row = {'Model': attribute_name, 'layers': value.layers, 'GF': value.GF, 'BIC':value.BIC}
         self.fitlog.loc[len(self.fitlog)] = new_row
     
     def selectmodel(self,modelname):
