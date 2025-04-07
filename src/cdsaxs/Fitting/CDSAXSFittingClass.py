@@ -52,24 +52,82 @@ class CDSAXS_Model():
         
         
 ### Data imports
+    
+    def importCDSAXSQxQz(self, Intensitydata, Qxdata, Qzdata):
+        """
+        Imports data from a 1D grating with input validation
         
-    def importCDSAXSQxQz(self,Intensitydata,Qxdata,Qzdata):
-        # imports data from a 1D grating
+        Parameters:
+        -----------
+        Intensitydata : str
+            Path to intensity data file
+        Qxdata : str
+            Path to Qx data file
+        Qzdata : str
+            Path to Qz data file
+        """
+        # Check if input variables exist
+        if Intensitydata is None or not isinstance(Intensitydata, str):
+            raise ValueError("Intensitydata must be a valid file path")
+        if Qxdata is None or not isinstance(Qxdata, str):
+            raise ValueError("Qxdata must be a valid file path")
+        if Qzdata is None or not isinstance(Qzdata, str):
+            raise ValueError("Qzdata must be a valid file path")
+        
+        # Check if files exist
+        for filepath in [Intensitydata, Qxdata, Qzdata]:
+            if not os.path.isfile(filepath):
+                raise FileNotFoundError(f"File not found: {filepath}")
+        
+        try:
+            # Load data from files
             self.Intensity = np.loadtxt(Intensitydata)
-            self.Qx=np.loadtxt(Qxdata)
-            self.Qz=np.loadtxt(Qzdata)
+            self.Qx = np.loadtxt(Qxdata)
+            self.Qz = np.loadtxt(Qzdata)
+            
+            # Replace zeros with NaN
+            self.Intensity[self.Intensity == 0] = np.nan
+            self.Qx[self.Qx == 0] = np.nan
+            self.Qz[self.Qz == 0] = np.nan
+            
+            # Calculate number of valid points
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            # Execute trapezoid-specific code if that geometry is set
+            if hasattr(self, 'geometry') and self.geometry == 'trapezoid':
+                self.SymCoordAssign_SingleMaterial()
+                self.SimTrap_SM()
+                self.SimInt_Initial = self.SimInt
+                self.GF = self.GF_calc(self.SimInt)
+                self.GF_Initial = self.GF
+                self.BIC = self.BIC_calc(self.GF)
+                self.GF_Initial = self.BIC
+        except Exception as e:
+            raise RuntimeError(f"Error processing data: {str(e)}")
+    
+       
+    # def importCDSAXSQxQz(self,Intensitydata,Qxdata,Qzdata):
+    #     # imports data from a 1D grating
+    #         self.Intensity = np.loadtxt(Intensitydata)
+    #         self.Qx=np.loadtxt(Qxdata)
+    #         self.Qz=np.loadtxt(Qzdata)
         
-            self.Intensity[self.Intensity == 0]=np.nan # replaces 
-            self.Qx[self.Qx == 0]=np.nan
-            self.Qz[self.Qz == 0]=np.nan
-            self.numberpoints=np.sum(np.isreal(self.Intensity))
-            self.SymCoordAssign_SingleMaterial()
-            self.SimTrap_SM()
-            self.SimInt_Initial=self.SimInt
-            self.GF = self.GF_calc(self.SimInt)
-            self.GF_Initial=self.GF
-            self.BIC= self.BIC_calc(self.GF)
-            self.GF_Initial=self.BIC
+    #         self.Intensity[self.Intensity == 0]=np.nan # replaces 
+    #         self.Qx[self.Qx == 0]=np.nan
+    #         self.Qz[self.Qz == 0]=np.nan
+    #         self.numberpoints=np.sum(np.isreal(self.Intensity))
+    #         if self.geometry == 'trapezoid':
+    #             self.SymCoordAssign_SingleMaterial()
+    #             self.SimTrap_SM()
+    #             self.SimInt_Initial=self.SimInt
+    #             self.GF = self.GF_calc(self.SimInt)
+    #             self.GF_Initial=self.GF
+    #             self.BIC= self.BIC_calc(self.GF)
+    #             self.GF_Initial=self.BIC
    
     def importCDSAXS_GUI(self,Datafile):
         Data=pd.read_csv(Datafile)
