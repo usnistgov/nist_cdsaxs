@@ -439,37 +439,52 @@ class CDSAXS_Model():
     
     
     
-    # def FreeFormTrapezoidOpt(self,Coord,layers,Qx,Qz):
-    #     # this version exists to accomate the form required by the gen algorithm, consider recombining and simplifying if possible
-    #     H1 = Coord[0,3]
-    #     H2 = Coord[0,3]
-    #     form=np.zeros([len(Qx[:,1]),len(Qx[1,:])]) # initialize structure of the amplitude - (labeled form here)
-    #     for i in range(int(layers)): 
-    #         H2 = H2+Coord[i,2]
-    #         if i > 0:
-    #             H1 = H1+Coord[i-1,2] 
-    #         x1 = Coord[i,0]
-    #         x4 = Coord[i,1]
-    #         x2 = Coord[i+1,0]
-    #         x3 = Coord[i+1,1]
-    #          # Avoid division by zero
-    #         x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
-    #         x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
-            
-    #         SL = Coord[i,2]/(x2-x1)
-    #         SR = -Coord[i,2]/(x4-x3)
-            
-    #         A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
-    #         A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
-    #         form=form+(1j/Qx)*(A1-A2)*Coord[i,4]
-    #     return form
-    
-    def GF_calc(self,SimInt):
-        GF_M= abs(np.log(self.Intensity)-np.log(SimInt))
+    def GF_calc(self, SimInt):
+        """
+        Calculates the goodness of fit (GF) metric between experimental and simulated intensities.
+        Uses log intensity
         
-        GF_M[np.isnan(GF_M)]=0
-        GF=np.sum(GF_M)
-        return (GF)
+        This function computes the goodness of fit by summing the absolute difference between 
+        the natural logarithm of experimental intensity (self.Intensity) and simulated intensity 
+        (SimInt). NaN values in the result are treated as zeros.
+        
+        Parameters:
+        -----------
+        SimInt : numpy.ndarray
+            Simulated intensity array with the same shape as self.Intensity
+            
+        Returns:
+        --------
+        float
+            The goodness of fit value; lower values indicate better fit
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            # Check if input is valid
+            if SimInt is None:
+                raise ValueError("SimInt must not be None")
+                
+            # Check if shapes are compatible
+            if hasattr(self, 'Intensity') and self.Intensity.shape != SimInt.shape:
+                raise ValueError(f"Shape mismatch: self.Intensity shape {self.Intensity.shape} different from SimInt shape {SimInt.shape}")
+            
+            # Compute the goodness of fit
+            GF_M = abs(np.log(self.Intensity) - np.log(SimInt))
+            
+            # Replace NaN values with zeros
+            GF_M[np.isnan(GF_M)] = 0
+            
+            # Sum to get the overall goodness of fit
+            GF = np.sum(GF_M)
+            
+            return GF
+            
+        except Exception as e:
+            print(f"Error in GF_calc: {str(e)}")
+            return float('inf')  # Return infinity as a worst-case fit value
             
     def BIC_calc(self, GF):
         k = 2*self.layers+2 # number of fitting parameters
