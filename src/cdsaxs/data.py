@@ -16,10 +16,23 @@ import warnings
 import numpy as np
 from numpy.typing import NDArray
 
+import cdsaxs.calculators as calculators
+from cdsaxs.sample import Sample
+
 METADATA_KEYWORDS = [
-        'sample_phi_deg', 'energy_ev', 'wavelength_nm', 'scaling_factor',
-        'detector_theta', 'detector_x', 'exposure_time_s', 'sdd_cm',
-        'sample_chi_deg', 'div_photodiode', 'center_px', 'pixel_size_um'
+        "sample_phi_deg",
+        "sample_chi_deg",
+
+        "energy_ev",
+        "wavelength_nm",
+        "exposure_time_s",
+        "sdd_cm",
+        "pixel_size_um",
+
+        "scaling_factor",
+        "I0",
+        "beam_current",
+        "center_px",
     ]
 
 
@@ -44,6 +57,11 @@ class DataQyQxz():
         Contains any relevant scattering metadata. These are key : value
         pairs where the key must be in the list below and the value is
         formatted depending on requirements of the parameter.
+        Note: Only one of wavelength and energy need to be specified.
+            The other will be calculated upon entry.
+    sample : Sample
+        Instance of the Sample class that details the sample measured
+        when collecting this dataset.
     user_params : dict
         Contains additional user-provided parameters. These may be
         relevant to the user and are shown in the data table of the GUI
@@ -55,15 +73,17 @@ class DataQyQxz():
     Metadata Keywords
     -----------------
     sample_phi_deg : sample rotation angle about positive y axis
+    sample_chi_deg : rotation about the z-axis (beam direction)
+
     energy_ev : source energy, eV
     wavelength_nm : source wavelength, nanometers
-    scaling_factor : data scaling factor, defaults to 1
-    detector_theta
-    detector_x
     exposure_time_s : count time in seconds
     sdd_cm : sample to detector distance in cm
-    sample_chi_deg : rotation about the z-axis (beam direction)
-    div_photodiode
+    pixel_size_um
+
+    scaling_factor : data scaling factor, defaults to 1
+    I0
+    beam_current
     center_px : [y, xz] beam center pixel location in y and xz
     """
 
@@ -75,6 +95,7 @@ class DataQyQxz():
         qys: NDArray[np.floating],
         qxzs: NDArray[np.floating],
         metadata: dict,
+        sample : Sample = None,
         user_params: dict = None,
     ):
         """Create an instance of DataQyQxz"""
@@ -92,23 +113,15 @@ class DataQyQxz():
         self.qxzs = qxzs
         self.qys = qys
 
-        unaccepted_keywords = [
-            x for x in metadata.keys() if x not in METADATA_KEYWORDS
-        ]
-        if len(unaccepted_keywords) > 0:
-            raise ValueError(
-                "The following metadata keywords are not accepted:\n" +
-                f"{unaccepted_keywords}\n" +
-                "The following are accepted metadata keywords:\n" +
-                f"{METADATA_KEYWORDS}"
-            )
-
         # TODO : implement checks for missing critical metadata
+        self._check_metadata(metadata)
+        if 'scaling_factor' not in metadata.keys():
+            metadata['scaling_factor'] = 1
+        metadata = self._metadata_wavelength_energy_calc(metadata=metadata)
         self.metadata = metadata
-        if 'scaling_factor' not in self.metadata.keys():
-            self.metadata['scaling_factor'] = 1
 
         self.user_params = user_params if user_params is not None else {}
+        self.sample = sample if sample is not None else Sample({})
 
     def rotate_image(self, degrees, direction='ccw'):
         """
@@ -221,7 +234,7 @@ class DataQyQxz():
             exists in self.metadata.
             Default value is True.
         """
-        if self._check_metadata_keys(metadata):
+        if self._check_metadata(metadata):
             for key, value in metadata.items():
                 if key in self.metadata.keys() and not overwrite:
                     pass
@@ -243,10 +256,12 @@ class DataQyQxz():
                 if key not in metadata_keys
                 }
 
-    def _check_metadata_keys(self, metadata):
+    def _check_metadata(self, metadata):
         """
         Check if a metadata dictionary contains any unaccepted metadata
         keywords.
+
+        Check if both wavelength and energy are being specified.
         """
         unaccepted_keywords = [
             x for x in metadata.keys() if x not in METADATA_KEYWORDS
@@ -258,7 +273,42 @@ class DataQyQxz():
                 "The following are accepted metadata keywords:\n" +
                 f"{METADATA_KEYWORDS}"
             )
+        
+        if "energy_ev" in metadata.keys() and "wavelength_nm" in metadata.keys():
+            raise ValueError(
+                "You have specified both the source energy and wavelength. "
+                "Only one of these can be specified and the other is "
+                "calculated. To avoid over-specifying or conflicting values, "
+                "please only use one of these values. "
+            )
         return True
+    
+    def _metadata_wavelength_energy_calc(self, metadata: dict = None):
+        """
+        Calculate missing wavelength or energy metadata from the other
+        provided. For example, if wavelength was provided in metadata,
+        the energy will be calculated and added to meatadata.
+
+        This method will perform the calculation for the metadata
+        attribute of this instance, unless the metadata argument is provided.
+        The update metadata dictionary will be returned.
+        """
+
+        if metadata is None:
+            metadata = self.metadata
+
+        if 'wavelength_nm' in metadata.keys():
+            metadata['energy_ev'] = calculators.wavelength_to_energy(
+                metadata['wavelength_nm'])
+        elif 'energy_ev' in self.metadata.keys():
+            metadata['wavelength_nm'] = calculators.energy_to_wavelength(
+                metadata['energy_ev'])
+        else:
+            raise KeyError(
+                "There is no source wavelength or energy information in "
+                "the metadata."
+            )
+        return metadata
 
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
@@ -298,6 +348,13 @@ class DataQyQxz():
             key: value for key, value in self.user_params
             if key not in param_keys
             }
+
+    def define_sample(self, sample: Sample):
+        """
+        Define the measured sample with an instance of the Sample class.
+        """
+        # TODO: implement required sample checks
+        self.sample = sample
 
 
 class Dataset():
