@@ -14,11 +14,12 @@ class TestDataQyQxz(unittest.TestCase):
              [60019., 70069.,   857., 65941.],
              [18439., 82922., 99999., 91001.],
              [10592., 19847., 10893., 41683.],
-             [15954.,  3109., 35295., 61517.]])
+             [15954.,  3109., 35295., 61517.]]).astype(np.float32)
 
-        self.qxzs = np.array([0.00063199, 0.000316, 0., -0.000316])
+        self.qxzs = np.array(
+            [0.00063199, 0.000316, 0., -0.000316]).astype(np.float32)
         self.qys = np.array([0.00126399, 0.00094799, 0.00063199, 0.000316, 0.,
-                            -0.000316, -0.00063199])
+                            -0.000316, -0.00063199]).astype(np.float32)
         self.metadata = {
             'center_px': [4, 2]
         }
@@ -49,10 +50,12 @@ class TestDataQyQxz(unittest.TestCase):
              [48676., 45711., 61100.,   857., 99999., 10893., 35295.],
              [20215., 49702.,  9052., 70069., 82922., 19847.,  3109.],
              [44386., 64811.,  4701., 60019., 18439., 10592., 15954.]]
-        )
+        ).astype(np.float32)
         expected_qxzs = np.array([0.00126399, 0.00094799, 0.00063199,
-                                  0.000316,  0., -0.000316, -0.00063199])
-        expected_qys = np.array([0.000316,  0., -0.000316, -0.00063199])
+                                  0.000316,  0., -0.000316, -0.00063199]
+                                  ).astype(np.float32)
+        expected_qys = np.array([0.000316,  0., -0.000316, -0.00063199]
+                                ).astype(np.float32)
         expected_center_px = [1, 4]
 
         self.test_dataqyqxz.reset_rotations()
@@ -91,10 +94,12 @@ class TestDataQyQxz(unittest.TestCase):
              [46325., 61100.,  9052.,  4701.],
              [77210., 45711., 49702., 64811.],
              [20338., 48676., 20215., 44386.]]
-        )
-        expected_qxzs = np.array([0.000316, -0., -0.000316, -0.00063199])
+        ).astype(np.float32)
+        expected_qxzs = np.array([0.000316, -0., -0.000316, -0.00063199]
+                                 ).astype(np.float32)
         expected_qys = np.array([0.00063199, 0.000316, -0., -0.000316,
-                                 -0.00063199, -0.00094799, -0.00126399])
+                                 -0.00063199, -0.00094799, -0.00126399]
+                                 ).astype(np.float32)
         expected_center_px = [2, 1]
 
         self.test_dataqyqxz.reset_rotations()
@@ -130,10 +135,12 @@ class TestDataQyQxz(unittest.TestCase):
              [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
              [35295., 10893., 99999.,   857., 61100., 45711., 48676.],
              [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
-        )
+        ).astype(np.float32)
         expected_qxzs = np.array([0.00063199, 0.000316, -0., -0.000316,
-                                  -0.00063199, -0.00094799, -0.00126399])
-        expected_qys = np.array([0.00063199, 0.000316, 0., -0.000316])
+                                  -0.00063199, -0.00094799, -0.00126399]
+                                  ).astype(np.float32)
+        expected_qys = np.array([0.00063199, 0.000316, 0., -0.000316]
+                                ).astype(np.float32)
         expected_center_px = [2, 2]
 
         self.test_dataqyqxz.reset_rotations()
@@ -169,10 +176,12 @@ class TestDataQyQxz(unittest.TestCase):
              [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
              [35295., 10893., 99999.,   857., 61100., 45711., 48676.],
              [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
-        )
+        ).astype(np.float32)
         expected_qxzs = np.array([0.00063199, 0.000316, -0., -0.000316,
-                                  -0.00063199, -0.00094799, -0.00126399])
-        expected_qys = np.array([0.00063199, 0.000316, 0., -0.000316])
+                                  -0.00063199, -0.00094799, -0.00126399]
+                                  ).astype(np.float32)
+        expected_qys = np.array([0.00063199, 0.000316, 0., -0.000316]
+                                ).astype(np.float32)
         expected_center_px = [2, 2]
 
         self.test_dataqyqxz.reset_rotations()
@@ -208,10 +217,12 @@ class TestDataQyQxz(unittest.TestCase):
              [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
              [35295., 10893., 99999.,   857., 61100., 45711., 48676.],
              [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
-        )
+        ).astype(np.float32)
         expected_qxzs = np.array([0.00063199, 0.000316, -0., -0.000316,
-                                  -0.00063199, -0.00094799, -0.00126399])
-        expected_qys = np.array([0.00063199, 0.000316, 0., -0.000316])
+                                  -0.00063199, -0.00094799, -0.00126399]
+                                  ).astype(np.float32)
+        expected_qys = np.array([0.00063199, 0.000316, 0., -0.000316]
+                                ).astype(np.float32)
         expected_center_px = [2, 2]
 
         self.test_dataqyqxz.reset_rotations()
@@ -283,18 +294,19 @@ class TestDataset(unittest.TestCase):
         self.test_dataset = Dataset(directory_sub, name=name)
 
         # set up data instances
-        img1 = np.array([[1, 1, 2, 2], [3, 3, 4, 5]])
-        img2 = np.array([[5, 5, 6, 6], [7, 7, 8, 8], [9, 9, 10, 11]])
+        img1 = np.array([[1, 1, 2, 2], [3, 3, 4, 5]]).astype(np.float32)
+        img2 = np.array([[5, 5, 6, 6], [7, 7, 8, 8], [9, 9, 10, 11]]
+                        ).astype(np.float32)
 
-        qxzs = np.array([0, 0.1, 0.2, 0.3])
-        qys1 = np.array([0, 1])
-        qys2 = np.array([0, 1, 2])
+        qxzs = np.array([0, 0.1, 0.2, 0.3]).astype(np.float32)
+        qys1 = np.array([0, 1]).astype(np.float32)
+        qys2 = np.array([0, 1, 2]).astype(np.float32)
 
         metadata = {}
         params = {}
 
         self.test_data1 = DataQyQxz(img1, qys1, qxzs, metadata, params=params)
-        self.test_data1 = DataQyQxz(img2, qys2, qxzs, metadata, params=params)
+        self.test_data2 = DataQyQxz(img2, qys2, qxzs, metadata, params=params)
 
     def test_add_data(self):
         self.test_dataset.add_data('test1.tif', self.test_data1)
