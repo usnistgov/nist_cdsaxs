@@ -256,7 +256,7 @@ class CDSAXS_Model():
                 Alpha = np.nan_to_num(Alpha, nan=0.0)
             
             # Compute Qr 
-            self.Qr = np.cos(Alpha)
+            self.Qr = self.Qx/np.cos(Alpha)
             
             # Store Alpha for future use
             self.Alpha = Alpha
