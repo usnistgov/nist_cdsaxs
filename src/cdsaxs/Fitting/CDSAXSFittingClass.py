@@ -34,7 +34,7 @@ import pandas as pd
 class CDSAXS_Model():
     
     def __init__(self,geometry,model,layers,PAR,SLD,DW,I0,Bk,Pitch):
-        self.geoemtry=geometry
+        self.geometry=geometry
         self.model=model
         self.PAR=PAR
         self.PAR_Initial=PAR
@@ -103,13 +103,16 @@ class CDSAXS_Model():
         for k, v in enumerate(qxlist):
             self.Qx[:,k]=self.Qx[:,k]*v     
         self.numberpoints=np.sum(np.isreal(self.Intensity))
-        self.SymCoordAssign_SingleMaterial()
-        self.SimTrap_SM()
-        self.SimInt_Initial=self.SimInt
-        self.GF = self.GF_calc(self.SimInt)
-        self.GF_Initial=self.GF
-        self.BIC= self.BIC_calc(self.GF)
-        self.GF_Initial=self.BIC
+        if self.geometry =='trapezoid':
+            self.SymCoordAssign_SingleMaterial()
+            self.SimTrap_SM()
+            self.SimInt_Initial=self.SimInt
+            self.GF = self.GF_calc(self.SimInt)
+            self.GF_Initial=self.GF
+            self.BIC= self.BIC_calc(self.GF)
+            self.GF_Initial=self.BIC
+       
+              
 
 
     def importCDSAXSQrQz(self,Intensitydata,Qrdata,Qzdata):
@@ -189,7 +192,7 @@ class CDSAXS_Model():
         # Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
         H1 = 0
         H2 = 0
-        self.Form=np.zeros([int(len(self.Qr[:,0])),int(len(self.Qr[0,:]))])
+        self.form=np.zeros([int(len(self.Qr[:,0])),int(len(self.Qr[0,:]))])
         
         for i in range (self.layers):
             H2=H2+self.PAR[i,1]
@@ -210,8 +213,8 @@ class CDSAXS_Model():
                 RI2=(z[ii+1]-H1)/Slope+R1
                 fa=2*np.pi*RI1/self.Qr*sp.jv(1,self.Qr*RI1)*np.exp(1j*self.Qz*z[ii])
                 fb=2*np.pi*RI2/self.Qr*sp.jv(1,self.Qr*RI2)*np.exp(1j*self.Qz*z[ii+1])
-                self.Form=self.Form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
-        return self.Form
+                self.form=self.form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
+        return self.form
     
     def ConeFourierTransformOpt(self,PAR,layers, Qz, Qr,Discretization):
         # Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
@@ -340,7 +343,7 @@ class CDSAXS_Model():
     def SimCyl_SM(self, Discretization):
         
         
-        self.ConeFourierTransform() 
+        self.ConeFourierTransform(Discretization) 
         
         M=np.power(np.exp(-1*(np.power(self.Qx,2)+np.power(self.Qz,2))*np.power(self.DW,2)),0.5)
         Formfactor = self.form*M
@@ -373,13 +376,13 @@ class CDSAXS_Model():
         Chi2=np.sum(Chi2)
         return Chi2
     
-    def SimCyl_GF(self, SimPar, layers, Intensity, Qx, Qz, Discretization):
+    def SimCyl_GF(self, SimPar, layers, Intensity, Qr, Qz, Discretization):
         PARs=np.zeros([layers+1,2])
         PARs[:,0:2]=np.reshape(SimPar[0:(layers+1)*2],(layers+1,2))
         [I0,DW,Bk]=SimPar[layers*2+2:layers*2+5]
-        ConeFourierTransformOpt(self,PAR,layers, Qz, Qr,Discretization)
-        F1 = self.FreeFormTrapezoidOpt(Coord[:,:,0],layers,Qx,Qz) 
-        M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(DW,2)),0.5)
+        
+        F1 = self.ConeFourierTransformOpt(PARs,layers, Qz, Qr,Discretization)
+        M=np.power(np.exp(-1*(np.power(Qr,2)+np.power(Qz,2))*np.power(DW,2)),0.5)
         Formfactor=F1*M
         Formfactor=abs(Formfactor)
         SimInt = np.power(Formfactor,2)*I0+Bk
@@ -406,6 +409,23 @@ class CDSAXS_Model():
         print('Initial ', self.GF_Initial, ' Final ', self.GF) 
         return (self.PAR,self.I0,self.DW,self.Bk)
         
+        
+    def CDSAXS_DiffEvolution_Cyl(self,limit,Discretization):
+        
+        self.GenBounds(limit)
+        
+        self.SimPar_Optimized = differential_evolution(self.SimCyl_GF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz, Discretization),polish=True)
+        
+        self.PAR=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
+
+        [self.I0,self.DW,self.Bk]= self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
+               
+        self.SimCyl_SM(Discretization)
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC= self.BIC_calc(self.GF)
+        #self.PlotQzCutComp(10,'yes')
+        print('Initial ', self.GF_Initial, ' Final ', self.GF) 
+        return (self.PAR,self.I0,self.DW,self.Bk)
         
     ### plotting code
     
