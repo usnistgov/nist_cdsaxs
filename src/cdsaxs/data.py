@@ -1,11 +1,12 @@
 """
-This module contains two classes:
+This module contains three classes:
 
 DataQyQxz : Class for storing a single scattering image, relevant
     scattering metadata, and any user-defined parameters.
-Dataset : Class for managing a series of DataQyQxz objects. A new
-    Dataset instance is created upon each loading of data by the user
-    in the GUI.
+Dataset : Class for managing a series of DataQyQxz objects. It is
+    expected that this is a single sample angle sweep in CD-SAXS.
+IntegratedDataset : Class for managing integrated DataQyQxz images in
+    a Dataset instance in the form of I vs. q_xz.
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ class DataQyQxz():
         qys: NDArray[np.floating],
         qxzs: NDArray[np.floating],
         metadata: dict,
-        sample : Sample = None,
+        sample: Sample = None,
         user_params: dict = None,
     ):
         """Create an instance of DataQyQxz"""
@@ -273,7 +274,7 @@ class DataQyQxz():
                 "The following are accepted metadata keywords:\n" +
                 f"{METADATA_KEYWORDS}"
             )
-        
+
         if "energy_ev" in metadata.keys() and "wavelength_nm" in metadata.keys():
             raise ValueError(
                 "You have specified both the source energy and wavelength. "
@@ -282,7 +283,7 @@ class DataQyQxz():
                 "please only use one of these values. "
             )
         return True
-    
+
     def _metadata_wavelength_energy_calc(self, metadata: dict = None):
         """
         Calculate missing wavelength or energy metadata from the other
@@ -341,7 +342,7 @@ class DataQyQxz():
         Parameters
         ----------
         param_keys : list
-            List of parameters to remove from user_params of this class 
+            List of parameters to remove from user_params of this class
             instance.
         """
         self.user_params = {
@@ -397,3 +398,94 @@ class Dataset():
         except KeyError:
             warnings.warn(f"Could not delete {filename} data as it was not "
                           "part of the dataset.")
+
+    def update_metadata_for_all(self, metadata: dict, overwrite: bool = True):
+        """
+        Add accepted metadata to all DataQyQxz stored in this Dataset.
+        Existing metadata parameters can be updated by keeping the
+        overwrite argument to True.
+
+        Parameters
+        ----------
+        metadata : dict
+            Key : value pairs of accepted metadata (key) and their
+            values. See class docstring for list of accepted keywords.
+        overwrite : bool
+            If set to True, any metadata provided to this method will
+            overwrite the existing value in the instance if it already
+            exists in self.metadata.
+            Default value is True.
+        """
+
+        for data in self.datas.values():
+            data.update_metadata(metadata=metadata, overwrite=overwrite)
+
+    def remove_metadata_from_all(self, metadata_keys: list):
+        """
+        Remove accepted metadata from all DataQyQxz stored in this Dataset.
+
+        Parameters
+        ----------
+        metadata_keys : list
+            List of metadata to remove from this class instance.
+        """
+
+        for data in self.datas.values():
+            data.remove_metadata(metadata_keys=metadata_keys)
+
+    def update_user_params_for_all(self, params: dict, overwrite: bool = True):
+        """
+        Add key: value pairs to the user params for all DataQyQxz.
+        Existing parameters can be updated by keeping the overwrite
+        argument as True.
+
+        Parameters
+        ----------
+        params : dict
+            Key : value pairs of user-specified parameters for this
+            data instance.
+        overwrite : bool
+            If set to True, any parameters provided to this method will
+            overwrite the existing value in this instance if it already
+            exists in self.uer_params.
+            Default value is True.
+        """
+
+        for data in self.datas.values():
+            data.update_user_params(params=params, overwrite=overwrite)
+
+    def remove_user_params_from_all(self, param_keys: list):
+        """
+        Remove the identified parameters from user params for all
+        DataQyQxz of this dataset.
+
+        Parameters
+        ----------
+        param_keys : list
+            List of parameters to remove from user_params of this class
+            instance.
+        """
+
+        for data in self.datas.values():
+            data.remove_user_params(param_keys=param_keys)
+
+
+class IntegratedDataset():
+    """
+    This class manages a dataset of integrated DataQyQxz images in the
+    form of I vs. Qxz.
+
+    Attributes
+    ----------
+    dataset : Dataset
+    integrated_data : dict
+    integration_metadata : dict
+    """
+
+    def __init__(self, dataset: Dataset,
+                 integrated_data: dict,
+                 integration_metadata: dict):
+
+        self.dataset = dataset
+        self.integrated_data = integrated_data
+        self.integration_metadata = integration_metadata
