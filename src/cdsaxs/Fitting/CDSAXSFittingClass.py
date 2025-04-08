@@ -917,40 +917,193 @@ class CDSAXS_Model():
             return None
         
         
-    def SimTrap_SMOpt(self,SimPar,layers,Qx,Qz):
+    def SimTrap_SMOpt(self, SimPar, layers, Qx, Qz):
+        """
+        version of SimTrap_SM for simulating intensity with external parameters for Diff_evolution.
         
-        Coord=self.SymCoordAssign_SingleMaterialOpt(SimPar,layers)
-        print('Used Coordinate ', Coord)
-        form=self.FreeFormTrapezoidOpt(Coord,layers,Qx,Qz) 
-        
-        M=np.power(np.exp(-1*(np.power(self.Qx,2)+np.power(self.Qz,2))*np.power(self.DW_Optimized,2)),0.5)
-        Formfactor = self.form*M
-        Formfactor=abs(Formfactor)
-        self.SimIntOpt = np.power(Formfactor,2)*self.I0_Optimized+self.Bk_Optimized
-        return self.SimIntOpt
+        Parameters:
+        -----------
+        SimPar : numpy.ndarray
+            Array with parameters for each layer
+        layers : int
+            Number of layers in the trapezoid structure
+        Qx : numpy.ndarray
+            X-component of scattering vector, 2D array
+        Qz : numpy.ndarray
+            Z-component of scattering vector, 2D array
+            
+        Returns:
+        --------
+        numpy.ndarray
+            The simulated intensity (self.SimIntOpt)
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'DW_Optimized'):
+                raise AttributeError("Missing required attribute: DW_Optimized (Debye-Waller factor)")
+                
+            if not hasattr(self, 'I0_Optimized'):
+                raise AttributeError("Missing required attribute: I0_Optimized (Intensity scaling factor)")
+                
+            if not hasattr(self, 'Bk_Optimized'):
+                raise AttributeError("Missing required attribute: Bk_Optimized (Background intensity)")
+            
+            # Validate input parameters
+            if SimPar is None or not isinstance(SimPar, np.ndarray):
+                raise TypeError("SimPar must be a numpy array")
+                
+            if layers is None or not isinstance(layers, (int, float)) or layers < 0:
+                raise ValueError(f"layers must be a non-negative number, got {layers}")
+                
+            if Qx is None or Qz is None:
+                raise ValueError("Qx and Qz must not be None")
+                
+            if not isinstance(Qx, np.ndarray) or not isinstance(Qz, np.ndarray):
+                raise TypeError("Qx and Qz must be numpy arrays")
+            
+            # Execute coordinate assignment and form factor calculation
+            Coord = self.SymCoordAssign_SingleMaterialOpt(SimPar, layers)
+            if Coord is None:
+                raise RuntimeError("Failed to assign coordinates in SymCoordAssign_SingleMaterialOpt")
+                
+            print('Used Coordinate ', Coord)
+            
+            form = self.FreeFormTrapezoidOpt(Coord, layers, Qx, Qz)
+            if form is None:
+                raise RuntimeError("Failed to calculate form factor in FreeFormTrapezoidOpt")
+            
+            # Store the form for use below
+            self.form = form
+            
+            # Calculate Debye-Waller factor
+            M = np.power(np.exp(-1 * (np.power(self.Qx, 2) + np.power(self.Qz, 2)) * np.power(self.DW_Optimized, 2)), 0.5)
+            
+            # Apply Debye-Waller factor to form factor
+            Formfactor = self.form * M
+            Formfactor = abs(Formfactor)
+            
+            # Calculate intensity
+            self.SimIntOpt = np.power(Formfactor, 2) * self.I0_Optimized + self.Bk_Optimized
+            
+            return self.SimIntOpt
+            
+        except Exception as e:
+            print(f"Error in SimTrap_SMOpt: {str(e)}")
+            self.SimIntOpt = None
+            return None
     
    
     
     def SimCyl_SM(self, Discretization):
+        """
+        Simulates the intensity for a single material cylindrical structure.
         
+        This function:
+        1. Calculates the form factor using ConeFourierTransform
+        2. Applies Debye-Waller factor
+        3. Computes the intensity
         
-        self.ConeFourierTransform(Discretization) 
+        Parameters:
+        -----------
+        Discretization : list or numpy.ndarray
+            Number of discretization steps for each layer
         
-        M=np.power(np.exp(-1*(np.power(self.Qx,2)+np.power(self.Qz,2))*np.power(self.DW,2)),0.5)
-        Formfactor = self.form*M
-        Formfactor=abs(Formfactor)
-        self.SimInt = np.power(Formfactor,2)*self.I0+self.Bk
-        return self.SimInt
+        Returns:
+        --------
+        numpy.ndarray
+            The simulated intensity (self.SimInt)
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                raise AttributeError("Missing required scattering vector attributes: Qx and/or Qz")
+            
+            if not hasattr(self, 'DW'):
+                raise AttributeError("Missing required attribute: DW (Debye-Waller factor)")
+                
+            if not hasattr(self, 'I0'):
+                raise AttributeError("Missing required attribute: I0 (Intensity scaling factor)")
+                
+            if not hasattr(self, 'Bk'):
+                raise AttributeError("Missing required attribute: Bk (Background intensity)")
+                
+            # Check if layers attribute exists for ConeFourierTransform
+            if not hasattr(self, 'layers'):
+                raise AttributeError("Missing required attribute: layers")
+                
+            # Check Discretization input
+            if Discretization is None:
+                raise ValueError("Discretization must not be None")
+                
+            if len(Discretization) < self.layers:
+                raise ValueError(f"Discretization array must have at least {self.layers} elements")
+            
+            # Execute form factor calculation
+            self.ConeFourierTransform(Discretization)
+            if not hasattr(self, 'form') or self.form is None:
+                raise RuntimeError("Failed to calculate form factor in ConeFourierTransform")
+            
+            # Calculate Debye-Waller factor
+            M = np.power(np.exp(-1 * (np.power(self.Qx, 2) + np.power(self.Qz, 2)) * np.power(self.DW, 2)), 0.5)
+            
+            # Apply Debye-Waller factor to form factor
+            Formfactor = self.form * M
+            Formfactor = abs(Formfactor)
+            
+            # Calculate intensity
+            self.SimInt = np.power(Formfactor, 2) * self.I0 + self.Bk
+            
+            return self.SimInt
+            
+        except Exception as e:
+            print(f"Error in SimCyl_SM: {str(e)}")
+            self.SimInt = None
+            return None
     
     
     
     ### optimization code
     
-    def GenBounds(self,limit):
-        self.bounds=[]
-        lower_bounds=self.SimPar*(1-limit)
-        upper_bounds=self.SimPar*(1+limit)
-        self.bounds = [(lower_bounds[i], upper_bounds[i]) for i in range(len(lower_bounds))]
+    def GenBounds(self, limit):
+        """
+        Generates bounds for optimization parameters based on a percentage limit.
+        
+        This function creates lower and upper bounds for each parameter in self.SimPar
+        by applying a percentage limit, and stores the resulting bounds in self.bounds.
+        
+        Parameters:
+        -----------
+        limit : float
+            Fraction that determines how much parameters can vary (e.g., 0.1 for ±10%)
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'SimPar'):
+                raise AttributeError("Missing required attribute: SimPar")
+                
+            # Validate input parameter
+            if limit is None:
+                raise ValueError("limit must not be None")
+                
+            if not isinstance(limit, (int, float)):
+                raise TypeError(f"limit must be a number, got {type(limit)}")
+                
+            if limit <= 0:
+                raise ValueError(f"limit must be positive, got {limit}")
+            
+            # Generate lower and upper bounds
+            lower_bounds = self.SimPar * (1 - limit)
+            upper_bounds = self.SimPar * (1 + limit)
+            
+            # Create list of bound tuples
+            self.bounds = [(lower_bounds[i], upper_bounds[i]) for i in range(len(lower_bounds))]
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error in GenBounds: {str(e)}")
+            self.bounds = None
+            return False
         
     def SimTrap_GF(self, SimPar, layers, Intensity, Qx, Qz):
         PARs=np.zeros([layers+1,2])
