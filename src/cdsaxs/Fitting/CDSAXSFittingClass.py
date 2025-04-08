@@ -1106,70 +1106,352 @@ class CDSAXS_Model():
             return False
         
     def SimTrap_GF(self, SimPar, layers, Intensity, Qx, Qz):
-        PARs=np.zeros([layers+1,2])
-        PARs[:,0:2]=np.reshape(SimPar[0:(layers+1)*2],(layers+1,2))
-        [I0,DW,Bk]=SimPar[layers*2+2:layers*2+5]
-        (Coord)=self.SymCoordAssign_SingleMaterialOpt(PARs,layers)
-        F1 = self.FreeFormTrapezoidOpt(Coord[:,:,0],layers,Qx,Qz) 
-        M=np.power(np.exp(-1*(np.power(Qx,2)+np.power(Qz,2))*np.power(DW,2)),0.5)
-        Formfactor=F1*M
-        Formfactor=abs(Formfactor)
-        SimInt = np.power(Formfactor,2)*I0+Bk
-        Chi2= abs(np.log(Intensity)-np.log(SimInt))
-        Chi2[np.isnan(Chi2)]=0
-        Chi2=np.sum(Chi2)
-        return Chi2
-    
+        """
+        Simulates a trapezoid structure and calculates goodness of fit (GF).
+        
+        Parameters:
+        -----------
+        SimPar : numpy.ndarray
+            1D array containing all simulation parameters (layer dimensions, I0, DW, Bk)
+        layers : int
+            Number of layers in the trapezoid structure
+        Intensity : numpy.ndarray
+            Measured intensity data for comparison
+        Qx : numpy.ndarray
+            X-component of scattering vector, 2D array
+        Qz : numpy.ndarray
+            Z-component of scattering vector, 2D array
+            
+        Returns:
+        --------
+        float
+            Chi-square value representing goodness of fit
+        """
+        try:
+            # Validate input parameters
+            if SimPar is None or not isinstance(SimPar, np.ndarray):
+                raise TypeError("SimPar must be a numpy array")
+                
+            if layers is None or not isinstance(layers, (int, float)) or layers < 0:
+                raise ValueError(f"layers must be a non-negative number, got {layers}")
+                
+            if Intensity is None or not isinstance(Intensity, np.ndarray):
+                raise TypeError("Intensity must be a numpy array")
+                
+            if Qx is None or Qz is None:
+                raise ValueError("Qx and Qz must not be None")
+                
+            if not isinstance(Qx, np.ndarray) or not isinstance(Qz, np.ndarray):
+                raise TypeError("Qx and Qz must be numpy arrays")
+                
+            # Check if SimPar has sufficient elements
+            required_length = (layers + 1) * 2 + 3  # For PARs, I0, DW, Bk
+            if len(SimPar) < required_length:
+                raise ValueError(f"SimPar array must have at least {required_length} elements, but has {len(SimPar)}")
+            
+            # Reshape parameters
+            PARs = np.zeros([layers + 1, 2])
+            PARs[:, 0:2] = np.reshape(SimPar[0:(layers + 1) * 2], (layers + 1, 2))
+            
+            # Extract I0, DW, Bk parameters
+            [I0, DW, Bk] = SimPar[layers * 2 + 2:layers * 2 + 5]
+            
+            # Calculate coordinates and form factor
+            Coord = self.SymCoordAssign_SingleMaterialOpt(PARs, layers)
+            if Coord is None:
+                raise RuntimeError("Failed to assign coordinates in SymCoordAssign_SingleMaterialOpt")
+                
+            F1 = self.FreeFormTrapezoidOpt(Coord[:, :, 0], layers, Qx, Qz)
+            if F1 is None:
+                raise RuntimeError("Failed to calculate form factor in FreeFormTrapezoidOpt")
+            
+            # Calculate Debye-Waller factor
+            M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(DW, 2)), 0.5)
+            
+            # Apply Debye-Waller factor to form factor
+            Formfactor = F1 * M
+            Formfactor = abs(Formfactor)
+            
+            # Calculate intensity
+            SimInt = np.power(Formfactor, 2) * I0 + Bk
+            
+            # Calculate Chi-square
+            Chi2 = abs(np.log(Intensity) - np.log(SimInt))
+            Chi2[np.isnan(Chi2)] = 0
+            Chi2 = np.sum(Chi2)
+            
+            return Chi2
+            
+        except Exception as e:
+            print(f"Error in SimTrap_GF: {str(e)}")
+            return float('inf')  # Return infinity as worst-case fit
+            
     def SimCyl_GF(self, SimPar, layers, Intensity, Qr, Qz, Discretization):
-        PARs=np.zeros([layers+1,2])
-        PARs[:,0:2]=np.reshape(SimPar[0:(layers+1)*2],(layers+1,2))
-        [I0,DW,Bk]=SimPar[layers*2+2:layers*2+5]
+        """
+        Simulates a cylindrical structure and calculates goodness of fit (GF).
         
-        F1 = self.ConeFourierTransformOpt(PARs,layers, Qz, Qr,Discretization)
-        M=np.power(np.exp(-1*(np.power(Qr,2)+np.power(Qz,2))*np.power(DW,2)),0.5)
-        Formfactor=F1*M
-        Formfactor=abs(Formfactor)
-        SimInt = np.power(Formfactor,2)*I0+Bk
-        Chi2= abs(np.log(Intensity)-np.log(SimInt))
-        Chi2[np.isnan(Chi2)]=0
-        Chi2=np.sum(Chi2)
-        return Chi2
+        Parameters:
+        -----------
+        SimPar : numpy.ndarray
+            1D array containing all simulation parameters (layer dimensions, I0, DW, Bk)
+        layers : int
+            Number of layers in the cylindrical structure
+        Intensity : numpy.ndarray
+            Measured intensity data for comparison
+        Qr : numpy.ndarray
+            Radial component of scattering vector, 2D array
+        Qz : numpy.ndarray
+            Z-component of scattering vector, 2D array
+        Discretization : list or numpy.ndarray
+            Number of discretization steps for each layer
+            
+        Returns:
+        --------
+        float
+            Chi-square value representing goodness of fit
+        """
+        try:
+            # Validate input parameters
+            if SimPar is None or not isinstance(SimPar, np.ndarray):
+                raise TypeError("SimPar must be a numpy array")
+                
+            if layers is None or not isinstance(layers, (int, float)) or layers < 0:
+                raise ValueError(f"layers must be a non-negative number, got {layers}")
+                
+            if Intensity is None or not isinstance(Intensity, np.ndarray):
+                raise TypeError("Intensity must be a numpy array")
+                
+            if Qr is None or Qz is None:
+                raise ValueError("Qr and Qz must not be None")
+                
+            if not isinstance(Qr, np.ndarray) or not isinstance(Qz, np.ndarray):
+                raise TypeError("Qr and Qz must be numpy arrays")
+                
+            if Discretization is None:
+                raise ValueError("Discretization must not be None")
+                
+            if len(Discretization) < layers:
+                raise ValueError(f"Discretization array must have at least {layers} elements")
+                
+            # Check if SimPar has sufficient elements
+            required_length = (layers + 1) * 2 + 3  # For PARs, I0, DW, Bk
+            if len(SimPar) < required_length:
+                raise ValueError(f"SimPar array must have at least {required_length} elements, but has {len(SimPar)}")
+            
+            # Reshape parameters
+            PARs = np.zeros([layers + 1, 2])
+            PARs[:, 0:2] = np.reshape(SimPar[0:(layers + 1) * 2], (layers + 1, 2))
+            
+            # Extract I0, DW, Bk parameters
+            [I0, DW, Bk] = SimPar[layers * 2 + 2:layers * 2 + 5]
+            
+            # Calculate form factor
+            F1 = self.ConeFourierTransformOpt(PARs, layers, Qz, Qr, Discretization)
+            if F1 is None:
+                raise RuntimeError("Failed to calculate form factor in ConeFourierTransformOpt")
+            
+            # Calculate Debye-Waller factor
+            M = np.power(np.exp(-1 * (np.power(Qr, 2) + np.power(Qz, 2)) * np.power(DW, 2)), 0.5)
+            
+            # Apply Debye-Waller factor to form factor
+            Formfactor = F1 * M
+            Formfactor = abs(Formfactor)
+            
+            # Calculate intensity
+            SimInt = np.power(Formfactor, 2) * I0 + Bk
+            
+            # Calculate Chi-square
+            Chi2 = abs(np.log(Intensity) - np.log(SimInt))
+            Chi2[np.isnan(Chi2)] = 0
+            Chi2 = np.sum(Chi2)
+            
+            return Chi2
+            
+        except Exception as e:
+            print(f"Error in SimCyl_GF: {str(e)}")
+            return float('inf')  # Return infinity as worst-case fit
    
-    def CDSAXS_DiffEvolution(self,limit):
+    def CDSAXS_DiffEvolution(self, limit, **kwargs):
+        """
+        Performs differential evolution optimization for CDSAXS model fitting.
         
-        self.GenBounds(limit)
+        This function:
+        1. Generates parameter bounds based on the given limit
+        2. Runs differential evolution to find optimal parameters
+        3. Reshapes results and updates model attributes
+        4. Simulates intensity with optimized parameters
+        5. Calculates goodness of fit and BIC
         
-        self.SimPar_Optimized = differential_evolution(self.SimTrap_GF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz),polish=True)
+        Parameters:
+        -----------
+        limit : float
+            Fraction that determines how much parameters can vary (e.g., 0.1 for ±10%)
+        **kwargs : dict
+            Additional keyword arguments to pass to scipy's differential_evolution function
+            (e.g., popsize, tol, mutation, recombination, maxiter, etc.)
+            
+        Returns:
+        --------
+        tuple
+            (PAR, I0, DW, Bk) - Optimized parameters for the model
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'SimPar'):
+                raise AttributeError("Missing required attribute: SimPar")
+                
+            if not hasattr(self, 'layers'):
+                raise AttributeError("Missing required attribute: layers")
+                
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                raise AttributeError("Missing required scattering vector attributes: Qx and/or Qz")
+                
+            if not hasattr(self, 'GF_Initial'):
+                raise AttributeError("Missing required attribute: GF_Initial")
+            
+            # Generate bounds for optimization
+            success = self.GenBounds(limit)
+            if not success or self.bounds is None:
+                raise RuntimeError("Failed to generate bounds in GenBounds")
+            
+            # Set default optimization parameters if not provided in kwargs
+            default_params = {
+                'polish': True
+            }
+            
+            # Update default parameters with any provided kwargs
+            optimization_params = {**default_params, **kwargs}
+            
+            # Run differential evolution optimization with the combined parameters
+            self.SimPar_Optimized = differential_evolution(
+                self.SimTrap_GF,
+                self.bounds, 
+                args=(self.layers, self.Intensity, self.Qx, self.Qz),
+                **optimization_params
+            )
+            
+            # Extract optimized parameters
+            self.PAR = np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2], (self.layers+1, 2))
+            [self.I0, self.DW, self.Bk] = self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
+            
+            # Generate coordinate assignments and simulate intensity
+            success = self.SymCoordAssign_SingleMaterial()
+            if not success:
+                raise RuntimeError("Failed to assign coordinates in SymCoordAssign_SingleMaterial")
+                
+            sim_int = self.SimTrap_SM()
+            if sim_int is None:
+                raise RuntimeError("Failed to simulate intensity in SimTrap_SM")
+            
+            # Calculate goodness of fit and BIC
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            # Print results
+            print('Initial ', self.GF_Initial, ' Final ', self.GF)
+            
+            return (self.PAR, self.I0, self.DW, self.Bk)
+            
+        except Exception as e:
+            print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
+            return None
         
-        self.PAR=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
-
-        [self.I0,self.DW,self.Bk]= self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
-               
-        self.SymCoordAssign_SingleMaterial()
-        self.SimTrap_SM()
-        self.GF = self.GF_calc(self.SimInt)
-        self.BIC= self.BIC_calc(self.GF)
-        #self.PlotQzCutComp(10,'yes')
-        print('Initial ', self.GF_Initial, ' Final ', self.GF) 
-        return (self.PAR,self.I0,self.DW,self.Bk)
         
+    def CDSAXS_DiffEvolution_Cyl(self, limit, Discretization, **kwargs):
+        """
+        Performs differential evolution optimization for CDSAXS cylindrical model fitting.
         
-    def CDSAXS_DiffEvolution_Cyl(self,limit,Discretization):
+        This function:
+        1. Generates parameter bounds based on the given limit
+        2. Runs differential evolution to find optimal parameters
+        3. Reshapes results and updates model attributes
+        4. Simulates intensity with optimized parameters
+        5. Calculates goodness of fit and BIC
         
-        self.GenBounds(limit)
-        
-        self.SimPar_Optimized = differential_evolution(self.SimCyl_GF,self.bounds, args=(self.layers,self.Intensity,self.Qx,self.Qz, Discretization),polish=True)
-        
-        self.PAR=np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2],(self.layers+1,2))
-
-        [self.I0,self.DW,self.Bk]= self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
-               
-        self.SimCyl_SM(Discretization)
-        self.GF = self.GF_calc(self.SimInt)
-        self.BIC= self.BIC_calc(self.GF)
-        #self.PlotQzCutComp(10,'yes')
-        print('Initial ', self.GF_Initial, ' Final ', self.GF) 
-        return (self.PAR,self.I0,self.DW,self.Bk)
+        Parameters:
+        -----------
+        limit : float
+            Fraction that determines how much parameters can vary (e.g., 0.1 for ±10%)
+        Discretization : list or numpy.ndarray
+            Number of discretization steps for each layer
+        **kwargs : dict
+            Additional keyword arguments to pass to scipy's differential_evolution function
+            (e.g., popsize, tol, mutation, recombination, maxiter, etc.)
+            
+        Returns:
+        --------
+        tuple
+            (PAR, I0, DW, Bk) - Optimized parameters for the model
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'SimPar'):
+                raise AttributeError("Missing required attribute: SimPar")
+                
+            if not hasattr(self, 'layers'):
+                raise AttributeError("Missing required attribute: layers")
+                
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                raise AttributeError("Missing required scattering vector attributes: Qx and/or Qz")
+                
+            if not hasattr(self, 'GF_Initial'):
+                raise AttributeError("Missing required attribute: GF_Initial")
+                
+            # Validate Discretization parameter
+            if Discretization is None:
+                raise ValueError("Discretization must not be None")
+                
+            if len(Discretization) < self.layers:
+                raise ValueError(f"Discretization array must have at least {self.layers} elements")
+            
+            # Generate bounds for optimization
+            success = self.GenBounds(limit)
+            if not success or self.bounds is None:
+                raise RuntimeError("Failed to generate bounds in GenBounds")
+            
+            # Set default optimization parameters if not provided in kwargs
+            default_params = {
+                'polish': True
+            }
+            
+            # Update default parameters with any provided kwargs
+            optimization_params = {**default_params, **kwargs}
+            
+            # Run differential evolution optimization with the combined parameters
+            self.SimPar_Optimized = differential_evolution(
+                self.SimCyl_GF,
+                self.bounds, 
+                args=(self.layers, self.Intensity, self.Qx, self.Qz, Discretization),
+                **optimization_params
+            )
+            
+            # Extract optimized parameters
+            self.PAR = np.reshape(self.SimPar_Optimized.x[0:(self.layers+1)*2], (self.layers+1, 2))
+            [self.I0, self.DW, self.Bk] = self.SimPar_Optimized.x[self.layers*2+2:self.layers*2+5]
+            
+            # Simulate intensity with optimized parameters
+            sim_int = self.SimCyl_SM(Discretization)
+            if sim_int is None:
+                raise RuntimeError("Failed to simulate intensity in SimCyl_SM")
+            
+            # Calculate goodness of fit and BIC
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            # Print results
+            print('Initial ', self.GF_Initial, ' Final ', self.GF) 
+            
+            return (self.PAR, self.I0, self.DW, self.Bk)
+            
+        except Exception as e:
+            print(f"Error in CDSAXS_DiffEvolution_Cyl: {str(e)}")
+            return None
         
     ### plotting code
     
