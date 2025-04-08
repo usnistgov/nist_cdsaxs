@@ -559,33 +559,182 @@ class CDSAXS_Model():
                 self.form=self.form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
         return self.form
     
-    def ConeFourierTransformOpt(self,PAR,layers, Qz, Qr,Discretization):
-        # Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
-        H1 = 0
-        H2 = 0
-        Form=np.zeros([int(len(Qr[:,0])),int(len(Qr[0,:]))])
+    def ConeFourierTransformOptimized(self, Discretization):
+        """
+        Optimized version of ConeFourierTransform for faster calculation. !!!! HAVE NOT VALIDATED THIS CODE
         
-        for i in range (layers):
-            H2=H2+PAR[i,1]
-            z=np.zeros([int(Discretization[i])])
-            stepsize=PAR[i,1]/Discretization[i]
-            z=np.arange(H1,H2+0.01,stepsize)
-            if i > 0 :
-                H1=H1+PAR[i-1,1]
+        Calculates the Fourier transform for a cone in cylindrical coordinates (Qr, Qz)
+        with performance optimizations for faster execution.
+        
+        Parameters:
+        -----------
+        Discretization : list or numpy.ndarray
+            Number of discretization steps for each layer
+        
+        Returns:
+        --------
+        numpy.ndarray
+            The calculated form factor (self.form)
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Qr') or not hasattr(self, 'Qz'):
+                raise AttributeError("Missing required attributes: Qr and/or Qz")
+            if not hasattr(self, 'PAR'):
+                raise AttributeError("Missing required attribute: PAR")
+            if not hasattr(self, 'layers'):
+                raise AttributeError("Missing required attribute: layers")
                 
-            z=np.arange(H1,H2+0.01,stepsize)
-            R1=PAR[i,0]
-            R2=PAR[i+1,0]
-            if R1==R2:
-                R1=R1+0.000001
-            Slope=(H2-H1)/(R2-R1)
-            for ii in range(len(z)-1):
-                RI1=(z[ii]-H1)/Slope+R1
-                RI2=(z[ii+1]-H1)/Slope+R1
-                fa=2*np.pi*RI1/Qr*sp.jv(1,Qr*RI1)*np.exp(1j*Qz*z[ii])
-                fb=2*np.pi*RI2/Qr*sp.jv(1,Qr*RI2)*np.exp(1j*Qz*z[ii+1])
-                Form=Form+stepsize*(fb+fa)/2 # if you had an SLD variation you would multiply by the SLD here
-        return Form
+            # Check if arrays have proper dimensions
+            if len(self.Qr.shape) != 2 or len(self.Qz.shape) != 2:
+                raise ValueError(f"Qr and Qz must be 2D arrays, got shapes {self.Qr.shape} and {self.Qz.shape}")
+                
+            # Check Discretization input
+            if Discretization is None:
+                raise ValueError("Discretization must not be None")
+            if len(Discretization) < self.layers:
+                raise ValueError(f"Discretization array must have at least {self.layers} elements")
+                
+            # Check PAR dimensions for indexing
+            if self.layers + 1 > len(self.PAR):
+                raise IndexError(f"Not enough rows in PAR ({len(self.PAR)}) for {self.layers} layers")
+            
+            # Pre-allocate arrays and initial values
+            shape = (int(len(self.Qr[:,0])), int(len(self.Qr[0,:])))
+            self.form = np.zeros(shape, dtype=complex)
+            H1 = 0
+            H2 = 0
+            
+            # Precompute division by Qr to avoid repeated divisions
+            # Add small value to avoid division by zero
+            Qr_safe = np.where(np.abs(self.Qr) < 1e-10, 1e-10, self.Qr)
+            inv_Qr = 1.0 / Qr_safe
+            
+            # Loop over layers
+            for i in range(self.layers):
+                H2 = H2 + self.PAR[i, 1]
+                if i > 0:
+                    H1 = H1 + self.PAR[i-1, 1]
+                    
+                # Calculate parameters for this layer
+                R1 = self.PAR[i, 0]
+                R2 = self.PAR[i+1, 0]
+                
+                # Avoid exact equality for numerical stability
+                if abs(R1 - R2) < 1e-6:
+                    R1 = R1 + 1e-6
+                    
+                Slope = (H2 - H1) / (R2 - R1)
+                stepsize = self.PAR[i, 1] / Discretization[i]
+                
+                # Generate z values for integration once
+                z = np.linspace(H1, H2, int(Discretization[i]) + 1)
+                
+                # Vectorize inner loop calculations
+                for ii in range(len(z) - 1):
+                    # Calculate radii at current heights
+                    RI1 = (z[ii] - H1) / Slope + R1
+                    RI2 = (z[ii+1] - H1) / Slope + R1
+                    
+                    # Compute Bessel functions once for each radius
+                    bessel_RI1 = sp.jv(1, self.Qr * RI1)
+                    bessel_RI2 = sp.jv(1, self.Qr * RI2)
+                    
+                    # Compute exponentials once for each z
+                    exp_z1 = np.exp(1j * self.Qz * z[ii])
+                    exp_z2 = np.exp(1j * self.Qz * z[ii+1])
+                    
+                    # Combine terms
+                    fa = 2 * np.pi * RI1 * inv_Qr * bessel_RI1 * exp_z1
+                    fb = 2 * np.pi * RI2 * inv_Qr * bessel_RI2 * exp_z2
+                    
+                    # Trapezoidal rule integration
+                    self.form = self.form + stepsize * (fa + fb) / 2
+                    
+            return self.form
+        
+        except Exception as e:
+            print(f"Error in ConeFourierTransformOptimized: {str(e)}")
+            self.form = None
+            return None
+    
+    def ConeFourierTransformOpt(self, PAR, layers, Qz, Qr, Discretization):
+        """
+        Optimized Fourier transform for a cone in cylindrical coordinates (Qr, Qz).
+        
+        Parameters:
+        -----------
+        PAR : numpy.ndarray
+            Parameter array with shape (n, 2) containing radius and height information
+        layers : int
+            Number of layers in the cone structure
+        Qz : numpy.ndarray
+            Z-component of scattering vector, 2D array
+        Qr : numpy.ndarray
+            Radial component of scattering vector, 2D array
+        Discretization : list or numpy.ndarray
+            Number of discretization steps for each layer
+            
+        Returns:
+        --------
+        numpy.ndarray
+            The calculated form factor
+        """
+        try:
+            # Validate input parameters
+            if PAR is None or not isinstance(PAR, np.ndarray):
+                raise TypeError("PAR must be a numpy array")
+                
+            if layers is None or not isinstance(layers, (int, float)) or layers <= 0:
+                raise ValueError(f"layers must be a positive number, got {layers}")
+                
+            if Qr is None or Qz is None:
+                raise ValueError("Qr and Qz must not be None")
+                
+            if not isinstance(Qr, np.ndarray) or not isinstance(Qz, np.ndarray):
+                raise TypeError("Qr and Qz must be numpy arrays")
+                
+            if len(Qr.shape) != 2 or len(Qz.shape) != 2:
+                raise ValueError(f"Qr and Qz must be 2D arrays, got shapes {Qr.shape} and {Qz.shape}")
+                
+            if Discretization is None or len(Discretization) < layers:
+                raise ValueError(f"Discretization array must have at least {layers} elements")
+                
+            # Check PAR dimensions for indexing
+            if layers + 1 > len(PAR):
+                raise IndexError(f"Not enough rows in PAR ({len(PAR)}) for {layers} layers")
+            
+            # Main calculation code - unchanged
+            H1 = 0
+            H2 = 0
+            Form = np.zeros([int(len(Qr[:,0])), int(len(Qr[0,:]))])
+            
+            for i in range(layers):
+                H2 = H2 + PAR[i,1]
+                z = np.zeros([int(Discretization[i])])
+                stepsize = PAR[i,1] / Discretization[i]
+                z = np.arange(H1, H2 + 0.01, stepsize)
+                if i > 0:
+                    H1 = H1 + PAR[i-1,1]
+                    
+                z = np.arange(H1, H2 + 0.01, stepsize)
+                R1 = PAR[i,0]
+                R2 = PAR[i+1,0]
+                if R1 == R2:
+                    R1 = R1 + 0.000001
+                Slope = (H2 - H1) / (R2 - R1)
+                for ii in range(len(z) - 1):
+                    RI1 = (z[ii] - H1) / Slope + R1
+                    RI2 = (z[ii+1] - H1) / Slope + R1
+                    fa = 2 * np.pi * RI1 / Qr * sp.jv(1, Qr * RI1) * np.exp(1j * Qz * z[ii])
+                    fb = 2 * np.pi * RI2 / Qr * sp.jv(1, Qr * RI2) * np.exp(1j * Qz * z[ii+1])
+                    Form = Form + stepsize * (fb + fa) / 2
+                    
+            return Form
+            
+        except Exception as e:
+            print(f"Error in ConeFourierTransformOpt: {str(e)}")
+            return None
     
     
 ### Coordinate Assignment Code
@@ -610,57 +759,164 @@ class CDSAXS_Model():
 
 
     def SymCoordAssign_SingleMaterial(self):
-        # assigns trapezoid coordinates for a symmetric trapezoid
-        # consider combining with SymCoordAssign with SLD as a flag
-
-            self.Coord=np.zeros([self.layers+1,5,1])
-            for T in range (self.layers+1):
-                if T==0:
-                    self.Coord[T,0,0]=0
-                    self.Coord[T,1,0]=self.PAR[0,0]
-                    self.Coord[T,2,0]=self.PAR[0,1]
-                    self.Coord[T,3,0]=0
-                    self.Coord[T,4,0]=1 # SLD - assigned to be 1 for a single material
-                else:
-                    self.Coord[T,0,0]=self.Coord[T-1,0,0]+0.5*(self.PAR[T-1,0]-self.PAR[T,0])
-                    self.Coord[T,1,0]=self.Coord[T,0,0]+self.PAR[T,0]
-                    self.Coord[T,2,0]=self.PAR[T,1]
-                    self.Coord[T,3,0]=0
-                    self.Coord[T,4,0]=1# SLD - assigned to be 1 for a single material
+        """
+        Assigns trapezoid coordinates for a symmetric trapezoid with a single material.
         
-    def SymCoordAssign_SingleMaterialOpt(self,PAR,layers):
-        # assigns trapezoid coordinates for a symmetric trapezoid
-        # consider combining with SymCoordAssign with SLD as a flag
-        #should be able to combine this with the previous funciton
-            Coord=np.zeros([layers+1,5,1])
-            for T in range (layers+1):
-                if T==0:
-                    Coord[T,0,0]=0
-                    Coord[T,1,0]=PAR[0,0]
-                    Coord[T,2,0]=PAR[0,1]
-                    Coord[T,3,0]=0
-                    Coord[T,4,0]=1 # SLD - assigned to be 1 for a single material
+        This function generates the coordinate array (self.Coord) for a symmetric trapezoid
+        structure based on the parameters in self.PAR. The SLD (Scattering Length Density)
+        is set to 1 for all layers, representing a single material.
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'PAR'):
+                raise AttributeError("Missing required attribute: PAR")
+            if not hasattr(self, 'layers'):
+                raise AttributeError("Missing required attribute: layers")
+                
+            # Validate PAR dimensions
+            if not isinstance(self.PAR, np.ndarray):
+                raise TypeError("PAR must be a numpy array")
+                
+            if len(self.PAR) < self.layers + 1:
+                raise ValueError(f"PAR array must have at least {self.layers + 1} rows, but has {len(self.PAR)}")
+                
+            # Check PAR shape
+            if len(self.PAR.shape) < 2 or self.PAR.shape[1] < 2:
+                raise ValueError(f"PAR must have at least 2 columns, but has shape {self.PAR.shape}")
+            
+            # Main calculation code - unchanged
+            self.Coord = np.zeros([self.layers+1, 5, 1])
+            for T in range(self.layers+1):
+                if T == 0:
+                    self.Coord[T, 0, 0] = 0
+                    self.Coord[T, 1, 0] = self.PAR[0, 0]
+                    self.Coord[T, 2, 0] = self.PAR[0, 1]
+                    self.Coord[T, 3, 0] = 0
+                    self.Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
                 else:
-                    Coord[T,0,0]=Coord[T-1,0,0]+0.5*(PAR[T-1,0]-PAR[T,0])
-                    Coord[T,1,0]=Coord[T,0,0]+PAR[T,0]
-                    Coord[T,2,0]=PAR[T,1]
-                    Coord[T,3,0]=0
-                    Coord[T,4,0]=1# SLD - assigned to be 1 for a single material
+                    self.Coord[T, 0, 0] = self.Coord[T-1, 0, 0] + 0.5 * (self.PAR[T-1, 0] - self.PAR[T, 0])
+                    self.Coord[T, 1, 0] = self.Coord[T, 0, 0] + self.PAR[T, 0]
+                    self.Coord[T, 2, 0] = self.PAR[T, 1]
+                    self.Coord[T, 3, 0] = 0
+                    self.Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
+            
+            return True
+        
+        except Exception as e:
+            print(f"Error in SymCoordAssign_SingleMaterial: {str(e)}")
+            return False
+        
+    def SymCoordAssign_SingleMaterialOpt(self, PAR, layers):
+        """
+        Optimized version that assigns trapezoid coordinates for a symmetric trapezoid with a single material.
+        Used in the Differential Evolution calculation
+        Parameters:
+        -----------
+        PAR : numpy.ndarray
+            Array with parameters for each layer, with shape (n, 2) where n >= layers+1
+        layers : int
+            Number of layers in the trapezoid structure
+            
+        Returns:
+        --------
+        numpy.ndarray
+            Coordinate array for the trapezoid structure
+        """
+        try:
+            # Validate input parameters
+            if PAR is None or not isinstance(PAR, np.ndarray):
+                raise TypeError("PAR must be a numpy array")
+                
+            if layers is None or not isinstance(layers, (int, float)) or layers < 0:
+                raise ValueError(f"layers must be a non-negative number, got {layers}")
+                
+            # Check PAR dimensions
+            if len(PAR) < layers + 1:
+                raise ValueError(f"PAR array must have at least {layers + 1} rows, but has {len(PAR)}")
+                
+            if len(PAR.shape) < 2 or PAR.shape[1] < 2:
+                raise ValueError(f"PAR must have at least 2 columns, but has shape {PAR.shape}")
+            
+            # Main calculation code - unchanged
+            Coord = np.zeros([layers+1, 5, 1])
+            for T in range(layers+1):
+                if T == 0:
+                    Coord[T, 0, 0] = 0
+                    Coord[T, 1, 0] = PAR[0, 0]
+                    Coord[T, 2, 0] = PAR[0, 1]
+                    Coord[T, 3, 0] = 0
+                    Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
+                else:
+                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
+                    Coord[T, 2, 0] = PAR[T, 1]
+                    Coord[T, 3, 0] = 0
+                    Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
+                    
             return Coord
+            
+        except Exception as e:
+            print(f"Error in SymCoordAssign_SingleMaterialOpt: {str(e)}")
+            return None
 
     
     ### Simulations
     def SimTrap_SM(self):
+        """
+        Simulates the intensity for a single material trapezoid structure.
         
-        self.SymCoordAssign_SingleMaterial()
-        self.FreeFormTrapezoid() 
+        This function:
+        1. Generates coordinates using SymCoordAssign_SingleMaterial
+        2. Calculates the form factor using FreeFormTrapezoid
+        3. Applies Debye-Waller factor
+        4. Computes the intensity
         
-        M=np.power(np.exp(-1*(np.power(self.Qx,2)+np.power(self.Qz,2))*np.power(self.DW,2)),0.5)
-        Formfactor = self.form*M
-        Formfactor=abs(Formfactor)
-        self.SimInt = np.power(Formfactor,2)*self.I0+self.Bk
-        return self.SimInt
-    
+        Returns:
+        --------
+        numpy.ndarray
+            The simulated intensity (self.SimInt)
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                raise AttributeError("Missing required scattering vector attributes: Qx and/or Qz")
+            
+            if not hasattr(self, 'DW'):
+                raise AttributeError("Missing required attribute: DW (Debye-Waller factor)")
+                
+            if not hasattr(self, 'I0'):
+                raise AttributeError("Missing required attribute: I0 (Intensity scaling factor)")
+                
+            if not hasattr(self, 'Bk'):
+                raise AttributeError("Missing required attribute: Bk (Background intensity)")
+            
+            # Execute coordinate assignment and form factor calculation
+            success = self.SymCoordAssign_SingleMaterial()
+            if not success:
+                raise RuntimeError("Failed to assign coordinates in SymCoordAssign_SingleMaterial")
+                
+            self.FreeFormTrapezoid()
+            if not hasattr(self, 'form') or self.form is None:
+                raise RuntimeError("Failed to calculate form factor in FreeFormTrapezoid")
+            
+            # Calculate Debye-Waller factor
+            M = np.power(np.exp(-1 * (np.power(self.Qx, 2) + np.power(self.Qz, 2)) * np.power(self.DW, 2)), 0.5)
+            
+            # Apply Debye-Waller factor to form factor
+            Formfactor = self.form * M
+            Formfactor = abs(Formfactor)
+            
+            # Calculate intensity
+            self.SimInt = np.power(Formfactor, 2) * self.I0 + self.Bk
+            
+            return self.SimInt
+       
+        except Exception as e:
+            print(f"Error in SimTrap_SM: {str(e)}")
+            self.SimInt = None
+            return None
+        
+        
     def SimTrap_SMOpt(self,SimPar,layers,Qx,Qz):
         
         Coord=self.SymCoordAssign_SingleMaterialOpt(SimPar,layers)
@@ -673,15 +929,7 @@ class CDSAXS_Model():
         self.SimIntOpt = np.power(Formfactor,2)*self.I0_Optimized+self.Bk_Optimized
         return self.SimIntOpt
     
-    def SimTrap_SMFinal(self,layers,Qx,Qz):
-    
-        form=self.FreeFormTrapezoidOpt(self.Coord_Optimized,layers,Qx,Qz) 
-        
-        M=np.power(np.exp(-1*(np.power(self.Qx,2)+np.power(self.Qz,2))*np.power(self.DW_Optimized,2)),0.5)
-        Formfactor = self.form*M
-        Formfactor=abs(Formfactor)
-        self.SimIntOpt = np.power(Formfactor,2)*self.I0_Optimized+self.Bk_Optimized
-        return self.SimIntOpt
+   
     
     def SimCyl_SM(self, Discretization):
         
