@@ -1,16 +1,18 @@
 """
-This module contains two classes:
+This module contains the following classes:
 
-DataQyQxz : Class for storing a single scattering image, relevant
-    scattering metadata, and any user-defined parameters.
-Dataset : Class for managing a series of DataQyQxz objects. A new
-    Dataset instance is created upon each loading of data by the user
-    in the GUI.
+Data2D : Generic two-dimensional data class not tied to diffraction.
+DataQdyQdx(Data2D) : Child class of Data2D for detector images.
+Dataset : Container class for instances of DataQdyQdx making up a single
+    CDSAXS measurement for a sample (e.g. single theta scan).
+Data1D : General one-dimensional data classes for intensity vs. q.
+IntegratedQSlice(Data1D) : Child class of Data1D for spectra
+    extracted from integration across a defined area of an image.
+
 """
 
 from __future__ import annotations
 
-import os
 import warnings
 
 import numpy as np
@@ -20,144 +22,71 @@ import cdsaxs.calculators as calculators
 from cdsaxs.sample import Sample
 
 METADATA_KEYWORDS = [
-        "sample_phi_deg",
-        "sample_chi_deg",
+    "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
+    "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
+    "scaling_factor", "I0", "beam_current", "center_px", "data_directory",
+    "filename"
+]
 
-        "energy_ev",
-        "wavelength_nm",
-        "exposure_time_s",
-        "sdd_cm",
-        "pixel_size_um",
+UPDATE_Q_TRIGGERS = [
+    "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
+    "detector_phi_deg", "detector_phi_omega"
+]
 
-        "scaling_factor",
-        "I0",
-        "beam_current",
-        "center_px",
-    ]
+ACCEPTED_Q_AXES = [
+    "qdy", "qdx", "qd", "qsy", "qsx", "qsz", "qs"
+]
 
 
-class DataQyQxz():
+class Data2D():
     """
-    This class contains the Qy-Qxz image, relevant metadata, and any
-    additional user parameters.
+    Generic 2D data class with basic image functionalities. This class
+    is not tied to any diffraction information.
 
     Attributes
     ----------
-    imgdata : NDArray
-        Scattering image as a 2D NumPy array. The first dimension should
-        correspond to Qy and the second dimension should correspond to
-        Qxz (with respect to the detector coordinates).
-    qxzs : NDArray
-        One-dimensional NumPy array of the scattering vector along the
-        xz direction (with respect to detector coordinates).
-    qys : NDArray
-        One-dimensional NumPy array of the scattering vector along the
-        y direction (with respect to detector coordinates).
-    metadata : dict
-        Contains any relevant scattering metadata. These are key : value
-        pairs where the key must be in the list below and the value is
-        formatted depending on requirements of the parameter.
-        Note: Only one of wavelength and energy need to be specified.
-            The other will be calculated upon entry.
-    sample : Sample
-        Instance of the Sample class that details the sample measured
-        when collecting this dataset.
-    user_params : dict
-        Contains additional user-provided parameters. These may be
-        relevant to the user and are shown in the data table of the GUI
-        after the required metadata, but are not used for processing
-        the data within the GUI and standard workflows. They key can
-        be of any format/type desired by the user.
-
-    TODO : add brief definitions to these keywords
-    Metadata Keywords
-    -----------------
-    sample_phi_deg : sample rotation angle about positive y axis
-    sample_chi_deg : rotation about the z-axis (beam direction)
-
-    energy_ev : source energy, eV
-    wavelength_nm : source wavelength, nanometers
-    exposure_time_s : count time in seconds
-    sdd_cm : sample to detector distance in cm
-    pixel_size_um
-
-    scaling_factor : data scaling factor, defaults to 1
-    I0
-    beam_current
-    center_px : [y, xz] beam center pixel location in y and xz
+    image : NDArray
+        Two-dimensional array containing the image as pixel intensities.
+        The first dimension corresponds to image rows from top to bottom
+        and the second dimension corresponds to image columns from left
+        to right.
     """
 
-    _current_rotation = 0
+    _ccw_rotation_counter = 0
 
-    def __init__(
-        self,
-        imgdata: NDArray[np.floating],
-        qys: NDArray[np.floating],
-        qxzs: NDArray[np.floating],
-        metadata: dict,
-        sample : Sample = None,
-        user_params: dict = None,
-    ):
-        """Create an instance of DataQyQxz"""
+    def __init__(self, image: NDArray[np.floating]):
+        """
+        Parameters
+        ----------
+        image : NDArray
+            Two-dimensional array of image intensities. The first
+            dimension corresponds to image rows from top to bottom and
+            the second dimension corresponds to image columns from left
+            to right.
+        """
 
-        if imgdata.shape[0] != len(qys) or imgdata.shape[1] != len(qxzs):
-            raise ValueError(
-                "Your image and scattering vector dimensions"
-                f"don't match up. Your image is of shape {imgdata.shape}. The"
-                "first dimension corresponds to qy and the second dimension"
-                "corresponds to qxz. Your qy and qxz scattering vectors are of"
-                f"length {len(qys)} and {len(qxzs)}, respectively."
-            )
-
-        self.imgdata = imgdata
-        self.qxzs = qxzs
-        self.qys = qys
-
-        # TODO : implement checks for missing critical metadata
-        self._check_metadata(metadata)
-        if 'scaling_factor' not in metadata.keys():
-            metadata['scaling_factor'] = 1
-        metadata = self._metadata_wavelength_energy_calc(metadata=metadata)
-        self.metadata = metadata
-
-        self.user_params = user_params if user_params is not None else {}
-        self.sample = sample if sample is not None else Sample({})
+        self.image = image
 
     def rotate_image(self, degrees, direction='ccw'):
         """
-        Rotate the scattering image by a specified number of degrees
-        in the direction specified.
+        Rotate the image by a specified numer of degrees in the
+        direction specified.
 
         The current image rotation with respect to the original image
-        is always saved and can be recalled using `reset_rotations`.
-
-        The beam center location is tracked through the rotation and
-        the scattering vectors are updated accordingly. Because the
-        beam center position is maintained on the image, the vectors
-        do not need to be recalculated. In some cases, such as a
-        rotation of 180 degrees, the sign from positive to negative or
-        negative to positive may change to maintain coordinate
-        conventions.
-        TODO: this will also be affected by detector_x; correct this
-
-        TODO: unclear how this works if beam center is off detector
+        is saved. The rotations can be undone with 'reset_rotations'.
 
         Parameters
         ----------
         degrees : float
-            Number of degrees to rotate the image, should be in
+            Number of degrees to rotate the image. This should be in
             increments of 90 degrees. A negative value will reverse the
-            rotation direction specified by direction, use caution.
+            rotation direction specified by the 'direction' parameter,
+            use caution.
         direction : str, optional
             Rotation direction. Default is 'ccw' which indicates a
             counterclockwise rotation. Set as 'cw' to indicate a
             clockwise rotation.
         """
-        # current parameters
-        imgdata = np.copy(self.imgdata)
-        qxzs = np.copy(self.qxzs)
-        qys = np.copy(self.qys)
-        center_px = self.metadata['center_px'].copy()
 
         if degrees < 0:
             warnings.warn(
@@ -167,55 +96,221 @@ class DataQyQxz():
                 "counter-clockwise is the same as a 90 degree clockwise "
                 "rotation. Did you intend this?"
             )
-        # determine number of 90 degree rotations clockwise
+        # determine number of 90 degree rotations counterclockwise
         k = int(degrees/90) % 4
         if direction == 'cw':
             k *= -1
 
         if k != 0:
-            self.imgdata = np.rot90(imgdata, k=k, axes=(0, 1))
+            self.image = np.rot90(self.image, k=k, axes=(0, 1))
 
-        if k == 1 or k == -3:
-            self.qxzs = qys
-            self.qys = -1*np.flip(qxzs)
-            self.metadata['center_px'] = [
-                len(qxzs)-center_px[1]-1, center_px[0]]
-
-        if k == 2 or k == -2:
-            self.qxzs = -1*np.flip(qxzs)
-            self.qys = -1*np.flip(qys)
-            self.metadata['center_px'] = [
-                len(qys)-center_px[0]-1, len(qxzs)-center_px[1]-1]
-
-        if k == 3 or k == -1:
-            self.qxzs = -1*np.flip(qys)
-            self.qys = qxzs
-            self.metadata['center_px'] = [
-                center_px[1], len(qys)-center_px[0]-1]
-
-        self._current_rotation += k
+        self._ccw_rotation_counter = (self._ccw_rotation_counter + k) % 4
 
     def reset_rotations(self):
         """
         Return the image to its original orientation removing any
-        rotations that have been done. The beam center will be tracked
-        through this rotation and scattering vectors updated.
+        rotations that have been done.
         """
-        if self._current_rotation != 0:
-            degrees = -90*self._current_rotation
-            while degrees < 0:
-                degrees += 360
+        if self._ccw_rotation_counter != 0:
+            degrees = -90*self._ccw_rotation_counter
             self.rotate_image(degrees)
 
-    def recalculate_q(self):
+    def integrate_box(
+            self,
+            limits_axis0,
+            limits_axis1,
+            mode,
+            axis,
+    ):
         """
-        Recalculate scattering vectors qys and qxzs.
+        Simple integration in a box defined by the [min, max) limits
+        for each axis.
 
-        This should be performed after any changes to the beam center
-        position or detector position.
+        limits_axis0 : tuple[int, int]
+            Defines the limits (indices) of the box in the first
+            dimension. This is a half open range [min, max).
+        limits_axis1 : tuple[int, int]
+            Defines the limits (indices) of the box in the second
+            dimension. This is a half open range [min, max).
+        mode : str
+            Sets the integration mode. This can be set to 'sum' or
+            'mean'.
+        axis : int
+            The axis along which the integration should be performed.
+            This can be set to either 0 (rows) or 1 (columns).
         """
-        # TODO: implement when working on diffraction.py
-        pass
+        if mode == 'sum':
+            integrated_i = np.nansum(
+                self.image[limits_axis0[0]:limits_axis0[1],
+                           limits_axis1[0]:limits_axis1[1]],
+                axis=axis
+            )
+        elif mode == 'mean':
+            integrated_i = np.nanmean(
+                self.image[limits_axis0[0]:limits_axis0[1],
+                           limits_axis1[0]:limits_axis1[1]],
+                axis=axis
+            )
+        else:
+            raise ValueError(
+                f"Integration mode of {mode} is not recognized. Accepted modes"
+                " include 'sum' and 'mean'."
+            )
+
+        return integrated_i.reshape(-1), {
+                'mode': mode,
+                'axis': axis,
+                'limits_axis0': limits_axis0,
+                'limits_axis1': limits_axis1
+            }
+
+    def integrate_box_of_size(
+            self,
+            size0,
+            size1,
+            center_px,
+            mode,
+            axis,
+            offset0=0,
+            offset1=0,
+            trim=False
+    ):
+        """
+        Integrate a box defined by its size and offset from a defined
+        centerpoint.
+
+        trim : bool
+        If trim is set to True, only the box that overlays the image
+        will be returned. If set to False, the areas that fall off the
+        image will be filled with NAN.
+
+        """
+        min0 = center_px[0] - int(size0/2) - offset0
+        max0 = min0 + size0
+
+        min1 = center_px[1] - int(size1/2) - offset1
+        max1 = min1 + size1
+
+        min0_im = max(min0, 0)
+        min1_im = max(min1, 0)
+        max0_im = min(max0, self.image.shape[0]-1)
+        max1_im = min(max1, self.image.shape[1]-1)
+
+        integrated_i_im = self.integrate_box(
+                         limits_axis0=(min0_im, min0_im),
+                         limits_axis1=(min1_im, max1_im),
+                         mode=mode, axis=axis
+                     )
+        if trim:
+            return integrated_i_im
+        else:
+            integrated_i = np.empty(size0 if axis == 1 else size1)
+            integrated_i[:] = np.nan
+            if axis == 0:
+                integrated_i[min1_im-min1:max1_im-min1] = integrated_i_im[0]
+            else:
+                integrated_i[min0_im-min0:max0_im-min0] = integrated_i_im[0]
+            return integrated_i.reshape(-1), integrated_i_im[1]  # params
+
+
+class DataQdyQdx(Data2D):
+    """
+    This class contains 2D scattering images with coordinates of
+    y vs x defined in the detector coordinate frame with positive y
+    in the upward vertical direction and positive x in the left
+    horizontal direction. The z axis is then defined as normal
+    incidence to follow the right-hand rule.
+
+    In many instances the detector coordinates will align with the lab
+    frame, where the z axis aligns with the beam path and the detector
+    is configured normal to the primary beam.
+
+    In cases where the detector has moved from the position with the
+    incident beam normal to the surface, two angles can be defined.
+    detector_phi : Rotation counterclockwise about the y-axis
+        originating at the sample position in the x-z plane (lab frame).
+    detector_omega : Rotation counterclockwise about the x-axis
+        originating at the sample position in the y-z plane (lab frame).
+
+    Attributes
+    ----------
+    image : NDarray
+        Scattering image as a two-dimensional numpy array. The first
+        dimension corresponds to the y-axis (detector frame) and the
+        second dimension corresponds to the x-axis (detector frame).
+    qdy : NDArray
+        Scattering vector for each pixel along the detector y-axis.
+    qdx : NDArray
+        Scattering vector for each pixel along the detector x-axis.
+    metadata : dict
+        Relevant scattering metadata to the image acquisition. These are
+        key : value paris where the key must be selected from the
+        metadata list below and the value format depends on the
+        requirements of the specific parameter. See the user
+        documentation for a thorough description of each of these
+        parameters.
+        Note: Only wavelength or energy should be specified, not both.
+    user_params : dict
+        Additional user-provided parameters or metadata relevant to the
+        data workflow. These are not accessed by the cdsaxs package.
+    name : str
+        Identifier for this image acquisition. The default when using
+        the cdsaxs loaders is the filename, but be cautious when
+        creating a Dataset as the filenames alone may not always result
+        in unique identifiers for each image.
+
+    Metadata Keywords
+    -----------------
+    sample_kappa_deg
+    sample_phi_deg
+    sample_omega_deg
+
+    energy_ev
+    wavelength_nm
+    exposure_time_s
+    sdd_cm
+    pixel_size_um
+
+    detector_phi_deg
+    detector_omega_deg
+
+    scaling_factor
+    I0
+    beam_current
+    center_px
+
+    data_directory
+    filename
+
+    """
+
+    def __init__(
+            self,
+            image: NDArray[np.floating],
+            metadata: dict = None,
+            user_params: dict = None,
+            name: str = None
+    ):
+        """Create an instance od DataQdyQdx"""
+
+        # run base class init
+        super().__init__(image)
+
+        self.metadata = {}
+        if metadata is not None:
+            self.update_metadata(metadata)
+
+        self.user_params = {}
+        if user_params is not None:
+            self.update_user_params(user_params)
+
+        self.qdy = None
+        self.qdx = None
+
+        # calculate the q vectors if all required metadata is present
+        self.calculate_q(suppress_errors=True)
+
+        self.name = name if name is not None else 'name'
 
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
@@ -240,75 +335,30 @@ class DataQyQxz():
                     pass
                 else:
                     self.metadata[key] = value
+                    # handle special wavelength/energy relationship
+                    if key == 'wavelength_nm':
+                        self.metadata['energy_ev'] =\
+                            calculators.wavelength_to_energy(value)
+                    elif key == 'energy_ev':
+                        self.metadata['wavelength_nm'] =\
+                            calculators.energy_to_wavelength(value)
+            if len([x for x in metadata.keys() if x in UPDATE_Q_TRIGGERS]) > 0:
+                self.calculate_q(suppress_errors=True)
 
-    def remove_metadata(self, metadata_keys: list):
+    def calculate_q(self, suppress_errors: bool = False):
         """
-        Remove accepted metadata from this instance of the class.
+        Calculate the qdy and qdx vectors along the image axes if
+        all required metadata is available.
 
         Parameters
         ----------
-        metadata_keys : list
-            List of metadata to remove from this class instance.
+        suppress_errors : bool, optional
+            If set to True, this method will try to calculate the
+            q vectors if the required metadata is availabe, but it
+            will not raise an error if the parameters are not available.
+            Default value is False.
         """
-        if self._check_metadata({key: 0 for key in metadata_keys}):
-            self.metadata = {
-                key: value for key, value in self.metadata
-                if key not in metadata_keys
-                }
-
-    def _check_metadata(self, metadata):
-        """
-        Check if a metadata dictionary contains any unaccepted metadata
-        keywords.
-
-        Check if both wavelength and energy are being specified.
-        """
-        unaccepted_keywords = [
-            x for x in metadata.keys() if x not in METADATA_KEYWORDS
-        ]
-        if len(unaccepted_keywords) > 0:
-            raise ValueError(
-                "The following metadata keywords are not accepted:\n" +
-                f"{unaccepted_keywords}\n" +
-                "The following are accepted metadata keywords:\n" +
-                f"{METADATA_KEYWORDS}"
-            )
-        
-        if "energy_ev" in metadata.keys() and "wavelength_nm" in metadata.keys():
-            raise ValueError(
-                "You have specified both the source energy and wavelength. "
-                "Only one of these can be specified and the other is "
-                "calculated. To avoid over-specifying or conflicting values, "
-                "please only use one of these values. "
-            )
-        return True
-    
-    def _metadata_wavelength_energy_calc(self, metadata: dict = None):
-        """
-        Calculate missing wavelength or energy metadata from the other
-        provided. For example, if wavelength was provided in metadata,
-        the energy will be calculated and added to meatadata.
-
-        This method will perform the calculation for the metadata
-        attribute of this instance, unless the metadata argument is provided.
-        The update metadata dictionary will be returned.
-        """
-
-        if metadata is None:
-            metadata = self.metadata
-
-        if 'wavelength_nm' in metadata.keys():
-            metadata['energy_ev'] = calculators.wavelength_to_energy(
-                metadata['wavelength_nm'])
-        elif 'energy_ev' in self.metadata.keys():
-            metadata['wavelength_nm'] = calculators.energy_to_wavelength(
-                metadata['energy_ev'])
-        else:
-            raise KeyError(
-                "There is no source wavelength or energy information in "
-                "the metadata."
-            )
-        return metadata
+        # TODO: implement this with the diffraction equations
 
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
@@ -333,67 +383,396 @@ class DataQyQxz():
             else:
                 self.user_params[key] = value
 
-    def remove_user_params(self, param_keys: list):
+    def rotate_image(self, degrees, direction='ccw'):
         """
-        Remove the identified parameters from user params of this
-        class instance.
+        Rotate the scattering image by a specified numer of degrees in
+        the direction specified. The scattering vectors qdy and qdx as
+        well as the beam center position in metadata (center_px) will
+        be updated to follow the rotation (if they exist).
+
+        The current image rotation with respect to the original image
+        is saved. The rotations can be undone with 'reset_rotations'.
 
         Parameters
         ----------
-        param_keys : list
-            List of parameters to remove from user_params of this class 
-            instance.
+        degrees : float
+            Number of degrees to rotate the image. This should be in
+            increments of 90 degrees. A negative value will reverse the
+            rotation direction specified by the 'direction' parameter,
+            use caution.
+        direction : str, optional
+            Rotation direction. Default is 'ccw' which indicates a
+            counterclockwise rotation. Set as 'cw' to indicate a
+            clockwise rotation.
         """
-        self.user_params = {
-            key: value for key, value in self.user_params
-            if key not in param_keys
-            }
+        # do image rotation but keep track of the steps taken
+        before_rotation = self._ccw_rotation_counter
+        super().rotate_image(degrees, direction=direction)
+        after_rotation = self._ccw_rotation_counter
+        ccw_steps = after_rotation - before_rotation
 
-    def define_sample(self, sample: Sample):
+        # update scattering vectors and beam center if they exist
+        qdy_before = np.copy(self.qdy)
+        qdx_before = np.copy(self.qdx)
+        try:
+            center_px_before = self.metadata['center_px']
+        except KeyError:
+            center_px_before = None
+
+        if ccw_steps == 1 or ccw_steps == -3:
+            if qdy_before and qdx_before:
+                self.qdy = -1*np.flip(qdx_before)
+                self.qdx = qdy_before
+            if center_px_before:
+                self.metadata['center_px'] = [
+                    len(qdx_before)-center_px_before[1]-1,
+                    center_px_before[0]]
+
+        if ccw_steps == 2 or ccw_steps == -2:
+            if qdy_before and qdx_before:
+                self.qdy = -1*np.flip(qdy_before)
+                self.qdx = -1*np.flip(qdx_before)
+            if center_px_before:
+                self.metadata['center_px'] = [
+                    len(qdy_before)-center_px_before[0]-1,
+                    len(qdx_before)-center_px_before[1]-1]
+
+        if ccw_steps == 3 or ccw_steps == -1:
+            if qdy_before and qdx_before:
+                self.qdy = qdx_before
+                self.qdx = -1*np.flip(qdy_before)
+            if center_px_before:
+                self.metadata['center_px'] = [
+                    center_px_before[1],
+                    len(qdy_before)-center_px_before[0]-1]
+
+    def reset_rotations(self):
         """
-        Define the measured sample with an instance of the Sample class.
+        Return the scattering image to its original orientation
+        removing any rotations that may have been done. The beam center
+        and scattering vectors will be tracked and updated through this
+        process (if they exist).
         """
-        # TODO: implement required sample checks
-        self.sample = sample
+        if self._ccw_rotation_counter != 0:
+            degrees = -90*self._ccw_rotation_counter
+            self.rotate_image(degrees)
+
+    def _check_metadata(self, metadata):
+        """
+        Check the metadata dictionary for:
+        - unaccepted metadata keywords
+        - overspecified wavelength/energy (onle one should be set)
+        """
+        unaccepted_keywords = [
+            x for x in metadata.keys() if x not in METADATA_KEYWORDS
+        ]
+        if len(unaccepted_keywords) > 0:
+            raise ValueError(
+                "The following metadata keywords are not accepted:\n" +
+                f"{unaccepted_keywords}\n" +
+                "The following are accepted metadata keywords:\n" +
+                f"{METADATA_KEYWORDS}"
+            )
+
+        if "energy_ev" in metadata.keys() and "wavelength_nm" in metadata.keys():
+            raise ValueError(
+                "You have specified both the source energy and wavelength. "
+                "Only one of these can be specified and the other is "
+                "calculated. To avoid over-specifying or conflicting values, "
+                "please only use one of these values. "
+            )
+        return True
+
+    def integrate_box(
+            self,
+            limits_qdy,
+            limits_qdx,
+            mode,
+            axis,
+    ):
+        """
+        Integrate a box defined by indexing limits.
+        axis : str
+            Define the axis to integrate over, either qdy or qdx.
+        """
+        integrated_i, params = super().integrate_box(
+            limits_axis0=limits_qdy,
+            limits_axis1=limits_qdx,
+            mode=mode,
+            axis=0 if axis == 'qdy' else 1
+        )
+        q = self.qdx[params["limits_axis1"][0]:params["limits_axis1"][1]]\
+            if axis == 'qdy'\
+            else self.qdy[params["limits_axis0"][0]:params["limits_axis0"][1]]
+
+        integrated_q_slice = IntegratedQSlice(
+            q=q,
+            I=integrated_i,
+            q_axis='qdx' if axis == 'qdy' else 'qdy',
+            name=self.name,
+            limits_axis0=params["limits_axis0"],
+            limits_axis1=params["limits_axis1"],
+            mode=mode,
+            integration_axis=params["axis"]
+        )
+
+        return integrated_q_slice
+
+    def integrate_box_of_size(
+            self,
+            size_qdy,
+            size_qdx,
+            mode,
+            axis,
+            offset_qdy=0,
+            offset_qdx=0,
+    ):
+        """
+        Integrate a box defined by its size and offset from a the
+        defined beam center.
+
+        axis : str
+            Define the axis to integrate over, either qdy or qdx.
+
+        """
+        integrated_i, params = super().integrate_box_of_size(
+            size0=size_qdy,
+            size1=size_qdx,
+            center_px=self.metadata['center_px'],
+            mode=mode,
+            axis=0 if axis == 'qdy' else 1,
+            offset0=offset_qdy,
+            offset1=offset_qdx,
+            trim=True
+        )
+
+        q = self.dqx[
+                params["limits_axis1"][0]:params["limits_axis1"][1]]\
+            if axis == 'qdy' else self.dqy[
+                params["limits_axis0"][0]:params["limits_axis0"][1]]
+
+        integrated_q_slice = IntegratedQSlice(
+            q=q,
+            I=integrated_i,
+            q_axis='qdx' if axis == 'qdy' else 'qdy',
+            name=self.name,
+            limits_axis0=params["limits_axis0"],
+            limits_axis1=params["limits_axis1"],
+            mode=mode,
+            integration_axis=params["axis"]
+        )
+
+        return integrated_q_slice
+
+    def integrate_box_of_q_range(
+            self,
+            range_qdy,
+            range_qdx,
+            mode,
+            axis
+    ):
+        """
+        Integrate using q ranges along both axes (half open).
+        """
+
+        qdy_indices = np.where((self.qdy >= range_qdy[0])
+                               & (self.qdy < range_qdy[1]))[0]
+        limits_qdy = (np.min(qdy_indices), np.max(qdy_indices)+1)
+
+        qdx_indices = np.where((self.qdx >= range_qdx[0])
+                               & (self.qdx < range_qdx[1]))[0]
+        limits_qdx = (np.min(qdx_indices), np.max(qdx_indices)+1)
+
+        return self.integrate_box(
+            limits_qdy,
+            limits_qdx,
+            mode=mode,
+            axis=axis
+        )
 
 
 class Dataset():
     """
-    This class manages at least one instance of DataQyQxz as a dataset.
+    A container class for a set of DataQdyQdx instances that make up a
+    single CD-SAXS measurement for a sample.
 
     Attributes
     ----------
-    data_folder : absolute filepath to data directory
-    name : default is data_folder but can be user-specified
-    datas : dictionary of filename keys leading to DataQyQxz objects,
-        one for each scattering file
+    datas : dict
+        Dictionary containing the DataQdyQdx objects. The key for each
+        instance is DataQdyQdx.name. Be cautious if the name attribute
+        was kept as default (filename) as it may result in non-unique
+        keys. If you are pulling all data from the same data directory,
+        however, this will not be a problem.
+    name : str
+        Custom name of the dataset.
+    sample : Sample
+        Instance of the Sample class that details the sample measured
+        when collecting the dataset. Information such as sample
+        thickness and attenuation coefficients should be added here to
+        enable the relevant data corrections.
+
+    Optional Attributes
+    -------------------
+    integrated_datasets : list
+        List of dictionaries containing integrated data. For each
+        ditionary (dataset), the keys align with the datas.keys() and
+        the values are instances of IntegratedDataSlices. These
+        dictionaries are produced by the cdsaxs integrators.
+
     """
 
     def __init__(
-        self,
-        data_folder: str,
-        name: str = None
+            self,
+            datas: list[DataQdyQdx] = None,
+            name: str = None,
+            sample: str = None
     ):
-        self.data_folder = os.path.abspath(data_folder)
-
-        if name is not None:
-            self.name = name
+        if datas:
+            self.add_data(datas)
         else:
-            self.name = self.data_folder
+            self.datas = {}
 
-        self.datas = {}
+        self.name = name
+        self.sample = sample
+        self.integrated_datasets = None
 
-    def add_data(self, filename: str, data: DataQyQxz):
-        """Add a single DataQyQxz instance to the dataset."""
-        if filename in self.datas.keys():
+    def add_data(self, datas: DataQdyQdx | list[DataQdyQdx]):
+        """Add one or more DataQdyQdx instances to the dataset."""
+        datas = [datas] if isinstance(datas, DataQdyQdx) else datas
+        for data in datas:
+            if data.name in self.datas.keys():
+                raise ValueError(
+                    "You do not have unique names for DataQdyQdx instances."
+                )
+            else:
+                self.datas[data.name] = data
+
+    def remove_data(self, datas: DataQdyQdx | list[DataQdyQdx]):
+        """Remove one or more DataQdyQdx instances from the dataset."""
+        datas = [datas] if isinstance(datas, DataQdyQdx) else datas
+        for data in datas:
+            try:
+                del self.datas[data.name]
+            except KeyError:
+                warnings.warn(f"Could not delete {data.name} data as it was"
+                              "not part of the dataset.")
+
+    def assign_sample(self, sample: Sample):
+        """
+        Assign the measured sample with an instance of the Sample class.
+        """
+        # TODO: implement required sample checks
+        self.sample = sample
+
+    def update_all_metadata(self, metadata: dict, overwrite: bool = True):
+        """
+        Add or update metadata for all DataQdyQdx stored in this Dataset.
+        Existing metadata parameters can be updated by keeping the
+        overwrite argument to True.
+
+        Parameters
+        ----------
+        metadata : dict
+            Key : value pairs of accepted metadata (key) and their
+            values. See DataQdyQdx class docstring for list of accepted
+            keywords.
+        overwrite : bool
+            If set to True, any metadata provided to this method will
+            overwrite the existing value in the instance if it already
+            exists in self.metadata.
+            Default value is True.
+        """
+
+        for data in self.datas.values():
+            data.update_metadata(metadata=metadata, overwrite=overwrite)
+
+    def update_user_params_for_all(self, params: dict, overwrite: bool = True):
+        """
+        Add key: value pairs to the user params for all DataQdyQdx.
+        Existing parameters can be updated by keeping the overwrite
+        argument as True.
+
+        Parameters
+        ----------
+        params : dict
+            Key : value pairs of user-specified parameters for this
+            data instance.
+        overwrite : bool
+            If set to True, any parameters provided to this method will
+            overwrite the existing value in this instance if it already
+            exists in self.uer_params.
+            Default value is True.
+        """
+
+        for data in self.datas.values():
+            data.update_user_params(params=params, overwrite=overwrite)
+
+
+class Data1D():
+    """
+    Simple one-dimensional spectra of scattering intensity vs. q.
+
+    Attributes
+    ----------
+    q : scattering vector
+    I : scattering intensity
+    q_axis : Defines q as one of the accepted axes listed below.
+    dI : uncertainity along I, default is None
+    dq : uncertainty along q, optional, default is None
+
+    Accepted Axes
+    -------------
+    qdy : Scattering vector component along y axis of detector frame.
+    qdx : Scattering vector component along x axis of detector frame.
+    qd  : Scattering vector in the detector frame.
+    qsy : Scattering vector component along y axis of sample frame.
+    qsx : Scattering vector component along x axis of sample frame.
+    qsz : Scattering vector component along z axis of sample frame.
+    qs  : Scattering vector in the sample frame.
+    """
+
+    def __init__(self, q: NDArray, I: NDArray, q_axis: NDArray,
+                 dI: NDArray = None, dq: NDArray = None):
+        self.q = q
+        self.I = I
+        if q_axis not in ACCEPTED_Q_AXES:
             raise ValueError(
-                f"Data for {filename} is already part of this dataset")
-        self.datas[filename] = data
+                f"{q_axis} is not an accepted q axis. Please select from: "
+                f"{ACCEPTED_Q_AXES}"
+            )
+        else:
+            self.q_axis = q_axis
 
-    def remove_data(self, filename):
-        """Removes a single DataQyQxz instance from the dataset."""
-        try:
-            del self.datas[filename]
-        except KeyError:
-            warnings.warn(f"Could not delete {filename} data as it was not "
-                          "part of the dataset.")
+        self.dI = dI
+        self.dq = dq
+
+
+class IntegratedQSlice(Data1D):
+    """
+    Child class of DataSlice that includes information about the
+    integration performed to create the slice.
+
+    Attributes
+    ----------
+    name : Unique name associated to the data image integrated.
+    limits_axis0 : Indexing limits in the first dimension, [min, max).
+    limits_axis1 : Indexing limits in the second dimension, [min, max).
+    mode : Integration mode of either 'sum' or 'mean'
+    integration_axis : Axis over which integration was performed, either 0 or 1.
+    """
+
+    def __init__(self, q: NDArray, I: NDArray, q_axis: NDArray,
+                 name: str, limits_axis0: tuple[int, int],
+                 limits_axis1: tuple[int, int], mode: str,
+                 integration_axis: int, dI: NDArray = None,
+                 dq: NDArray = None):
+
+        # Base class init
+        super().init(q=q, I=I, q_axis=q_axis, dI=dI, dq=dq)
+
+        self.name = name
+        self.limits_axis0 = limits_axis0
+        self.limits_axis1 = limits_axis1
+        self.mode = mode
+        self.integration_axis = integration_axis
