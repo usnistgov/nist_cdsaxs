@@ -38,4 +38,3 @@ def correct_dtype(name, value):
         raise KeyError(
             f"No data type known for {name}."
         )
-    

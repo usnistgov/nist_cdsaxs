@@ -11,6 +11,8 @@ SAMPLE_METADATA_KEYWORDS = [
 ]
 
 # TODO: create special commonly used samples, such as AgBeh or empty
+
+
 class Sample():
     """
     Simple class to manage metadata specific to the sample material,
@@ -42,11 +44,11 @@ class Sample():
             sample_metadata: dict,
             user_params: dict = None
     ):
-        
+
         self._check_metadata(sample_metadata)
         self.sample_metadata = sample_metadata
 
-        self.user_params = user_params if user_params is not None else {} 
+        self.user_params = user_params if user_params is not None else {}
 
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
@@ -85,7 +87,7 @@ class Sample():
             self.metadata = {
                 key: value for key, value in self.metadata
                 if key not in metadata_keys
-                }       
+                }
 
     def _check_metadata(self, metadata):
         """
@@ -104,7 +106,7 @@ class Sample():
             )
 
         return True
-    
+
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
         Add key: value pairs to the user params of this class instance.
@@ -136,7 +138,7 @@ class Sample():
         Parameters
         ----------
         param_keys : list
-            List of parameters to remove from user_params of this class 
+            List of parameters to remove from user_params of this class
             instance.
         """
         self.user_params = {

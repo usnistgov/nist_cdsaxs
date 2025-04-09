@@ -720,8 +720,6 @@ class DataQdyQdx(Data2D):
         return fig
 
 
-
-
 class Dataset():
     """
     A container class for a set of DataQdyQdx instances that make up a
@@ -864,6 +862,7 @@ class Dataset():
             figs.append(self.datas[key].plot_data())
 
         return figs
+
 
 class Data1D():
     """
