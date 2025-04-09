@@ -7,13 +7,15 @@ dataset.
 
 from __future__ import annotations
 import os
+import warnings
 
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
-from cdsaxs.data import METADATA_KEYWORDS, DataQyQxz, Dataset
+from cdsaxs.data import DataQdyQdx, Dataset
+from cdsaxs.metadata import correct_dtype, METADATA_KEYWORDS
 
 
 class TiffTools():
@@ -26,13 +28,13 @@ class TiffTools():
         self.filepath = filepath
         try:
             image = Image.open(filepath)
-            self.image = np.array(image).astype(float)
+            self.image = np.array(image).astype(np.float32)
 
             header = {TAGS[key]: image.tag[key] for key in image.tag_v2
                       if key in TAGS.keys()}
             self.header = header
         except:
-            image = tifffile.imread(filepath).astype(float)
+            image = tifffile.imread(filepath).astype(np.float32)
             self.image = image
 
             with tifffile.TiffFile(filepath) as tif:
@@ -55,7 +57,7 @@ class TiffTools():
             raise ValueError("Count not extract count time from file.")
 
 
-class GeneralTIFFLoader():
+def GeneralTIFFLoader(filepath_csv, name=None):
     """
     General TIFF loader. Any scattering metadata or user-defined
     parameters should be passed as a csv file where the first row is
@@ -70,66 +72,62 @@ class GeneralTIFFLoader():
     notebooks. These additional parmaeters will get passed
     to data.DataQyQxz.params.
 
-    Required Metadata Parameters
-    ----------------------------
-    filename : tiff filename (not a file path)
-    sample_phi_deg : sample rotation angle about positive y-axis, degrees
-    *One of the following:*
-        energy_ev : source energy, eV
-        wavelength_nm : source wavelength, nm
-    exposure_time_s : exposture time of image, s
+    List of accepted CSV column headers:
+        Required
+        --------
+        filename
+        sample_phi_deg : sample rotation angle during cd-saxs measurement in degrees
+        energy_ev : source energy in eV (cannot be used with wavelength_nm)
+        wavelength_nm : source wavelength in nm (cannot be used with energy_ev)
+        exposure_time_s : exposture time in s
 
-    Optional Metadata Parameters
-    ----------------------------
-    scaling_factor : data scaling factor, defaults to 1
-    detector_theta
-    detector_x
-    sdd_cm : sample to detector distance in cm
-    sample_chi_deg : rotation about the z-axis (beam direction)
-    div_photodiode
-    center_px : [xz, y] beam center pixel location in xz and y
+        Optional
+        --------
+        sample_label : user-specified sample label
+        sdd_cm : sample-to-detector distance in cm
+        sample_chi_deg : rotation in the sample xy plane about the z axis
     """
 
-    def __init__(self, filepath_csv, name=None):
+    # load the csv metadata file
+    csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
+    header = csv_data[0, :]
+    csv_data = csv_data[1:, :]
 
-        # load the csv metadata file
-        csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
-        header = csv_data[0, :]
-        csv_data = csv_data[1:, :]
+    # extract data directory
+    folder, _ = os.path.split(filepath_csv)
+    print('Made dataset from ' + folder)
 
-        # extract data directory
-        folder, _ = os.path.split(filepath_csv)
-        print('Made dataset from ' + self.folder)
+    dataset = Dataset(name=name)
 
-        dataset = Dataset(self.folder, name=name)
+    for i, row in enumerate(csv_data):
+        metadata = {}
+        params = {}
+        for ii, value in enumerate(row):
+            if header[ii] in METADATA_KEYWORDS:
+                metadata[str(header[ii])] = correct_dtype(header[ii], value)
+            else:
+                params[str(header[ii])] = value
+        metadata["data_directory"] = folder
+        tiff = TiffTools(os.path.join(folder, metadata["filename"]))
+        try:
+            metadata["count_time_s"] = tiff.extract_count_time()
+        except:
+            pass
 
-        for i, row in enumerate(csv_data):
-            metadata = {}
-            params = {}
-            for value in row:
-                if header[i] in METADATA_KEYWORDS and header[i] != 'filename':
-                    metadata[header[i]] = value
-                elif header[i] == 'filename':
-                    filename = value
-                else:
-                    params[header[i]] = value
-            image = TiffTools(os.path.join(folder, filename)).image
+        image = tiff.image
 
-            if 'center_px' not in metadata.keys():
-                # default center pixel at bottom right of image
-                metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
+        if 'center_px' not in metadata.keys():
+            # default center pixel at bottom right of image
+            metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
 
-            if 'pixel_size_um' not in metadata.keys():
-                # default pixel size
-                metadata['pixel_size_um'] = 172
+        if 'pixel_size_um' not in metadata.keys():
+            # default pixel size
+            metadata['pixel_size_um'] = 172
+            warnings.warn(
+                f"Using default pixel size of {metadata['pixel_size_um']}")
 
-            qxz_px = -1*np.arange(0, image.shape[1]) + metadata['center_px'][1]
-            qy_px = -1*np.arange(0, image.shape[0]) + metadata['center_px'][0]
+        data = DataQdyQdx(image, metadata=metadata, user_params=params)
 
-            # TODO: URGENT - fix this once we have diffraction function!
-            qxzs = np.copy(qxz_px).astype(float)
-            qys = np.copy(qy_px).astype(float)
+        dataset.add_data(data)
 
-            data = DataQyQxz(image, qys, qxzs, metadata, params=params)
-
-            dataset.add_data(filename, data)
+    return dataset

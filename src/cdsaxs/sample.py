@@ -1,6 +1,6 @@
 """
 Simple Sample class that holds information about the sample material."
-""""
+"""
 
 SAMPLE_METADATA_KEYWORDS = [
     'sample_size_mm',

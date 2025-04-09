@@ -15,18 +15,18 @@ from __future__ import annotations
 
 import warnings
 
+import matplotlib.pyplot as plt
+import matplotlib.colors as mpl_colors
 import numpy as np
 from numpy.typing import NDArray
+from scipy.signal import find_peaks
+from scipy.stats import linregress
 
 import cdsaxs.calculators as calculators
+from cdsaxs.metadata import METADATA_KEYWORDS
 from cdsaxs.sample import Sample
-
-METADATA_KEYWORDS = [
-    "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
-    "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
-    "scaling_factor", "I0", "beam_current", "center_px", "data_directory",
-    "filename"
-]
+from cdsaxs_gui_legacy import diffraction
+import cdsaxs._plotting_tools as plotting_tools
 
 UPDATE_Q_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
@@ -257,7 +257,8 @@ class DataQdyQdx(Data2D):
         Identifier for this image acquisition. The default when using
         the cdsaxs loaders is the filename, but be cautious when
         creating a Dataset as the filenames alone may not always result
-        in unique identifiers for each image.
+        in unique identifiers for each image. A custom name can be set
+        by passing 'name' metadata.
 
     Metadata Keywords
     -----------------
@@ -281,6 +282,7 @@ class DataQdyQdx(Data2D):
 
     data_directory
     filename
+    name
 
     """
 
@@ -310,7 +312,9 @@ class DataQdyQdx(Data2D):
         # calculate the q vectors if all required metadata is present
         self.calculate_q(suppress_errors=True)
 
-        self.name = name if name is not None else 'name'
+        self.name = name if name is not None else\
+            metadata['name'] if 'name' in metadata.keys() else\
+            metadata['filename'] if 'filename' in metadata.keys() else 'name'
 
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
@@ -358,7 +362,33 @@ class DataQdyQdx(Data2D):
             will not raise an error if the parameters are not available.
             Default value is False.
         """
-        # TODO: implement this with the diffraction equations
+        required_keywords = ["center_px", "sdd_cm", "wavelength_nm",
+                             "pixel_size_um"]
+        missing_keywords = []
+        for word in required_keywords:
+            if word not in self.metadata.keys():
+                missing_keywords.append(word)
+        if len(missing_keywords) > 0 and not suppress_errors:
+            raise ValueError(
+                "The following metadta is missing to calculate q: "
+                f"{missing_keywords}"
+            )
+
+        # TODO: update this when diffraction.py is refactored
+        qdy = diffraction.qy_pixels_to_qy(
+            -1*np.arange(0, self.image.shape[0]) + self.metadata['center_px'][0],
+            self.metadata["wavelength_nm"],
+            self.metadata["pixel_size_um"],
+            self.metadata["sdd_cm"],
+        )
+        qdx = diffraction.qxz_pixels_to_qxz(
+            -1*np.arange(0, self.image.shape[1]) + self.metadata['center_px'][1],
+            self.metadata["wavelength_nm"],
+            self.metadata["pixel_size_um"],
+            self.metadata["sdd_cm"],
+        )
+        self.qdy = qdy
+        self.qdx = qdx
 
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
@@ -590,6 +620,107 @@ class DataQdyQdx(Data2D):
             axis=axis
         )
 
+    def find_peaks1D(self, box_mode, box_params: dict, peak_params: dict):
+        """
+        Simple peak finding function in 1D to determine appropriate
+        rotation angle of the sample coordinate system in the x-y
+        detector plane.
+
+        The box used to search for peaks is defined in the same way as
+        the integrator methods. This method assumes that there is only
+        a one-dimensional line of peaks along the axis not defined as
+        the integration axis in box_params.
+
+        Parameters
+        ----------
+        box_mode : str
+            Type of integration box to use. Options are:
+                'box' : indcates use of DataQdyQdx.integrate_box
+                'box_size' : indicates use of DataQdyQdx.integrate_box_of_size
+                'q_range' : indicates use of DataQdyQdx.integrate_box_of_q_range
+        box_params : dict
+            Dictionary of keyword arguments for the selected integration
+            method (box_mode).
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+
+        Returns
+        -------
+        list[tuple]
+            List of peak positions in (qdy, qdx) coordinates.
+        float
+            Angle of rotation of best line fit to the peaks counterclockwise
+            from the qdx axis.
+        tuple[float, float]
+            Results from linear fit to the peaks of (slope, intercept).
+        """
+
+        if box_mode == 'box':
+            integrated_q_slice = self.integrate_box(**box_params)
+        elif box_mode == 'box_size':
+            integrated_q_slice = self.integrate_box_of_size(**box_params)
+        elif box_mode == 'q_range':
+            integrated_q_slice = self.integrate_box_of_q_range(**box_params)
+        else:
+            raise ValueError(
+                f"The box_mode {box_mode} is not recognized."
+            )
+
+        peaks, params = find_peaks(**peak_params)
+
+        min0, max0 = integrated_q_slice.limits_axis0
+        min1, max1 = integrated_q_slice.limits_axis1
+        box_image = self.image[min0:max0, min1:max1]
+
+        if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
+            peaks_other = np.argmax(box_image[:, peaks], axis=0)
+            peak_coords = [(y, x) for y, x in zip(peaks_other, peaks)]
+        else:
+            peaks_other = np.argmax(box_image[peaks, :], axis=1)
+            peak_coords = [(y, x) for y, x in zip(peaks, peaks_other)]
+
+        peak_coords_array = np.array(peak_coords)
+        fit = linregress(peak_coords_array[:, 1], peak_coords_array[:, 0])
+        angle = np.arctan(fit.slope)
+
+        return peak_coords, angle, (fit.slope, fit.intercept)
+
+    def plot_data(self):
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+
+        plot_image = np.copy(self.image)
+        vmin = np.min(plot_image[plot_image > 0])
+        vmax = np.max(plot_image)
+        plot_image[plot_image == 0] = vmin/10
+
+        mappable = ax.imshow(plot_image,
+                             norm=mpl_colors.LogNorm(vmin=vmin, vmax=vmax))
+        plt.colorbar(mappable, ax=ax, label="Intensity")
+
+        label0 = r'q$_{d,y}$' if self.qdy is not None else r'px_${d,y}'
+        units0 = r'$(\AA^{-1})$' if self.qdy is not None else r'()'
+        ax.set_ylabel(label0 + " " + units0)
+        if self.qdy is not None:
+            ticks, labels = plotting_tools.create_even_q_ticks(self.qdy)
+            ax.set_yticks(ticks, labels)
+
+        label1 = r'q$_{d,x}$' if self.qdx is not None else r'px_${d,x}'
+        units1 = r'$(\AA^{-1})$' if self.qdx is not None else r'()'
+        ax.set_xlabel(label1 + " " + units1)
+        if self.qdx is not None:
+            ticks, labels = plotting_tools.create_even_q_ticks(self.qdx)
+            ax.set_xticks(ticks, labels)
+
+        plt.title(self.name)
+
+        # plt.show()
+        plt.close()
+        return fig
+
+
+
 
 class Dataset():
     """
@@ -708,6 +839,31 @@ class Dataset():
         for data in self.datas.values():
             data.update_user_params(params=params, overwrite=overwrite)
 
+    def plot_datas(self, keys='ALL'):
+        """
+        Plot one or more DataQdyQdx in the dataset.
+
+        Parameters
+        ----------
+        keys : list | str
+            If set to 'ALL', a list of all figures for all datas will
+            be returned. Otherwise, it can be a single data key or
+            a list of data keys to plot.
+        """
+
+        figs = []
+
+        if keys == 'ALL':
+            keys = list(self.datas.keys())
+        elif isinstance(keys, str):
+            keys = [keys]
+        else:
+            pass
+
+        for key in keys:
+            figs.append(self.datas[key].plot_data())
+
+        return figs
 
 class Data1D():
     """
