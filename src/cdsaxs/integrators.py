@@ -38,9 +38,9 @@ def integrate_dataset(
             integrated_datas[key] = integrated_q_slice
 
     if in_place:
-        dataset.integrated_datasets = [integrated_datas] if not hasattr(
-            dataset, "integrated_datasets"
-        ) else dataset.integrated_datasets.append(integrated_datas)
+        dataset.integrated_datasets = [integrated_datas]\
+            if dataset.integrated_datasets is None\
+            else dataset.integrated_datasets.append(integrated_datas)
     else:
         return integrated_datas
 
@@ -75,9 +75,9 @@ def integrate_dataset_box_of_size(
             integrated_datas[key] = integrated_q_slice
 
     if in_place:
-        dataset.integrated_datasets = [integrated_datas] if not hasattr(
-            dataset, "integrated_datasets"
-        ) else dataset.integrated_datasets.append(integrated_datas)
+        dataset.integrated_datasets = [integrated_datas]\
+            if dataset.integrated_datasets is None\
+            else dataset.integrated_datasets.append(integrated_datas)
     else:
         return integrated_datas
 
@@ -108,8 +108,8 @@ def integrate_dataset_box_of_q_range(
             integrated_datas[key] = integrated_q_slice
 
     if in_place:
-        dataset.integrated_datasets = [integrated_datas] if not hasattr(
-            dataset, "integrated_datasets"
-        ) else dataset.integrated_datasets.append(integrated_datas)
+        dataset.integrated_datasets = [integrated_datas]\
+            if dataset.integrated_datasets is None\
+            else dataset.integrated_datasets.append(integrated_datas)
     else:
         return integrated_datas
