@@ -52,3 +52,30 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
                 ticks_interp.append(np.interp(val, q, ticks_index))
 
         return ticks_interp, ticks_q
+
+
+def generate_axis_label_units(q_axis):
+    """
+    Generate formatted axis label with units based on the axis string.
+    This only does anything with q axes currently; everythign else it
+    just returns back to you.
+
+    """
+
+    if q_axis[0] == 'q':
+    
+        units = r" $(\AA^{-1})$"
+
+        subscript = r"$_{" + q_axis[1]
+        if len(q_axis) > 2:
+            for var in q_axis[2:]:
+                subscript += f",{var}"
+        subscript += r"}$"
+
+        label = r"q" + subscript
+
+        return label + units
+    
+    else:
+        return q_axis
+

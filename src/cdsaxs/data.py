@@ -23,7 +23,9 @@ from scipy.signal import find_peaks
 from scipy.stats import linregress
 
 import cdsaxs.calculators as calculators
+from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS
+import cdsaxs.plotting as plotting
 from cdsaxs.sample import Sample
 from cdsaxs_gui_legacy import diffraction
 import cdsaxs._plotting_tools as plotting_tools
@@ -31,10 +33,6 @@ import cdsaxs._plotting_tools as plotting_tools
 UPDATE_Q_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
     "detector_phi_deg", "detector_phi_omega"
-]
-
-ACCEPTED_Q_AXES = [
-    "qdy", "qdx", "qd", "qsy", "qsx", "qsz", "qs"
 ]
 
 
@@ -163,54 +161,6 @@ class Data2D():
                 'limits_axis0': limits_axis0,
                 'limits_axis1': limits_axis1
             }
-
-    def integrate_box_of_size(
-            self,
-            size0,
-            size1,
-            center_px,
-            mode,
-            axis,
-            offset0=0,
-            offset1=0,
-            trim=False
-    ):
-        """
-        Integrate a box defined by its size and offset from a defined
-        centerpoint.
-
-        trim : bool
-        If trim is set to True, only the box that overlays the image
-        will be returned. If set to False, the areas that fall off the
-        image will be filled with NAN.
-
-        """
-        min0 = center_px[0] - int(size0/2) - offset0
-        max0 = min0 + size0
-
-        min1 = center_px[1] - int(size1/2) - offset1
-        max1 = min1 + size1
-
-        min0_im = max(min0, 0)
-        min1_im = max(min1, 0)
-        max0_im = min(max0, self.image.shape[0]-1)
-        max1_im = min(max1, self.image.shape[1]-1)
-
-        integrated_i_im = self.integrate_box(
-                         limits_axis0=(min0_im, min0_im),
-                         limits_axis1=(min1_im, max1_im),
-                         mode=mode, axis=axis
-                     )
-        if trim:
-            return integrated_i_im
-        else:
-            integrated_i = np.empty(size0 if axis == 1 else size1)
-            integrated_i[:] = np.nan
-            if axis == 0:
-                integrated_i[min1_im-min1:max1_im-min1] = integrated_i_im[0]
-            else:
-                integrated_i[min0_im-min0:max0_im-min0] = integrated_i_im[0]
-            return integrated_i.reshape(-1), integrated_i_im[1]  # params
 
 
 class DataQdyQdx(Data2D):
@@ -515,8 +465,8 @@ class DataQdyQdx(Data2D):
 
     def integrate_box(
             self,
-            limits_axis0,
-            limits_axis1,
+            limits_qdy_px,
+            limits_qdx_px,
             mode,
             axis,
     ):
@@ -526,14 +476,14 @@ class DataQdyQdx(Data2D):
             Define the axis to integrate over, either qdy or qdx.
         """
         integrated_i, params = super().integrate_box(
-            limits_axis0=limits_axis0,
-            limits_axis1=limits_axis1,
+            limits_axis0=limits_qdy_px,
+            limits_axis1=limits_qdx_px,
             mode=mode,
             axis=0 if axis == 'qdy' else 1
         )
-        q = self.qdx[params["limits_axis1"][0]:params["limits_axis1"][1]]\
+        q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]\
             if axis == 'qdy'\
-            else self.qdy[params["limits_axis0"][0]:params["limits_axis0"][1]]
+            else self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
 
         integrated_q_slice = IntegratedQSlice(
             q=q,
@@ -557,6 +507,43 @@ class DataQdyQdx(Data2D):
             offset_qdy_px=0,
             offset_qdx_px=0,
     ):
+        # ""
+        # Integrate a box defined by its size and offset from a defined
+        # centerpoint.
+
+        # trim : bool
+        # If trim is set to True, only the box that overlays the image
+        # will be returned. If set to False, the areas that fall off the
+        # image will be filled with NAN.
+
+        # """
+        # min0 = center_px[0] - int(size0/2) - offset0
+        # max0 = min0 + size0
+
+        # min1 = center_px[1] - int(size1/2) - offset1
+        # max1 = min1 + size1
+
+        # min0_im = max(min0, 0)
+        # min1_im = max(min1, 0)
+        # max0_im = min(max0, self.image.shape[0]-1)
+        # max1_im = min(max1, self.image.shape[1]-1)
+
+        # integrated_i_im = self.integrate_box(
+        #                  limits_axis0=(min0_im, min0_im),
+        #                  limits_axis1=(min1_im, max1_im),
+        #                  mode=mode, axis=axis
+        #              )
+        # if trim:
+        #     return integrated_i_im
+        # else:
+        #     integrated_i = np.empty(size0 if axis == 1 else size1)
+        #     integrated_i[:] = np.nan
+        #     if axis == 0:
+        #         integrated_i[min1_im-min1:max1_im-min1] = integrated_i_im[0]
+        #     else:
+        #         integrated_i[min0_im-min0:max0_im-min0] = integrated_i_im[0]
+        #     return integrated_i.reshape(-1), integrated_i_im[1]  # params
+        
         """
         Integrate a box defined by its size and offset from a the
         defined beam center.
@@ -565,31 +552,26 @@ class DataQdyQdx(Data2D):
             Define the axis to integrate over, either qdy or qdx.
 
         """
-        integrated_i, params = super().integrate_box_of_size(
-            size0=size_qdy_px,
-            size1=size_qdx_px,
-            center_px=self.metadata['center_px'],
-            mode=mode,
-            axis=0 if axis == 'qdy' else 1,
-            offset0=offset_qdy_px,
-            offset1=offset_qdx_px,
-            trim=True
-        )
 
-        q = self.dqx[
-                params["limits_axis1"][0]:params["limits_axis1"][1]]\
-            if axis == 'qdy' else self.dqy[
-                params["limits_axis0"][0]:params["limits_axis0"][1]]
+        # figure out where the box lies with respect to beam center
+        center0, center1 = self.metadata['center_px']
+        min0 = center0 - int(size_qdy_px/2) - offset_qdy_px
+        max0 = min0 + size_qdy_px
+        min1 = center1 - int(size_qdx_px/2) - offset_qdx_px
+        max1 = min1 + size_qdx_px
 
-        integrated_q_slice = IntegratedQSlice(
-            q=q,
-            I=integrated_i,
-            q_axis='qdx' if axis == 'qdy' else 'qdy',
-            name=self.name,
-            limits_axis0=params["limits_axis0"],
-            limits_axis1=params["limits_axis1"],
+        # make sure the box isn't falling off the image
+        min0 = max(min0, 0)
+        min1 = max(min1, 0)
+        max0 = min(max0, self.image.shape[0]-1)
+        max1 = min(max1, self.image.shape[1]-1)
+
+        # integrate the box area of image
+        integrated_q_slice = self.integrate_box(
+            limits_qdy_px=[min0, max0],
+            limits_qdx_px=[min1, max1],
             mode=mode,
-            integration_axis=params["axis"]
+            axis=axis
         )
 
         return integrated_q_slice
@@ -605,6 +587,10 @@ class DataQdyQdx(Data2D):
         Integrate using q ranges along both axes (half open).
         """
 
+        # fix the min, max order if the user provided them reversed
+        range_qdy = [min(range_qdy), max(range_qdy)]
+        range_qdx = [min(range_qdx), max(range_qdx)]
+
         qdy_indices = np.where((self.qdy >= range_qdy[0])
                                & (self.qdy < range_qdy[1]))[0]
         limits_axis0 = (np.min(qdy_indices), np.max(qdy_indices)+1)
@@ -613,12 +599,14 @@ class DataQdyQdx(Data2D):
                                & (self.qdx < range_qdx[1]))[0]
         limits_axis1 = (np.min(qdx_indices), np.max(qdx_indices)+1)
 
-        return self.integrate_box(
-            limits_axis0,
+        integrated_q_slice = self.integrate_box(
+            limits_axis0,s
             limits_axis1,
             mode=mode,
             axis=axis
         )
+
+        return integrated_q_slice
 
     def find_peaks1D(self, box_mode, box_params: dict, peak_params: dict):
         """
@@ -686,37 +674,26 @@ class DataQdyQdx(Data2D):
 
         return peak_coords, angle, (fit.slope, fit.intercept)
 
-    def plot_data(self):
-        fig = plt.figure()
-        ax = fig.add_subplot(1, 1, 1)
+    def plot_data(self, show_pixels=False):
 
-        plot_image = np.copy(self.image)
-        vmin = np.min(plot_image[plot_image > 0])
-        vmax = np.max(plot_image)
-        plot_image[plot_image == 0] = vmin/10
+        if show_pixels or self.qdy is None:
+            axis0 = None
+            axis1 = None
+            axis0_type = 'px_dy'
+            axis1_type = 'px_dx'
+        else:
+            axis0 = self.qdy
+            axis1 = self.qdx
+            axis0_type = 'qdy'
+            axis1_type = 'qdx'
 
-        mappable = ax.imshow(plot_image,
-                             norm=mpl_colors.LogNorm(vmin=vmin, vmax=vmax))
-        plt.colorbar(mappable, ax=ax, label="Intensity")
+        fig = plotting.plot2D(
+            self.image,
+            axis0=axis0, axis1=axis1,
+            axis0_type=axis0_type, axis1_type=axis1_type,
+            title=self.name
+        )
 
-        label0 = r'q$_{d,y}$' if self.qdy is not None else r'px_${d,y}'
-        units0 = r'$(\AA^{-1})$' if self.qdy is not None else r'()'
-        ax.set_ylabel(label0 + " " + units0)
-        if self.qdy is not None:
-            ticks, labels = plotting_tools.create_even_q_ticks(self.qdy)
-            ax.set_yticks(ticks, labels)
-
-        label1 = r'q$_{d,x}$' if self.qdx is not None else r'px_${d,x}'
-        units1 = r'$(\AA^{-1})$' if self.qdx is not None else r'()'
-        ax.set_xlabel(label1 + " " + units1)
-        if self.qdx is not None:
-            ticks, labels = plotting_tools.create_even_q_ticks(self.qdx)
-            ax.set_xticks(ticks, labels)
-
-        plt.title(self.name)
-
-        # plt.show()
-        plt.close()
         return fig
 
 
@@ -863,71 +840,3 @@ class Dataset():
 
         return figs
 
-
-class Data1D():
-    """
-    Simple one-dimensional spectra of scattering intensity vs. q.
-
-    Attributes
-    ----------
-    q : scattering vector
-    I : scattering intensity
-    q_axis : Defines q as one of the accepted axes listed below.
-    dI : uncertainity along I, default is None
-    dq : uncertainty along q, optional, default is None
-
-    Accepted Axes
-    -------------
-    qdy : Scattering vector component along y axis of detector frame.
-    qdx : Scattering vector component along x axis of detector frame.
-    qd  : Scattering vector in the detector frame.
-    qsy : Scattering vector component along y axis of sample frame.
-    qsx : Scattering vector component along x axis of sample frame.
-    qsz : Scattering vector component along z axis of sample frame.
-    qs  : Scattering vector in the sample frame.
-    """
-
-    def __init__(self, q: NDArray, I: NDArray, q_axis: NDArray,
-                 dI: NDArray = None, dq: NDArray = None):
-        self.q = q
-        self.I = I
-        if q_axis not in ACCEPTED_Q_AXES:
-            raise ValueError(
-                f"{q_axis} is not an accepted q axis. Please select from: "
-                f"{ACCEPTED_Q_AXES}"
-            )
-        else:
-            self.q_axis = q_axis
-
-        self.dI = dI
-        self.dq = dq
-
-
-class IntegratedQSlice(Data1D):
-    """
-    Child class of DataSlice that includes information about the
-    integration performed to create the slice.
-
-    Attributes
-    ----------
-    name : Unique name associated to the data image integrated.
-    limits_axis0 : Indexing limits in the first dimension, [min, max).
-    limits_axis1 : Indexing limits in the second dimension, [min, max).
-    mode : Integration mode of either 'sum' or 'mean'
-    integration_axis : Axis over which integration was performed, either 0 or 1.
-    """
-
-    def __init__(self, q: NDArray, I: NDArray, q_axis: NDArray,
-                 name: str, limits_axis0: tuple[int, int],
-                 limits_axis1: tuple[int, int], mode: str,
-                 integration_axis: int, dI: NDArray = None,
-                 dq: NDArray = None):
-
-        # Base class init
-        super().__init__(q=q, I=I, q_axis=q_axis, dI=dI, dq=dq)
-
-        self.name = name
-        self.limits_axis0 = limits_axis0
-        self.limits_axis1 = limits_axis1
-        self.mode = mode
-        self.integration_axis = integration_axis
