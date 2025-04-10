@@ -7,8 +7,8 @@ from cdsaxs.data import Dataset
 
 def integrate_dataset(
         dataset: Dataset,
-        limits_qdy,
-        limits_qdx,
+        limits_qdy_px,
+        limits_qdx_px,
         mode,
         axis,
         in_place: bool = True,
@@ -24,8 +24,8 @@ def integrate_dataset(
     integrated_datas = {}
     for key, data in dataset.datas.items():
         integrated_q_slice = data.integrate_box(
-            limits_qdy=limits_qdy,
-            limits_qdx=limits_qdx,
+            limits_qdy=limits_qdy_px,
+            limits_qdx=limits_qdx_px,
             mode=mode,
             axis=axis,
         )
@@ -47,23 +47,23 @@ def integrate_dataset(
 
 def integrate_dataset_box_of_size(
         dataset: Dataset,
-        size_qdy,
-        size_qdx,
+        size_qdy_px,
+        size_qdx_px,
         mode,
         axis,
-        offset_qdy=0,
-        offset_qdx=0,
+        offset_qdy_px=0,
+        offset_qdx_px=0,
         in_place=True
 ):
     integrated_datas = {}
     for key, data in dataset.datas.items():
         integrated_q_slice = data.integrate_box_of_size(
-            size_qdy=size_qdy,
-            size_qdx=size_qdx,
+            size_qdy_px=size_qdy_px,
+            size_qdx_px=size_qdx_px,
             mode=mode,
             axis=axis,
-            offset_qdy=offset_qdy,
-            offset_qdx=offset_qdx,
+            offset_qdy=offset_qdy_px,
+            offset_qdx=offset_qdx_px,
         )
 
         if key != integrated_q_slice.name:

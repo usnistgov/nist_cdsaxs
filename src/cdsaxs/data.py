@@ -924,7 +924,7 @@ class IntegratedQSlice(Data1D):
                  dq: NDArray = None):
 
         # Base class init
-        super().init(q=q, I=I, q_axis=q_axis, dI=dI, dq=dq)
+        super().__init__(q=q, I=I, q_axis=q_axis, dI=dI, dq=dq)
 
         self.name = name
         self.limits_axis0 = limits_axis0
