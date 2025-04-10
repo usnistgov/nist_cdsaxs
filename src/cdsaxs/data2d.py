@@ -653,7 +653,7 @@ class DataQdyQdx(Data2D):
                 f"The box_mode {box_mode} is not recognized."
             )
 
-        peaks, params = find_peaks(**peak_params)
+        peaks, params = find_peaks(integrated_q_slice.I, **peak_params)
 
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
