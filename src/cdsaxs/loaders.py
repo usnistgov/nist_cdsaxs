@@ -110,7 +110,7 @@ def GeneralTIFFLoader(filepath_csv, name=None):
         metadata["data_directory"] = folder
         tiff = TiffTools(os.path.join(folder, metadata["filename"]))
         try:
-            metadata["count_time_s"] = tiff.extract_count_time()
+            metadata["exposure_time_s"] = tiff.extract_count_time()
         except:
             pass
 
