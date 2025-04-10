@@ -41,16 +41,16 @@ class TiffTools():
                 self.header = {tag.name: tag.value
                                for tag in tif.pages[0].tags}
 
-    def extract_count_time(self):
+    def extract_exposure_time(self):
 
-        "Extract count time in seconds from the TIFF file header."
+        "Extract exposure time in seconds from the TIFF file header."
 
         try:
             key, value, units = [
                 x for x in self.header['ImageDescription'][0].split('#')
                 if 'Exposure_time' in x][0].split()
             if units != 's':
-                raise ValueError("Count time is in wrong units.")
+                raise ValueError("Exposure time is in wrong units.")
             else:
                 return float(value)
         except:
@@ -109,10 +109,11 @@ def GeneralTIFFLoader(filepath_csv, name=None):
                 params[str(header[ii])] = value
         metadata["data_directory"] = folder
         tiff = TiffTools(os.path.join(folder, metadata["filename"]))
-        try:
-            metadata["exposure_time_s"] = tiff.extract_count_time()
-        except:
-            pass
+        if "exposure_time_s" not in metadata.keys():
+            try:
+                metadata["exposure_time_s"] = tiff.extract_exposure_time()
+            except:
+                pass
 
         image = tiff.image
 
