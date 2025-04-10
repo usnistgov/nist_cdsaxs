@@ -497,6 +497,7 @@ class DataQdyQdx(Data2D):
             axis,
             offset_qdy_px=0,
             offset_qdx_px=0,
+            show_plot=True,
     ):
         # ""
         # Integrate a box defined by its size and offset from a defined
@@ -565,7 +566,13 @@ class DataQdyQdx(Data2D):
             axis=axis
         )
 
-        return integrated_q_slice
+        if show_plot:
+            fig = plotting.plot_QdyQdx_integration(
+                self, integrated_q_slice=integrated_q_slice, slice_log=True)
+        else:
+            fig = None
+
+        return integrated_q_slice, fig
 
     def integrate_box_of_q_range(
             self,
