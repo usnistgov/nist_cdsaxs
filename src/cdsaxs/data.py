@@ -515,8 +515,8 @@ class DataQdyQdx(Data2D):
 
     def integrate_box(
             self,
-            limits_qdy,
-            limits_qdx,
+            limits_axis0,
+            limits_axis1,
             mode,
             axis,
     ):
@@ -526,8 +526,8 @@ class DataQdyQdx(Data2D):
             Define the axis to integrate over, either qdy or qdx.
         """
         integrated_i, params = super().integrate_box(
-            limits_axis0=limits_qdy,
-            limits_axis1=limits_qdx,
+            limits_axis0=limits_axis0,
+            limits_axis1=limits_axis1,
             mode=mode,
             axis=0 if axis == 'qdy' else 1
         )
@@ -550,12 +550,12 @@ class DataQdyQdx(Data2D):
 
     def integrate_box_of_size(
             self,
-            size_qdy,
-            size_qdx,
+            size_qdy_px,
+            size_qdx_px,
             mode,
             axis,
-            offset_qdy=0,
-            offset_qdx=0,
+            offset_qdy_px=0,
+            offset_qdx_px=0,
     ):
         """
         Integrate a box defined by its size and offset from a the
@@ -566,13 +566,13 @@ class DataQdyQdx(Data2D):
 
         """
         integrated_i, params = super().integrate_box_of_size(
-            size0=size_qdy,
-            size1=size_qdx,
+            size0=size_qdy_px,
+            size1=size_qdx_px,
             center_px=self.metadata['center_px'],
             mode=mode,
             axis=0 if axis == 'qdy' else 1,
-            offset0=offset_qdy,
-            offset1=offset_qdx,
+            offset0=offset_qdy_px,
+            offset1=offset_qdx_px,
             trim=True
         )
 
@@ -607,15 +607,15 @@ class DataQdyQdx(Data2D):
 
         qdy_indices = np.where((self.qdy >= range_qdy[0])
                                & (self.qdy < range_qdy[1]))[0]
-        limits_qdy = (np.min(qdy_indices), np.max(qdy_indices)+1)
+        limits_axis0 = (np.min(qdy_indices), np.max(qdy_indices)+1)
 
         qdx_indices = np.where((self.qdx >= range_qdx[0])
                                & (self.qdx < range_qdx[1]))[0]
-        limits_qdx = (np.min(qdx_indices), np.max(qdx_indices)+1)
+        limits_axis1 = (np.min(qdx_indices), np.max(qdx_indices)+1)
 
         return self.integrate_box(
-            limits_qdy,
-            limits_qdx,
+            limits_axis0,
+            limits_axis1,
             mode=mode,
             axis=axis
         )
