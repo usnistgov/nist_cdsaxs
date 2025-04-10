@@ -14,7 +14,7 @@ from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
-from cdsaxs.data import DataQdyQdx, Dataset
+from cdsaxs.data2d import DataQdyQdx, Dataset
 from cdsaxs.metadata import correct_dtype, METADATA_KEYWORDS
 
 

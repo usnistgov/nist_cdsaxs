@@ -2,7 +2,7 @@
 Includes integrators for the Dataset class.
 """
 
-from cdsaxs.data import Dataset
+from cdsaxs.data2d import Dataset, DataQdyQdx
 
 
 def integrate_dataset(

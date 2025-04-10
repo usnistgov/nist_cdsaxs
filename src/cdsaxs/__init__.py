@@ -1,3 +1,3 @@
-import cdsaxs.data
+import cdsaxs.data2d
 import cdsaxs.integrators
 import cdsaxs.loaders
