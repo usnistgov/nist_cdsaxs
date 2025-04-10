@@ -591,7 +591,7 @@ class DataQdyQdx(Data2D):
         limits_axis1 = (np.min(qdx_indices), np.max(qdx_indices)+1)
 
         integrated_q_slice = self.integrate_box(
-            limits_axis0,s
+            limits_axis0,
             limits_axis1,
             mode=mode,
             axis=axis

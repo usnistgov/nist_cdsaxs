@@ -2,7 +2,7 @@
 Includes integrators for the Dataset class.
 """
 
-from cdsaxs.data2d import Dataset, DataQdyQdx
+from cdsaxs.dataset import Dataset
 
 
 def integrate_dataset(
@@ -24,8 +24,8 @@ def integrate_dataset(
     integrated_datas = {}
     for key, data in dataset.datas.items():
         integrated_q_slice = data.integrate_box(
-            limits_qdy=limits_qdy_px,
-            limits_qdx=limits_qdx_px,
+            limits_qdy_px=limits_qdy_px,
+            limits_qdx_px=limits_qdx_px,
             mode=mode,
             axis=axis,
         )
