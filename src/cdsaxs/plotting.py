@@ -134,3 +134,85 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
 
     return fig, fig_slice
 
+def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array, log_scale=True):
+
+    fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
+                 axis0_type='qdy', axis1_type='qdx', log_scale=log_scale)
+
+    # box limits, lines get drawn in the middle of pixels so offset
+    # half open range by 0.5 pixels
+    xmin, xmax = integrated_q_slice.limits_axis1
+    xmin -= 0.5
+    xmax -= 0.5
+    ymin, ymax = integrated_q_slice.limits_axis0
+    ymin -= 0.5
+    ymax -= 0.5
+    x = [xmin, xmin, xmax, xmax, xmin]
+    y = [ymin, ymax, ymax, ymin, ymin]
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode='lines', line=dict(color='red')
+    ))
+    fig.add_trace(go.Scatter(
+        x=peak_coords_array[: ,1], y=peak_coords_array[:,0], mode='markers', marker=dict(color='red')
+    ))
+    
+
+    # integrated 1D data
+
+    fig_slice = go.Figure()
+
+    if integrated_q_slice.q_axis == 'qdy':
+        for x in peak_coords_array[:, 0]:
+            fig_slice.add_trace(
+                x=[data.qdx[x], data.qdx[x]],
+                y=[integrated_q_slice.I[data.qdx[x]]-integrated_q_slice.limits_axis1[0], np.nanmax(integrated_q_slice.I)*1.1]
+            )
+    else:
+        for x in peak_coords_array[:, 1]:
+            fig_slice.add_trace(go.Scatter(
+                x=[data.qdx[x], data.qdx[x]],
+                y=[integrated_q_slice.I[x-integrated_q_slice.limits_axis1[0]], np.nanmax(integrated_q_slice.I)*1.1],
+                mode='lines',
+                line={'color': 'red'}
+            ))
+
+    fig_slice.add_trace(go.Scatter(
+        x=integrated_q_slice.q,
+        y=integrated_q_slice.I,
+        mode='lines+markers',
+        marker={'color': 'darkcyan'},
+        error_y=dict(
+            type='data',
+            array=integrated_q_slice.dI,
+            visible=True
+        )
+    ))
+
+    fig_slice.update_xaxes(
+        title=plotting_tools.generate_axis_label_units(
+            integrated_q_slice.q_axis
+        ),
+        ticks='outside'
+    )
+
+    fig_slice.update_yaxes(
+        title='Total Intensity' if integrated_q_slice.mode == 'sum'
+        else 'Average Intensity' if integrated_q_slice.mode == 'mean'
+        else 'Intensity',
+        ticks='outside'
+    )
+
+    fig_slice.update_layout(
+        width=500,
+    )
+
+    if log_scale:
+        fig_slice.update_layout(
+            yaxis_type="log"
+        )
+    else:
+        fig_slice.update_yaxes(
+            {'range': (0, np.nanmax(integrated_q_slice.I)*1.05)}
+        )
+
+    return fig, fig_slice

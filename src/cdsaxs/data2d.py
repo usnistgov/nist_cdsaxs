@@ -626,7 +626,7 @@ class DataQdyQdx(Data2D):
             List of peak positions in (qdy, qdx) coordinates.
         float
             Angle of rotation of best line fit to the peaks counterclockwise
-            from the qdx axis.
+            from the qdx axis. Units are degrees.
         tuple[float, float]
             Results from linear fit to the peaks of (slope, intercept).
         """
@@ -646,21 +646,24 @@ class DataQdyQdx(Data2D):
         elif peak_find_scale == 'log':
             peaks,params = find_peaks(np.log10(integrated_q_slice.I), **peak_params)
 
-
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
         box_image = self.image[min0:max0, min1:max1]
 
         if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
             peaks_other = np.argmax(box_image[:, peaks], axis=0)
-            peak_coords = [(y, x) for y, x in zip(peaks_other, peaks)]
+            peak_coords = [(y+min0, x+min1) for y, x in zip(peaks_other, peaks)]
         else:
             peaks_other = np.argmax(box_image[peaks, :], axis=1)
-            peak_coords = [(y, x) for y, x in zip(peaks, peaks_other)]
+            peak_coords = [(y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
 
         peak_coords_array = np.array(peak_coords)
         fit = linregress(peak_coords_array[:, 1], peak_coords_array[:, 0])
-        angle = np.arctan(fit.slope)
+        angle = np.rad2deg(np.arctan(fit.slope))
+
+        fig, fig_slice = plotting.plot_QdyQdx_find_peaks(self, integrated_q_slice, peak_coords_array)
+        iplot(fig)
+        iplot(fig_slice)
 
         return peak_coords, angle, (fit.slope, fit.intercept)
 
