@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ipywidgets as ipw
+from ipywidgets import widgets, interact, VBox
 
 
 import cdsaxs._plotting_tools as plotting_tools
@@ -133,40 +134,3 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
 
     return fig, fig_slice
 
-
-
-# def plot_QdyQdx_integration(data, integrated_q_slice,
-#                             slice_log=True):
-
-#     fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
-#                  axis0_type='qdy', axis1_type='qdx')
-
-#     gs = gridspec.GridSpec(2, 2)
-#     fig.set_figheight(6)
-#     fig.set_figwidth(6)
-#     fig.axes[0].set_subplotspec(gs[0, 0])
-#     fig.axes[1].set_subplotspec(gs[0, 1])
-
-#     ax = fig.axes[0]
-#     xmin, xmax = integrated_q_slice.limits_axis1
-#     ymin, ymax = integrated_q_slice.limits_axis0
-#     x = [xmin, xmin, xmax, xmax, xmin]
-#     y = [ymin, ymax, ymax, ymin, ymin]
-#     ax.plot(x, y, color='red')
-    
-#     ax = fig.axes[1]
-#     vmin, vmax = ax.viewLim.bounds[2:4]
-
-#     ax = fig.add_subplot(gs[1, 0])
-#     ax.errorbar(integrated_q_slice.q, integrated_q_slice.I, yerr=integrated_q_slice.dI, fmt='-')
-#     if slice_log:
-#         ax.set_yscale('log')
-#         ax.set_ylim(vmin, vmax*10)
-#     else:
-#         ax.set_ylim(0, np.nanmax(integrated_q_slice.I)*1.05)
-
-#     fig.tight_layout()
-
-#     plt.close()
-
-#     return fig

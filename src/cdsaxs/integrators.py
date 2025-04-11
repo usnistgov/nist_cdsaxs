@@ -44,6 +44,8 @@ def integrate_dataset(
     else:
         return integrated_datas
 
+import time
+from IPython.display import clear_output
 
 def integrate_dataset_box_of_size(
         dataset: Dataset,
@@ -53,18 +55,36 @@ def integrate_dataset_box_of_size(
         axis,
         offset_qdy_px=0,
         offset_qdx_px=0,
-        in_place=True
+        in_place=True,
 ):
     integrated_datas = {}
+    i = 0
     for key, data in dataset.datas.items():
+        
         integrated_q_slice = data.integrate_box_of_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px,
-            mode=mode,
-            axis=axis,
-            offset_qdy=offset_qdy_px,
-            offset_qdx=offset_qdx_px,
-        )
+                size_qdy_px=size_qdy_px,
+                size_qdx_px=size_qdx_px,
+                mode=mode,
+                axis=axis,
+                offset_qdy_px=offset_qdy_px,
+                offset_qdx_px=offset_qdx_px,
+                show_plot=False
+            )
+        
+        # if interactive_plot:
+        #     print(f"Image {i+1} of {len(dataset.datas.keys())}.")
+        #     user_input = input(
+        #         "Press Enter to continue, type 'exit' to cancel"
+        #         " integration, or type 'complete' to immediately process"
+        #         " all images.")
+
+        #     clear_output(wait=True)
+        #     if user_input.lower() == 'exit':
+        #         print("Integration canceled.")
+        #         return None
+        #     elif user_input.lower() == 'complete all':
+        #         print("Remaining images completed.")
+        #         interactive_plot = False
 
         if key != integrated_q_slice.name:
             raise KeyError(
@@ -72,12 +92,15 @@ def integrate_dataset_box_of_size(
                 "the integrated slice names."
             )
         else:
-            integrated_datas[key] = integrated_q_slice
+            integrated_datas[key] = integrated_q_slice    
+
+        i += 1    
 
     if in_place:
         dataset.integrated_datasets = [integrated_datas]\
             if dataset.integrated_datasets is None\
             else dataset.integrated_datasets.append(integrated_datas)
+        return None
     else:
         return integrated_datas
 
