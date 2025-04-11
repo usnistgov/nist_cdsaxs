@@ -592,7 +592,7 @@ class DataQdyQdx(Data2D):
 
         return integrated_q_slice
 
-    def find_peaks1D(self, box_mode, box_params: dict, peak_params: dict):
+    def find_peaks1D(self, box_mode, box_params: dict, peak_params: dict, peak_find_scale='linear'):
         """
         Simple peak finding function in 1D to determine appropriate
         rotation angle of the sample coordinate system in the x-y
@@ -616,6 +616,9 @@ class DataQdyQdx(Data2D):
         peak_params : dict
             Dictionary of keyword arguments for the scipy.find_peaks
             algorithm; see scipy documentation for more information.
+        peak_find_scale = 'linear'
+            The scale of the data to use for peak finding.
+            Can be set to 'linear' or 'log'. Default is 'linear'.
 
         Returns
         -------
@@ -638,8 +641,11 @@ class DataQdyQdx(Data2D):
             raise ValueError(
                 f"The box_mode {box_mode} is not recognized."
             )
+        if peak_find_scale == 'linear':
+            peaks, params = find_peaks(integrated_q_slice.I, **peak_params)
+        elif peak_find_scale == 'log':
+            peaks,params = find_peaks(np.log10(integrated_q_slice.I), **peak_params)
 
-        peaks, params = find_peaks(integrated_q_slice.I, **peak_params)
 
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
