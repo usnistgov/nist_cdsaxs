@@ -134,6 +134,7 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
 
     return fig, fig_slice
 
+
 def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array, log_scale=True):
 
     fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
