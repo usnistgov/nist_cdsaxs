@@ -64,18 +64,22 @@ def generate_axis_label_units(q_axis):
 
     if q_axis[0] == 'q':
     
-        units = r" $(\AA^{-1})$"
+        units = r"(\mathring{\text{A}}^{-1})$"
 
-        subscript = r"$_{" + q_axis[1]
-        if len(q_axis) > 2:
-            for var in q_axis[2:]:
-                subscript += f",{var}"
-        subscript += r"}$"
+        label = r"$q"
+        if len(q_axis)==1:
+            return label + r"\thinspace" + units
+        
+        else:
+            subscript = r"_{" + q_axis[1]
+            if len(q_axis) > 2:
+                for var in q_axis[2:]:
+                    subscript += f",{var}"
+            subscript += r"}\thinspace"
 
-        label = r"q" + subscript
+            label = label + subscript + units
 
-        return label + units
-    
+            return label
+
     else:
         return q_axis
-

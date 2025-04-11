@@ -14,6 +14,9 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 from scipy.stats import linregress
+from plotly.offline import iplot
+import ipywidgets as ipw
+
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
@@ -460,6 +463,7 @@ class DataQdyQdx(Data2D):
             limits_qdx_px,
             mode,
             axis,
+            show_plot=False
     ):
         """
         Integrate a box defined by indexing limits.
@@ -497,45 +501,9 @@ class DataQdyQdx(Data2D):
             axis,
             offset_qdy_px=0,
             offset_qdx_px=0,
-            show_plot=True,
-    ):
-        # ""
-        # Integrate a box defined by its size and offset from a defined
-        # centerpoint.
-
-        # trim : bool
-        # If trim is set to True, only the box that overlays the image
-        # will be returned. If set to False, the areas that fall off the
-        # image will be filled with NAN.
-
-        # """
-        # min0 = center_px[0] - int(size0/2) - offset0
-        # max0 = min0 + size0
-
-        # min1 = center_px[1] - int(size1/2) - offset1
-        # max1 = min1 + size1
-
-        # min0_im = max(min0, 0)
-        # min1_im = max(min1, 0)
-        # max0_im = min(max0, self.image.shape[0]-1)
-        # max1_im = min(max1, self.image.shape[1]-1)
-
-        # integrated_i_im = self.integrate_box(
-        #                  limits_axis0=(min0_im, min0_im),
-        #                  limits_axis1=(min1_im, max1_im),
-        #                  mode=mode, axis=axis
-        #              )
-        # if trim:
-        #     return integrated_i_im
-        # else:
-        #     integrated_i = np.empty(size0 if axis == 1 else size1)
-        #     integrated_i[:] = np.nan
-        #     if axis == 0:
-        #         integrated_i[min1_im-min1:max1_im-min1] = integrated_i_im[0]
-        #     else:
-        #         integrated_i[min0_im-min0:max0_im-min0] = integrated_i_im[0]
-        #     return integrated_i.reshape(-1), integrated_i_im[1]  # params
-        
+            show_plot=False,
+            plot_log_scale=True,
+    ):  
         """
         Integrate a box defined by its size and offset from a the
         defined beam center.
@@ -567,19 +535,21 @@ class DataQdyQdx(Data2D):
         )
 
         if show_plot:
-            fig = plotting.plot_QdyQdx_integration(
-                self, integrated_q_slice=integrated_q_slice, slice_log=True)
-        else:
-            fig = None
+            fig, fig_slice = plotting.plot_QdyQdx_integration(
+                self, integrated_q_slice=integrated_q_slice,
+                log_scale=plot_log_scale)
+            iplot(fig)
+            iplot(fig_slice)
 
-        return integrated_q_slice, fig
+        return integrated_q_slice, fig, fig_slice
 
     def integrate_box_of_q_range(
             self,
             range_qdy,
             range_qdx,
             mode,
-            axis
+            axis,
+            show_plot=False
     ):
         """
         Integrate using q ranges along both axes (half open).
@@ -672,7 +642,7 @@ class DataQdyQdx(Data2D):
 
         return peak_coords, angle, (fit.slope, fit.intercept)
 
-    def plot_data(self, show_pixels=False):
+    def plot_data(self, show_pixels=False, log_scale=True):
 
         if show_pixels or self.qdy is None:
             axis0 = None
@@ -689,7 +659,8 @@ class DataQdyQdx(Data2D):
             self.image,
             axis0=axis0, axis1=axis1,
             axis0_type=axis0_type, axis1_type=axis1_type,
-            title=self.name
+            title=self.name,
+            log_scale=log_scale
         )
 
-        return fig
+        iplot(fig)
