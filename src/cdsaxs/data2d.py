@@ -463,7 +463,8 @@ class DataQdyQdx(Data2D):
             limits_qdx_px,
             mode,
             axis,
-            show_plot=False
+            show_plot=False,
+            plot_log_scale=True,
     ):
         """
         Integrate a box defined by indexing limits.
@@ -490,6 +491,13 @@ class DataQdyQdx(Data2D):
             mode=mode,
             integration_axis=params["axis"]
         )
+
+        if show_plot:
+            fig, fig_slice = plotting.plot_QdyQdx_integration(
+                self, integrated_q_slice=integrated_q_slice,
+                log_scale=plot_log_scale)
+            iplot(fig)
+            iplot(fig_slice)
 
         return integrated_q_slice
 
@@ -541,7 +549,7 @@ class DataQdyQdx(Data2D):
             iplot(fig)
             iplot(fig_slice)
 
-        return integrated_q_slice, fig, fig_slice
+        return integrated_q_slice
 
     def integrate_box_of_q_range(
             self,
@@ -549,7 +557,8 @@ class DataQdyQdx(Data2D):
             range_qdx,
             mode,
             axis,
-            show_plot=False
+            show_plot=False,
+            plot_log_scale=True,
     ):
         """
         Integrate using q ranges along both axes (half open).
@@ -573,6 +582,13 @@ class DataQdyQdx(Data2D):
             mode=mode,
             axis=axis
         )
+
+        if show_plot:
+            fig, fig_slice = plotting.plot_QdyQdx_integration(
+                self, integrated_q_slice=integrated_q_slice,
+                log_scale=plot_log_scale)
+            iplot(fig)
+            iplot(fig_slice)
 
         return integrated_q_slice
 
