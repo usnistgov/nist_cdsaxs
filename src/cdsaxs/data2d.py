@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from scipy.signal import find_peaks
 from scipy.stats import linregress
 from plotly.offline import iplot
-import ipywidgets as ipw
+
 
 
 import cdsaxs.calculators as calculators
@@ -510,7 +510,7 @@ class DataQdyQdx(Data2D):
             offset_qdy_px=0,
             offset_qdx_px=0,
             show_plot=False,
-            plot_log_scale=True,
+            log_scale=True,
     ):  
         """
         Integrate a box defined by its size and offset from a the
@@ -545,7 +545,7 @@ class DataQdyQdx(Data2D):
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self, integrated_q_slice=integrated_q_slice,
-                log_scale=plot_log_scale)
+                log_scale=log_scale)
             iplot(fig)
             iplot(fig_slice)
 
@@ -558,7 +558,7 @@ class DataQdyQdx(Data2D):
             mode,
             axis,
             show_plot=False,
-            plot_log_scale=True,
+            log_scale=True,
     ):
         """
         Integrate using q ranges along both axes (half open).
@@ -586,7 +586,7 @@ class DataQdyQdx(Data2D):
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self, integrated_q_slice=integrated_q_slice,
-                log_scale=plot_log_scale)
+                log_scale=log_scale)
             iplot(fig)
             iplot(fig_slice)
 

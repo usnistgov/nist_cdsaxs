@@ -10,8 +10,7 @@ from numpy.typing import NDArray
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import ipywidgets as ipw
-from ipywidgets import widgets, interact, VBox
+
 
 
 import cdsaxs._plotting_tools as plotting_tools
@@ -20,6 +19,7 @@ import cdsaxs._plotting_tools as plotting_tools
 def plot2D(image: NDArray, axis0=None, axis1=None,
            axis0_type=None, axis1_type=None, title=None,
            log_scale=True):
+    #TODO axis not properly rendering when using vscode jupyter notebook - KNOWN ISSUE WITH VSCODE AND PLOTLY
 
     plot_image = np.copy(image)
     if log_scale:
@@ -77,7 +77,7 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
 def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
 
     fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
-                 axis0_type='qdy', axis1_type='qdx', log_scale=True)
+                 axis0_type='qdy', axis1_type='qdx', log_scale=log_scale)
 
     # box limits, lines get drawn in the middle of pixels so offset
     # half open range by 0.5 pixels
