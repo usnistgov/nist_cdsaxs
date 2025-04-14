@@ -29,13 +29,13 @@ class TiffTools():
         self.filepath = filepath
         try:
             image = Image.open(filepath)
-            self.image = np.array(image).astype(np.float32)
+            self.image = np.array(image).astype(np.float64)
 
             header = {TAGS[key]: image.tag[key] for key in image.tag_v2
                       if key in TAGS.keys()}
             self.header = header
         except:
-            image = tifffile.imread(filepath).astype(np.float32)
+            image = tifffile.imread(filepath).astype(np.float64)
             self.image = image
 
             with tifffile.TiffFile(filepath) as tif:

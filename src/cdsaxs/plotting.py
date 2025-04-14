@@ -156,7 +156,6 @@ def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array, log_scal
     fig.add_trace(go.Scatter(
         x=peak_coords_array[: ,1], y=peak_coords_array[:,0], mode='markers', marker=dict(color='red')
     ))
-    
 
     # integrated 1D data
 

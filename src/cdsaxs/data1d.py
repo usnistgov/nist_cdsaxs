@@ -9,6 +9,7 @@ IntegratedQSlice(Data1D) : Child class of Data1D. Contains one-
 
 from __future__ import annotations
 
+import numpy as np
 from numpy.typing import NDArray
 
 ACCEPTED_Q_AXES = [
@@ -23,9 +24,9 @@ class Data1D():
     Attributes
     ----------
     q : scattering vector
-    I : scattering intensity
+    Iq : scattering intensity as a function of q
     q_axis : Defines q as one of the accepted axes listed below.
-    dI : uncertainity along I, default is None
+    dIq : uncertainity along I, default is None
     dq : uncertainty along q, optional, default is None
 
     Accepted Axes
@@ -39,10 +40,20 @@ class Data1D():
     qs  : Scattering vector in the sample frame.
     """
 
-    def __init__(self, q: NDArray, I: NDArray, q_axis: NDArray,
-                 dI: NDArray = None, dq: NDArray = None):
-        self.q = q
-        self.I = I
+    def __init__(self,
+                 q: NDArray,
+                 Iq: NDArray,
+                 q_axis: NDArray,
+                 dIq: NDArray = None,
+                 dq: NDArray = None):
+
+        if len(q) != len(Iq):
+            raise ValueError(
+                f"'q' and 'I(q)' need to be of the same length."
+                f"They were provided with lengths {len(q)} and {len(Iq)}."
+            )
+        self.q = np.array(q)
+        self.Iq = np.array(Iq)
         if q_axis not in ACCEPTED_Q_AXES:
             raise ValueError(
                 f"{q_axis} is not an accepted q axis. Please select from: "
@@ -51,8 +62,71 @@ class Data1D():
         else:
             self.q_axis = q_axis
 
-        self.dI = dI
-        self.dq = dq
+        if dIq is not None and len(dIq) != len(q):
+            raise ValueError(
+                "dIq needs to be of the same length as q and Iq."
+            )
+        self.dIq = np.array(dIq)
+
+        if dq is not None and len(dq) != len(q):
+            raise ValueError(
+                "dq needs to be of the same length as q and Iq."
+            )
+        self.dq = np.array(dq)
+
+    def interpolate(self,
+                    interpolated_q,
+                    mode='log'):
+        """
+        Interpolate the one-dimensional dataset and extract intensity
+        values at the specified interpolated q-values. Please refer
+        to the numpy.interp documentation for in-depth description
+        of the interpolation method used.
+
+        Parameters
+        ----------
+        interpolated_q : NDArray
+            q-values at which to extract interpolated intensities.
+        mode : str
+            Interpolation mode. The interpolation performed is linear,
+            but this can be performed on the log-scale data, which is
+            many scattering cases can limit introduction of artifacts
+            in regions of sparse data. To select regular linear
+            interpolation, set mode to 'linear'. To select interpolation
+            on the log-scale data (log I vs. log q), set mode to 'log'.
+            Default value is 'log'.
+
+        Returns
+        -------
+        NDArray : Interpolated q values.
+        NDArray : Interpolated I(q) values.
+        """
+
+        interpolated_q = np.array(interpolated_q)
+
+        sorted_q = self.q[np.argsort(self.q)]
+        sorted_Iq = self.Iq[np.argsort(self.q)]
+
+        if mode == 'log':
+            sorted_q = np.log10(sorted_q)
+            sorted_Iq = np.log10(sorted_Iq)
+        elif mode == 'linear':
+            pass
+        else:
+            raise ValueError(
+                f"Interpoaltion mode {mode} is not recognized. Please use"
+                "eiter 'linear' or 'log'."
+            )
+
+        interpolated_Iq = np.interp(
+            x=np.log10(interpolated_q) if mode == 'log' else interpolated_q,
+            xp=sorted_q,
+            fp=sorted_Iq
+        )
+        if mode == 'log':
+            interpolated_Iq = np.power(10, interpolated_Iq)
+
+        return interpolated_q, interpolated_Iq
 
 
 class IntegratedQSlice(Data1D):
@@ -66,17 +140,23 @@ class IntegratedQSlice(Data1D):
     limits_axis0 : Indexing limits in the first dimension, [min, max).
     limits_axis1 : Indexing limits in the second dimension, [min, max).
     mode : Integration mode of either 'sum' or 'mean'
-    integration_axis : Axis over which integration was performed, either 0 or 1.
+    integration_axis : Axis over which integration was performed, 0 or 1.
     """
 
-    def __init__(self, q: NDArray, I: NDArray, q_axis: NDArray,
-                 name: str, limits_axis0: tuple[int, int],
-                 limits_axis1: tuple[int, int], mode: str,
-                 integration_axis: int, dI: NDArray = None,
+    def __init__(self,
+                 q: NDArray,
+                 Iq: NDArray,
+                 q_axis: NDArray,
+                 name: str,
+                 limits_axis0: tuple[int, int],
+                 limits_axis1: tuple[int, int],
+                 mode: str,
+                 integration_axis: int,
+                 dIq: NDArray = None,
                  dq: NDArray = None):
 
         # Base class init
-        super().__init__(q=q, I=I, q_axis=q_axis, dI=dI, dq=dq)
+        super().__init__(q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, dq=dq)
 
         self.name = name
         self.limits_axis0 = limits_axis0

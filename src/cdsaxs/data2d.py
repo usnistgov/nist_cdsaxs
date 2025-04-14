@@ -105,7 +105,10 @@ class Data2D():
         """
         if self._ccw_rotation_counter != 0:
             degrees = -90*self._ccw_rotation_counter
-            self.rotate_image(degrees)
+            with warnings.catch_warnings():
+                # ignore the warning meant for direct use of rotate()
+                warnings.simplefilter('ignore')
+                self.rotate_image(degrees)
 
     def integrate_box(
             self,
@@ -394,7 +397,7 @@ class DataQdyQdx(Data2D):
             center_px_before = None
 
         if ccw_steps == 1 or ccw_steps == -3:
-            if qdy_before and qdx_before:
+            if qdy_before is not None and qdx_before is not None:
                 self.qdy = -1*np.flip(qdx_before)
                 self.qdx = qdy_before
             if center_px_before:
@@ -403,7 +406,7 @@ class DataQdyQdx(Data2D):
                     center_px_before[0]]
 
         if ccw_steps == 2 or ccw_steps == -2:
-            if qdy_before and qdx_before:
+            if qdy_before is not None and qdx_before is not None:
                 self.qdy = -1*np.flip(qdy_before)
                 self.qdx = -1*np.flip(qdx_before)
             if center_px_before:
@@ -412,7 +415,7 @@ class DataQdyQdx(Data2D):
                     len(qdx_before)-center_px_before[1]-1]
 
         if ccw_steps == 3 or ccw_steps == -1:
-            if qdy_before and qdx_before:
+            if qdy_before is not None and qdx_before is not None:
                 self.qdy = qdx_before
                 self.qdx = -1*np.flip(qdy_before)
             if center_px_before:
@@ -471,6 +474,9 @@ class DataQdyQdx(Data2D):
         axis : str
             Define the axis to integrate over, either qdy or qdx.
         """
+        if axis not in ['qdy', 'qdx']:
+            raise ValueError("Invalid axis to integrate over.")
+
         integrated_i, params = super().integrate_box(
             limits_axis0=limits_qdy_px,
             limits_axis1=limits_qdx_px,
@@ -483,7 +489,7 @@ class DataQdyQdx(Data2D):
 
         integrated_q_slice = IntegratedQSlice(
             q=q,
-            I=integrated_i,
+            Iq=integrated_i,
             q_axis='qdx' if axis == 'qdy' else 'qdy',
             name=self.name,
             limits_axis0=params["limits_axis0"],
@@ -511,7 +517,7 @@ class DataQdyQdx(Data2D):
             offset_qdx_px=0,
             show_plot=False,
             log_scale=True,
-    ):  
+    ):
         """
         Integrate a box defined by its size and offset from a the
         defined beam center.
@@ -531,8 +537,8 @@ class DataQdyQdx(Data2D):
         # make sure the box isn't falling off the image
         min0 = max(min0, 0)
         min1 = max(min1, 0)
-        max0 = min(max0, self.image.shape[0]-1)
-        max1 = min(max1, self.image.shape[1]-1)
+        max0 = min(max0, self.image.shape[0])
+        max1 = min(max1, self.image.shape[1])
 
         # integrate the box area of image
         integrated_q_slice = self.integrate_box(
