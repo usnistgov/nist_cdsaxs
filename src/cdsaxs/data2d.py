@@ -16,8 +16,6 @@ from scipy.signal import find_peaks
 from scipy.stats import linregress
 from plotly.offline import iplot
 
-
-
 import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS
@@ -323,13 +321,15 @@ class DataQdyQdx(Data2D):
 
         # TODO: update this when diffraction.py is refactored
         qdy = diffraction.qy_pixels_to_qy(
-            -1*np.arange(0, self.image.shape[0]) + self.metadata['center_px'][0],
+            -1*np.arange(0, self.image.shape[0])
+            + self.metadata['center_px'][0],
             self.metadata["wavelength_nm"],
             self.metadata["pixel_size_um"],
             self.metadata["sdd_cm"],
         )
         qdx = diffraction.qxz_pixels_to_qxz(
-            -1*np.arange(0, self.image.shape[1]) + self.metadata['center_px'][1],
+            -1*np.arange(0, self.image.shape[1])
+            + self.metadata['center_px'][1],
             self.metadata["wavelength_nm"],
             self.metadata["pixel_size_um"],
             self.metadata["sdd_cm"],
@@ -451,7 +451,8 @@ class DataQdyQdx(Data2D):
                 f"{METADATA_KEYWORDS}"
             )
 
-        if "energy_ev" in metadata.keys() and "wavelength_nm" in metadata.keys():
+        if "energy_ev" in metadata.keys() and\
+                "wavelength_nm" in metadata.keys():
             raise ValueError(
                 "You have specified both the source energy and wavelength. "
                 "Only one of these can be specified and the other is "
@@ -598,7 +599,11 @@ class DataQdyQdx(Data2D):
 
         return integrated_q_slice
 
-    def find_peaks1D(self, box_mode, box_params: dict, peak_params: dict, peak_find_scale='linear'):
+    def find_peaks1D(self,
+                     box_mode,
+                     box_params: dict,
+                     peak_params: dict,
+                     peak_find_scale='linear'):
         """
         Simple peak finding function in 1D to determine appropriate
         rotation angle of the sample coordinate system in the x-y
@@ -648,9 +653,10 @@ class DataQdyQdx(Data2D):
                 f"The box_mode {box_mode} is not recognized."
             )
         if peak_find_scale == 'linear':
-            peaks, params = find_peaks(integrated_q_slice.I, **peak_params)
+            peaks, params = find_peaks(integrated_q_slice.Iq, **peak_params)
         elif peak_find_scale == 'log':
-            peaks,params = find_peaks(np.log10(integrated_q_slice.I), **peak_params)
+            peaks, params = find_peaks(np.log10(integrated_q_slice.I),
+                                       **peak_params)
 
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
@@ -658,16 +664,19 @@ class DataQdyQdx(Data2D):
 
         if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
             peaks_other = np.argmax(box_image[:, peaks], axis=0)
-            peak_coords = [(y+min0, x+min1) for y, x in zip(peaks_other, peaks)]
+            peak_coords = [
+                (y+min0, x+min1) for y, x in zip(peaks_other, peaks)]
         else:
             peaks_other = np.argmax(box_image[peaks, :], axis=1)
-            peak_coords = [(y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
+            peak_coords = [
+                (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
 
         peak_coords_array = np.array(peak_coords)
         fit = linregress(peak_coords_array[:, 1], peak_coords_array[:, 0])
         angle = np.rad2deg(np.arctan(fit.slope))
 
-        fig, fig_slice = plotting.plot_QdyQdx_find_peaks(self, integrated_q_slice, peak_coords_array)
+        fig, fig_slice = plotting.plot_QdyQdx_find_peaks(
+            self, integrated_q_slice, peak_coords_array)
         iplot(fig)
         iplot(fig_slice)
 

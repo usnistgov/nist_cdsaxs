@@ -35,6 +35,7 @@ class Dataset():
     Optional Attributes
     -------------------
     integrated_datasets : list
+        TODO: this shouldn't be a list
         List of dictionaries containing integrated data. For each
         ditionary (dataset), the keys align with the datas.keys() and
         the values are instances of IntegratedDataSlices. These
@@ -56,6 +57,7 @@ class Dataset():
         self.name = name
         self.sample = sample
         self.integrated_datasets = None
+        self.reduced_datasets = None
 
     def add_data(self, datas: DataQdyQdx | list[DataQdyQdx]):
         """Add one or more DataQdyQdx instances to the dataset."""
