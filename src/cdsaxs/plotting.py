@@ -227,10 +227,24 @@ def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
     return fig, fig_slice
 
 
+def plot_find_beam_center(data, integrated_q_slice, peak_coords_array,
+                          beam_center,
+                          log_scale=True):
+
+    fig, fig_slice = plot_QdyQdx_find_peaks(
+        data, integrated_q_slice, peak_coords_array, log_scale=log_scale
+    )
+
+    fig.add_vline(beam_center[1], line={'color': 'red', 'dash': 'dot'})
+    fig.add_hline(beam_center[0], line={'color': 'red', 'dash': 'dot'})
+
+    return fig, fig_slice
+
+
 def plot_reduced_dataset(dataset, index=0, log_scale=True):
 
     reduced_dataset = dataset.reduced_datasets[index]
-    
+
     qszs = []
     qsxs = []
     Iqs = []
@@ -394,12 +408,12 @@ def plot_reduced_slices(dataset, index=0, q_slice_axis='qsx', log_scale=True,
         data = reduced_slices[qsx]
         sort_q = np.argsort(data.q)
         ax.errorbar(data.q[sort_q],
-                     data.Iq[sort_q]*10**(i*offset_order)+offset_value*i,
-                     label=np.round(qsx, 6),
-                     fmt='o-')
+                    data.Iq[sort_q]*10**(i*offset_order)+offset_value*i,
+                    label=np.round(qsx, 6),
+                    fmt='o-')
 
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
-    
+
     if log_scale:
         ax.set_yscale('log')
 
