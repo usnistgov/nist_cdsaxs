@@ -711,3 +711,99 @@ class DataQdyQdx(Data2D):
             return fig
         else:
             iplot(fig)
+
+    def find_beam_center_from_peaks(
+            self,
+            beam_center_guess,
+            size_qdy_px,
+            size_qdx_px,
+            peak_axis,
+            peak_params: dict,
+            peak_find_scale='linear'):
+        
+        """
+        Simple peak finding function in 1D to determine appropriate
+        rotation angle of the sample coordinate system in the x-y
+        detector plane.
+
+        The box used to search for peaks is defined in the same way as
+        the integrator methods. This method assumes that there is only
+        a one-dimensional line of peaks along the axis not defined as
+        the integration axis in box_params.
+
+        Parameters
+        ----------
+        box_params : dict
+            Dictionary of keyword arguments for the selected integration
+            method (box_mode).
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+        peak_find_scale = 'linear'
+            The scale of the data to use for peak finding.
+            Can be set to 'linear' or 'log'. Default is 'linear'.
+
+        Returns
+        -------
+        list[tuple]
+            List of peak positions in (qdy, qdx) coordinates.
+        float
+            Angle of rotation of best line fit to the peaks counterclockwise
+            from the qdx axis. Units are degrees.
+        tuple[float, float]
+            Results from linear fit to the peaks of (slope, intercept).
+        """
+
+        box_params = {
+            "size_qdy_px": size_qdy_px,
+            "size_qdx_px": size_qdx_px,
+            "axis": 'qdx' if peak_axis == 'qdy' else 'qdy',
+            "mode": 'sum',
+        }
+        box_params["offset_qdy_px"] =\
+            int(np.round(self.metadata['center_px'][0],0) - beam_center_guess[0])
+        box_params["offset_qdx_px"] =\
+            int(np.round(self.metadata['center_px'][1],0) - beam_center_guess[1])
+
+        integrated_q_slice = self.integrate_box_of_size(**box_params)
+
+        if peak_find_scale == 'linear':
+            peaks, params = find_peaks(integrated_q_slice.Iq, **peak_params)
+        elif peak_find_scale == 'log':
+            peaks, params = find_peaks(np.log10(integrated_q_slice.Iq),
+                                       **peak_params)
+
+        min0, max0 = integrated_q_slice.limits_axis0
+        min1, max1 = integrated_q_slice.limits_axis1
+        box_image = self.image[min0:max0, min1:max1]
+
+        if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
+            peaks_other = np.argmax(box_image[:, peaks], axis=0)
+            peak_coords = [
+                (y+min0, x+min1) for y, x in zip(peaks_other, peaks)]
+        else:
+            peaks_other = np.argmax(box_image[peaks, :], axis=1)
+            peak_coords = [
+                (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
+
+        peak_coords_array = np.array(peak_coords)
+        fit = linregress(peak_coords_array[:, 1], peak_coords_array[:, 0])
+        angle = np.rad2deg(np.arctan(fit.slope))
+
+        qdx_coords = peak_coords_array[:, 1]
+        qdx_coords_lower = qdx_coords[qdx_coords < beam_center_guess[1]]
+        qdx_coords_higher = qdx_coords[qdx_coords > beam_center_guess[1]]
+        centers = []
+        for low, high in zip(np.flip(qdx_coords_lower), qdx_coords_higher):
+            centers.append(np.mean([low, high]))
+        center_qdx = np.mean(centers)
+
+        center_qdy = fit.slope*center_qdx + fit.intercept
+
+        fig, fig_slice = plotting.plot_find_beam_center(
+            self, integrated_q_slice, peak_coords_array,
+            [center_qdy, center_qdx])
+        iplot(fig)
+        iplot(fig_slice)
+
+        return center_qdy, center_qdx
