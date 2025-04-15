@@ -378,3 +378,33 @@ def plot_integrated_dataset(
     plt.close()
 
     return fig
+
+
+def plot_reduced_slices(dataset, index=0, q_slice_axis='qsx', log_scale=True,
+                        offset_order=0, offset_value=0):
+
+    reduced_slices = dataset.reduced_slices[index][q_slice_axis]
+
+    fig, ax = plt.subplots()
+    offset_order = 2
+    offset_value = 0
+
+    slices = np.sort([x for x in reduced_slices.keys()])
+    for i, qsx in enumerate(slices):
+        data = reduced_slices[qsx]
+        sort_q = np.argsort(data.q)
+        ax.errorbar(data.q[sort_q],
+                     data.Iq[sort_q]*10**(i*offset_order)+offset_value*i,
+                     label=np.round(qsx, 6),
+                     fmt='o-')
+
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    
+    if log_scale:
+        ax.set_yscale('log')
+
+    ax.set_ylabel("Intensity")
+    ax.set_xlabel(plotting_tools.generate_axis_label_units(q_slice_axis))
+
+    plt.close()
+    return fig

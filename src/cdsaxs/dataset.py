@@ -173,7 +173,7 @@ class Dataset():
         Plot the slices extracted from integrated a dataset of DataQdxQdy.
 
         """
-        fig = plotting.plot_integrated_dataset_slices(
+        fig = plotting.plot_integrated_dataset(
             self,
             index=index,
             q_axis=q_axis,
@@ -195,6 +195,26 @@ class Dataset():
             self,
             index=index,
             log_scale=log_scale
+        )
+
+        return fig
+
+    def plot_reduced_slices(
+            self,
+            index=0,
+            q_slice_axis='qsx',
+            log_scale=True,
+            offset_order=0,
+            offset_value=0
+    ):
+
+        fig = plotting.plot_reduced_slices(
+            self,
+            index=index,
+            q_slice_axis=q_slice_axis,
+            log_scale=True,
+            offset_order=0,
+            offset_value=0,
         )
 
         return fig
