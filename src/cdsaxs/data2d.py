@@ -530,6 +530,8 @@ class DataQdyQdx(Data2D):
 
         # figure out where the box lies with respect to beam center
         center0, center1 = self.metadata['center_px']
+        center0 = int(np.round(center0, 0))
+        center1 = int(np.round(center1, 0))
         min0 = center0 - int(size_qdy_px/2) - offset_qdy_px
         max0 = min0 + size_qdy_px
         min1 = center1 - int(size_qdx_px/2) - offset_qdx_px
