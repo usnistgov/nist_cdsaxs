@@ -9,6 +9,7 @@ import warnings
 
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.sample import Sample
+import cdsaxs.plotting as plotting
 
 
 class Dataset():
@@ -34,12 +35,17 @@ class Dataset():
 
     Optional Attributes
     -------------------
-    integrated_datasets : list
-        TODO: this shouldn't be a list
-        List of dictionaries containing integrated data. For each
-        ditionary (dataset), the keys align with the datas.keys() and
+    integrated_datasets : dict
+        Dictionary of dictionaries containing integrated data. The key
+        corresponds to an index (ordered by integration).
+        For each inner ditionary, the keys align with the datas.keys() and
         the values are instances of IntegratedDataSlices. These
         dictionaries are produced by the cdsaxs integrators.
+
+    reduced_datastets : dict
+
+    reduced_slices : dict
+
 
     """
 
@@ -56,8 +62,9 @@ class Dataset():
 
         self.name = name
         self.sample = sample
-        self.integrated_datasets = None
-        self.reduced_datasets = None
+        self.integrated_datasets = {}
+        self.reduced_datasets = {}
+        self.reduced_slices = {}
 
     def add_data(self, datas: DataQdyQdx | list[DataQdyQdx]):
         """Add one or more DataQdyQdx instances to the dataset."""
@@ -152,6 +159,42 @@ class Dataset():
             pass
 
         for key in keys:
-            figs.append(self.datas[key].plot_data())
+            figs.append(self.datas[key].plot_data(return_fig=True))
 
         return figs
+
+    def plot_integrated_dataset(
+            self,
+            index=0,
+            q_axis=None,
+            order_by='sample_phi_deg',
+            log_scale=True):
+        """
+        Plot the slices extracted from integrated a dataset of DataQdxQdy.
+
+        """
+        fig = plotting.plot_integrated_dataset_slices(
+            self,
+            index=index,
+            q_axis=q_axis,
+            order_by=order_by,
+            log_scale=log_scale,
+        )
+
+        return fig
+
+    def plot_reduced_dataset(
+            self,
+            index=0,
+            log_scale=True
+    ):
+        """
+        Plot the Qsz vs. Qsx reduced dataset after integration.
+        """
+        fig = plotting.plot_reduced_dataset(
+            self,
+            index=index,
+            log_scale=log_scale
+        )
+
+        return fig

@@ -655,7 +655,7 @@ class DataQdyQdx(Data2D):
         if peak_find_scale == 'linear':
             peaks, params = find_peaks(integrated_q_slice.Iq, **peak_params)
         elif peak_find_scale == 'log':
-            peaks, params = find_peaks(np.log10(integrated_q_slice.I),
+            peaks, params = find_peaks(np.log10(integrated_q_slice.Iq),
                                        **peak_params)
 
         min0, max0 = integrated_q_slice.limits_axis0
@@ -682,7 +682,7 @@ class DataQdyQdx(Data2D):
 
         return peak_coords, angle, (fit.slope, fit.intercept)
 
-    def plot_data(self, show_pixels=False, log_scale=True):
+    def plot_data(self, show_pixels=False, log_scale=True, return_fig=False):
 
         if show_pixels or self.qdy is None:
             axis0 = None
@@ -703,4 +703,9 @@ class DataQdyQdx(Data2D):
             log_scale=log_scale
         )
 
-        iplot(fig)
+        fig.update_layout({'title': self.name})
+
+        if return_fig:
+            return fig
+        else:
+            iplot(fig)

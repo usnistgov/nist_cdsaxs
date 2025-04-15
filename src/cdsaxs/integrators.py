@@ -38,14 +38,14 @@ def integrate_dataset(
             integrated_datas[key] = integrated_q_slice
 
     if in_place:
-        dataset.integrated_datasets = [integrated_datas]\
-            if dataset.integrated_datasets is None\
-            else dataset.integrated_datasets.append(integrated_datas)
+        if len(dataset.integrated_datasets.keys()) == 0:
+            key = 0
+        else:
+            key = max(dataset.integrated_datasets.keys())+1
+        dataset.integrated_datasets[key] = integrated_datas
     else:
         return integrated_datas
 
-import time
-from IPython.display import clear_output
 
 def integrate_dataset_box_of_size(
         dataset: Dataset,
@@ -70,21 +70,6 @@ def integrate_dataset_box_of_size(
                 offset_qdx_px=offset_qdx_px,
                 show_plot=False
             )
-        
-        # if interactive_plot:
-        #     print(f"Image {i+1} of {len(dataset.datas.keys())}.")
-        #     user_input = input(
-        #         "Press Enter to continue, type 'exit' to cancel"
-        #         " integration, or type 'complete' to immediately process"
-        #         " all images.")
-
-        #     clear_output(wait=True)
-        #     if user_input.lower() == 'exit':
-        #         print("Integration canceled.")
-        #         return None
-        #     elif user_input.lower() == 'complete all':
-        #         print("Remaining images completed.")
-        #         interactive_plot = False
 
         if key != integrated_q_slice.name:
             raise KeyError(
@@ -97,10 +82,11 @@ def integrate_dataset_box_of_size(
         i += 1    
 
     if in_place:
-        dataset.integrated_datasets = [integrated_datas]\
-            if dataset.integrated_datasets is None\
-            else dataset.integrated_datasets.append(integrated_datas)
-        return None
+        if len(dataset.integrated_datasets.keys()) == 0:
+            key = 0
+        else:
+            key = max(dataset.integrated_datasets.keys())+1
+        dataset.integrated_datasets[key] = integrated_datas
     else:
         return integrated_datas
 
@@ -131,8 +117,10 @@ def integrate_dataset_box_of_q_range(
             integrated_datas[key] = integrated_q_slice
 
     if in_place:
-        dataset.integrated_datasets = [integrated_datas]\
-            if dataset.integrated_datasets is None\
-            else dataset.integrated_datasets.append(integrated_datas)
+        if len(dataset.integrated_datasets.keys()) == 0:
+            key = 0
+        else:
+            key = max(dataset.integrated_datasets.keys())+1
+        dataset.integrated_datasets[key] = integrated_datas
     else:
         return integrated_datas

@@ -10,7 +10,6 @@ import numpy as np
 from numpy.typing import NDArray
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.offline import iplot
 
 import cdsaxs._plotting_tools as plotting_tools
 
@@ -228,9 +227,9 @@ def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
     return fig, fig_slice
 
 
-def plot_reduced_dataset(dataset, reduced_index=0, log_scale=True, interactive=False):
+def plot_reduced_dataset(dataset, index=0, log_scale=True):
 
-    reduced_dataset = dataset.reduced_datasets[reduced_index]
+    reduced_dataset = dataset.reduced_datasets[index]
     
     qszs = []
     qsxs = []
@@ -274,55 +273,108 @@ def plot_reduced_dataset(dataset, reduced_index=0, log_scale=True, interactive=F
 
     colors = np.array(colors)
 
-    if not interactive:
-        fig, ax = plt.subplots()
-        fig.set_figheight(8)
-        fig.set_figwidth(9)
+    fig, ax = plt.subplots()
+    fig.set_figheight(8)
+    fig.set_figwidth(9)
 
-        ax.scatter(qsxs, qszs, s=5, marker='o', color=colors)
-        ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
-        ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
+    ax.scatter(qsxs, qszs, s=5, marker='o', color=colors)
+    ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
+    ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
+
+    if log_scale:
+        norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)
+    else:
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = mpl_cm.viridis
+    mappable = mpl_cm.ScalarMappable(cmap=cmap, norm=norm)
+    cbar = fig.colorbar(mappable, ax=ax)
+    cbar.set_label("Intensity")
+
+    plt.title(dataset.name)
+
+    plt.close()
+
+    return fig
+
+
+def plot_integrated_dataset(
+        dataset,
+        index=0,
+        q_axis=None,
+        order_by='sample_phi_deg',
+        log_scale=True,
+        ):
+
+    if q_axis is None:
+        # if the q_axis is not provided, pick the first one from the list
+        # this should all be the same but in 2d cdsaxs may not always be
+        q_axis = list(dataset.integrated_datasets[0].values())[0].q_axis
+
+    data_names = [name for name, value in dataset.integrated_datasets[0].items()
+                  if value.q_axis == q_axis]
+
+    x_vals = []
+    y_vals = []
+    color_vals = []
+    order_vals = []
+
+    integrated_dataset = {key: value for key, value
+                          in dataset.integrated_datasets[index].items()
+                          if key in data_names}
+    for name, data in integrated_dataset.items():
+        x_vals.append(data.q)
+        order_vals.append(dataset.datas[name].metadata[order_by])
+        y_vals.append(np.ones_like(data.q)*order_vals[-1])
+        color_vals.append(data.Iq)
+
+    sort = np.argsort(order_vals)
+    x_vals = np.array(x_vals)[sort]
+    y_vals = np.array(y_vals)[sort]
+    color_vals = np.array(color_vals)[sort]
+    order_vals = np.array(order_vals)[sort]
+
+    # colorbar range
+    if log_scale:
+        vmin = np.log10(np.nanmin(color_vals[color_vals > 0]))
+        vmax = np.log10(np.nanmax(color_vals))
+    else:
+        vmin = np.nanmin(color_vals[color_vals > 0])
+        vmax = np.nanmax(color_vals)
+    cmap = mpl.colormaps['viridis']
+
+    # create the plot
+
+    fig, ax = plt.subplots()
+    fig.set_figheight(8)
+    fig.set_figwidth(9)
+
+    for i in range(0, len(order_vals)):
+        xs = x_vals[i]
+        ys = y_vals[i]
+        cs = color_vals[i]
+        os = order_vals[i]
 
         if log_scale:
-            norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)
+            colors = [cmap((np.log10(c)-vmin)/(vmax-vmin)) for c in cs]
         else:
-            norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-        cmap = mpl_cm.viridis
-        mappable = mpl_cm.ScalarMappable(cmap=cmap, norm=norm)
-        cbar = fig.colorbar(mappable, ax=ax)
-        cbar.set_label("Intensity")
+            colors = [cmap((c-vmin)/(vmax-vmin)) for c in cs]
 
-        plt.close()
+        ax.scatter(xs, ys, s=5, marker='o', color=colors)
 
-        return fig
-    
-    if interactive:
-        fig = go.Figure()
+    ax.set_xlabel(plotting_tools.generate_axis_label_units(q_axis))
+    ax.set_ylabel(plotting_tools.generate_axis_label_units(order_by))
 
-        fig.add_trace(go.Scatter(
-            x=qsxs,
-            y=qszs,
-            mode='markers',
-            marker={
-                'size': 5,
-                # 'color': [f'rgba({r}, {g}, {b}, {a})' for r, g, b, a in colors]
-                'color': np.log10(Iqs) if log_scale else Iqs,
-                'colorbar': {
-                    'tickformat': 'e',
-                    'title': 'Intensity',
-                },
-                'colorscale': 'viridis',
-                'cmin': vmin,
-                'cmax': vmax,
-            }
-        ))
+    if log_scale:
+        norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)
+    else:
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = mpl_cm.viridis
+    mappable = mpl_cm.ScalarMappable(cmap=cmap, norm=norm)
+    cbar = fig.colorbar(mappable, ax=ax)
+    cbar.set_label('Intensity')
 
-        fig.update_layout(
-            {'width': 800,
-             'height': 800}
-        )
+    plt.title(dataset.name+f" (Integrated Datasets {index})")
 
-        fig.update_xaxes(title=plotting_tools.generate_axis_label_units('qsx'))
-        fig.update_yaxes(title=plotting_tools.generate_axis_label_units('qsz'))
+    plt.close()
 
-        iplot(fig)
+    return fig
