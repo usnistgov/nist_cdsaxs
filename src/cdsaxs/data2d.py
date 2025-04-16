@@ -515,8 +515,9 @@ class DataQdyQdx(Data2D):
             q=q,
             Iq=integrated_i,
             q_axis='qdx' if axis == 0 else 'qdy',
+            name=self.name,
             limits_axis0=params["limits_axis0"],
-            limits_axis1=params["limits_axis_1"],
+            limits_axis1=params["limits_axis1"],
             mode=mode,
             integration_axis=params["axis"],
         )
@@ -802,11 +803,13 @@ class DataQdyQdx(Data2D):
 
         if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
             peaks_other = np.argmax(image_box[:, peaks], axis=0)
+            peaks_px = [
+                (y+min0, x+min1) for x, y in zip(peaks, peaks_other)]
         else:
             peaks_other = np.argmax(image_box[peaks, :], axis=1)
+            peaks_px = [
+                (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
 
-        peaks_px = [
-            (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
         peaks_q = [
             (self.qdy[y], self.qdx[x]) for y, x in peaks_px]
 
@@ -965,6 +968,7 @@ class DataQdyQdx(Data2D):
                 box_params=box_params,
                 peak_params=peak_params,
                 peak_find_scale=peak_find_scale,
+                show_plot=False
             )
 
         peaks = np.array(peaks_px)[:, peak_axis]

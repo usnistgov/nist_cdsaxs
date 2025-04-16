@@ -253,9 +253,9 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
     Iqs = []
 
     for data in reduced_dataset.values():
-        qsz = data['qsz']
-        qsx = data['qsx']
-        Iq = data['Iq']
+        qsz = data.qsz
+        qsx = data.qsx
+        Iq = data.Iq
         qszs.extend(list(qsz))
         qsxs.extend(list(qsx))
         Iqs.extend(list(Iq))
@@ -265,8 +265,8 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
     Iqs = np.array(Iqs)
 
     if log_scale:
-        vmin = np.nanmin(np.log10(Iqs[Iqs>0]))
-        vmax = np.nanmax(np.log10(Iqs[Iqs>0]))
+        vmin = np.nanmin(np.log10(Iqs[Iqs > 0]))
+        vmax = np.nanmax(np.log10(Iqs[Iqs > 0]))
     else:
         vmin = np.nanmin(0)
         vmax = np.nanmax(Iqs)
