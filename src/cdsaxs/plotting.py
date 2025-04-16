@@ -69,6 +69,9 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
             'title': {'text': 'Intensity', 'side': 'right'},
             'ticks': 'outside',
         })
+    
+    if title:
+        fig.update_layout({'title': title})
 
     return fig
 

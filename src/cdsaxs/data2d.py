@@ -294,6 +294,29 @@ class DataQdyQdx(Data2D):
             if len([x for x in metadata.keys() if x in UPDATE_Q_TRIGGERS]) > 0:
                 self.calculate_q(suppress_errors=True)
 
+    def update_user_params(self, params: dict, overwrite: bool = True):
+        """
+        Add key: value pairs to the user params of this class instance.
+        Existing parameters can be updated by keeping the overwrite
+        argument as True.
+
+        Parameters
+        ----------
+        params : dict
+            Key : value pairs of user-specified parameters for this
+            data instance.
+        overwrite : bool
+            If set to True, any parameters provided to this method will
+            overwrite the existing value in this instance if it already
+            exists in self.uer_params.
+            Default value is True.
+        """
+        for key, value in params.items():
+            if key in self.user_params.keys() and not overwrite:
+                pass
+            else:
+                self.user_params[key] = value
+
     def calculate_q(self, suppress_errors: bool = False):
         """
         Calculate the qdy and qdx vectors along the image axes if
@@ -336,29 +359,6 @@ class DataQdyQdx(Data2D):
         )
         self.qdy = qdy
         self.qdx = qdx
-
-    def update_user_params(self, params: dict, overwrite: bool = True):
-        """
-        Add key: value pairs to the user params of this class instance.
-        Existing parameters can be updated by keeping the overwrite
-        argument as True.
-
-        Parameters
-        ----------
-        params : dict
-            Key : value pairs of user-specified parameters for this
-            data instance.
-        overwrite : bool
-            If set to True, any parameters provided to this method will
-            overwrite the existing value in this instance if it already
-            exists in self.uer_params.
-            Default value is True.
-        """
-        for key, value in params.items():
-            if key in self.user_params.keys() and not overwrite:
-                pass
-            else:
-                self.user_params[key] = value
 
     def rotate_image(self, degrees, direction='ccw'):
         """
@@ -434,75 +434,97 @@ class DataQdyQdx(Data2D):
             degrees = -90*self._ccw_rotation_counter
             self.rotate_image(degrees)
 
-    def _check_metadata(self, metadata):
-        """
-        Check the metadata dictionary for:
-        - unaccepted metadata keywords
-        - overspecified wavelength/energy (onle one should be set)
-        """
-        unaccepted_keywords = [
-            x for x in metadata.keys() if x not in METADATA_KEYWORDS
-        ]
-        if len(unaccepted_keywords) > 0:
-            raise ValueError(
-                "The following metadata keywords are not accepted:\n" +
-                f"{unaccepted_keywords}\n" +
-                "The following are accepted metadata keywords:\n" +
-                f"{METADATA_KEYWORDS}"
-            )
-
-        if "energy_ev" in metadata.keys() and\
-                "wavelength_nm" in metadata.keys():
-            raise ValueError(
-                "You have specified both the source energy and wavelength. "
-                "Only one of these can be specified and the other is "
-                "calculated. To avoid over-specifying or conflicting values, "
-                "please only use one of these values. "
-            )
-        return True
-
     def integrate_box(
-            self,
-            limits_qdy_px,
-            limits_qdx_px,
-            mode,
-            axis,
-            show_plot=False,
-            plot_log_scale=True,
-    ):
+        self,
+        limits_qdy_px: list | tuple,
+        limits_qdx_px: list | tuple,
+        mode: str,
+        axis: str | int,
+        show_plot=False,
+        log_scale=True,
+        # interactive_plot=True
+    ) -> IntegratedQSlice:
         """
         Integrate a box defined by indexing limits.
-        axis : str
-            Define the axis to integrate over, either qdy or qdx.
-        """
-        if axis not in ['qdy', 'qdx']:
-            raise ValueError("Invalid axis to integrate over.")
 
+        Parameters
+        ----------
+        limits_qdy_px : iterable of int
+            Pixel range along qdy axis for integration box.
+            Half open range of [min, max).
+        limits_qdx_px : iterable of int
+            Pixel range along qdx axis for integration box.
+            Half open range of [min, max).
+        mode : str
+            Integration mode, either 'sum' or 'mean'.
+        axis : str, int
+            Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
+            can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
+            axis is set to 'qdy', integration will return I vs. qdx data.
+        show_plot : bool, optional
+            If set to False, the scattering image overlaid with the
+            integration box boundaries will be shown in a first figure
+            and the one-dimensional data will be shown in a second figure.
+            Default value is False.
+        log_scale : bool, optional
+            If set to True, the plots will show the scattering intensity
+            on a log scale. If set to False, intensity will be displayed
+            on a linear scale. This only applies to the plots and does
+            not affect the data operation.
+            Default value is True.
+        interactive_plot : bool, optional
+            If set to True, the plots returned will be interactive plots
+            built via Plotly. If set to False, the plots returned will be
+            static matplotlib figures.
+            TODO: currently this is disabled and only True is accepted.
+            Default value is True.
+
+        Returns
+        -------
+        IntegratedQSlice
+            One-dimensional I vs. q data extracted from the integration.
+
+        """
+
+        if isinstance(axis, str):
+            if axis == 'qdy':
+                axis = 0
+            elif axis == 'qdx':
+                axis = 1
+            else:
+                raise ValueError(f"Invalid integration axis of {axis}.")
+
+        # access parent method of box integration
         integrated_i, params = super().integrate_box(
             limits_axis0=limits_qdy_px,
             limits_axis1=limits_qdx_px,
             mode=mode,
-            axis=0 if axis == 'qdy' else 1
+            axis=axis
         )
-        q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]\
-            if axis == 'qdy'\
-            else self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
 
+        # extract scattering vector for this integration
+        if axis == 0:
+            q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]
+        elif axis == 1:
+            q = self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
+
+        # create instance of IntegratedQSlice to hold integration metadata
         integrated_q_slice = IntegratedQSlice(
             q=q,
             Iq=integrated_i,
-            q_axis='qdx' if axis == 'qdy' else 'qdy',
-            name=self.name,
+            q_axis='qdx' if axis == 0 else 'qdy',
             limits_axis0=params["limits_axis0"],
-            limits_axis1=params["limits_axis1"],
+            limits_axis1=params["limits_axis_1"],
             mode=mode,
-            integration_axis=params["axis"]
+            integration_axis=params["axis"],
         )
 
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
-                self, integrated_q_slice=integrated_q_slice,
-                log_scale=plot_log_scale)
+                self,
+                integrated_q_slice=integrated_q_slice,
+                log_scale=log_scale
+            )
             iplot(fig)
             iplot(fig_slice)
 
@@ -514,33 +536,78 @@ class DataQdyQdx(Data2D):
             size_qdx_px,
             mode,
             axis,
-            offset_qdy_px=0,
-            offset_qdx_px=0,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
             show_plot=False,
             log_scale=True,
     ):
         """
-        Integrate a box defined by its size and offset from a the
-        defined beam center.
+        Integrate a box of a specific size. By default this box is
+        centered at the closest pixel to the beam center position (q=0),
+        but it can be shifted in either qdy or qdx by a set number of
+        pixels.
 
-        axis : str
-            Define the axis to integrate over, either qdy or qdx.
+        Parameters
+        ----------
+        size_qdy_px : int
+            Size of the integration box in pixels along qdy axis.
+        size_qdx_px : int
+            Size of the integration box in pixels along qdx axis.
+        mode : str
+            Integration mode, either 'sum' or 'mean'.
+        axis : str, int
+            Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
+            can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
+            axis is set to 'qdy', integration will return I vs. qdx data.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+        show_plot : bool, optional
+            If set to False, the scattering image overlaid with the
+            integration box boundaries will be shown in a first figure
+            and the one-dimensional data will be shown in a second figure.
+            Default value is False.
+        log_scale : bool, optional
+            If set to True, the plots will show the scattering intensity
+            on a log scale. If set to False, intensity will be displayed
+            on a linear scale. This only applies to the plots and does
+            not affect the data operation.
+            Default value is True.
+        interactive_plot : bool, optional
+            If set to True, the plots returned will be interactive plots
+            built via Plotly. If set to False, the plots returned will be
+            static matplotlib figures.
+            TODO: currently this is disabled and only True is accepted.
+            Default value is True.
+
+        Returns
+        -------
+        IntegratedQSlice
+            One-dimensional I vs. q data extracted from the integration.
 
         """
 
         # figure out where the box lies with respect to beam center
+        # make sure that the box doesn't fall off the image
         center0, center1 = self.metadata['center_px']
-        center0 = int(np.round(center0, 0))
-        center1 = int(np.round(center1, 0))
-        min0 = center0 - int(size_qdy_px/2) - offset_qdy_px
-        max0 = min0 + size_qdy_px
-        min1 = center1 - int(size_qdx_px/2) - offset_qdx_px
-        max1 = min1 + size_qdx_px
 
-        # make sure the box isn't falling off the image
+        center0 = int(np.round(center0, 0))  # closest pixel
+        min0 = center0 - int(size_qdy_px/2) - shift_box_qdy_px
+        max0 = min0 + size_qdy_px
         min0 = max(min0, 0)
-        min1 = max(min1, 0)
         max0 = min(max0, self.image.shape[0])
+
+        center1 = int(np.round(center1, 0))  # closest pixel
+        min1 = center1 - int(size_qdx_px/2) - shift_box_qdx_px
+        max1 = min1 + size_qdx_px
+        min1 = max(min1, 0)
         max1 = min(max1, self.image.shape[1])
 
         # integrate the box area of image
@@ -570,7 +637,47 @@ class DataQdyQdx(Data2D):
             log_scale=True,
     ):
         """
-        Integrate using q ranges along both axes (half open).
+        Integrate a box defined by scattering vector limits.
+
+        Parameters
+        ----------
+        range_qdy : iterable of float
+            Range of scattering vector qdy defining the integration box.
+            Half open range of [min, max). Pixels with a q value that
+            satisfies min <= q < max will be accepted into the box.
+        range_qdx : iterable of float
+            Range of scattering vector qdx definiing the integration box.
+            Half open range of [min, max). Pixels with a q value that
+            satisfies min <= q < max will be accepted into the box.
+        mode : str
+            Integration mode, either 'sum' or 'mean'.
+        axis : str, int
+            Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
+            can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
+            axis is set to 'qdy', integration will return I vs. qdx data.
+        show_plot : bool, optional
+            If set to False, the scattering image overlaid with the
+            integration box boundaries will be shown in a first figure
+            and the one-dimensional data will be shown in a second figure.
+            Default value is False.
+        log_scale : bool, optional
+            If set to True, the plots will show the scattering intensity
+            on a log scale. If set to False, intensity will be displayed
+            on a linear scale. This only applies to the plots and does
+            not affect the data operation.
+            Default value is True.
+        interactive_plot : bool, optional
+            If set to True, the plots returned will be interactive plots
+            built via Plotly. If set to False, the plots returned will be
+            static matplotlib figures.s
+            TODO: currently this is disabled and only True is accepted.
+            Default value is True.
+
+        Returns
+        -------
+        IntegratedQSlice
+            One-dimensional I vs. q data extracted from the integration.
+
         """
 
         # fix the min, max order if the user provided them reversed
@@ -579,15 +686,15 @@ class DataQdyQdx(Data2D):
 
         qdy_indices = np.where((self.qdy >= range_qdy[0])
                                & (self.qdy < range_qdy[1]))[0]
-        limits_axis0 = (np.min(qdy_indices), np.max(qdy_indices)+1)
+        limits_qdy_px = (np.min(qdy_indices), np.max(qdy_indices)+1)
 
         qdx_indices = np.where((self.qdx >= range_qdx[0])
                                & (self.qdx < range_qdx[1]))[0]
-        limits_axis1 = (np.min(qdx_indices), np.max(qdx_indices)+1)
+        limits_qdx_px = (np.min(qdx_indices), np.max(qdx_indices)+1)
 
         integrated_q_slice = self.integrate_box(
-            limits_axis0,
-            limits_axis1,
+            limits_qdy_px=limits_qdy_px,
+            limits_qdx_px=limits_qdx_px,
             mode=mode,
             axis=axis
         )
@@ -605,7 +712,8 @@ class DataQdyQdx(Data2D):
                      box_mode,
                      box_params: dict,
                      peak_params: dict,
-                     peak_find_scale='linear'):
+                     peak_find_scale='linear',
+                     show_plot=True):
         """
         Simple peak finding function in 1D to determine appropriate
         rotation angle of the sample coordinate system in the x-y
@@ -613,37 +721,57 @@ class DataQdyQdx(Data2D):
 
         The box used to search for peaks is defined in the same way as
         the integrator methods. This method assumes that there is only
-        a one-dimensional line of peaks along the axis not defined as
-        the integration axis in box_params.
+        a one-dimensional line of peaks along the axis NOT defined as
+        the integration axis in box_params. The location of the peaks
+        along the integration axis are then determined at the max
+        intensity value at a single position along the first axis.
 
         Parameters
         ----------
         box_mode : str
             Type of integration box to use. Options are:
-                'box' : indcates use of DataQdyQdx.integrate_box
-                'box_size' : indicates use of DataQdyQdx.integrate_box_of_size
-                'q_range' : indicates use of DataQdyQdx.integrate_box_of_q_range
+                'box' : use DataQdyQdx.integrate_box
+                'box_size' : use DataQdyQdx.integrate_box_of_size
+                'q_range' : use DataQdyQdx.integrate_box_of_q_range
         box_params : dict
             Dictionary of keyword arguments for the selected integration
-            method (box_mode).
+            method (box_mode). See the docstring of the corresponding
+            integration method for more information of available
+            arguments and their definitions.
         peak_params : dict
             Dictionary of keyword arguments for the scipy.find_peaks
             algorithm; see scipy documentation for more information.
-        peak_find_scale = 'linear'
-            The scale of the data to use for peak finding.
-            Can be set to 'linear' or 'log'. Default is 'linear'.
+        peak_find_scale : str
+            The scale of the intesity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        show_plot : bool
+            If set to True, a first figure will display the scattering
+            image overlaid with the integration box and markers on each
+            detected peak while a second figure will show the 1D slice
+            extracted from the integration and vertical lines at each
+            peak position.
 
         Returns
         -------
-        list[tuple]
-            List of peak positions in (qdy, qdx) coordinates.
+        list[tuple[float, float]]
+            List of peak positions in (qdy, qdx) scattering vector coordiantes.
+        list[tuple[int, int]]
+            List of peak positions in (px_dy, px_dx) pixel coordinates.
         float
-            Angle of rotation of best line fit to the peaks counterclockwise
-            from the qdx axis. Units are degrees.
+            Angle of rotation of best line fit to the peaks clockwise
+            from a line parallel to the qdx axis.
+            Units are degrees.
         tuple[float, float]
             Results from linear fit to the peaks of (slope, intercept).
+            The units are in pixels; keep in mind for images pixels
+            are numbered from top to bottom and left to right (rows and
+            columns).
+        IntegratedQSlice
+            Integrated I vs. Q slice used for peak finding.
         """
 
+        # integrate over the box
         if box_mode == 'box':
             integrated_q_slice = self.integrate_box(**box_params)
         elif box_mode == 'box_size':
@@ -654,37 +782,75 @@ class DataQdyQdx(Data2D):
             raise ValueError(
                 f"The box_mode {box_mode} is not recognized."
             )
+
+        # find peaks along the integrated I vs. q spectra
         if peak_find_scale == 'linear':
-            peaks, params = find_peaks(integrated_q_slice.Iq, **peak_params)
+            peaks, _ = find_peaks(integrated_q_slice.Iq, **peak_params)
         elif peak_find_scale == 'log':
-            peaks, params = find_peaks(np.log10(integrated_q_slice.Iq),
-                                       **peak_params)
+            peaks, _ = find_peaks(
+                np.log10(integrated_q_slice.Iq), **peak_params)
+        else:
+            raise ValueError(
+                f"The peak_find_scale {peak_find_scale} is not recognized."
+            )
 
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
-        box_image = self.image[min0:max0, min1:max1]
+        image_box = self.image[min0:max0, min1:max1]
 
         if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
-            peaks_other = np.argmax(box_image[:, peaks], axis=0)
-            peak_coords = [
-                (y+min0, x+min1) for y, x in zip(peaks_other, peaks)]
+            peaks_other = np.argmax(image_box[:, peaks], axis=0)
         else:
-            peaks_other = np.argmax(box_image[peaks, :], axis=1)
-            peak_coords = [
-                (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
+            peaks_other = np.argmax(image_box[peaks, :], axis=1)
 
-        peak_coords_array = np.array(peak_coords)
-        fit = linregress(peak_coords_array[:, 1], peak_coords_array[:, 0])
-        angle = np.rad2deg(np.arctan(fit.slope))
+        peaks_px = [
+            (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
+        peaks_q = [
+            (self.qdy[y], self.qdx[x]) for y, x in peaks_px]
 
-        fig, fig_slice = plotting.plot_QdyQdx_find_peaks(
-            self, integrated_q_slice, peak_coords_array)
-        iplot(fig)
-        iplot(fig_slice)
+        peaks_array = np.array(peaks_px)
+        try:
+            fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
+            angle = np.rad2deg(np.arctan(fit.slope))
+            slope, intercept = (fit.slope, fit.intercept)
+        except ValueError:
+            # vertical line
+            angle = 90
+            slope = np.nan
+            intercept = np.nan
 
-        return peak_coords, angle, (fit.slope, fit.intercept)
+        if show_plot:
+            fig, fig_slice = plotting.plot_QdyQdx_find_peaks(
+                self, integrated_q_slice, peaks_array)
+            iplot(fig)
+            iplot(fig_slice)
 
-    def plot_data(self, show_pixels=False, log_scale=True, return_fig=False):
+        return peaks_q, peaks_px, angle, (slope, intercept), integrated_q_slice
+
+    def plot_data(
+            self,
+            show_pixels=False,
+            log_scale=True,
+            # interactive_plot=True
+    ):
+        """
+        Plot the scattering image.
+
+        Parameters
+        ----------
+        show_pixels : bool
+            If set to True, instead of the scattering vector, pixel
+            indices will be shown along the qdy and qdx axes.
+            Default value is False.
+        log_scale : bool
+            If set to True, the scattering intensity will be displayed
+            on a log sale. If set to False, the scattering intensity
+            will be displayed on a linear scale.
+            Default value is True
+        interactive_plot : bool
+            If set to True, an interactive plot built with Plotly will
+            TODO: currently this is disabled and only accepts True.
+        """
 
         if show_pixels or self.qdy is None:
             axis0 = None
@@ -705,12 +871,7 @@ class DataQdyQdx(Data2D):
             log_scale=log_scale
         )
 
-        fig.update_layout({'title': self.name})
-
-        if return_fig:
-            return fig
-        else:
-            iplot(fig)
+        iplot(fig)
 
     def find_beam_center_from_peaks(
             self,
@@ -720,90 +881,139 @@ class DataQdyQdx(Data2D):
             peak_axis,
             peak_params: dict,
             peak_find_scale='linear'):
-        
         """
-        Simple peak finding function in 1D to determine appropriate
-        rotation angle of the sample coordinate system in the x-y
-        detector plane.
+        Attempt to locate the beam center position using simple
+        1D peak finding. See DataQdyQdx.find_peaks1D for a more
+        detailed description of the peak finding process. For this
+        method, only an integration box of size can be used and it
+        must be centered on the beam center guess so that you have
+        equal number of peaks on each side of the beam (ideally).
 
-        The box used to search for peaks is defined in the same way as
-        the integrator methods. This method assumes that there is only
-        a one-dimensional line of peaks along the axis not defined as
-        the integration axis in box_params.
+        In many cases the beam center position is likely to fall on
+        an integer pixel value. This is because the peak finding
+        algorithm only returns the pixel on which the peak is and does
+        not perform any additional fit of the local intensity to determine
+        a float pixel location of the peak.
+        TODO: implement local gaussian fits for more accurate positions
+
+        The beam center is determined by matching the same order peaks
+        in the negative and positive peak_axis direction. The peak_axis
+        is not the integration axis.
 
         Parameters
         ----------
-        box_params : dict
-            Dictionary of keyword arguments for the selected integration
-            method (box_mode).
+        beam_center_guess : iterable of int
+            Initial guess of the beam center position in pixels along
+            qdy and qdx [center_px_qdy, center_px_qdx].
+        size_qdy_px : int
+            Box size in pixels along the qdy axis.
+        size_qdx_px : int
+            Box size in pixels along the qdx axis.
+        peak_axis : str, int
+            Axis along which the peaks are present, either 'qdy' or 'qdx'.
+            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
+            For example, if peak_axis is set to 'qdx', peaks will be
+            detected along the qdx axis.
         peak_params : dict
             Dictionary of keyword arguments for the scipy.find_peaks
             algorithm; see scipy documentation for more information.
         peak_find_scale = 'linear'
-            The scale of the data to use for peak finding.
-            Can be set to 'linear' or 'log'. Default is 'linear'.
+            The scale of the intesity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        show_plot : bool
+            If set to True, a first figure will display the scattering
+            image overlaid with the integration box and markers on each
+            detected peak while a second figure will show the 1D slice
+            extracted from the integration and vertical lines at each
+            peak position. The determiend beam center will be shown
+            with dashed red lines.
 
         Returns
         -------
-        list[tuple]
-            List of peak positions in (qdy, qdx) coordinates.
-        float
-            Angle of rotation of best line fit to the peaks counterclockwise
-            from the qdx axis. Units are degrees.
         tuple[float, float]
-            Results from linear fit to the peaks of (slope, intercept).
+            Beam center coordinates in units of pixels, [px_dy, px_dx].
         """
+
+        if isinstance(peak_axis, str):
+            if peak_axis == 'qdy':
+                peak_axis = 0
+            elif peak_axis == 'qdx':
+                peak_axis = 1
+            else:
+                raise ValueError(
+                    f"Invalid integration peak axis of {peak_axis}.")
 
         box_params = {
             "size_qdy_px": size_qdy_px,
             "size_qdx_px": size_qdx_px,
-            "axis": 'qdx' if peak_axis == 'qdy' else 'qdy',
+            "axis": 1 - peak_axis,
             "mode": 'sum',
         }
-        box_params["offset_qdy_px"] =\
-            int(np.round(self.metadata['center_px'][0],0) - beam_center_guess[0])
-        box_params["offset_qdx_px"] =\
-            int(np.round(self.metadata['center_px'][1],0) - beam_center_guess[1])
+        # use the box shift to correctly center the box on the beam center
+        # guess and not the default or current beam center
+        box_params["shift_box_qdy_px"] = int(
+            np.round(self.metadata['center_px'][0], 0) - beam_center_guess[0])
+        box_params["shift_box_qdx_px"] = int(
+            np.round(self.metadata['center_px'][1], 0) - beam_center_guess[1])
 
-        integrated_q_slice = self.integrate_box_of_size(**box_params)
+        peaks_q, peaks_px, angle, (slope, intercept), integrated_q_slice =\
+            self.find_peaks1D(
+                box_mode='box_size',
+                box_params=box_params,
+                peak_params=peak_params,
+                peak_find_scale=peak_find_scale,
+            )
 
-        if peak_find_scale == 'linear':
-            peaks, params = find_peaks(integrated_q_slice.Iq, **peak_params)
-        elif peak_find_scale == 'log':
-            peaks, params = find_peaks(np.log10(integrated_q_slice.Iq),
-                                       **peak_params)
-
-        min0, max0 = integrated_q_slice.limits_axis0
-        min1, max1 = integrated_q_slice.limits_axis1
-        box_image = self.image[min0:max0, min1:max1]
-
-        if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
-            peaks_other = np.argmax(box_image[:, peaks], axis=0)
-            peak_coords = [
-                (y+min0, x+min1) for y, x in zip(peaks_other, peaks)]
-        else:
-            peaks_other = np.argmax(box_image[peaks, :], axis=1)
-            peak_coords = [
-                (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
-
-        peak_coords_array = np.array(peak_coords)
-        fit = linregress(peak_coords_array[:, 1], peak_coords_array[:, 0])
-        angle = np.rad2deg(np.arctan(fit.slope))
-
-        qdx_coords = peak_coords_array[:, 1]
-        qdx_coords_lower = qdx_coords[qdx_coords < beam_center_guess[1]]
-        qdx_coords_higher = qdx_coords[qdx_coords > beam_center_guess[1]]
+        peaks = np.array(peaks_px)[:, peak_axis]
+        low_peaks = peaks[peaks < beam_center_guess[peak_axis]]
+        high_peaks = peaks[peaks > beam_center_guess[peak_axis]]
         centers = []
-        for low, high in zip(np.flip(qdx_coords_lower), qdx_coords_higher):
+        for low, high in zip(np.flip(low_peaks), high_peaks):
             centers.append(np.mean([low, high]))
-        center_qdx = np.mean(centers)
 
-        center_qdy = fit.slope*center_qdx + fit.intercept
+        if peak_axis == 1:
+            center_qdx = np.mean(centers)
+            center_qdy = slope*center_qdx + intercept
+        elif peak_axis == 0:
+            center_qdy = np.mean(centers)
+            if np.isnan(slope):
+                # this means the peaks form perfectly vertical line
+                center_qdx = np.array(peaks_px)[0, 0]
+            else:
+                center_qdx = (center_qdy-intercept)/slope
 
         fig, fig_slice = plotting.plot_find_beam_center(
-            self, integrated_q_slice, peak_coords_array,
+            self, integrated_q_slice, np.array(peaks_px),
             [center_qdy, center_qdx])
         iplot(fig)
         iplot(fig_slice)
 
         return center_qdy, center_qdx
+
+    def _check_metadata(self, metadata):
+        """
+        Check the metadata dictionary for:
+        - unaccepted metadata keywords
+        - overspecified wavelength/energy (onle one should be set)
+        """
+        unaccepted_keywords = [
+            x for x in metadata.keys() if x not in METADATA_KEYWORDS
+        ]
+        if len(unaccepted_keywords) > 0:
+            raise ValueError(
+                "The following metadata keywords are not accepted:\n" +
+                f"{unaccepted_keywords}\n" +
+                "The following are accepted metadata keywords:\n" +
+                f"{METADATA_KEYWORDS}"
+            )
+
+        if "energy_ev" in metadata.keys() and\
+                "wavelength_nm" in metadata.keys():
+            raise ValueError(
+                "You have specified both the source energy and wavelength. "
+                "Only one of these can be specified and the other is "
+                "calculated. To avoid over-specifying or conflicting values, "
+                "please only use one of these values. "
+            )
+        return True

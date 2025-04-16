@@ -2,14 +2,7 @@
 Simple Sample class that holds information about the sample material."
 """
 
-SAMPLE_METADATA_KEYWORDS = [
-    'sample_size_mm',
-    'substrate_thickness_um',
-    'substrate_attenuation_coeff_um-1',
-    'sample_thickness_um',
-    'sample_attenuation_coeff_um-1',
-]
-
+from cdsaxs.metadata import SAMPLE_METADATA_KEYWORDS
 # TODO: create special commonly used samples, such as AgBeh or empty
 
 
@@ -35,8 +28,6 @@ class Sample():
     sample_size_mm
     substrate_thickness_um
     substrate_attenuation_coeff_um-1
-    sample_thickness_um
-    sample_attenuation_coeff_um-1
     """
 
     def __init__(

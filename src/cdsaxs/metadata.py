@@ -9,6 +9,12 @@ METADATA_KEYWORDS = [
     "name", "center_px"
 ]
 
+SAMPLE_METADATA_KEYWORDS = [
+    'sample_size_mm',
+    'substrate_thickness_um',
+    'substrate_attenuation_coeff_um-1',
+]
+
 FLOATS = [
     "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
     "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
