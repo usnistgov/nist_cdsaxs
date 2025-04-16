@@ -15,6 +15,10 @@ SAMPLE_METADATA_KEYWORDS = [
     'substrate_attenuation_coeff_um-1',
 ]
 
+ACCEPTED_Q_AXES = [
+    "qdy", "qdx", "qd", "qsy", "qsx", "qsz", "qs"
+]
+
 FLOATS = [
     "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
     "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",

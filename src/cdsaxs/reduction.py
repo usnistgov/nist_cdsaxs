@@ -1,28 +1,56 @@
 """
 Reduction tools for processing the cdsaxs Dataset class.
 """
+from __future__ import annotations
+
 import numpy as np
 
-from cdsaxs.data1d import Data1D
+from cdsaxs.data1d import Data1D, ReducedData
 from cdsaxs.dataset import Dataset
-from cdsaxs_gui_legacy import diffraction
 import cdsaxs.plotting as plotting
+from cdsaxs_gui_legacy import diffraction
 
 
 def integrate_dataset(
         dataset: Dataset,
-        limits_qdy_px,
-        limits_qdx_px,
-        mode,
-        axis,
+        limits_qdy_px: list | tuple,
+        limits_qdx_px: list | tuple,
+        mode: str,
+        axis: str | int,
         in_place: bool = True,
-        ):
+) -> None | dict:
     """
-    Most general dataset integration function.
+    Integrate a box defined by indexing limits for each data in
+    the dataset.
 
     Parameters
     ----------
+    dataset : Dataset
+        The dataset containing datas on which the integration is performed.
+    limits_qdy_px : iterable of int
+        Pixel range along qdy axis for integration box.
+        Half open range of [min, max).
+    limits_qdx_px : iterable of int
+        Pixel range along qdx axis for integration box.
+        Half open range of [min, max).
+    mode : str
+        Integration mode, either 'sum' or 'mean'.
+    axis : str, int
+        Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
+        can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
+        axis is set to 'qdy', integration will return I vs. qdx data.
+    in_place: bool
+        If set to True, the integrated dataset (dictionary) will be
+        added to the dataset.integrated_datasets attribute. If set to
+        False, the dictionary will be returned.
+        Default value is True.
 
+    Returns
+    -------
+    dict
+        Dictionary of integrated q slices, where each key is the name of
+        the data image (dataset.datas.keys()) used and the value is
+        of type IntegratedQSlice.
     """
 
     integrated_datas = {}
@@ -47,31 +75,75 @@ def integrate_dataset(
         else:
             key = max(dataset.integrated_datasets.keys())+1
         dataset.integrated_datasets[key] = integrated_datas
+        return None
     else:
         return integrated_datas
 
 
 def integrate_dataset_box_of_size(
-        dataset: Dataset,
-        size_qdy_px,
-        size_qdx_px,
-        mode,
-        axis,
-        offset_qdy_px=0,
-        offset_qdx_px=0,
-        in_place=True,
-):
+    dataset: Dataset,
+    size_qdy_px: int,
+    size_qdx_px: int,
+    mode: str,
+    axis: str | int,
+    shift_box_qdy_px: int = 0,
+    shift_box_qdx_px: int = 0,
+    in_place=True,
+) -> None | dict:
+    """
+    Integrate a box of a specific size. By default this box is
+    centered at the closest pixel to the beam center position (q=0),
+    but it can be shifted in either qdy or qdx by a set number of
+    pixels.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset containing datas on which the integration is performed.
+    size_qdy_px : int
+        Size of the integration box in pixels along qdy axis.
+    size_qdx_px : int
+        Size of the integration box in pixels along qdx axis.
+    mode : str
+        Integration mode, either 'sum' or 'mean'.
+    axis : str, int
+        Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
+        can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
+        axis is set to 'qdy', integration will return I vs. qdx data.
+    shift_box_qdy_px : int, optional
+        Number of pixels to shift the box by in the positive qdy
+        direction. A negative value will shift the box in the
+        negative qdy direction.
+        Default value is 0.
+    shift_box_qdx_px : int, optional
+        Number of pixels to shift the box by in the positive qdx
+        direction. A negative value will shift the box in the
+        negative qdx direction.
+        Default value is 0.
+    in_place: bool
+        If set to True, the integrated dataset (dictionary) will be
+        added to the dataset.integrated_datasets attribute. If set to
+        False, the dictionary will be returned.
+        Default value is True.
+
+    Returns
+    -------
+    dict
+        Dictionary of integrated q slices, where each key is the name of
+        the data image (dataset.datas.keys()) used and the value is
+        of type IntegratedQSlice.
+    """
     integrated_datas = {}
     i = 0
     for key, data in dataset.datas.items():
-        
+
         integrated_q_slice = data.integrate_box_of_size(
                 size_qdy_px=size_qdy_px,
                 size_qdx_px=size_qdx_px,
                 mode=mode,
                 axis=axis,
-                offset_qdy_px=offset_qdy_px,
-                offset_qdx_px=offset_qdx_px,
+                shift_box_qdy_px=shift_box_qdy_px,
+                shift_box_qdx_px=shift_box_qdx_px,
                 show_plot=False
             )
 
@@ -81,9 +153,9 @@ def integrate_dataset_box_of_size(
                 "the integrated slice names."
             )
         else:
-            integrated_datas[key] = integrated_q_slice    
+            integrated_datas[key] = integrated_q_slice
 
-        i += 1    
+        i += 1
 
     if in_place:
         if len(dataset.integrated_datasets.keys()) == 0:
@@ -97,12 +169,46 @@ def integrate_dataset_box_of_size(
 
 def integrate_dataset_box_of_q_range(
         dataset: Dataset,
-        range_qdy,
-        range_qdx,
-        mode,
-        axis,
+        range_qdy: list | tuple,
+        range_qdx: list | tuple,
+        mode: str,
+        axis: str | int,
         in_place=True
 ):
+    """
+    Integrate a box defined by scattering vector limits.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset containing datas on which the integration is performed.
+    range_qdy : iterable of float
+        Range of scattering vector qdy defining the integration box.
+        Half open range of [min, max). Pixels with a q value that
+        satisfies min <= q < max will be accepted into the box.
+    range_qdx : iterable of float
+        Range of scattering vector qdx definiing the integration box.
+        Half open range of [min, max). Pixels with a q value that
+        satisfies min <= q < max will be accepted into the box.
+    mode : str
+        Integration mode, either 'sum' or 'mean'.
+    axis : str, int
+        Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
+        can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
+        axis is set to 'qdy', integration will return I vs. qdx data.
+    in_place: bool
+        If set to True, the integrated dataset (dictionary) will be
+        added to the dataset.integrated_datasets attribute. If set to
+        False, the dictionary will be returned.
+        Default value is True.
+
+    Returns
+    -------
+    dict
+        Dictionary of integrated q slices, where each key is the name of
+        the data image (dataset.datas.keys()) used and the value is
+        of type IntegratedQSlice.
+    """
 
     integrated_datas = {}
     for key, data in dataset.datas.items():
@@ -130,12 +236,37 @@ def integrate_dataset_box_of_q_range(
         return integrated_datas
 
 
-def create_reduced_QszQsx(dataset: Dataset,
-                          integrated_index: int = 0,
-                          in_place: bool = True):
+def create_reduced_QszQsx(
+        dataset: Dataset,
+        integrated_index: int = 0,
+        in_place: bool = True):
     """
-    Creates dictionary of qsz vs. qsx one-dimensional data (sample frame)
-    built from one-dimensional integrated data of I vs. qdy (detector frame).
+    For each integrated q slice of each data image, a reduced dataset
+    is created which is comprised of 'qsx', 'qsz' and 'Iq'.
+
+    Currently this is only implemented for I vs. qdx slices and assumes
+    that qdy = 0. TODO: expand this in the future to all axes.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset containing datas on which the integration is performed.
+    integrated_index : int
+        Index of the integrated dataset of dataset to use in generating
+        the reduced dataset. This is the key used in the
+        dataset.integrated_datasets dictionary.
+    in_place: bool
+        If set to True, the reduced dataset (dictionary) will be
+        added to the dataset.reduced_datasets attribute. If set to
+        False, the dictionary will be returned.
+        Default value is True.
+
+    Returns
+    -------
+    dict
+        Dictionary of dictionaries, where each key is the name of
+        the data image (dataset.datas.keys()) used and the value is
+        of type IntegratedQSlice.
     """
     if dataset.integrated_datasets is None:
         raise ValueError(
@@ -156,9 +287,11 @@ def create_reduced_QszQsx(dataset: Dataset,
                 samplethetaoffset=0
             )
 
-            reduced_dataset[key] = {'qsz': qsz,
-                                    'qsx': qsx,
-                                    'Iq': np.copy(integrated_q_slice.Iq)}
+            reduced_dataset[key] = ReducedData(
+                Iq=np.copy(integrated_q_slice.Iq),
+                qsx=qsx,
+                qsz=qsz,
+            )
 
         elif integrated_q_slice.q_axis == 'qdy':
             # TODO: implement 2D CDSAXS
@@ -186,7 +319,8 @@ def slice_reduced_dataset(
     find_peaks=False,
     peak_params={},
     in_place: bool = True,
-    show_plot=True):
+    show_plot=True
+):
 
     """
     Creates dictionary of qsz vs. qsx one-dimensional data (sample frame)
@@ -210,12 +344,12 @@ def slice_reduced_dataset(
         Iq = []
 
         for data in dataset.reduced_datasets[reduced_index].values():
-            selection = np.where((data[q_axis] >= q_range[0]) &
-                                 (data[q_axis] < q_range[1]) &
-                                 (data["Iq"] >= 0))[0]
-            if len(selection)>0:
-                qsz.append(np.nanmean(data['qsz'][selection]))
-                Iq.append(np.nanmean(data['Iq'][selection]))
+            selection = np.where((data.qsx >= q_range[0]) &
+                                 (data.qsx < q_range[1]) &
+                                 (data.Iq >= 0))[0]
+            if len(selection) > 0:
+                qsz.append(np.nanmean(data.qsz[selection]))
+                Iq.append(np.nanmean(data.Iq[selection]))
 
         slices[q_values[i]] = Data1D(q=qsz, Iq=Iq, q_axis='qsz')
 
@@ -228,8 +362,8 @@ def slice_reduced_dataset(
         min_qsz = 0
 
         for data in dataset.reduced_datasets[reduced_index].values():
-            max_qsz = max(max_qsz, np.nanmax(data["qsz"]))
-            min_qsz = min(min_qsz, np.nanmin(data["qsz"]))
+            max_qsz = max(max_qsz, np.nanmax(data.qsz))
+            min_qsz = min(min_qsz, np.nanmin(data.qsz))
 
         for q in q_values:
             fig.axes[0].vlines(q, min_qsz, max_qsz, color='red')
@@ -244,4 +378,3 @@ def slice_reduced_dataset(
         return fig
     else:
         return slices
-

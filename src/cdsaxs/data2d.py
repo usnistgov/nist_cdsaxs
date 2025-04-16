@@ -534,12 +534,12 @@ class DataQdyQdx(Data2D):
 
     def integrate_box_of_size(
             self,
-            size_qdy_px,
-            size_qdx_px,
-            mode,
-            axis,
-            shift_box_qdy_px=0,
-            shift_box_qdx_px=0,
+            size_qdy_px: int,
+            size_qdx_px: int,
+            mode: str,
+            axis: str | int,
+            shift_box_qdy_px: int = 0,
+            shift_box_qdx_px: int = 0,
             show_plot=False,
             log_scale=True,
     ):
@@ -631,10 +631,10 @@ class DataQdyQdx(Data2D):
 
     def integrate_box_of_q_range(
             self,
-            range_qdy,
-            range_qdx,
-            mode,
-            axis,
+            range_qdy: list | tuple,
+            range_qdx: list | tuple,
+            mode: str,
+            axis: str | int,
             show_plot=False,
             log_scale=True,
     ):

@@ -1,5 +1,5 @@
 """
-This module contains 1-dimensional data classes of:
+This module contains classes for handling one-dimensional data, I vs. q.
 
 Data1D : General one-dimensional scattering data class for I vs. q.
 IntegratedQSlice(Data1D) : Child class of Data1D. Contains one-
@@ -12,9 +12,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-ACCEPTED_Q_AXES = [
-    "qdy", "qdx", "qd", "qsy", "qsx", "qsz", "qs"
-]
+from cdsaxs.metadata import ACCEPTED_Q_AXES
 
 
 class Data1D():
@@ -89,7 +87,7 @@ class Data1D():
             q-values at which to extract interpolated intensities.
         mode : str
             Interpolation mode. The interpolation performed is linear,
-            but this can be performed on the log-scale data, which is
+            but this can be performed on the log-scale data, which in
             many scattering cases can limit introduction of artifacts
             in regions of sparse data. To select regular linear
             interpolation, set mode to 'linear'. To select interpolation
@@ -163,3 +161,28 @@ class IntegratedQSlice(Data1D):
         self.limits_axis1 = limits_axis1
         self.mode = mode
         self.integration_axis = integration_axis
+
+
+class ReducedData():
+    """
+    Reduced data in the sample frame that includes the axes:
+    Iq, qsz, qsx
+
+    TODO: expand this to multi-dimensional CD-SAXS
+
+    Attributes
+    ----------
+    qsx : NDArray
+    qsz : NDArray
+    Iq : NDArray
+    """
+
+    def __init__(self, Iq, qsx=None, qsy=None, qsz=None):
+
+        self.Iq = np.array(Iq)
+        if qsx is not None:
+            self.qsx = np.array(qsx)
+        if qsy is not None:
+            self.qsy = np.array(qsy)
+        if qsz is not None:
+            self.qsz = np.array(qsz)

@@ -77,7 +77,7 @@ def GeneralTIFFLoader(filepath_csv, name=None):
         Required
         --------
         filename
-        sample_phi_deg : sample rotation angle during cd-saxs measurement in degrees
+        sample_phi_deg : sample rotation angle during cd-saxs in degrees
         energy_ev : source energy in eV (cannot be used with wavelength_nm)
         wavelength_nm : source wavelength in nm (cannot be used with energy_ev)
         exposure_time_s : exposture time in s
