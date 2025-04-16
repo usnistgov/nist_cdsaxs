@@ -1,9 +1,9 @@
 """
-This module contains the following classes:
+This module contains the following classes for two-dimensional
+scattering images.
 
 Data2D : Generic two-dimensional data class not tied to diffraction.
 DataQdyQdx(Data2D) : Child class of Data2D for detector images.
-
 """
 
 from __future__ import annotations
@@ -119,6 +119,8 @@ class Data2D():
         Simple integration in a box defined by the [min, max) limits
         for each axis.
 
+        Parameters
+        ----------
         limits_axis0 : tuple[int, int]
             Defines the limits (indices) of the box in the first
             dimension. This is a half open range [min, max).
