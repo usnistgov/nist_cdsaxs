@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from scipy.signal import find_peaks
 from scipy.stats import linregress
 from plotly.offline import iplot
+from PIL import Image
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
@@ -114,6 +115,9 @@ class Data2D():
             limits_axis1,
             mode,
             axis,
+            box_angle_deg=0,
+            rotation_center=[0, 0],
+            rotation_sampling_mode='bicubic'
     ):
         """
         Simple integration in a box defined by the [min, max) limits
@@ -133,17 +137,47 @@ class Data2D():
         axis : int
             The axis along which the integration should be performed.
             This can be set to either 0 (rows) or 1 (columns).
+        box_angle_deg : float
+            Rotate the box by the set number of degrees clockwise
+            about the center point. Rotating the box will maintain the
+            size of the box.
+            Units are in degrees.
+            Default value is 0.
+        rotation_center : list
+            Center of rotation if the box_angle_deg is not 0. The
+            default is the upper left of the image.
+        rotation_sampling_mode : str
+            Set the resampling method used when a box angle is provided.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
         """
+        image = np.copy(self.image)
+        if box_angle_deg != 0:
+            if rotation_sampling_mode == 'nearest':
+                resample = Image.Resampling.NEAREST
+            elif rotation_sampling_mode == 'bilinear':
+                resample = Image.Resampling.BILINEAR
+            else:
+                resample = Image.Resampling.BICUBIC
+            image = Image.fromarray(image)
+            image = image.rotate(box_angle_deg, resample=resample,
+                                 center=(rotation_center[1], rotation_center[0]),
+                                 fillcolor=-50)
+            image = np.array(Image)
+
         if mode == 'sum':
             integrated_i = np.nansum(
-                self.image[limits_axis0[0]:limits_axis0[1],
-                           limits_axis1[0]:limits_axis1[1]],
+                image[limits_axis0[0]:limits_axis0[1],
+                      limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
         elif mode == 'mean':
             integrated_i = np.nanmean(
-                self.image[limits_axis0[0]:limits_axis0[1],
-                           limits_axis1[0]:limits_axis1[1]],
+                image[limits_axis0[0]:limits_axis0[1],
+                      limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
         else:
