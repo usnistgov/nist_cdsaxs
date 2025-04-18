@@ -10,27 +10,7 @@ import re
 import pandas as pd
 
 import os
-#Examples of assigning attributes names with a variable
-# class MyAttribute:
-#     def __set_name__(self, owner, name):
-#         self.name = name
 
-# class MyClass:
-#     attr1 = MyAttribute()
-#     attr2 = MyAttribute()
-
-# # Accessing the attribute names
-# print(MyClass.attr1.name) # Output: attr1
-# print(MyClass.attr2.name) # Output: attr2
-
-
-# class MyClass:
-#     def __init__(self, attribute_name, value):
-#         setattr(self, attribute_name, value)
-
-# # Creating an instance and setting an attribute dynamically
-# instance = MyClass("dynamic_attr", 10)
-# print(instance.dynamic_attr) # Output: 10
 
 
 class CDSAXS_Model():
@@ -858,26 +838,7 @@ class CDSAXS_Model():
     
     
 ### Coordinate Assignment Code
-    def SymCoordAssign_SingleMaterial(self):
-    # assigns trapezoid coordinates for a symmetric trapezoid
-    # consider combining with SymCoordAssign with SLD as a flag
-
-        self.Coord=np.zeros([self.layers+1,5,1])
-        for T in range (self.layers+1):
-            if T==0:
-                self.Coord[T,0,0]=0
-                self.Coord[T,1,0]=self.PAR[0,0]
-                self.Coord[T,2,0]=self.PAR[0,1]
-                self.Coord[T,3,0]=0
-                self.Coord[T,4,0]=1 # SLD - assigned to be 1 for a single material
-            else:
-                self.Coord[T,0,0]=self.Coord[T-1,0,0]+0.5*(self.PAR[T-1,0]-self.PAR[T,0])
-                self.Coord[T,1,0]=self.Coord[T,0,0]+self.PAR[T,0]
-                self.Coord[T,2,0]=self.PAR[T,1]
-                self.Coord[T,3,0]=0
-                self.Coord[T,4,0]=1# SLD - assigned to be 1 for a single material
-
-
+   
     def SymCoordAssign_SingleMaterial(self):
         """
         Assigns trapezoid coordinates for a symmetric trapezoid with a single material.
