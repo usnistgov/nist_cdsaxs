@@ -151,7 +151,11 @@ class IntegratedQSlice(Data1D):
                  mode: str,
                  integration_axis: int,
                  dIq: NDArray = None,
-                 dq: NDArray = None):
+                 dq: NDArray = None,
+                 box_angle_deg: float = 0,
+                 rotation_center: list = [0, 0],
+                 rotation_sampling_mode: str = 'bicubic'
+    ):
 
         # Base class init
         super().__init__(q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, dq=dq)
@@ -161,6 +165,9 @@ class IntegratedQSlice(Data1D):
         self.limits_axis1 = limits_axis1
         self.mode = mode
         self.integration_axis = integration_axis
+        self.box_angle_deg = box_angle_deg
+        self.rotation_center = rotation_center
+        self.rotation_sampling_mode = rotation_sampling_mode
 
 
 class ReducedData():

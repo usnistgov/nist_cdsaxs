@@ -10,28 +10,30 @@ import numpy as np
 from numpy.typing import NDArray
 import plotly.express as px
 import plotly.graph_objects as go
+from PIL import Image
 
 import cdsaxs._plotting_tools as plotting_tools
 
 
 def plot2D(image: NDArray, axis0=None, axis1=None,
            axis0_type=None, axis1_type=None, title=None,
-           log_scale=True):
+           log_scale=True, vmin=None, vmax=None):
     # TODO axis not rendering in vs code notebook - KNOWN ISSUE VSCODE/PLOTLY
 
     plot_image = np.copy(image)
     if log_scale:
         with np.errstate(divide='ignore', invalid='ignore'):
             plot_image = np.log10(plot_image)
-        vmin = np.nanmin(plot_image[plot_image > -np.inf])
-        vmax = np.nanmax(plot_image)
+        vmin = np.nanmin(plot_image[plot_image > -np.inf]) if vmin is None\
+            else vmin
+        vmax = np.nanmax(plot_image) if vmax is None else vmax
         # set all pixels that were 0 counts to one order of magnitude lower
         # the pixels that were nan will all show as white
         plot_image[np.isneginf(plot_image)] = vmin-1
         plot_image[np.isnan(plot_image)] = None
     else:
-        vmin = 0
-        vmax = np.nanmax(plot_image)
+        vmin = 0 if vmin is None else vmin
+        vmax = np.nanmax(plot_image) if vmax is None else vmax
 
     fig = px.imshow(plot_image, zmin=vmin, zmax=vmax,
                     color_continuous_scale='viridis', aspect='equal')
@@ -69,17 +71,34 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
             'title': {'text': 'Intensity', 'side': 'right'},
             'ticks': 'outside',
         })
-    
+
     if title:
         fig.update_layout({'title': title})
 
     return fig
 
 
-def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
+def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
+                            vmin=None, vmax=None):
 
-    fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
-                 axis0_type='qdy', axis1_type='qdx', log_scale=log_scale)
+    image = np.copy(data.image)
+    if integrated_q_slice.box_angle_deg != 0:
+        if integrated_q_slice.rotation_sampling_mode == 'nearest':
+            resample = Image.Resampling.NEAREST
+        elif integrated_q_slice.rotation_sampling_mode == 'bilinear':
+            resample = Image.Resampling.BILINEAR
+        else:
+            resample = Image.Resampling.BICUBIC
+        image = Image.fromarray(image)
+        image = image.rotate(integrated_q_slice.box_angle_deg,
+                             resample=resample,
+                             center=(integrated_q_slice.rotation_center[1],
+                                     integrated_q_slice.rotation_center[0]),
+                             fillcolor=-50)
+        image = np.array(Image)
+    fig = plot2D(image, axis0=data.qdy, axis1=data.qdx,
+                 axis0_type='qdy', axis1_type='qdx', log_scale=log_scale,
+                 vmin=vmin, vmax=vmax)
 
     # box limits, lines get drawn in the middle of pixels so offset
     # half open range by 0.5 pixels
