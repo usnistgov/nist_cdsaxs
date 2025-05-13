@@ -280,7 +280,7 @@ def create_reduced_QszQsx(
 
         if integrated_q_slice.q_axis == 'qdx':
             qsz, qsx, _, _ = diffraction.qxz_to_qz_qx(
-                integrated_q_slice.q,
+                integrated_q_slice.q*-1,
                 np.zeros(shape=integrated_q_slice.q.shape, dtype=np.float64),
                 data.metadata['wavelength_nm'],
                 data.metadata['sample_phi_deg'],
@@ -336,7 +336,7 @@ def slice_reduced_dataset(
             )
 
     q_ranges = [
-        (val-width, val+width) for val, width in zip(q_values, q_widths)]
+        (val-width/2, val+width/2) for val, width in zip(q_values, q_widths)]
 
     slices = {}
     for i, q_range in enumerate(q_ranges):
@@ -345,7 +345,7 @@ def slice_reduced_dataset(
 
         for data in dataset.reduced_datasets[reduced_index].values():
             selection = np.where((data.qsx >= q_range[0]) &
-                                 (data.qsx < q_range[1]) &
+                                 (data.qsx <= q_range[1]) &
                                  (data.Iq >= 0))[0]
             if len(selection) > 0:
                 qsz.append(np.nanmean(data.qsz[selection]))
@@ -357,8 +357,8 @@ def slice_reduced_dataset(
 
         fig = plotting.plot_reduced_dataset(dataset,
                                             index=reduced_index,
-                                            q_slice_axis='qsz'
-                                            if q_axis == 'qsx' else 'qsx',
+                                            # q_slice_axis='qsz'
+                                            # if q_axis == 'qsx' else 'qsx',
                                             log_scale=True)
 
         max_qsz = 0
