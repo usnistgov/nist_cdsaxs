@@ -280,7 +280,7 @@ def create_reduced_QszQsx(
 
         if integrated_q_slice.q_axis == 'qdx':
             qsz, qsx, _, _ = diffraction.qxz_to_qz_qx(
-                integrated_q_slice.q*-1,
+                integrated_q_slice.q,
                 np.zeros(shape=integrated_q_slice.q.shape, dtype=np.float64),
                 data.metadata['wavelength_nm'],
                 data.metadata['sample_phi_deg'],
