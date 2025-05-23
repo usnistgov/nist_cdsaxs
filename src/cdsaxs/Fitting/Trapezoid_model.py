@@ -3045,3 +3045,332 @@ class TrapezoidModelArrayBg(CDSAXS_Model):
         
         plt.tight_layout()
         plt.show()
+        
+        
+    def parameter_sweep_width_dw_1layer(self, width_range, dw_range, n_points=(10, 10),
+                                    exclude_from_fit=None, plot_results=True, 
+                                    figsize=(10, 8), save_results=False, filename=None,
+                                    optimization_kwargs=None, verbose=True, metric='GF'):
+        """
+        Special 2D parameter sweep for 1-layer models: sweep both widths simultaneously 
+        (width_0 = width_1) along with Debye-Waller factor.
+        
+        This function is only available for single-layer (layers=1) trapezoid models.
+        It sweeps the common width value for both the bottom and top trapezoid widths
+        while also sweeping the Debye-Waller factor.
+        
+        Parameters:
+        -----------
+        width_range : tuple
+            (min_width, max_width) for both trapezoid widths
+        dw_range : tuple
+            (min_dw, max_dw) for the Debye-Waller factor
+        n_points : tuple, optional
+            (n_width_points, n_dw_points) for each parameter. Default: (10, 10)
+        exclude_from_fit : list, optional
+            List of parameter names to exclude from optimization (beyond width and DW)
+        plot_results : bool, optional
+            Whether to plot the heatmap. Default: True
+        figsize : tuple, optional
+            Figure size for the plot. Default: (10, 8)
+        save_results : bool, optional
+            Whether to save results to file. Default: False
+        filename : str, optional
+            Filename for saving results
+        optimization_kwargs : dict, optional
+            Additional kwargs for CDSAXS_DiffEvolution
+        verbose : bool, optional
+            Whether to print progress. Default: True
+        metric : str, optional
+            Metric to plot ('GF' or 'BIC'). Default: 'GF'
+            
+        Returns:
+        --------
+        dict
+            Dictionary with sweep values, GF/BIC matrices, and optimized parameters
+            
+        Raises:
+        -------
+        ValueError
+            If the model doesn't have exactly 1 layer
+        """
+        # Check if this is a 1-layer model
+        if self.layers != 1:
+            raise ValueError(f"This function is only for 1-layer models. Current model has {self.layers} layers.")
+        
+        if not hasattr(self, 'Intensity'):
+            raise ValueError("Data must be imported before performing parameter sweep")
+        
+        # Set default optimization parameters
+        if optimization_kwargs is None:
+            optimization_kwargs = {'maxiter': 20, 'popsize': 8, 'plot_results': False}
+        
+        # Create sweep values
+        width_values = np.linspace(width_range[0], width_range[1], n_points[0])
+        dw_values = np.linspace(dw_range[0], dw_range[1], n_points[1])
+        
+        # Initialize results storage
+        results = {
+            'sweep_type': 'width_dw_1layer',
+            'width_values': width_values,
+            'dw_values': dw_values,
+            'gf_matrix': np.full((n_points[1], n_points[0]), np.inf),
+            'bic_matrix': np.full((n_points[1], n_points[0]), np.inf),
+            'optimized_params': [[None for _ in range(n_points[0])] for _ in range(n_points[1])],
+            'convergence_matrix': np.full((n_points[1], n_points[0]), False, dtype=bool)
+        }
+        
+        # Store original parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Setup progress bar
+        total_points = n_points[0] * n_points[1]
+        if verbose:
+            pbar = tqdm(total=total_points, desc="1-Layer Width+DW Sweep")
+        
+        for i, width_val in enumerate(width_values):
+            for j, dw_val in enumerate(dw_values):
+                try:
+                    # Reset to original parameters
+                    self.model_params = copy.deepcopy(original_params)
+                    self.update_traditional_from_model_params()
+                    
+                    # Set both widths to the same value
+                    self.model_params['trapezoids'][0]['width'] = width_val  # Bottom width
+                    self.model_params['trapezoids'][1]['width'] = width_val  # Top width
+                    
+                    # Set DW value
+                    self.model_params['DW'] = dw_val
+                    
+                    # Update traditional parameters
+                    self.update_traditional_from_model_params()
+                    
+                    # Create optimization parameters excluding width and DW parameters
+                    excluded_params = ['trap_0_width', 'trap_1_width', 'DW']
+                    if exclude_from_fit:
+                        excluded_params.extend(exclude_from_fit)
+                    
+                    opt_params = self._create_optimization_params_excluding(excluded_params)
+                    
+                    if not opt_params:
+                        # No parameters to optimize, just calculate GF
+                        self.SimInt = self.SimTrap_SM()
+                        gf = self.GF_calc(self.SimInt)
+                        bic = self.BIC_calc(gf)
+                        converged = True
+                    else:
+                        # Run optimization
+                        opt_result = self.CDSAXS_DiffEvolution(
+                            params_to_optimize=opt_params,
+                            **optimization_kwargs
+                        )
+                        gf = self.GF
+                        bic = self.BIC
+                        converged = opt_result is not None
+                    
+                    # Store results
+                    results['gf_matrix'][j, i] = gf
+                    results['bic_matrix'][j, i] = bic
+                    results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
+                    results['convergence_matrix'][j, i] = converged
+                    
+                    if verbose:
+                        pbar.set_postfix({
+                            'Width': f'{width_val:.1f}',
+                            'DW': f'{dw_val:.1f}',
+                            'GF': f'{gf:.4f}'
+                        })
+                        pbar.update(1)
+                        
+                except Exception as e:
+                    if verbose:
+                        print(f"Error at Width={width_val}, DW={dw_val}: {str(e)}")
+                        pbar.update(1)
+        
+        if verbose:
+            pbar.close()
+        
+        # Restore original parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Plot results
+        if plot_results:
+            self._plot_width_dw_sweep_results(results, figsize, metric)
+        
+        # Save results
+        if save_results:
+            self._save_sweep_results(results, filename or "width_dw_1layer_sweep")
+        
+        return results
+    
+    def _plot_width_dw_sweep_results(self, results, figsize, metric='GF'):
+        """
+        Plot 1-layer width+DW sweep results as heatmap.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_width_dw_1layer
+        figsize : tuple
+            Figure size
+        metric : str
+            Metric to plot ('GF' or 'BIC')
+        """
+        # Choose which matrix to plot
+        if metric.upper() == 'GF':
+            data_matrix = results['gf_matrix']
+            title = 'Goodness of Fit (GF)'
+            cmap = 'viridis'
+        else:
+            data_matrix = results['bic_matrix']
+            title = 'Bayesian Information Criterion (BIC)'
+            cmap = 'viridis'
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        # Create heatmap
+        plot_data = np.copy(data_matrix)
+        plot_data[np.isinf(plot_data)] = np.nan
+        
+        # Use log scale if the range is large
+        if np.nanmax(plot_data) / np.nanmin(plot_data) > 100:
+            norm = LogNorm(vmin=np.nanmin(plot_data), vmax=np.nanmax(plot_data))
+        else:
+            norm = None
+        
+        im = ax.imshow(plot_data, cmap=cmap, aspect='auto', origin='lower', norm=norm)
+        
+        # Set axis labels and ticks
+        ax.set_xlabel('Trapezoid Width (both layers)')
+        ax.set_ylabel('Debye-Waller Factor (DW)')
+        ax.set_title(f'{title} Heatmap: Width vs DW (1-Layer Model)')
+        
+        # Set tick labels
+        n_ticks = 5
+        x_tick_indices = np.linspace(0, len(results['width_values'])-1, n_ticks, dtype=int)
+        y_tick_indices = np.linspace(0, len(results['dw_values'])-1, n_ticks, dtype=int)
+        
+        ax.set_xticks(x_tick_indices)
+        ax.set_xticklabels([f'{results["width_values"][i]:.1f}' for i in x_tick_indices])
+        ax.set_yticks(y_tick_indices)
+        ax.set_yticklabels([f'{results["dw_values"][i]:.1f}' for i in y_tick_indices])
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label(title)
+        
+        # Mark minimum
+        min_idx = np.unravel_index(np.nanargmin(plot_data), plot_data.shape)
+        ax.plot(min_idx[1], min_idx[0], 'r*', markersize=15, 
+                label=f'Min {metric}: {plot_data[min_idx]:.4f}')
+        ax.legend()
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Print summary
+        min_val = plot_data[min_idx]
+        min_width = results['width_values'][min_idx[1]]
+        min_dw = results['dw_values'][min_idx[0]]
+        
+        print(f"\n1-Layer Width+DW Sweep Summary:")
+        print(f"Grid size: {len(results['width_values'])} x {len(results['dw_values'])}")
+        print(f"Width range: {results['width_values'][0]:.1f} to {results['width_values'][-1]:.1f}")
+        print(f"DW range: {results['dw_values'][0]:.1f} to {results['dw_values'][-1]:.1f}")
+        print(f"Best {metric}: {min_val:.4f}")
+        print(f"  at Width = {min_width:.1f}, DW = {min_dw:.1f}")
+        print(f"  (Both trap_0_width and trap_1_width set to {min_width:.1f})")
+    
+    def get_optimal_width_dw_1layer(self, results):
+        """
+        Extract the optimal width and DW values from 1-layer sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_width_dw_1layer
+            
+        Returns:
+        --------
+        dict
+            Dictionary with optimal values and corresponding GF/BIC
+        """
+        if results['sweep_type'] != 'width_dw_1layer':
+            raise ValueError("Results must be from parameter_sweep_width_dw_1layer function")
+        
+        # Find minimum GF
+        gf_matrix = results['gf_matrix']
+        gf_matrix_clean = np.copy(gf_matrix)
+        gf_matrix_clean[np.isinf(gf_matrix_clean)] = np.nan
+        
+        min_gf_idx = np.unravel_index(np.nanargmin(gf_matrix_clean), gf_matrix_clean.shape)
+        min_gf = gf_matrix_clean[min_gf_idx]
+        min_gf_width = results['width_values'][min_gf_idx[1]]
+        min_gf_dw = results['dw_values'][min_gf_idx[0]]
+        
+        # Find minimum BIC
+        bic_matrix = results['bic_matrix']
+        bic_matrix_clean = np.copy(bic_matrix)
+        bic_matrix_clean[np.isinf(bic_matrix_clean)] = np.nan
+        
+        min_bic_idx = np.unravel_index(np.nanargmin(bic_matrix_clean), bic_matrix_clean.shape)
+        min_bic = bic_matrix_clean[min_bic_idx]
+        min_bic_width = results['width_values'][min_bic_idx[1]]
+        min_bic_dw = results['dw_values'][min_bic_idx[0]]
+        
+        return {
+            'best_gf': {
+                'width': min_gf_width,
+                'dw': min_gf_dw,
+                'gf_value': min_gf,
+                'bic_value': results['bic_matrix'][min_gf_idx]
+            },
+            'best_bic': {
+                'width': min_bic_width,
+                'dw': min_bic_dw,
+                'gf_value': results['gf_matrix'][min_bic_idx],
+                'bic_value': min_bic
+            }
+        }
+    
+    def apply_optimal_width_dw_1layer(self, results, criterion='GF'):
+        """
+        Apply the optimal width and DW values from sweep results to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_width_dw_1layer
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+        """
+        if self.layers != 1:
+            raise ValueError("This function is only for 1-layer models")
+        
+        optimal_vals = self.get_optimal_width_dw_1layer(results)
+        
+        if criterion.upper() == 'GF':
+            width = optimal_vals['best_gf']['width']
+            dw = optimal_vals['best_gf']['dw']
+            print(f"Applying optimal GF values: Width = {width:.1f}, DW = {dw:.1f}")
+        else:
+            width = optimal_vals['best_bic']['width']
+            dw = optimal_vals['best_bic']['dw']
+            print(f"Applying optimal BIC values: Width = {width:.1f}, DW = {dw:.1f}")
+        
+        # Update model parameters
+        self.model_params['trapezoids'][0]['width'] = width
+        self.model_params['trapezoids'][1]['width'] = width
+        self.model_params['DW'] = dw
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
+        
+        # Recalculate simulation
+        self.SimInt = self.SimTrap_SM()
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC = self.BIC_calc(self.GF)
+        
+        print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
