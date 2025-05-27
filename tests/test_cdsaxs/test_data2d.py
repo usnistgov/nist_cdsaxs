@@ -797,11 +797,13 @@ class TestDataQdyQdx(unittest.TestCase):
             size_qdx_px=2,
             mode='sum',
             axis='qdy',
-            offset_qdx_px=-1,
+            shift_box_qdx_px=-1,
         )
 
         q = np.array([0., -0.000284846566])
         Iq = np.array([111749., 198625.])
+
+        print(self.dataqdyqdx.qdx)
 
         print(integrated_q_slice.limits_axis0, integrated_q_slice.limits_axis1)
 
@@ -816,7 +818,7 @@ class TestDataQdyQdx(unittest.TestCase):
             size_qdx_px=2,
             mode='sum',
             axis='qdx',
-            offset_qdx_px=-1,
+            shift_box_qdx_px=-1,
         )
 
         q = np.array([0.000284846566, 0., -0.000284846566])
@@ -833,7 +835,7 @@ class TestDataQdyQdx(unittest.TestCase):
             size_qdx_px=2,
             mode='mean',
             axis='qdy',
-            offset_qdx_px=-1,
+            shift_box_qdx_px=-1,
         )
 
         q = np.array([0., -0.000284846566])
@@ -850,7 +852,7 @@ class TestDataQdyQdx(unittest.TestCase):
             size_qdx_px=2,
             mode='mean',
             axis='qdx',
-            offset_qdx_px=-1,
+            shift_box_qdx_px=-1,
         )
 
         q = np.array([0.000284846566, 0., -0.000284846566])
