@@ -409,7 +409,7 @@ class TestDataQdyQdx(unittest.TestCase):
                                  -0.000569693132])
         expected_center_px = [1, 4]
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
         self.dataqdyqdx.rotate_image(90)
 
         np.testing.assert_array_equal(
@@ -434,7 +434,7 @@ class TestDataQdyQdx(unittest.TestCase):
                              msg="The counter-clockwise 90 degree rotation "
                              "resulted in the wrong center pixel location.")
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
 
     def test_dataqdyqdx_rotate_ccw180(self):
         expected_img = np.array(
@@ -455,7 +455,7 @@ class TestDataQdyQdx(unittest.TestCase):
 
         expected_center_px = [2, 1]
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
         self.dataqdyqdx.rotate_image(180)
 
         np.testing.assert_array_equal(
@@ -480,7 +480,7 @@ class TestDataQdyQdx(unittest.TestCase):
                              msg="The counter-clockwise 180 degree rotation "
                              "resulted in the wrong center pixel location.")
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
 
     def test_dataqdyqdx_rotate_ccw270(self):
         expected_img = np.array(
@@ -497,7 +497,7 @@ class TestDataQdyQdx(unittest.TestCase):
                                 )
         expected_center_px = [2, 2]
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
         self.dataqdyqdx.rotate_image(270)
 
         np.testing.assert_array_equal(
@@ -522,7 +522,7 @@ class TestDataQdyQdx(unittest.TestCase):
                              msg="The counter-clockwise 182700 degree rotation"
                              " resulted in the wrong center pixel location.")
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
 
     def test_dataqdyqdx_rotate_ccw_m90(self):
         expected_img = np.array(
@@ -539,7 +539,7 @@ class TestDataQdyQdx(unittest.TestCase):
                                 )
         expected_center_px = [2, 2]
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
         self.dataqdyqdx.rotate_image(-90)
 
         np.testing.assert_array_equal(
@@ -564,7 +564,7 @@ class TestDataQdyQdx(unittest.TestCase):
                              msg="The counter-clockwise -90 degree rotation "
                              "resulted in the wrong center pixel location.")
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
 
     def test_dataqdyqdx_rotate_cw90(self):
         expected_img = np.array(
@@ -580,7 +580,7 @@ class TestDataQdyQdx(unittest.TestCase):
                                  -0.000284846566])
         expected_center_px = [2, 2]
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
         self.dataqdyqdx.rotate_image(90, direction='cw')
 
         np.testing.assert_array_equal(
@@ -605,16 +605,110 @@ class TestDataQdyQdx(unittest.TestCase):
                              msg="The clockwise -90 degree rotation "
                              "resulted in the wrong center pixel location.")
 
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
 
-    def test_dataqdyqdx_reset_rotations(self):
+    def test_flip_horizontally(self):
+        expected_img = np.array(
+            [[20338., 48676., 20215., 44386.],
+             [77210., 45711., 49702., 64811.],
+             [46325., 61100.,  9052.,  4701.],
+             [65941.,   857., 70069., 60019.],
+             [91001., 99999., 82922., 18439.],
+             [41683., 10893., 19847., 10592.],
+             [61517., 35295.,  3109., 15954.]]
+        )
+        expected_qys = np.array([0.001139386259, 0.000854539696,
+                                 0.000569693132, 0.000284846566, 0.,
+                                 -0.000284846566, -0.000569693132])
+        expected_qxzs = np.array([0.000284846566, 0.,
+                                 -0.000284846566, -0.000569693132])
+
+        expected_center_px = [4, 1]
+
+        self.dataqdyqdx.reset_image_orientation()
+        self.dataqdyqdx.flip_horizontally()
+
+        np.testing.assert_array_equal(
+            self.dataqdyqdx.image, expected_img,
+            err_msg="The horizontal flip resulted in the"
+            " wrong image.")
+
+        np.testing.assert_array_almost_equal(
+            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            err_msg="The horizontal flip resulted in the"
+            " incorrect qxzs array."
+        )
+
+        np.testing.assert_array_almost_equal(
+            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            err_msg="The horizontal flip resulted in the"
+            " incorrect qxzs array."
+        )
+
+        self.assertListEqual(self.dataqdyqdx.metadata['center_px'],
+                             expected_center_px,
+                             msg="The horizontal flip "
+                             "resulted in the wrong center pixel location.")
+
+        self.dataqdyqdx.reset_image_orientation()
+
+    def test_flip_vertically(self):
+        expected_img = np.array(
+            [[15954.,  3109., 35295., 61517.],
+             [10592., 19847., 10893., 41683.],
+             [18439., 82922., 99999., 91001.],
+             [60019., 70069.,   857., 65941.],
+             [ 4701.,  9052., 61100., 46325.],
+             [64811., 49702., 45711., 77210.],
+             [44386., 20215., 48676., 20338.]]
+        )
+        expected_qys = np.array([0.000569693132, 0.000284846566, 0.,
+                                 -0.000284846566, -0.000569693132,
+                                 -0.000854539696, -0.001139386259])
+        expected_qxzs = np.array([0.000569693132, 0.000284846566, 0.,
+                                 -0.000284846566])
+
+        expected_center_px = [2, 2]
+
+        self.dataqdyqdx.reset_image_orientation()
+        self.dataqdyqdx.flip_vertically()
+
+        np.testing.assert_array_equal(
+            self.dataqdyqdx.image, expected_img,
+            err_msg="The horizontal flip resulted in the"
+            " wrong image.")
+
+        np.testing.assert_array_almost_equal(
+            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            err_msg="The horizontal flip resulted in the"
+            " incorrect qxzs array."
+        )
+
+        np.testing.assert_array_almost_equal(
+            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            err_msg="The horizontal flip resulted in the"
+            " incorrect qxzs array."
+        )
+
+        self.assertListEqual(self.dataqdyqdx.metadata['center_px'],
+                             expected_center_px,
+                             msg="The horizontal flip "
+                             "resulted in the wrong center pixel location.")
+
+        self.dataqdyqdx.reset_image_orientation()
+
+    def test_dataqdyqdx_reset_image_orientation(self):
         self.dataqdyqdx.rotate_image(90)
+        self.dataqdyqdx.flip_vertically()
         self.dataqdyqdx.rotate_image(90)
+        self.dataqdyqdx.flip_vertically()
+        self.dataqdyqdx.flip_horizontally()
         self.dataqdyqdx.rotate_image(-180)
         self.dataqdyqdx.rotate_image(270)
+        self.dataqdyqdx.flip_horizontally()
         self.dataqdyqdx.rotate_image(270)
         self.dataqdyqdx.rotate_image(90, direction='cw')
-        self.dataqdyqdx.reset_rotations()
+        self.dataqdyqdx.reset_image_orientation()
 
         np.testing.assert_array_equal(
             self.dataqdyqdx.image, self.image)

@@ -459,8 +459,6 @@ class DataQdyQdx(Data2D):
         # do the rotation and store original image information if needed
         super().rotate_image(degrees, direction=direction)
         k = int(self._image_transformations[-1][1:])
-        if self._original_center_px is None:
-            self._original_center_px = center_px
 
         if k == 1:
             if center_px is not None:
