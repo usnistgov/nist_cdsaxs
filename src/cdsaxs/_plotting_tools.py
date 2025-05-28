@@ -29,10 +29,11 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
         spacing = 10**spacing_exp
 
         start = np.ceil(np.nanmin(q)/spacing)*spacing
-        stop = np.floor(np.nanmax(q)/spacing)*spacing
+        stop = np.floor(np.nanmax(q)/spacing)*spacing + spacing
 
-        ticks_q = np.round(np.arange(start, stop+spacing, spacing),
+        ticks_q = np.round(np.arange(start, stop, spacing),
                            int(np.abs(min(0, spacing_exp))))
+
         while len(ticks_q) < (num-1):
             spacing /= 2
             spacing_exp = np.floor(np.log10(spacing))
@@ -42,6 +43,11 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
             ticks_q = np.round(np.arange(start, stop+spacing, spacing),
                                int(np.abs(min(0, spacing_exp))))
 
+        # confirm the last point from np.arange is correct with floating point
+        # calculations (see numpy documentation)
+        if ticks_q[-1] > np.nanmax(q):
+            ticks_q = ticks_q[:-1]
+
         ticks_interp = []
         ticks_index = np.arange(0, len(q))
         for val in ticks_q:
@@ -50,7 +56,6 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
                     np.interp(val, np.flip(q), np.flip(ticks_index)))
             else:
                 ticks_interp.append(np.interp(val, q, ticks_index))
-
         return ticks_interp, ticks_q
 
 
