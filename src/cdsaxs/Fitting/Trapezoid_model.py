@@ -3374,3 +3374,313 @@ class TrapezoidModelArrayBg(CDSAXS_Model):
         self.BIC = self.BIC_calc(self.GF)
         
         print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
+        
+                
+        
+    def get_optimal_parameters_1d(self, results, criterion='GF'):
+        """
+        Extract the optimal parameters from 1D sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_1d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+            
+        Returns:
+        --------
+        dict
+            Dictionary with optimal parameter value and corresponding metrics
+        """
+        if criterion.upper() == 'GF':
+            values_array = np.array(results['gf_values'])
+            min_idx = np.nanargmin(values_array)
+            min_value = values_array[min_idx]
+            corresponding_bic = results['bic_values'][min_idx]
+        else:
+            values_array = np.array(results['bic_values'])
+            min_idx = np.nanargmin(values_array)
+            min_value = values_array[min_idx]
+            corresponding_bic = min_value
+            corresponding_gf = results['gf_values'][min_idx]
+        
+        optimal_param_value = results['sweep_values'][min_idx]
+        optimal_params = results['optimized_params'][min_idx]
+        
+        return {
+            'sweep_parameter': results['sweep_param'],
+            'optimal_value': optimal_param_value,
+            'gf': results['gf_values'][min_idx] if criterion.upper() == 'GF' else corresponding_gf,
+            'bic': corresponding_bic if criterion.upper() == 'GF' else min_value,
+            'optimized_parameters': optimal_params,
+            'converged': results['convergence_flags'][min_idx],
+            'criterion_used': criterion.upper()
+        }
+    
+    def apply_optimal_parameters_1d(self, results, criterion='GF', update_simulation=True):
+        """
+        Apply the optimal parameters from 1D sweep results to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_1d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+        update_simulation : bool, optional
+            Whether to recalculate simulation and metrics. Default: True
+        """
+        optimal = self.get_optimal_parameters_1d(results, criterion)
+        
+        if optimal['optimized_parameters'] is None:
+            raise ValueError("No valid optimized parameters found in results")
+        
+        print(f"Applying optimal {criterion} parameters:")
+        print(f"  {optimal['sweep_parameter']} = {optimal['optimal_value']:.4f}")
+        print(f"  {criterion}: {optimal[criterion.lower()]:.4f}")
+        
+        # Update model parameters
+        self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+        self.update_traditional_from_model_params()
+        
+        if update_simulation:
+            # Recalculate simulation and metrics
+            self.SimInt = self.SimTrap_SM()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
+        else:
+            print("Model parameters updated (simulation not recalculated)")
+    
+    def get_optimal_parameters_2d(self, results, criterion='GF'):
+        """
+        Extract the optimal parameters from 2D sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_2d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+            
+        Returns:
+        --------
+        dict
+            Dictionary with optimal parameter values and corresponding metrics
+        """
+        if criterion.upper() == 'GF':
+            values_matrix = results['gf_matrix']
+            corresponding_matrix = results['bic_matrix']
+        else:
+            values_matrix = results['bic_matrix']
+            corresponding_matrix = results['gf_matrix']
+        
+        # Find minimum (handle inf values)
+        clean_matrix = np.copy(values_matrix)
+        clean_matrix[np.isinf(clean_matrix)] = np.nan
+        
+        min_idx = np.unravel_index(np.nanargmin(clean_matrix), clean_matrix.shape)
+        min_value = clean_matrix[min_idx]
+        corresponding_value = corresponding_matrix[min_idx]
+        
+        # Get parameter values
+        param1_value = results['param1_values'][min_idx[1]]
+        param2_value = results['param2_values'][min_idx[0]]
+        
+        # Get optimized parameters
+        optimal_params = results['optimized_params'][min_idx[0]][min_idx[1]]
+        converged = results['convergence_matrix'][min_idx]
+        
+        return {
+            'sweep_parameters': results['sweep_params'],
+            'optimal_values': {
+                results['sweep_params'][0]: param1_value,
+                results['sweep_params'][1]: param2_value
+            },
+            'gf': min_value if criterion.upper() == 'GF' else corresponding_value,
+            'bic': corresponding_value if criterion.upper() == 'GF' else min_value,
+            'optimized_parameters': optimal_params,
+            'converged': converged,
+            'criterion_used': criterion.upper()
+        }
+    
+    def apply_optimal_parameters_2d(self, results, criterion='GF', update_simulation=True):
+        """
+        Apply the optimal parameters from 2D sweep results to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_2d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+        update_simulation : bool, optional
+            Whether to recalculate simulation and metrics. Default: True
+        """
+        optimal = self.get_optimal_parameters_2d(results, criterion)
+        
+        if optimal['optimized_parameters'] is None:
+            raise ValueError("No valid optimized parameters found in results")
+        
+        print(f"Applying optimal {criterion} parameters:")
+        for param, value in optimal['optimal_values'].items():
+            print(f"  {param} = {value:.4f}")
+        print(f"  {criterion}: {optimal[criterion.lower()]:.4f}")
+        
+        # Update model parameters
+        self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+        self.update_traditional_from_model_params()
+        
+        if update_simulation:
+            # Recalculate simulation and metrics
+            self.SimInt = self.SimTrap_SM()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
+        else:
+            print("Model parameters updated (simulation not recalculated)")
+    
+    def compare_sweep_optima(self, results_list, labels=None, criterion='GF'):
+        """
+        Compare optimal values from multiple sweep results.
+        
+        Parameters:
+        -----------
+        results_list : list
+            List of results dictionaries from parameter sweeps
+        labels : list, optional
+            Labels for each result set
+        criterion : str, optional
+            Criterion for comparison ('GF' or 'BIC'). Default: 'GF'
+        """
+        if labels is None:
+            labels = [f"Sweep {i+1}" for i in range(len(results_list))]
+        
+        print(f"\nSweep Results Comparison (by {criterion}):")
+        print("=" * 80)
+        print(f"{'Label':<15} {'Type':<10} {'Parameters':<25} {'GF':<10} {'BIC':<10} {'Converged':<10}")
+        print("-" * 80)
+        
+        all_optima = []
+        
+        for result, label in zip(results_list, labels):
+            try:
+                if 'sweep_param' in result:
+                    # 1D sweep
+                    optimal = self.get_optimal_parameters_1d(result, criterion)
+                    sweep_type = "1D"
+                    param_str = f"{optimal['sweep_parameter']}={optimal['optimal_value']:.3f}"
+                elif 'sweep_params' in result:
+                    # 2D sweep
+                    optimal = self.get_optimal_parameters_2d(result, criterion)
+                    sweep_type = "2D"
+                    param_str = f"{optimal['sweep_parameters'][0]}={optimal['optimal_values'][optimal['sweep_parameters'][0]]:.3f}, " + \
+                               f"{optimal['sweep_parameters'][1]}={optimal['optimal_values'][optimal['sweep_parameters'][1]]:.3f}"
+                elif 'sweep_type' in result and result['sweep_type'] == 'width_dw_1layer':
+                    # 1-layer specialized sweep
+                    optimal = self.get_optimal_width_dw_1layer(result)
+                    sweep_type = "1L-WD"
+                    if criterion.upper() == 'GF':
+                        param_str = f"W={optimal['best_gf']['width']:.1f}, DW={optimal['best_gf']['dw']:.1f}"
+                        gf_val = optimal['best_gf']['gf_value']
+                        bic_val = optimal['best_gf']['bic_value']
+                    else:
+                        param_str = f"W={optimal['best_bic']['width']:.1f}, DW={optimal['best_bic']['dw']:.1f}"
+                        gf_val = optimal['best_bic']['gf_value']
+                        bic_val = optimal['best_bic']['bic_value']
+                    
+                    print(f"{label:<15} {sweep_type:<10} {param_str:<25} {gf_val:<10.4f} {bic_val:<10.4f} {'Yes':<10}")
+                    all_optima.append((label, gf_val if criterion.upper() == 'GF' else bic_val))
+                    continue
+                else:
+                    print(f"{label:<15} {'Unknown':<10} {'---':<25} {'---':<10} {'---':<10} {'---':<10}")
+                    continue
+                
+                converged_str = "Yes" if optimal['converged'] else "No"
+                
+                print(f"{label:<15} {sweep_type:<10} {param_str:<25} {optimal['gf']:<10.4f} {optimal['bic']:<10.4f} {converged_str:<10}")
+                all_optima.append((label, optimal[criterion.lower()]))
+                
+            except Exception as e:
+                print(f"{label:<15} {'Error':<10} {str(e)[:25]:<25} {'---':<10} {'---':<10} {'---':<10}")
+        
+        # Find and highlight best overall
+        if all_optima:
+            best_label, best_value = min(all_optima, key=lambda x: x[1])
+            print("-" * 80)
+            print(f"Best overall {criterion}: {best_label} with {criterion} = {best_value:.4f}")
+        
+        print("=" * 80)
+    
+    def get_sweep_summary(self, results):
+        """
+        Get a summary of sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from any parameter sweep
+            
+        Returns:
+        --------
+        dict
+            Summary information about the sweep
+        """
+        summary = {'sweep_type': 'unknown'}
+        
+        try:
+            if 'sweep_param' in results:
+                # 1D sweep
+                summary.update({
+                    'sweep_type': '1D',
+                    'parameter': results['sweep_param'],
+                    'range': (results['sweep_values'][0], results['sweep_values'][-1]),
+                    'n_points': len(results['sweep_values']),
+                    'best_gf': np.nanmin(results['gf_values']),
+                    'best_bic': np.nanmin(results['bic_values']),
+                    'convergence_rate': np.mean(results['convergence_flags'])
+                })
+            elif 'sweep_params' in results:
+                # 2D sweep
+                gf_matrix = np.copy(results['gf_matrix'])
+                gf_matrix[np.isinf(gf_matrix)] = np.nan
+                
+                bic_matrix = np.copy(results['bic_matrix'])
+                bic_matrix[np.isinf(bic_matrix)] = np.nan
+                
+                summary.update({
+                    'sweep_type': '2D',
+                    'parameters': results['sweep_params'],
+                    'ranges': [
+                        (results['param1_values'][0], results['param1_values'][-1]),
+                        (results['param2_values'][0], results['param2_values'][-1])
+                    ],
+                    'grid_size': (len(results['param1_values']), len(results['param2_values'])),
+                    'best_gf': np.nanmin(gf_matrix),
+                    'best_bic': np.nanmin(bic_matrix),
+                    'convergence_rate': np.mean(results['convergence_matrix'])
+                })
+            elif 'sweep_type' in results and results['sweep_type'] == 'width_dw_1layer':
+                # 1-layer specialized
+                gf_matrix = np.copy(results['gf_matrix'])
+                gf_matrix[np.isinf(gf_matrix)] = np.nan
+                
+                summary.update({
+                    'sweep_type': '1-layer Width+DW',
+                    'parameters': ['width_both', 'DW'],
+                    'ranges': [
+                        (results['width_values'][0], results['width_values'][-1]),
+                        (results['dw_values'][0], results['dw_values'][-1])
+                    ],
+                    'grid_size': (len(results['width_values']), len(results['dw_values'])),
+                    'best_gf': np.nanmin(gf_matrix),
+                    'best_bic': np.nanmin(results['bic_matrix']),
+                    'convergence_rate': np.mean(results['convergence_matrix'])
+                })
+        except Exception as e:
+            summary['error'] = str(e)
+        
+        return summary
