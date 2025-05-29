@@ -10,27 +10,7 @@ import re
 import pandas as pd
 
 import os
-#Examples of assigning attributes names with a variable
-# class MyAttribute:
-#     def __set_name__(self, owner, name):
-#         self.name = name
 
-# class MyClass:
-#     attr1 = MyAttribute()
-#     attr2 = MyAttribute()
-
-# # Accessing the attribute names
-# print(MyClass.attr1.name) # Output: attr1
-# print(MyClass.attr2.name) # Output: attr2
-
-
-# class MyClass:
-#     def __init__(self, attribute_name, value):
-#         setattr(self, attribute_name, value)
-
-# # Creating an instance and setting an attribute dynamically
-# instance = MyClass("dynamic_attr", 10)
-# print(instance.dynamic_attr) # Output: 10
 
 
 class CDSAXS_Model():
@@ -133,6 +113,102 @@ class CDSAXS_Model():
    
    
    
+    # def importCDSAXS_GUI(self, Datafile):
+    #     """
+    #     Imports CDSAXS data from a GUI-created file with input validation
+        
+    #     Parameters:
+    #     -----------
+    #     Datafile : str
+    #         Path to the data file (CSV format)
+    #     """
+    #     # Check if input variable exists and is valid
+    #     if Datafile is None or not isinstance(Datafile, str):
+    #         raise ValueError("Datafile must be a valid file path")
+        
+    #     # Check if file exists
+    #     if not os.path.isfile(Datafile):
+    #         raise FileNotFoundError(f"File not found: {Datafile}")
+        
+    #     try:
+    #         # Import data using pandas
+    #         Data = pd.read_csv(Datafile)
+            
+    #         # Check if file has content
+    #         if Data.empty:
+    #             raise ValueError("The data file is empty")
+            
+    #         # Check the number of cuts
+    #         num_columns = len(Data.columns)
+    #         if num_columns < 2:
+    #             raise ValueError("Data must have at least 2 columns")
+                
+    #         numbercuts = num_columns // 2
+    #         headers = Data.columns.tolist()
+            
+    #         # Extract qx values from headers
+    #         qxlist = []
+    #         for i in range(1, len(headers), 2):
+    #             # Look for pattern 'qx = number' in the header
+    #             match = re.search(r'qx\s*=\s*(\d+\.?\d*)', headers[i])
+    #             if match:
+    #                 number = float(match.group(1))
+    #                 # Convert to int if it's a whole number
+    #                 if number.is_integer():
+    #                     number = int(number)
+    #                 qxlist.append(number)
+            
+    #         # Check if we found any qx values
+    #         if not qxlist:
+    #             raise ValueError("No qx values found in headers")
+                
+    #         # Convert to numpy array
+    #         Data1 = Data.to_numpy()
+            
+    #         # Initialize arrays
+    #         data_rows = len(Data1[:,0])
+    #         self.Intensity = np.zeros([data_rows, numbercuts])
+    #         self.Qz = np.zeros([data_rows, numbercuts])
+            
+    #         # Fill arrays with data
+    #         for i in range(0, numbercuts):
+    #             if (i*2+1) < num_columns:  # Check if column exists
+    #                 self.Intensity[:,i] = Data1[:,(i*2+1)]
+    #                 self.Qz[:,i] = Data1[:,(i*2)]
+            
+    #         # Create Qx array
+    #         self.Qx = self.Qz.copy()
+    #         self.Qx[~np.isnan(self.Qx)] = 1
+            
+    #         # Apply qx values to each column
+    #         for k, v in enumerate(qxlist):
+    #             if k < self.Qx.shape[1]:  # Check if column exists
+    #                 self.Qx[:,k] = self.Qx[:,k] * v
+            
+    #         # Calculate number of valid points
+    #         self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+    #         # Check if we have valid data
+    #         if self.numberpoints == 0:
+    #             raise ValueError("No valid data points found after processing")
+            
+    #         # Execute trapezoid-specific code if that geometry is set
+    #         if hasattr(self, 'geometry') and self.geometry == 'trapezoid':
+    #             self.SymCoordAssign_SingleMaterial()
+    #             self.SimTrap_SM()
+    #             self.SimInt_Initial = self.SimInt
+    #             self.GF = self.GF_calc(self.SimInt)
+    #             self.GF_Initial = self.GF
+    #             self.BIC = self.BIC_calc(self.GF)
+    #             self.GF_Initial = self.BIC
+                
+    #     except pd.errors.EmptyDataError:
+    #         raise ValueError("The data file is empty or not properly formatted")
+    #     except pd.errors.ParserError:
+    #         raise ValueError("Error parsing the CSV file. Check the file format")
+    #     except Exception as e:
+    #         raise RuntimeError(f"Error processing data: {str(e)}")
+    
     def importCDSAXS_GUI(self, Datafile):
         """
         Imports CDSAXS data from a GUI-created file with input validation
@@ -205,6 +281,26 @@ class CDSAXS_Model():
                 if k < self.Qx.shape[1]:  # Check if column exists
                     self.Qx[:,k] = self.Qx[:,k] * v
             
+            # Check if Qx values are increasing along the rows and sort if needed
+            # Get the first row with valid data to check order
+            for row_idx in range(self.Qx.shape[0]):
+                if np.all(np.isfinite(self.Qx[row_idx, :])):
+                    # Check if Qx is not in ascending order
+                    if not np.all(np.diff(self.Qx[row_idx, :]) >= 0):
+                        # Get sort indices
+                        sort_indices = np.argsort(self.Qx[row_idx, :])
+                        
+                        # Apply sorting to all arrays
+                        self.Qx = self.Qx[:, sort_indices]
+                        self.Qz = self.Qz[:, sort_indices]
+                        self.Intensity = self.Intensity[:, sort_indices]
+                    break
+            
+            # Create Qy array with zeros where Qx has positive values
+            self.Qy = np.zeros_like(self.Qx)
+            # Only set values to zero where Qx is positive (keep NaN values as they were)
+            self.Qy[self.Qx > 0] = 0
+            
             # Calculate number of valid points
             self.numberpoints = np.sum(np.isfinite(self.Intensity))
             
@@ -228,6 +324,10 @@ class CDSAXS_Model():
             raise ValueError("Error parsing the CSV file. Check the file format")
         except Exception as e:
             raise RuntimeError(f"Error processing data: {str(e)}")
+    
+    
+    
+    
     
     def convert_Cartesian_Cylindrical(self):
         """
@@ -738,26 +838,7 @@ class CDSAXS_Model():
     
     
 ### Coordinate Assignment Code
-    def SymCoordAssign_SingleMaterial(self):
-    # assigns trapezoid coordinates for a symmetric trapezoid
-    # consider combining with SymCoordAssign with SLD as a flag
-
-        self.Coord=np.zeros([self.layers+1,5,1])
-        for T in range (self.layers+1):
-            if T==0:
-                self.Coord[T,0,0]=0
-                self.Coord[T,1,0]=self.PAR[0,0]
-                self.Coord[T,2,0]=self.PAR[0,1]
-                self.Coord[T,3,0]=0
-                self.Coord[T,4,0]=1 # SLD - assigned to be 1 for a single material
-            else:
-                self.Coord[T,0,0]=self.Coord[T-1,0,0]+0.5*(self.PAR[T-1,0]-self.PAR[T,0])
-                self.Coord[T,1,0]=self.Coord[T,0,0]+self.PAR[T,0]
-                self.Coord[T,2,0]=self.PAR[T,1]
-                self.Coord[T,3,0]=0
-                self.Coord[T,4,0]=1# SLD - assigned to be 1 for a single material
-
-
+   
     def SymCoordAssign_SingleMaterial(self):
         """
         Assigns trapezoid coordinates for a symmetric trapezoid with a single material.
