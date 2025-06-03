@@ -233,6 +233,207 @@ class CDSAXS_Model:
         
         return True  # Return success
     
+    def importScaledCDSAXS_Data(self, datafile, format='auto'):
+        """
+        Imports scaled CDSAXS data that was exported by export_scaled_data function.
+        This function can be added to the CDSAXS_Model base class.
+        
+        Parameters:
+        -----------
+        datafile : str
+            Path to the scaled data file (CSV or NPZ format)
+        format : str, optional
+            File format ('csv', 'numpy', or 'auto' for auto-detection)
+            
+        Returns:
+        --------
+        bool
+            True if import was successful, False otherwise
+        """
+        # Check if input variable exists and is valid
+        if datafile is None or not isinstance(datafile, str):
+            raise ValueError("Datafile must be a valid file path")
+        
+        # Check if file exists
+        if not os.path.isfile(datafile):
+            raise FileNotFoundError(f"File not found: {datafile}")
+        
+        # Auto-detect format if needed
+        if format == 'auto':
+            if datafile.lower().endswith('.csv'):
+                format = 'csv'
+            elif datafile.lower().endswith('.npz'):
+                format = 'numpy'
+            else:
+                raise ValueError("Cannot auto-detect format. Please specify 'csv' or 'numpy'")
+        
+        try:
+            if format.lower() == 'csv':
+                return self._import_scaled_csv(datafile)
+            elif format.lower() in ['numpy', 'npz']:
+                return self._import_scaled_numpy(datafile)
+            else:
+                raise ValueError(f"Unsupported format: {format}. Use 'csv' or 'numpy'")
+                
+        except Exception as e:
+            print(f"Error importing scaled data: {str(e)}")
+            return False
+
+
+    def _import_scaled_csv(self, datafile):
+        """
+        Import scaled data from CSV format.
+        
+        Parameters:
+        -----------
+        datafile : str
+            Path to the CSV file
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            # Read the CSV file
+            data = pd.read_csv(datafile)
+            
+            if data.empty:
+                raise ValueError("The data file is empty")
+            
+            # Parse column headers to extract cut information
+            # Expected format: "Qz_cut_N" and "Intensity_cut_N_qx_VALUE"
+            headers = data.columns.tolist()
+            
+            # Find unique cut indices and qx values
+            cut_info = {}
+            for header in headers:
+                if header.startswith('Intensity_cut_'):
+                    # Parse: "Intensity_cut_N_qx_VALUE"
+                    match = re.match(r'Intensity_cut_(\d+)_qx_([+-]?\d*\.?\d*)', header)
+                    if match:
+                        cut_idx = int(match.group(1))
+                        qx_value = float(match.group(2))
+                        cut_info[cut_idx] = qx_value
+            
+            if not cut_info:
+                raise ValueError("No valid intensity columns found in CSV file")
+            
+            # Sort cuts by index
+            sorted_cuts = sorted(cut_info.keys())
+            numbercuts = len(sorted_cuts)
+            
+            # Get data dimensions
+            data_rows = len(data)
+            
+            # Initialize arrays
+            self.Intensity = np.zeros([data_rows, numbercuts])
+            self.Qz = np.zeros([data_rows, numbercuts])
+            self.Qx = np.zeros([data_rows, numbercuts])
+            
+            # Fill arrays with data
+            for i, cut_idx in enumerate(sorted_cuts):
+                qz_col = f"Qz_cut_{cut_idx}"
+                intensity_col = f"Intensity_cut_{cut_idx}_qx_{cut_info[cut_idx]:.4f}"
+                
+                if qz_col not in data.columns:
+                    raise ValueError(f"Missing Qz column: {qz_col}")
+                if intensity_col not in data.columns:
+                    # Try to find a close match (handle floating point precision)
+                    intensity_candidates = [col for col in data.columns 
+                                        if col.startswith(f"Intensity_cut_{cut_idx}_qx_")]
+                    if not intensity_candidates:
+                        raise ValueError(f"Missing intensity column for cut {cut_idx}")
+                    intensity_col = intensity_candidates[0]
+                
+                self.Qz[:, i] = data[qz_col].values
+                self.Intensity[:, i] = data[intensity_col].values
+                self.Qx[:, i] = cut_info[cut_idx]
+            
+            # Create Qy array with zeros
+            self.Qy = np.zeros_like(self.Qx)
+            
+            # Calculate number of valid points and cuts
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            self.numbercuts = numbercuts
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            print(f"Successfully imported scaled CSV data:")
+            print(f"  - {numbercuts} cuts")
+            print(f"  - {data_rows} data points per cut")
+            print(f"  - {self.numberpoints} total valid points")
+            
+            # Process data according to geometry (if method exists)
+            if hasattr(self, 'process_imported_data'):
+                self.process_imported_data()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing scaled CSV data: {str(e)}")
+            return False
+
+
+    def _import_scaled_numpy(self, datafile):
+        """
+        Import scaled data from NumPy NPZ format.
+        
+        Parameters:
+        -----------
+        datafile : str
+            Path to the NPZ file
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            # Load the NPZ file
+            data = np.load(datafile)
+            
+            # Check required arrays
+            required_arrays = ['Intensity', 'Qz', 'Qx', 'Qy']
+            for array_name in required_arrays:
+                if array_name not in data:
+                    raise ValueError(f"Missing required array: {array_name}")
+            
+            # Load arrays
+            self.Intensity = data['Intensity']
+            self.Qz = data['Qz']
+            self.Qx = data['Qx']
+            self.Qy = data['Qy']
+            
+            # Validate shapes
+            if not all(arr.shape == self.Intensity.shape for arr in [self.Qz, self.Qx, self.Qy]):
+                raise ValueError("Array shapes are inconsistent")
+            
+            # Calculate derived values
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            self.numbercuts = self.Intensity.shape[1]
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            print(f"Successfully imported scaled NumPy data:")
+            print(f"  - {self.numbercuts} cuts")
+            print(f"  - {self.Intensity.shape[0]} data points per cut")
+            print(f"  - {self.numberpoints} total valid points")
+            
+            # Process data according to geometry (if method exists)
+            if hasattr(self, 'process_imported_data'):
+                self.process_imported_data()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing scaled NumPy data: {str(e)}")
+            return False
+    
     def process_imported_data(self):
         """
         Process imported data according to geometry.
@@ -425,5 +626,17 @@ class CDSAXS_Model:
         """
         Plots the current structure.
         To be implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement this method")
+    
+    def simulate_structure(self, *args, **kwargs):
+        """
+        Abstract method to simulate the structure intensity.
+        To be implemented by subclasses with their specific simulation methods.
+        
+        Returns:
+        --------
+        numpy.ndarray
+            The simulated intensity (also sets self.SimInt)
         """
         raise NotImplementedError("Subclasses must implement this method")
