@@ -299,7 +299,7 @@ class DatasetBIN_INFO(object):
             info = np.genfromtxt(filename_info, delimiter='=', skip_header=1, dtype=str)
             info = {key: value for key, value in info}
             info['Sample Theta'] = float(info['Sample Theta ']) if 'Sample Theta ' in info else float(info['Theta '])
-            info['mono_act'] = 24200
+            info['mono_act'] = 9249.789 if info['Radiation '] == ' Gallium' else 24200
             info['Seconds'] = float(info['LiveTime '])
             infostr = '--- Specific to one image file ---\n'
             infostr += '\n'.join(['{0}: {1}'.format(key, info[key]) for key in sorted(info)])
