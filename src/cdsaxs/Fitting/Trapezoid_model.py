@@ -7,7 +7,7 @@ import seaborn as sns
 
 from CDSAXS_base_model import CDSAXS_Model
 
-class TrapezoidModelArrayBg(CDSAXS_Model):
+class TrapezoidModelArray(CDSAXS_Model):
     """
     CDSAXS model for trapezoid structures with array-based background support.
     Each column can have its own background value.
