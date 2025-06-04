@@ -878,8 +878,8 @@ class CylinderModel(CDSAXS_Model):
             plt.plot([], [], linestyle=linestyle, color=color, alpha=alpha, linewidth=2, label=label)
         
         plt.axis('equal')
-        plt.xlabel('Radius (nm)')
-        plt.ylabel('Height (nm)')
+        plt.xlabel('Radius (Å)')
+        plt.ylabel('Height (Å)')
         plt.grid(True, linestyle='--', alpha=0.3)
         
         return plt.gca()
@@ -933,7 +933,7 @@ class CylinderModel(CDSAXS_Model):
             
             # Set labels and title
             ax.set_title(f'Cut at Qr = {qr_value:.4f}')
-            ax.set_xlabel('Qz (nm$^{-1}$)')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (a.u.)')
             ax.grid(True, linestyle='--', alpha=0.4)
             
@@ -988,7 +988,7 @@ class CylinderModel(CDSAXS_Model):
             plt.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=0.6, linewidth=1.5)
         
         plt.title('Intensity Comparison - All Cuts')
-        plt.xlabel('Qz (nm$^{-1}$)')
+        plt.xlabel('Qz (Å$^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.4)
@@ -1160,7 +1160,7 @@ class CylinderModel(CDSAXS_Model):
             
             # Set labels and title
             ax.set_title(f'Cut at Qr = {qr_value:.4f}')
-            ax.set_xlabel('Qz (nm$^{-1}$)')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (counts)')
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.legend()
