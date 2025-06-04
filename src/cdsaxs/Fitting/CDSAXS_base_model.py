@@ -1475,3 +1475,623 @@ class CDSAXS_Model:
                 opt_params[param_name] = param_config
         
         return opt_params
+    
+    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
+        """
+        Plots intensity vs Qz for specific cuts (Qx for trapezoid, Qr for cylinder)
+        
+        Parameters:
+        -----------
+        cut_index : int or list or None, optional
+            Index or indices of the cut(s) to plot
+            If None, plots all available cuts
+        SimInt : numpy.ndarray, optional
+            Simulated intensity to plot alongside measured data
+            If None, uses self.SimInt if available
+        log_scale : str, optional
+            Whether to use logarithmic scale for intensity ('yes' or 'no')
+        
+        Returns:
+        --------
+        matplotlib.axes.Axes or list of Axes
+            The axes object(s) containing the plot(s)
+        """
+        # Check if required attributes exist
+        if not hasattr(self, 'Qz') or not hasattr(self, 'Intensity'):
+            raise AttributeError("Missing required attributes: Qz and/or Intensity")
+        
+        # Determine which cuts to plot
+        if cut_index is None:
+            # Plot all cuts
+            cut_indices = list(range(self.Intensity.shape[1]))
+        elif isinstance(cut_index, (list, tuple, np.ndarray)):
+            # Plot multiple specified cuts
+            cut_indices = cut_index
+        else:
+            # Plot a single cut
+            cut_indices = [cut_index]
+        
+        # Create a figure with appropriate size
+        n_cuts = len(cut_indices)
+        if n_cuts == 1:
+            # Single plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            axes = [ax]
+        else:
+            # Multiple plots
+            fig_width = min(16, n_cuts * 5)  # Limit maximum width
+            fig_height = min(10, n_cuts * 3)  # Limit maximum height
+            
+            if n_cuts <= 4:
+                # Use a single row for 2-4 plots
+                n_rows = 1
+                n_cols = n_cuts
+            else:
+                # Create a grid for many plots
+                n_rows = int(np.ceil(np.sqrt(n_cuts)))
+                n_cols = int(np.ceil(n_cuts / n_rows))
+            
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
+            if n_rows * n_cols > 1:
+                axes = axes.flatten()
+        
+        # Determine the appropriate Q-component for labeling
+        q_component = self.Qx if self.geometry == 'trapezoid' else self.Qr
+        q_label = 'Qx' if self.geometry == 'trapezoid' else 'Qr'
+        
+        # Plot each cut
+        for i, (ax, idx) in enumerate(zip(axes, cut_indices)):
+            # Check if the index is valid
+            if idx < 0 or idx >= self.Intensity.shape[1]:
+                ax.text(0.5, 0.5, f"Invalid cut index: {idx}", 
+                       ha='center', va='center', transform=ax.transAxes)
+                continue
+            
+            # Get Qz values for the selected cut
+            qz_values = self.Qz[:, idx]
+            q_value = q_component[0, idx]
+            
+            # Plot measured intensity
+            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'bo-', label='Measured')
+            
+            # Plot simulated intensity if available
+            if SimInt is not None:
+                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'r-', label='Simulated')
+            elif hasattr(self, 'SimInt') and self.SimInt is not None:
+                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'r-', label='Simulated')
+            
+            # Set logarithmic scale if requested
+            if log_scale.lower() == 'yes':
+                ax.set_yscale('log')
+            
+            # Set labels and title
+            ax.set_title(f'Cut at {q_label} = {q_value:.4f}')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
+            ax.set_ylabel('Intensity (counts)')
+            ax.grid(True, linestyle='--', alpha=0.7)
+            ax.legend()
+        
+        # Hide unused subplots
+        for i in range(len(cut_indices), len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        
+        # Return a single axis for a single plot, or list of axes for multiple plots
+        return axes[0] if len(axes) == 1 else axes
+    
+    def export_scaled_data(self, output_file, format='csv', scaling_factor=None, 
+                          data_subset=None, metadata=None):
+        """
+        Export the current intensity data with optional scaling and subsetting.
+        
+        Parameters:
+        -----------
+        output_file : str
+            Path for the output file (without extension)
+        format : str, optional
+            Output format ('csv' or 'numpy'). Default: 'csv'
+        scaling_factor : float or numpy.ndarray, optional
+            Factor(s) to scale the intensity data
+            If array, must match the number of cuts
+        data_subset : dict, optional
+            Dictionary specifying data subset to export
+            e.g., {'qz_range': (min_qz, max_qz), 'cuts': [0, 2, 4]}
+        metadata : dict, optional
+            Additional metadata to include in the export
+            
+        Returns:
+        --------
+        str
+            Path of the exported file
+        """
+        # Check if required attributes exist
+        if not hasattr(self, 'Intensity') or not hasattr(self, 'Qz'):
+            raise AttributeError("Missing required attributes: Intensity and/or Qz")
+        
+        # Prepare data for export
+        intensity_data = self.Intensity.copy()
+        qz_data = self.Qz.copy()
+        
+        # Get Q-component data based on geometry
+        if self.geometry == 'trapezoid':
+            q_data = self.Qx.copy()
+            q_label = 'qx'
+        else:
+            q_data = self.Qr.copy()
+            q_label = 'qr'
+        
+        # Apply scaling if provided
+        if scaling_factor is not None:
+            if np.isscalar(scaling_factor):
+                intensity_data *= scaling_factor
+            else:
+                # Array scaling - must match number of cuts
+                if len(scaling_factor) != intensity_data.shape[1]:
+                    raise ValueError(f"Scaling factor array length ({len(scaling_factor)}) "
+                                   f"must match number of cuts ({intensity_data.shape[1]})")
+                intensity_data *= scaling_factor[np.newaxis, :]
+        
+        # Apply data subset if provided
+        if data_subset is not None:
+            # Subset by Qz range
+            if 'qz_range' in data_subset:
+                qz_min, qz_max = data_subset['qz_range']
+                valid_rows = []
+                for col in range(qz_data.shape[1]):
+                    col_mask = (qz_data[:, col] >= qz_min) & (qz_data[:, col] <= qz_max)
+                    if col == 0:
+                        valid_rows = col_mask
+                    else:
+                        valid_rows = valid_rows | col_mask
+                
+                intensity_data = intensity_data[valid_rows, :]
+                qz_data = qz_data[valid_rows, :]
+                q_data = q_data[valid_rows, :]
+            
+            # Subset by specific cuts
+            if 'cuts' in data_subset:
+                cut_indices = data_subset['cuts']
+                intensity_data = intensity_data[:, cut_indices]
+                qz_data = qz_data[:, cut_indices]
+                q_data = q_data[:, cut_indices]
+        
+        # Export based on format
+        if format.lower() == 'csv':
+            return self._export_csv(output_file, intensity_data, qz_data, q_data, q_label, metadata)
+        elif format.lower() in ['numpy', 'npz']:
+            return self._export_numpy(output_file, intensity_data, qz_data, q_data, metadata)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    def _export_csv(self, output_file, intensity_data, qz_data, q_data, q_label, metadata):
+        """Export data in CSV format."""
+        import pandas as pd
+        
+        # Create column names and data
+        columns = []
+        data_dict = {}
+        
+        for i in range(intensity_data.shape[1]):
+            q_value = q_data[0, i]  # Assuming q is constant per cut
+            
+            qz_col = f"Qz_cut_{i}"
+            intensity_col = f"Intensity_cut_{i}_{q_label}_{q_value:.4f}"
+            
+            columns.extend([qz_col, intensity_col])
+            data_dict[qz_col] = qz_data[:, i]
+            data_dict[intensity_col] = intensity_data[:, i]
+        
+        # Create DataFrame
+        df = pd.DataFrame(data_dict)
+        
+        # Add timestamp to filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{output_file}_{timestamp}.csv"
+        
+        # Save to CSV
+        df.to_csv(filename, index=False)
+        
+        # Add metadata as comments if provided
+        if metadata:
+            self._add_csv_metadata(filename, metadata)
+        
+        print(f"Data exported to: {filename}")
+        print(f"  - {intensity_data.shape[1]} cuts")
+        print(f"  - {intensity_data.shape[0]} data points per cut")
+        
+        return filename
+    
+    def _export_numpy(self, output_file, intensity_data, qz_data, q_data, metadata):
+        """Export data in NumPy format."""
+        # Create Qy data (zeros for both geometries in this context)
+        qy_data = np.zeros_like(q_data)
+        
+        # Prepare data dictionary
+        data_dict = {
+            'Intensity': intensity_data,
+            'Qz': qz_data,
+            'Qy': qy_data
+        }
+        
+        # Add the appropriate Q component
+        if self.geometry == 'trapezoid':
+            data_dict['Qx'] = q_data
+        else:
+            data_dict['Qr'] = q_data
+        
+        # Add metadata if provided
+        if metadata:
+            for key, value in metadata.items():
+                if isinstance(value, (str, int, float)):
+                    data_dict[f'metadata_{key}'] = value
+        
+        # Add timestamp to filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{output_file}_{timestamp}.npz"
+        
+        # Save to NPZ
+        np.savez_compressed(filename, **data_dict)
+        
+        print(f"Data exported to: {filename}")
+        print(f"  - {intensity_data.shape[1]} cuts")
+        print(f"  - {intensity_data.shape[0]} data points per cut")
+        
+        return filename
+    
+    def _add_csv_metadata(self, filename, metadata):
+        """Add metadata as comments to CSV file."""
+        # Read existing content
+        with open(filename, 'r') as f:
+            content = f.read()
+        
+        # Prepare metadata comments
+        metadata_lines = ["# Metadata:"]
+        for key, value in metadata.items():
+            metadata_lines.append(f"# {key}: {value}")
+        metadata_lines.append("# ")  # Empty line before data
+        
+        # Write metadata + content
+        with open(filename, 'w') as f:
+            f.write('\n'.join(metadata_lines) + '\n')
+            f.write(content)
+    
+    def validate_model_parameters(self, verbose=True):
+        """
+        Validate the current model parameters for consistency and physical reasonableness.
+        
+        Parameters:
+        -----------
+        verbose : bool, optional
+            Whether to print detailed validation results. Default: True
+            
+        Returns:
+        --------
+        dict
+            Dictionary with validation results and any issues found
+        """
+        validation_results = {
+            'valid': True,
+            'warnings': [],
+            'errors': [],
+            'parameter_summary': {}
+        }
+        
+        try:
+            # Check if model_params exists
+            if not hasattr(self, 'model_params'):
+                validation_results['errors'].append("No model_params found")
+                validation_results['valid'] = False
+                return validation_results
+            
+            # Validate basic structure
+            required_keys = ['layers', 'DW', 'I0', 'Bk']
+            for key in required_keys:
+                if key not in self.model_params:
+                    validation_results['errors'].append(f"Missing required parameter: {key}")
+                    validation_results['valid'] = False
+            
+            # Validate geometry-specific parameters
+            if self.geometry == 'trapezoid':
+                self._validate_trapezoid_params(validation_results)
+            elif self.geometry == 'cylinder':
+                self._validate_cylinder_params(validation_results)
+            
+            # Validate global parameters
+            self._validate_global_params(validation_results)
+            
+            # Generate parameter summary
+            self._generate_parameter_summary(validation_results)
+            
+            if verbose:
+                self._print_validation_results(validation_results)
+            
+        except Exception as e:
+            validation_results['errors'].append(f"Validation failed: {str(e)}")
+            validation_results['valid'] = False
+        
+        return validation_results
+    
+    def _validate_trapezoid_params(self, validation_results):
+        """Validate trapezoid-specific parameters."""
+        if 'trapezoids' not in self.model_params:
+            validation_results['errors'].append("Missing trapezoids parameter")
+            return
+        
+        trapezoids = self.model_params['trapezoids']
+        layers = self.model_params['layers']
+        
+        # Check number of trapezoids
+        if len(trapezoids) != layers + 1:
+            validation_results['errors'].append(
+                f"Number of trapezoids ({len(trapezoids)}) should be layers + 1 ({layers + 1})"
+            )
+        
+        # Validate each trapezoid
+        for i, trap in enumerate(trapezoids):
+            if 'width' not in trap:
+                validation_results['errors'].append(f"Trapezoid {i} missing width")
+                continue
+            
+            width = trap['width']
+            if width <= 0:
+                validation_results['errors'].append(f"Trapezoid {i} width ({width}) must be positive")
+            
+            # Check height for non-top trapezoids
+            if i < layers:
+                if 'height' not in trap:
+                    validation_results['errors'].append(f"Trapezoid {i} missing height")
+                    continue
+                
+                height = trap['height']
+                if height <= 0:
+                    validation_results['warnings'].append(f"Trapezoid {i} height ({height}) should be positive")
+        
+        # Check for tapering consistency
+        widths = [trap['width'] for trap in trapezoids]
+        if len(widths) > 1:
+            if not all(w1 >= w2 for w1, w2 in zip(widths[:-1], widths[1:])):
+                validation_results['warnings'].append("Trapezoid widths are not monotonically decreasing")
+    
+    def _validate_cylinder_params(self, validation_results):
+        """Validate cylinder-specific parameters."""
+        if 'cylinders' not in self.model_params:
+            validation_results['errors'].append("Missing cylinders parameter")
+            return
+        
+        cylinders = self.model_params['cylinders']
+        layers = self.model_params['layers']
+        
+        # Check number of cylinders
+        if len(cylinders) != layers + 1:
+            validation_results['errors'].append(
+                f"Number of cylinders ({len(cylinders)}) should be layers + 1 ({layers + 1})"
+            )
+        
+        # Validate each cylinder
+        for i, cyl in enumerate(cylinders):
+            if 'radius' not in cyl:
+                validation_results['errors'].append(f"Cylinder {i} missing radius")
+                continue
+            
+            radius = cyl['radius']
+            if radius <= 0:
+                validation_results['errors'].append(f"Cylinder {i} radius ({radius}) must be positive")
+            
+            # Check height for non-top cylinders
+            if i < layers:
+                if 'height' not in cyl:
+                    validation_results['errors'].append(f"Cylinder {i} missing height")
+                    continue
+                
+                height = cyl['height']
+                if height <= 0:
+                    validation_results['warnings'].append(f"Cylinder {i} height ({height}) should be positive")
+        
+        # Check for tapering consistency
+        radii = [cyl['radius'] for cyl in cylinders]
+        if len(radii) > 1:
+            if not all(r1 >= r2 for r1, r2 in zip(radii[:-1], radii[1:])):
+                validation_results['warnings'].append("Cylinder radii are not monotonically decreasing")
+    
+    def _validate_global_params(self, validation_results):
+        """Validate global parameters."""
+        # Validate DW (Debye-Waller factor)
+        dw = self.model_params.get('DW', None)
+        if dw is not None:
+            if dw < 0:
+                validation_results['errors'].append(f"DW ({dw}) must be non-negative")
+            elif dw > 10:
+                validation_results['warnings'].append(f"DW ({dw}) is unusually large")
+        
+        # Validate I0 (intensity scaling)
+        i0 = self.model_params.get('I0', None)
+        if i0 is not None:
+            if i0 <= 0:
+                validation_results['errors'].append(f"I0 ({i0}) must be positive")
+        
+        # Validate background
+        bk = self.model_params.get('Bk', None)
+        if bk is not None:
+            if np.isscalar(bk):
+                if bk < 0:
+                    validation_results['warnings'].append(f"Background ({bk}) is negative")
+            else:
+                # Array background
+                if np.any(np.array(bk) < 0):
+                    validation_results['warnings'].append("Some background values are negative")
+    
+    def _generate_parameter_summary(self, validation_results):
+        """Generate a summary of model parameters."""
+        summary = {}
+        
+        if hasattr(self, 'model_params'):
+            summary['geometry'] = self.geometry
+            summary['layers'] = self.model_params.get('layers', 'Unknown')
+            summary['DW'] = self.model_params.get('DW', 'Unknown')
+            summary['I0'] = self.model_params.get('I0', 'Unknown')
+            summary['Bk'] = self.model_params.get('Bk', 'Unknown')
+            
+            if self.geometry == 'trapezoid' and 'trapezoids' in self.model_params:
+                widths = [trap.get('width', 0) for trap in self.model_params['trapezoids']]
+                heights = [trap.get('height', 0) for trap in self.model_params['trapezoids'][:-1]]
+                summary['widths'] = widths
+                summary['heights'] = heights
+                summary['total_height'] = sum(heights)
+                summary['aspect_ratio'] = max(widths) / summary['total_height'] if summary['total_height'] > 0 else float('inf')
+            
+            elif self.geometry == 'cylinder' and 'cylinders' in self.model_params:
+                radii = [cyl.get('radius', 0) for cyl in self.model_params['cylinders']]
+                heights = [cyl.get('height', 0) for cyl in self.model_params['cylinders'][:-1]]
+                summary['radii'] = radii
+                summary['heights'] = heights
+                summary['total_height'] = sum(heights)
+                summary['aspect_ratio'] = max(radii) / summary['total_height'] if summary['total_height'] > 0 else float('inf')
+        
+        validation_results['parameter_summary'] = summary
+    
+    def _print_validation_results(self, validation_results):
+        """Print validation results in a formatted way."""
+        print("\n" + "="*60)
+        print("MODEL PARAMETER VALIDATION")
+        print("="*60)
+        
+        # Print overall status
+        status = "VALID" if validation_results['valid'] else "INVALID"
+        print(f"Status: {status}")
+        
+        # Print errors
+        if validation_results['errors']:
+            print(f"\nERRORS ({len(validation_results['errors'])}):")
+            for error in validation_results['errors']:
+                print(f"  ❌ {error}")
+        
+        # Print warnings
+        if validation_results['warnings']:
+            print(f"\nWARNINGS ({len(validation_results['warnings'])}):")
+            for warning in validation_results['warnings']:
+                print(f"  ⚠️  {warning}")
+        
+        # Print parameter summary
+        if validation_results['parameter_summary']:
+            print(f"\nPARAMETER SUMMARY:")
+            summary = validation_results['parameter_summary']
+            print(f"  Geometry: {summary.get('geometry', 'Unknown')}")
+            print(f"  Layers: {summary.get('layers', 'Unknown')}")
+            print(f"  DW: {summary.get('DW', 'Unknown')}")
+            print(f"  I0: {summary.get('I0', 'Unknown')}")
+            print(f"  Background: {summary.get('Bk', 'Unknown')}")
+            
+            if 'total_height' in summary:
+                print(f"  Total Height: {summary['total_height']:.2f}")
+            if 'aspect_ratio' in summary:
+                ratio = summary['aspect_ratio']
+                if ratio != float('inf'):
+                    print(f"  Aspect Ratio: {ratio:.2f}")
+        
+        if not validation_results['errors'] and not validation_results['warnings']:
+            print("\n✅ No issues found!")
+        
+        print("="*60)
+    
+    def copy_model(self, deep=True):
+        """
+        Create a copy of the current model.
+        
+        Parameters:
+        -----------
+        deep : bool, optional
+            Whether to create a deep copy. Default: True
+            
+        Returns:
+        --------
+        CDSAXS_Model
+            Copy of the current model
+        """
+        if deep:
+            # Create new model with copied parameters
+            new_model = self.__class__(
+                self.model,
+                self.layers,
+                model_params=copy.deepcopy(self.model_params) if hasattr(self, 'model_params') else None
+            )
+            
+            # Copy data if it exists
+            if hasattr(self, 'Intensity'):
+                new_model.Intensity = self.Intensity.copy()
+            if hasattr(self, 'Qz'):
+                new_model.Qz = self.Qz.copy()
+            if hasattr(self, 'Qx'):
+                new_model.Qx = self.Qx.copy()
+            if hasattr(self, 'Qy'):
+                new_model.Qy = self.Qy.copy()
+            if hasattr(self, 'SimInt'):
+                new_model.SimInt = self.SimInt.copy()
+            
+            # Copy other attributes
+            for attr in ['GF', 'BIC', 'numberpoints', 'numbercuts']:
+                if hasattr(self, attr):
+                    setattr(new_model, attr, getattr(self, attr))
+                    
+        else:
+            # Shallow copy
+            new_model = copy.copy(self)
+        
+        return new_model
+    
+    def reset_to_initial(self):
+        """
+        Reset model parameters to their initial values.
+        """
+        if hasattr(self, 'PAR_Initial') and self.PAR_Initial is not None:
+            self.PAR = self.PAR_Initial.copy()
+        
+        if hasattr(self, 'DW_Initial') and self.DW_Initial is not None:
+            self.DW = self.DW_Initial
+            
+        if hasattr(self, 'I0_Initial') and self.I0_Initial is not None:
+            self.I0 = self.I0_Initial
+            
+        if hasattr(self, 'Bk_Initial') and self.Bk_Initial is not None:
+            self.Bk = self.Bk_Initial
+        
+        # Rebuild model_params from initial traditional parameters
+        self.build_model_params_from_traditional()
+        
+        print("Model parameters reset to initial values")
+    
+    def get_model_info(self):
+        """
+        Get a comprehensive summary of the model.
+        
+        Returns:
+        --------
+        dict
+            Dictionary containing model information
+        """
+        info = {
+            'geometry': self.geometry,
+            'model_type': self.model,
+            'layers': self.layers,
+            'has_data': hasattr(self, 'Intensity'),
+            'has_simulation': hasattr(self, 'SimInt'),
+            'parameters': {}
+        }
+        
+        # Add parameter information
+        if hasattr(self, 'model_params'):
+            info['parameters'] = copy.deepcopy(self.model_params)
+        
+        # Add data information
+        if hasattr(self, 'Intensity'):
+            info['data_shape'] = self.Intensity.shape
+            info['number_points'] = getattr(self, 'numberpoints', 'Unknown')
+            info['number_cuts'] = getattr(self, 'numbercuts', self.Intensity.shape[1])
+        
+        # Add fitting results
+        if hasattr(self, 'GF'):
+            info['goodness_of_fit'] = self.GF
+        if hasattr(self, 'BIC'):
+            info['bic'] = self.BIC
+        
+        return info

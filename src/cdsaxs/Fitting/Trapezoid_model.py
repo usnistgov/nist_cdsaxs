@@ -1,3 +1,5 @@
+# Updated Trapezoid_model.py with common functions moved to base class
+
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
@@ -1016,8 +1018,8 @@ class TrapezoidModelArray(CDSAXS_Model):
         if equal_aspect:
             plt.axis('equal')
         
-        plt.xlabel('Width (Å)')
-        plt.ylabel('Height (Å)')
+        plt.xlabel('Width (Å)')
+        plt.ylabel('Height (Å)')
         plt.grid(True, linestyle='--', alpha=0.3)
         
         return plt.gca()
@@ -1071,7 +1073,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             
             # Set labels and title
             ax.set_title(f'Cut at Qx = {qx_value:.4f}')
-            ax.set_xlabel('Qz (Å$^{-1}$)')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (a.u.)')
             ax.grid(True, linestyle='--', alpha=0.4)
             
@@ -1126,7 +1128,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             plt.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=0.6, linewidth=1.5)
         
         plt.title('Intensity Comparison - All Cuts')
-        plt.xlabel('Qz (Å$^{-1}$)')
+        plt.xlabel('Qz (Å$^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.4)
@@ -1311,269 +1313,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                            ha='left', va='center', fontsize=9,
                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
-    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
-        """
-        Plots intensity vs Qz for specific Qx cut(s)
-        
-        Parameters:
-        -----------
-        cut_index : int or list or None, optional
-            Index or indices of the Qx cut(s) to plot
-            If None, plots all available cuts
-        SimInt : numpy.ndarray, optional
-            Simulated intensity to plot alongside measured data
-            If None, uses self.SimInt if available
-        log_scale : str, optional
-            Whether to use logarithmic scale for intensity ('yes' or 'no')
-        
-        Returns:
-        --------
-        matplotlib.axes.Axes or list of Axes
-            The axes object(s) containing the plot(s)
-        """
-        # Check if required attributes exist
-        if not hasattr(self, 'Qz') or not hasattr(self, 'Intensity'):
-            raise AttributeError("Missing required attributes: Qz and/or Intensity")
-        
-        # Determine which cuts to plot
-        if cut_index is None:
-            # Plot all cuts
-            cut_indices = list(range(self.Intensity.shape[1]))
-        elif isinstance(cut_index, (list, tuple, np.ndarray)):
-            # Plot multiple specified cuts
-            cut_indices = cut_index
-        else:
-            # Plot a single cut
-            cut_indices = [cut_index]
-        
-        # Create a figure with appropriate size
-        n_cuts = len(cut_indices)
-        if n_cuts == 1:
-            # Single plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            axes = [ax]
-        else:
-            # Multiple plots
-            fig_width = min(16, n_cuts * 5)  # Limit maximum width
-            fig_height = min(10, n_cuts * 3)  # Limit maximum height
-            
-            if n_cuts <= 4:
-                # Use a single row for 2-4 plots
-                n_rows = 1
-                n_cols = n_cuts
-            else:
-                # Create a grid for many plots
-                n_rows = int(np.ceil(np.sqrt(n_cuts)))
-                n_cols = int(np.ceil(n_cuts / n_rows))
-            
-            fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
-            if n_rows * n_cols > 1:
-                axes = axes.flatten()
-        
-        # Plot each cut
-        for i, (ax, idx) in enumerate(zip(axes, cut_indices)):
-            # Check if the index is valid
-            if idx < 0 or idx >= self.Intensity.shape[1]:
-                ax.text(0.5, 0.5, f"Invalid cut index: {idx}", 
-                       ha='center', va='center', transform=ax.transAxes)
-                continue
-            
-            # Get Qz values for the selected cut
-            qz_values = self.Qz[:, idx]
-            qx_value = self.Qx[0, idx]
-            
-            # Plot measured intensity
-            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'bo-', label='Measured')
-            
-            # Plot simulated intensity if available
-            if SimInt is not None:
-                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'r-', label='Simulated')
-            elif hasattr(self, 'SimInt') and self.SimInt is not None:
-                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'r-', label='Simulated')
-            
-            # Set logarithmic scale if requested
-            if log_scale.lower() == 'yes':
-                ax.set_yscale('log')
-            
-            # Set labels and title
-            ax.set_title(f'Cut at Qx = {qx_value:.4f}')
-            ax.set_xlabel('Qz (Å$^{-1}$)')
-            ax.set_ylabel('Intensity (counts)')
-            ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
-        
-        # Hide unused subplots
-        for i in range(len(cut_indices), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        
-        # Return a single axis for a single plot, or list of axes for multiple plots
-        return axes[0] if len(axes) == 1 else axes
-    
-    
-    def parameter_sweep_width_dw_1layer(self, width_range, dw_range, n_points=(10, 10),
-                                    exclude_from_fit=None, plot_results=True, 
-                                    figsize=(10, 8), save_results=False, filename=None,
-                                    optimization_kwargs=None, verbose=True, metric='GF'):
-        """
-        Special 2D parameter sweep for 1-layer models: sweep both widths simultaneously 
-        (width_0 = width_1) along with Debye-Waller factor.
-        
-        This function is only available for single-layer (layers=1) trapezoid models.
-        It sweeps the common width value for both the bottom and top trapezoid widths
-        while also sweeping the Debye-Waller factor.
-        
-        Parameters:
-        -----------
-        width_range : tuple
-            (min_width, max_width) for both trapezoid widths
-        dw_range : tuple
-            (min_dw, max_dw) for the Debye-Waller factor
-        n_points : tuple, optional
-            (n_width_points, n_dw_points) for each parameter. Default: (10, 10)
-        exclude_from_fit : list, optional
-            List of parameter names to exclude from optimization (beyond width and DW)
-        plot_results : bool, optional
-            Whether to plot the heatmap. Default: True
-        figsize : tuple, optional
-            Figure size for the plot. Default: (10, 8)
-        save_results : bool, optional
-            Whether to save results to file. Default: False
-        filename : str, optional
-            Filename for saving results
-        optimization_kwargs : dict, optional
-            Additional kwargs for CDSAXS_DiffEvolution
-        verbose : bool, optional
-            Whether to print progress. Default: True
-        metric : str, optional
-            Metric to plot ('GF' or 'BIC'). Default: 'GF'
-            
-        Returns:
-        --------
-        dict
-            Dictionary with sweep values, GF/BIC matrices, and optimized parameters
-            
-        Raises:
-        -------
-        ValueError
-            If the model doesn't have exactly 1 layer
-        """
-        # Check if this is a 1-layer model
-        if self.layers != 1:
-            raise ValueError(f"This function is only for 1-layer models. Current model has {self.layers} layers.")
-        
-        if not hasattr(self, 'Intensity'):
-            raise ValueError("Data must be imported before performing parameter sweep")
-        
-        # Set default optimization parameters
-        if optimization_kwargs is None:
-            optimization_kwargs = {'maxiter': 20, 'popsize': 8, 'plot_results': False}
-        
-        # Create sweep values
-        width_values = np.linspace(width_range[0], width_range[1], n_points[0])
-        dw_values = np.linspace(dw_range[0], dw_range[1], n_points[1])
-        
-        # Initialize results storage
-        results = {
-            'sweep_type': 'width_dw_1layer',
-            'width_values': width_values,
-            'dw_values': dw_values,
-            'gf_matrix': np.full((n_points[1], n_points[0]), np.inf),
-            'bic_matrix': np.full((n_points[1], n_points[0]), np.inf),
-            'optimized_params': [[None for _ in range(n_points[0])] for _ in range(n_points[1])],
-            'convergence_matrix': np.full((n_points[1], n_points[0]), False, dtype=bool)
-        }
-        
-        # Store original parameters
-        original_params = copy.deepcopy(self.model_params)
-        
-        # Setup progress bar
-        total_points = n_points[0] * n_points[1]
-        if verbose:
-            pbar = tqdm(total=total_points, desc="1-Layer Width+DW Sweep")
-        
-        for i, width_val in enumerate(width_values):
-            for j, dw_val in enumerate(dw_values):
-                try:
-                    # Reset to original parameters
-                    self.model_params = copy.deepcopy(original_params)
-                    self.update_traditional_from_model_params()
-                    
-                    # Set both widths to the same value
-                    self.model_params['trapezoids'][0]['width'] = width_val  # Bottom width
-                    self.model_params['trapezoids'][1]['width'] = width_val  # Top width
-                    
-                    # Set DW value
-                    self.model_params['DW'] = dw_val
-                    
-                    # Update traditional parameters
-                    self.update_traditional_from_model_params()
-                    
-                    # Create optimization parameters excluding width and DW parameters
-                    excluded_params = ['trap_0_width', 'trap_1_width', 'DW']
-                    if exclude_from_fit:
-                        excluded_params.extend(exclude_from_fit)
-                    
-                    opt_params = self._create_optimization_params_excluding(excluded_params)
-                    
-                    if not opt_params:
-                        # No parameters to optimize, just calculate GF
-                        if hasattr(self, 'discretization'):
-                            # Cylinder models need discretization parameter
-                            self.SimInt = self.simulate_structure(self.discretization)
-                        else:
-                            # Trapezoid models don't need discretization
-                            self.SimInt = self.simulate_structure()
-                        gf = self.GF_calc(self.SimInt)
-                        bic = self.BIC_calc(gf)
-                        converged = True
-                    else:
-                        # Run optimization
-                        opt_result = self.CDSAXS_DiffEvolution(
-                            params_to_optimize=opt_params,
-                            **optimization_kwargs
-                        )
-                        gf = self.GF
-                        bic = self.BIC
-                        converged = opt_result is not None
-                    
-                    # Store results
-                    results['gf_matrix'][j, i] = gf
-                    results['bic_matrix'][j, i] = bic
-                    results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
-                    results['convergence_matrix'][j, i] = converged
-                    
-                    if verbose:
-                        pbar.set_postfix({
-                            'Width': f'{width_val:.1f}',
-                            'DW': f'{dw_val:.1f}',
-                            'GF': f'{gf:.4f}'
-                        })
-                        pbar.update(1)
-                        
-                except Exception as e:
-                    if verbose:
-                        print(f"Error at Width={width_val}, DW={dw_val}: {str(e)}")
-                        pbar.update(1)
-        
-        if verbose:
-            pbar.close()
-        
-        # Restore original parameters
-        self.model_params = original_params
-        self.update_traditional_from_model_params()
-        
-        # Plot results
-        if plot_results:
-            self._plot_width_dw_sweep_results(results, figsize, metric)
-        
-        # Save results
-        if save_results:
-            self._save_sweep_results(results, filename or "width_dw_1layer_sweep")
-        
-        return results
-    
+
     def _plot_width_dw_sweep_results(self, results, figsize, metric='GF'):
         """
         Plot 1-layer width+DW sweep results as heatmap.
@@ -1739,21 +1479,11 @@ class TrapezoidModelArray(CDSAXS_Model):
         self.update_traditional_from_model_params()
         
         # Recalculate simulation
-        if hasattr(self, 'discretization'):
-            # Cylinder models need discretization parameter
-            self.SimInt = self.simulate_structure(self.discretization)
-        else:
-            # Trapezoid models don't need discretization
-            self.SimInt = self.simulate_structure()
+        self.SimInt = self.simulate_structure()
         self.GF = self.GF_calc(self.SimInt)
         self.BIC = self.BIC_calc(self.GF)
         
         print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
-
-
-
- 
-    
     
     def simulate_structure(self, *args, **kwargs):
         """
@@ -1765,3 +1495,6 @@ class TrapezoidModelArray(CDSAXS_Model):
             The simulated intensity (also sets self.SimInt)
         """
         return self.SimTrap_SM(*args, **kwargs)
+
+# Create an alias for backward compatibility
+TrapezoidModel = TrapezoidModelArray
