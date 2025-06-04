@@ -271,19 +271,13 @@ class TrapezoidModelArray(CDSAXS_Model):
                     'default': self.Bk
                 }
         else:
-            # Ensure default values are set if not provided
+            # FIXED: Ensure default values are set for all parameters
             for param, limits in param_limits.items():
                 if 'default' not in limits:
-                    if param.startswith('trap_'):
-                        parts = param.split('_')
-                        trap_idx = int(parts[1])
-                        param_type = parts[2]
-                        limits['default'] = self.model_params['trapezoids'][trap_idx][param_type]
-                    elif param.startswith('Bk_'):
-                        bk_idx = int(param.split('_')[1])
-                        limits['default'] = self.Bk[bk_idx] if isinstance(self.Bk, np.ndarray) else self.Bk
-                    else:
-                        limits['default'] = getattr(self, param)
+                    # Get default value from current model state
+                    default_value = self._get_current_parameter_value(param)
+                    limits['default'] = default_value
+                    print(f"INFO: Added missing default for {param}: {default_value}")
         
         # Store optimization parameters
         self.model_params['optimization'] = param_limits
@@ -1499,5 +1493,55 @@ class TrapezoidModelArray(CDSAXS_Model):
         """
         return self.SimTrap_SM(*args, **kwargs)
 
+
+
+    def _get_current_parameter_value(self, param_name):
+        """
+        Get the current value of a parameter from the model.
+        
+        Parameters:
+        -----------
+        param_name : str
+            Name of the parameter
+            
+        Returns:
+        --------
+        float
+            Current value of the parameter
+        """
+        if param_name.startswith('trap_'):
+            parts = param_name.split('_')
+            trap_idx = int(parts[1])
+            param_type = parts[2]
+            return self.model_params['trapezoids'][trap_idx][param_type]
+        
+        elif param_name.startswith('cyl_'):
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            return self.model_params['cylinders'][cyl_idx][param_type]
+        
+        elif param_name.startswith('Bk_'):
+            bk_idx = int(param_name.split('_')[1])
+            if isinstance(self.Bk, np.ndarray):
+                return self.Bk[bk_idx]
+            else:
+                return self.Bk
+        
+        elif param_name == 'Bk':
+            if isinstance(self.Bk, np.ndarray):
+                return self.Bk[0]  # Return first element for scalar case
+            else:
+                return self.Bk
+        
+        elif param_name in ['DW', 'I0']:
+            return getattr(self, param_name)
+        
+        else:
+            # Try to get from model_params
+            if hasattr(self, 'model_params') and param_name in self.model_params:
+                return self.model_params[param_name]
+            else:
+                raise ValueError(f"Unknown parameter: {param_name}")
 # Create an alias for backward compatibility
 TrapezoidModel = TrapezoidModelArray
