@@ -6,6 +6,7 @@ import pandas as pd
 from scipy.optimize import differential_evolution
 import matplotlib.pyplot as plt
 import copy
+from tqdm import tqdm
 
 class CDSAXS_Model:
     """
@@ -655,50 +656,18 @@ class CDSAXS_Model:
     
     
     def parameter_sweep_1d(self, sweep_param, sweep_range, n_points=20, 
-                        exclude_from_fit=None, plot_results=True, 
-                        figsize=(10, 6), save_results=False, filename=None,
-                        optimization_kwargs=None, verbose=True):
+                                exclude_from_fit=None, plot_results=True, 
+                                figsize=(10, 6), save_results=False, filename=None,
+                                optimization_kwargs=None, verbose=True):
         """
-        Perform a 1D parameter sweep, holding one parameter constant while optimizing others.
-        
-        Parameters:
-        -----------
-        sweep_param : str
-            Name of the parameter to sweep (e.g., 'trap_0_width', 'DW', 'I0')
-        sweep_range : tuple
-            (min_value, max_value) for the sweep parameter
-        n_points : int, optional
-            Number of points to sweep. Default: 20
-        exclude_from_fit : list, optional
-            List of parameter names to exclude from optimization (in addition to sweep_param)
-        plot_results : bool, optional
-            Whether to plot the results. Default: True
-        figsize : tuple, optional
-            Figure size for the plot. Default: (10, 6)
-        save_results : bool, optional
-            Whether to save results to file. Default: False
-        filename : str, optional
-            Filename for saving results. If None, auto-generates name
-        optimization_kwargs : dict, optional
-            Additional kwargs for CDSAXS_DiffEvolution
-        verbose : bool, optional
-            Whether to print progress. Default: True
-            
-        Returns:
-        --------
-        dict
-            Dictionary with sweep values, GF values, BIC values, and optimized parameters
+        Fixed version of parameter_sweep_1d with proper error handling and results storage.
         """
-        if not hasattr(self, 'Intensity'):
-            raise ValueError("Data must be imported before performing parameter sweep")
-        ### debug
-        
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
         
         # Set default optimization parameters
         if optimization_kwargs is None:
-            optimization_kwargs = {'maxiter': 30, 'popsize': 10, 'plot_results': False}
+            optimization_kwargs = {'maxiter': 30, 'popsize': 10}
         
         # Create sweep values
         sweep_values = np.linspace(sweep_range[0], sweep_range[1], n_points)
@@ -736,45 +705,111 @@ class CDSAXS_Model:
                     [sweep_param] + (exclude_from_fit or [])
                 )
                 
+                # Initialize variables for this iteration
+                gf = float('inf')
+                bic = float('inf')
+                converged = False
+                
                 if not opt_params:
                     # No parameters to optimize, just calculate GF
-                    if hasattr(self, 'discretization'):
-                        # Cylinder models need discretization parameter
-                        self.SimInt = self.simulate_structure(self.discretization)
-                    else:
-                        # Trapezoid models don't need discretization
-                        self.SimInt = self.simulate_structure()
-                    gf = self.GF_calc(self.SimInt)
-                    bic = self.BIC_calc(gf)
-                    converged = True
-                    opt_result = {}
+                    try:
+                        # Handle both geometries correctly
+                        if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                            # Cylinder models need discretization parameter
+                            sim_result = self.simulate_structure(self.discretization)
+                        else:
+                            # Trapezoid models don't need discretization
+                            sim_result = self.simulate_structure()
+                        
+                        # Check if simulation succeeded
+                        if sim_result is not None:
+                            gf = self.GF_calc(sim_result)
+                            bic = self.BIC_calc(gf)
+                            converged = True
+                            
+                            # Debug output for first few points
+                            if verbose and i < 3:
+                                print(f"DEBUG: Point {i+1}: {sweep_param}={value:.1f}, GF={gf:.4f}")
+                        else:
+                            if verbose:
+                                print(f"Warning: Simulation failed at {sweep_param}={value}")
+                            
+                    except Exception as e:
+                        if verbose:
+                            print(f"Warning: Simulation error at {sweep_param}={value}: {e}")
                 else:
-                    # Run optimization
-                    opt_result=self.CDSAXS_DiffEvolution(
-                        params_to_optimize=opt_params,
-                        plot_results=False,
-                        **optimization_kwargs
-                    )
-                    gf = self.GF
-                    bic = self.BIC
-                    converged = opt_result is not None
+                    # Run optimization with suppressed output
+                    try:
+                        # Don't assign the return value to avoid dictionary display
+                        self.CDSAXS_DiffEvolution(
+                            params_to_optimize=opt_params,
+                            plot_results=False,  # Suppress plots during sweep
+                            verbose=False,       # Suppress optimization output
+                            **optimization_kwargs
+                        )
+                        
+                        # Get results from model attributes
+                        if hasattr(self, 'GF') and hasattr(self, 'BIC'):
+                            gf = self.GF
+                            bic = self.BIC
+                            converged = True
+                        else:
+                            if verbose:
+                                print(f"Warning: No GF/BIC attributes after optimization at {sweep_param}={value}")
+                            
+                    except Exception as e:
+                        if verbose:
+                            print(f"Warning: Optimization failed at {sweep_param}={value}: {e}")
                 
-                # Store results
+                # Store results (make sure we always store something)
                 results['gf_values'].append(gf)
                 results['bic_values'].append(bic)
                 results['optimized_params'].append(copy.deepcopy(self.model_params))
                 results['convergence_flags'].append(converged)
                 
-                if verbose:
-                    self._print_sweep_summary_1d(results)
+                # Update progress bar with current best
+                if verbose and hasattr(pbar, 'set_postfix'):
+                    finite_gfs = [g for g in results['gf_values'] if np.isfinite(g)]
+                    current_best_gf = min(finite_gfs) if finite_gfs else float('inf')
+                    pbar.set_postfix({
+                        f'{sweep_param}': f'{value:.3f}',
+                        'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
+                    })
                     
             except Exception as e:
                 if verbose:
                     print(f"Error at {sweep_param}={value}: {str(e)}")
+                # Still store something to maintain array lengths
                 results['gf_values'].append(float('inf'))
                 results['bic_values'].append(float('inf'))
                 results['optimized_params'].append(None)
                 results['convergence_flags'].append(False)
+        
+        if verbose and hasattr(pbar, 'close'):
+            pbar.close()
+        
+        # Verify results before proceeding
+        expected_length = len(sweep_values)
+        actual_length = len(results['gf_values'])
+        
+        if actual_length != expected_length:
+            print(f"WARNING: Results length mismatch. Expected {expected_length}, got {actual_length}")
+            # Pad with inf values if needed
+            while len(results['gf_values']) < expected_length:
+                results['gf_values'].append(float('inf'))
+                results['bic_values'].append(float('inf'))
+                results['optimized_params'].append(None)
+                results['convergence_flags'].append(False)
+        
+        # Debug: Print a few results
+        if verbose:
+            print(f"DEBUG: First few results:")
+            for i in range(min(3, len(results['gf_values']))):
+                print(f"  {sweep_param}={sweep_values[i]:.1f} -> GF={results['gf_values'][i]}")
+        
+        # Print summary with best results
+        if verbose:
+            self._print_sweep_summary_1d(results)
         
         # Restore original parameters
         self.model_params = original_params
@@ -793,9 +828,9 @@ class CDSAXS_Model:
     
     
     def parameter_sweep_2d(self, sweep_params, sweep_ranges, n_points=(10, 10),
-                          exclude_from_fit=None, plot_results=True, 
-                          figsize=(10, 8), save_results=False, filename=None,
-                          optimization_kwargs=None, verbose=True, metric='GF'):
+                      exclude_from_fit=None, plot_results=True, 
+                      figsize=(10, 8), save_results=False, filename=None,
+                      optimization_kwargs=None, verbose=True, metric='GF'):
         """
         Perform a 2D parameter sweep with heatmap visualization.
         
@@ -829,12 +864,16 @@ class CDSAXS_Model:
         dict
             Dictionary with sweep values, GF/BIC matrices, and optimized parameters
         """
+        import numpy as np
+        import copy
+        from tqdm import tqdm
+        
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
         
         # Set default optimization parameters
         if optimization_kwargs is None:
-            optimization_kwargs = {'maxiter': 20, 'popsize': 8, 'plot_results': False}
+            optimization_kwargs = {'maxiter': 20, 'popsize': 8}
         
         # Create sweep values
         param1_values = np.linspace(sweep_ranges[0][0], sweep_ranges[0][1], n_points[0])
@@ -861,6 +900,11 @@ class CDSAXS_Model:
         
         for i, val1 in enumerate(param1_values):
             for j, val2 in enumerate(param2_values):
+                # Initialize variables for this iteration
+                gf = float('inf')
+                bic = float('inf')
+                converged = False
+                
                 try:
                     # Reset to original parameters
                     self.model_params = copy.deepcopy(original_params)
@@ -877,25 +921,50 @@ class CDSAXS_Model:
                     
                     if not opt_params:
                         # No parameters to optimize, just calculate GF
-                        if hasattr(self, 'discretization'):
-                            # Cylinder models need discretization parameter
-                            self.SimInt = self.simulate_structure(self.discretization)
-                        else:
-                            # Trapezoid models don't need discretization
-                            self.SimInt = self.simulate_structure()
-                        gf = self.GF_calc(self.SimInt)
-                        bic = self.BIC_calc(gf)
-                        converged = True
+                        try:
+                            # Handle both geometries correctly
+                            if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                                # Cylinder models need discretization parameter
+                                sim_result = self.simulate_structure(self.discretization)
+                            else:
+                                # Trapezoid models don't need discretization
+                                sim_result = self.simulate_structure()
+                            
+                            # Check if simulation succeeded
+                            if sim_result is not None:
+                                gf = self.GF_calc(sim_result)
+                                bic = self.BIC_calc(gf)
+                                converged = True
+                            else:
+                                if verbose and total_points <= 25:  # Only print for small grids
+                                    print(f"Warning: Simulation failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
+                                
+                        except Exception as e:
+                            if verbose and total_points <= 25:  # Only print for small grids
+                                print(f"Warning: Simulation error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
                     else:
-                        # Run optimization
-                        opt_result=self.CDSAXS_DiffEvolution(
-                            params_to_optimize=opt_params,
-                            plot_results=False,
-                            **optimization_kwargs
-                        )
-                        gf = self.GF
-                        bic = self.BIC
-                        converged = opt_result is not None
+                        # Run optimization with suppressed output
+                        try:
+                            # Don't assign the return value to avoid dictionary display
+                            self.CDSAXS_DiffEvolution(
+                                params_to_optimize=opt_params,
+                                plot_results=False,  # Suppress plots during sweep
+                                verbose=False,       # Suppress optimization output
+                                **optimization_kwargs
+                            )
+                            
+                            # Get results from model attributes
+                            if hasattr(self, 'GF') and hasattr(self, 'BIC'):
+                                gf = self.GF
+                                bic = self.BIC
+                                converged = True
+                            else:
+                                if verbose and total_points <= 25:  # Only print for small grids
+                                    print(f"Warning: No GF/BIC attributes after optimization at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
+                                
+                        except Exception as e:
+                            if verbose and total_points <= 25:  # Only print for small grids
+                                print(f"Warning: Optimization failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
                     
                     # Store results
                     results['gf_matrix'][j, i] = gf
@@ -903,21 +972,46 @@ class CDSAXS_Model:
                     results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
                     results['convergence_matrix'][j, i] = converged
                     
+                    # Update progress bar
                     if verbose:
+                        # Calculate current best for progress display
+                        current_gf_matrix = results['gf_matrix'][:j+1, :i+1] if j > 0 or i > 0 else results['gf_matrix'][j:j+1, i:i+1]
+                        finite_gfs = current_gf_matrix[np.isfinite(current_gf_matrix)]
+                        current_best_gf = np.min(finite_gfs) if len(finite_gfs) > 0 else float('inf')
+                        
                         pbar.set_postfix({
                             f'{sweep_params[0]}': f'{val1:.3f}',
                             f'{sweep_params[1]}': f'{val2:.3f}',
-                            'GF': f'{gf:.4f}'
+                            'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
                         })
                         pbar.update(1)
                         
                 except Exception as e:
                     if verbose:
-                        self._print_sweep_summary_2d(results)
+                        print(f"Error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {str(e)}")
+                    
+                    # Store failed results
+                    results['gf_matrix'][j, i] = float('inf')
+                    results['bic_matrix'][j, i] = float('inf')
+                    results['optimized_params'][j][i] = None
+                    results['convergence_matrix'][j, i] = False
+                    
+                    if verbose:
                         pbar.update(1)
         
         if verbose:
             pbar.close()
+        
+        # Verify results matrices
+        expected_shape = (n_points[1], n_points[0])
+        if results['gf_matrix'].shape != expected_shape:
+            print(f"WARNING: GF matrix shape mismatch. Expected {expected_shape}, got {results['gf_matrix'].shape}")
+        if results['bic_matrix'].shape != expected_shape:
+            print(f"WARNING: BIC matrix shape mismatch. Expected {expected_shape}, got {results['bic_matrix'].shape}")
+        
+        # Print summary with best results
+        if verbose:
+            self._print_sweep_summary_2d(results)
         
         # Restore original parameters
         self.model_params = original_params
@@ -2347,3 +2441,4 @@ class CDSAXS_Model:
             print(f"  BIC = {self.BIC:.4f}")
         
         print(f"{'='*60}")
+
