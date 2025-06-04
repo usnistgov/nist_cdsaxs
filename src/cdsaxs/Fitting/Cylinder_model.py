@@ -591,6 +591,39 @@ class CylinderModel(CDSAXS_Model):
             print(f"Error in SimCyl_GF: {str(e)}")
             return float('inf')  # Return infinity as worst-case fit
     
+    def _cylinder_optimization_wrapper(self, optimization_values):
+        """
+        Wrapper function for cylindrical optimization that can be pickled.
+        """
+        # Create PAR array from optimization values
+        temp_PAR = np.zeros((self.layers + 1, 2))
+        temp_DW = self.DW
+        temp_I0 = self.I0
+        temp_Bk = self.Bk
+        
+        for i, param_name in enumerate(self.param_names):
+            if param_name.startswith('cyl_'):
+                parts = param_name.split('_')
+                cyl_idx = int(parts[1])
+                param_type = parts[2]
+                
+                if param_type == 'radius':
+                    temp_PAR[cyl_idx, 0] = optimization_values[i]
+                elif param_type == 'height':
+                    temp_PAR[cyl_idx, 1] = optimization_values[i]
+            elif param_name == 'DW':
+                temp_DW = optimization_values[i]
+            elif param_name == 'I0':
+                temp_I0 = optimization_values[i]
+            elif param_name == 'Bk':
+                temp_Bk = optimization_values[i]
+        
+        # Create SimPar array for cylindrical GF function
+        SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
+        
+        # Call cylindrical GF function
+        return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
                             plot_structure=True, plot_grid=True, plot_combined=True, **kwargs):
         """
@@ -682,40 +715,9 @@ class CylinderModel(CDSAXS_Model):
             # Run differential evolution optimization
             print(f"Starting optimization with {len(param_names)} parameters...")
             
-            # Create a wrapper function for cylindrical optimization
-            def cyl_wrapper(optimization_values):
-                # Create PAR array from optimization values
-                temp_PAR = np.zeros((self.layers + 1, 2))
-                temp_DW = self.DW
-                temp_I0 = self.I0
-                temp_Bk = self.Bk
-                
-                for i, param_name in enumerate(param_names):
-                    if param_name.startswith('cyl_'):
-                        parts = param_name.split('_')
-                        cyl_idx = int(parts[1])
-                        param_type = parts[2]
-                        
-                        if param_type == 'radius':
-                            temp_PAR[cyl_idx, 0] = optimization_values[i]
-                        elif param_type == 'height':
-                            temp_PAR[cyl_idx, 1] = optimization_values[i]
-                    elif param_name == 'DW':
-                        temp_DW = optimization_values[i]
-                    elif param_name == 'I0':
-                        temp_I0 = optimization_values[i]
-                    elif param_name == 'Bk':
-                        temp_Bk = optimization_values[i]
-                
-                # Create SimPar array for cylindrical GF function
-                SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
-                
-                # Call cylindrical GF function
-                return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
-            
-            # Run the optimization
+            # Run the optimization using the method-level wrapper (can be pickled)
             result = differential_evolution(
-                cyl_wrapper,
+                self._cylinder_optimization_wrapper,
                 bounds,
                 **optimization_params
             )
@@ -761,7 +763,7 @@ class CylinderModel(CDSAXS_Model):
             # Generate before/after comparison plots if requested
             if plot_results:
                 self._plot_optimization_results(initial_model_params, initial_simInt,
-                                              plot_structure, plot_grid, plot_combined)
+                                            plot_structure, plot_grid, plot_combined)
             
             # Print parameter changes
             self._print_parameter_changes(initial_model_params)
