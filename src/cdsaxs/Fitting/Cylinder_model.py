@@ -239,22 +239,87 @@ class CylinderModel(CDSAXS_Model):
                 'default': self.Bk
             }
         else:
-            # Ensure default values are set if not provided
+            # FIXED: Ensure default values are set if not provided
             for param, limits in param_limits.items():
                 if 'default' not in limits:
-                    if param.startswith('cyl_'):
-                        parts = param.split('_')
-                        cyl_idx = int(parts[1])
-                        param_type = parts[2]
-                        limits['default'] = self.model_params['cylinders'][cyl_idx][param_type]
-                    else:
-                        limits['default'] = getattr(self, param)
+                    default_value = self._get_current_parameter_value(param)
+                    limits['default'] = default_value
+                    #print(f"INFO: Added missing default for {param}: {default_value}")
         
         # Store optimization parameters
         self.model_params['optimization'] = param_limits
         
         return param_limits
     
+    def _ensure_defaults_in_params(self, params_to_optimize):
+        """
+        Ensure all optimization parameters have default values set.
+        
+        Parameters:
+        -----------
+        params_to_optimize : dict
+            Dictionary of optimization parameters
+            
+        Returns:
+        --------
+        dict
+            Updated parameters with defaults ensured
+        """
+        updated_params = {}
+        
+        for param_name, param_config in params_to_optimize.items():
+            # Copy the existing configuration
+            updated_config = param_config.copy()
+            
+            # Add default if missing
+            if 'default' not in updated_config:
+                try:
+                    default_value = self._get_current_parameter_value(param_name)
+                    updated_config['default'] = default_value
+                    #print(f"INFO: Added missing default for {param_name}: {default_value}")
+                except Exception as e:
+                    # Fallback: use middle of min/max range
+                    if 'min' in updated_config and 'max' in updated_config:
+                        default_value = (updated_config['min'] + updated_config['max']) / 2
+                        updated_config['default'] = default_value
+                        print(f"WARNING: Could not get current value for {param_name}, using range midpoint: {default_value}")
+                    else:
+                        raise ValueError(f"Cannot determine default value for parameter {param_name}: {str(e)}")
+            
+            updated_params[param_name] = updated_config
+        
+        return updated_params
+
+    def _get_current_parameter_value(self, param_name):
+        """
+        Get the current value of a parameter from the model.
+        
+        Parameters:
+        -----------
+        param_name : str
+            Name of the parameter
+            
+        Returns:
+        --------
+        float
+            Current value of the parameter
+        """
+        if param_name.startswith('cyl_'):
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            return self.model_params['cylinders'][cyl_idx][param_type]
+        
+        elif param_name in ['DW', 'I0', 'Bk']:
+            return getattr(self, param_name)
+        
+        else:
+            # Try to get from model_params
+            if hasattr(self, 'model_params') and param_name in self.model_params:
+                return self.model_params[param_name]
+            else:
+                raise ValueError(f"Unknown parameter: {param_name}")
+        
     def _extract_PAR_from_model_params(self):
         """
         Helper method to extract PAR array from model_params.
@@ -627,8 +692,8 @@ class CylinderModel(CDSAXS_Model):
         return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
 
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                            plot_structure=True, plot_grid=True, plot_combined=True,
-                            verbose=False,**kwargs):
+                        plot_structure=True, plot_grid=True, plot_combined=True,
+                        verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS cylindrical model fitting
         and shows before/after comparison plots.
@@ -679,6 +744,9 @@ class CylinderModel(CDSAXS_Model):
             if params_to_optimize is None:
                 params_to_optimize = self.model_params['optimization']
             
+            # FIXED: Ensure all parameters have default values
+            params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+            
             # Create parameter names list and bounds list
             param_names = []
             bounds = []
@@ -687,7 +755,7 @@ class CylinderModel(CDSAXS_Model):
             for param_name, param_config in params_to_optimize.items():
                 param_names.append(param_name)
                 bounds.append((param_config['min'], param_config['max']))
-                initial_values.append(param_config['default'])
+                initial_values.append(param_config['default'])  # This should now always exist
             
             # Store for use in optimization
             self.param_names = param_names

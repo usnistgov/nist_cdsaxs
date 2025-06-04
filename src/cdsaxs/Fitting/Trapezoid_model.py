@@ -277,12 +277,51 @@ class TrapezoidModelArray(CDSAXS_Model):
                     # Get default value from current model state
                     default_value = self._get_current_parameter_value(param)
                     limits['default'] = default_value
-                    print(f"INFO: Added missing default for {param}: {default_value}")
+                    #print(f"INFO: Added missing default for {param}: {default_value}")
         
         # Store optimization parameters
         self.model_params['optimization'] = param_limits
         
         return param_limits
+    
+    def _ensure_defaults_in_params(self, params_to_optimize):
+        """
+        Ensure all optimization parameters have default values set.
+        
+        Parameters:
+        -----------
+        params_to_optimize : dict
+            Dictionary of optimization parameters
+            
+        Returns:
+        --------
+        dict
+            Updated parameters with defaults ensured
+        """
+        updated_params = {}
+        
+        for param_name, param_config in params_to_optimize.items():
+            # Copy the existing configuration
+            updated_config = param_config.copy()
+            
+            # Add default if missing
+            if 'default' not in updated_config:
+                try:
+                    default_value = self._get_current_parameter_value(param_name)
+                    updated_config['default'] = default_value
+                    #print(f"INFO: Added missing default for {param_name}: {default_value}")
+                except Exception as e:
+                    # Fallback: use middle of min/max range
+                    if 'min' in updated_config and 'max' in updated_config:
+                        default_value = (updated_config['min'] + updated_config['max']) / 2
+                        updated_config['default'] = default_value
+                        print(f"WARNING: Could not get current value for {param_name}, using range midpoint: {default_value}")
+                    else:
+                        raise ValueError(f"Cannot determine default value for parameter {param_name}: {str(e)}")
+            
+            updated_params[param_name] = updated_config
+        
+        return updated_params
     
     def _extract_PAR_from_model_params(self):
         """
@@ -737,8 +776,8 @@ class TrapezoidModelArray(CDSAXS_Model):
             return float('inf')  # Return infinity as worst-case fit
     
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                            plot_structure=True, plot_grid=True, plot_combined=True,
-                            verbose=False,**kwargs):
+                        plot_structure=True, plot_grid=True, plot_combined=True,
+                        verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS trapezoid model fitting
         with array background support and shows before/after comparison plots.
@@ -780,6 +819,9 @@ class TrapezoidModelArray(CDSAXS_Model):
             if params_to_optimize is None:
                 params_to_optimize = self.model_params['optimization']
             
+            # FIXED: Ensure all parameters have default values
+            params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+            
             # Create parameter names list and bounds list
             param_names = []
             bounds = []
@@ -788,7 +830,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             for param_name, param_config in params_to_optimize.items():
                 param_names.append(param_name)
                 bounds.append((param_config['min'], param_config['max']))
-                initial_values.append(param_config['default'])
+                initial_values.append(param_config['default'])  # This should now always exist
             
             # Store for use in SimTrap_GF
             self.param_names = param_names
@@ -889,7 +931,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             # Generate before/after comparison plots if requested
             if plot_results:
                 self._plot_optimization_results(initial_model_params, initial_simInt,
-                                              plot_structure, plot_grid, plot_combined)
+                                            plot_structure, plot_grid, plot_combined)
             
             # Print parameter changes
             if verbose:
