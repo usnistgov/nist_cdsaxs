@@ -639,6 +639,18 @@ class CDSAXS_Model:
         numpy.ndarray
             The simulated intensity (also sets self.SimInt)
         """
+        if not opt_params:
+            print(f"Debug: About to call simulate_structure")
+            print(f"Debug: self.Intensity shape before sim: {self.Intensity.shape}")
+            
+            self.SimInt = self.simulate_structure()
+            
+            print(f"Debug: SimInt shape after sim: {self.SimInt.shape if self.SimInt is not None else 'None'}")
+            print(f"Debug: SimInt sample: {self.SimInt[0,0] if self.SimInt is not None else 'None'}")
+            
+            gf = self.GF_calc(self.SimInt)
+            print(f"Debug: GF value: {gf}")
+        
         raise NotImplementedError("Subclasses must implement this method")
     
     
@@ -677,6 +689,16 @@ class CDSAXS_Model:
         dict
             Dictionary with sweep values, GF values, BIC values, and optimized parameters
         """
+        #### dbug
+        
+        print(f"Debug: Intensity shape: {self.Intensity.shape if hasattr(self, 'Intensity') else 'No Intensity attr'}")
+        print(f"Debug: Intensity sample: {self.Intensity[0,0] if hasattr(self, 'Intensity') else 'N/A'}")
+        print(f"Debug: Has NaN values: {np.any(np.isnan(self.Intensity)) if hasattr(self, 'Intensity') else 'N/A'}")
+        
+        if not hasattr(self, 'Intensity'):
+            raise ValueError("Data must be imported before performing parameter sweep")
+        ### debug
+        
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
         
@@ -1410,4 +1432,46 @@ class CDSAXS_Model:
             print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
         else:
             print("Model parameters updated (simulation not recalculated)")
-    
+  
+    def _set_parameter_value(self, param_name, value):
+        """Set a parameter value in the model."""
+        if param_name.startswith('trap_'):
+            # Trapezoid parameter
+            parts = param_name.split('_')
+            trap_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['trapezoids'][trap_idx][param_type] = value
+        elif param_name.startswith('cyl_'):
+            # Cylinder parameter
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['cylinders'][cyl_idx][param_type] = value
+        elif param_name.startswith('Bk_'):
+            # Background parameter for specific column
+            bk_idx = int(param_name.split('_')[1])
+            if isinstance(self.model_params['Bk'], list):
+                self.model_params['Bk'][bk_idx] = value
+            else:
+                # Convert to list if needed
+                n_cols = len(self.Bk) if isinstance(self.Bk, np.ndarray) else 1
+                self.model_params['Bk'] = [self.model_params['Bk']] * n_cols
+                self.model_params['Bk'][bk_idx] = value
+        else:
+            # Global parameter
+            self.model_params[param_name] = value
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
+
+    def _create_optimization_params_excluding(self, excluded_params):
+        """Create optimization parameters excluding specified parameters."""
+        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+            self.initialize_optimization_params()
+        
+        opt_params = {}
+        for param_name, param_config in self.model_params['optimization'].items():
+            if param_name not in excluded_params:
+                opt_params[param_name] = param_config
+        
+        return opt_params

@@ -1418,42 +1418,6 @@ class TrapezoidModel(CDSAXS_Model):
         
         return results
     
-    def _set_parameter_value(self, param_name, value):
-        """Set a parameter value in the model."""
-        if param_name.startswith('trap_'):
-            # Trapezoid parameter
-            parts = param_name.split('_')
-            trap_idx = int(parts[1])
-            param_type = parts[2]
-            self.model_params['trapezoids'][trap_idx][param_type] = value
-        elif param_name.startswith('Bk_'):
-            # Background parameter for specific column
-            bk_idx = int(param_name.split('_')[1])
-            if isinstance(self.model_params['Bk'], list):
-                self.model_params['Bk'][bk_idx] = value
-            else:
-                # Convert to list if needed
-                n_cols = len(self.Bk) if isinstance(self.Bk, np.ndarray) else 1
-                self.model_params['Bk'] = [self.model_params['Bk']] * n_cols
-                self.model_params['Bk'][bk_idx] = value
-        else:
-            # Global parameter
-            self.model_params[param_name] = value
-        
-        # Update traditional parameters
-        self.update_traditional_from_model_params()
-    
-    def _create_optimization_params_excluding(self, excluded_params):
-        """Create optimization parameters excluding specified parameters."""
-        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
-            self.initialize_optimization_params()
-        
-        opt_params = {}
-        for param_name, param_config in self.model_params['optimization'].items():
-            if param_name not in excluded_params:
-                opt_params[param_name] = param_config
-        
-        return opt_params
     
     def _plot_1d_sweep_results(self, results, figsize):
         """Plot 1D sweep results."""
