@@ -1,3 +1,5 @@
+# Updated Cylinder_model.py with common functions moved to base class
+
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.special as sp
@@ -556,7 +558,7 @@ class CylinderModel(CDSAXS_Model):
             if len(SimPar) < required_length:
                 raise ValueError(f"SimPar array must have at least {required_length} elements, but has {len(SimPar)}")
             
- # Reshape parameters
+            # Reshape parameters
             PARs = np.zeros([layers + 1, 2])
             PARs[:, 0:2] = np.reshape(SimPar[0:(layers + 1) * 2], (layers + 1, 2))
             
@@ -878,8 +880,8 @@ class CylinderModel(CDSAXS_Model):
             plt.plot([], [], linestyle=linestyle, color=color, alpha=alpha, linewidth=2, label=label)
         
         plt.axis('equal')
-        plt.xlabel('Radius (Å)')
-        plt.ylabel('Height (Å)')
+        plt.xlabel('Radius (Å)')
+        plt.ylabel('Height (Å)')
         plt.grid(True, linestyle='--', alpha=0.3)
         
         return plt.gca()
@@ -933,7 +935,7 @@ class CylinderModel(CDSAXS_Model):
             
             # Set labels and title
             ax.set_title(f'Cut at Qr = {qr_value:.4f}')
-            ax.set_xlabel('Qz (Å$^{-1}$)')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (a.u.)')
             ax.grid(True, linestyle='--', alpha=0.4)
             
@@ -988,7 +990,7 @@ class CylinderModel(CDSAXS_Model):
             plt.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=0.6, linewidth=1.5)
         
         plt.title('Intensity Comparison - All Cuts')
-        plt.xlabel('Qz (Å$^{-1}$)')
+        plt.xlabel('Qz (Å$^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.4)
@@ -1073,147 +1075,7 @@ class CylinderModel(CDSAXS_Model):
         ax = self._plot_cylinder_structure(self.model_params)
         plt.title('Cylinder Structure')
         return ax
-
-    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
-        """
-        Plots intensity vs Qz for specific Qr cut(s)
-        
-        Parameters:
-        -----------
-        cut_index : int or list or None, optional
-            Index or indices of the Qr cut(s) to plot
-            If None, plots all available cuts
-        SimInt : numpy.ndarray, optional
-            Simulated intensity to plot alongside measured data
-            If None, uses self.SimInt if available
-        log_scale : str, optional
-            Whether to use logarithmic scale for intensity ('yes' or 'no')
-        
-        Returns:
-        --------
-        matplotlib.axes.Axes or list of Axes
-            The axes object(s) containing the plot(s)
-        """
-        # Check if required attributes exist
-        if not hasattr(self, 'Qz') or not hasattr(self, 'Intensity'):
-            raise AttributeError("Missing required attributes: Qz and/or Intensity")
-        
-        # Determine which cuts to plot
-        if cut_index is None:
-            # Plot all cuts
-            cut_indices = list(range(self.Intensity.shape[1]))
-        elif isinstance(cut_index, (list, tuple, np.ndarray)):
-            # Plot multiple specified cuts
-            cut_indices = cut_index
-        else:
-            # Plot a single cut
-            cut_indices = [cut_index]
-        
-        # Create a figure with appropriate size
-        n_cuts = len(cut_indices)
-        if n_cuts == 1:
-            # Single plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            axes = [ax]
-        else:
-            # Multiple plots
-            fig_width = min(16, n_cuts * 5)  # Limit maximum width
-            fig_height = min(10, n_cuts * 3)  # Limit maximum height
-            
-            if n_cuts <= 4:
-                # Use a single row for 2-4 plots
-                n_rows = 1
-                n_cols = n_cuts
-            else:
-                # Create a grid for many plots
-                n_rows = int(np.ceil(np.sqrt(n_cuts)))
-                n_cols = int(np.ceil(n_cuts / n_rows))
-            
-            fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
-            if n_rows * n_cols > 1:
-                axes = axes.flatten()
-        
-        # Plot each cut
-        for i, (ax, idx) in enumerate(zip(axes, cut_indices)):
-            # Check if the index is valid
-            if idx < 0 or idx >= self.Intensity.shape[1]:
-                ax.text(0.5, 0.5, f"Invalid cut index: {idx}", 
-                       ha='center', va='center', transform=ax.transAxes)
-                continue
-            
-            # Get Qz values for the selected cut
-            qz_values = self.Qz[:, idx]
-            qr_value = self.Qr[0, idx]
-            
-            # Plot measured intensity
-            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'bo-', label='Measured')
-            
-            # Plot simulated intensity if available
-            if SimInt is not None:
-                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'r-', label='Simulated')
-            elif hasattr(self, 'SimInt') and self.SimInt is not None:
-                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'r-', label='Simulated')
-            
-            # Set logarithmic scale if requested
-            if log_scale.lower() == 'yes':
-                ax.set_yscale('log')
-            
-            # Set labels and title
-            ax.set_title(f'Cut at Qr = {qr_value:.4f}')
-            ax.set_xlabel('Qz (Å$^{-1}$)')
-            ax.set_ylabel('Intensity (counts)')
-            ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
-        
-        # Hide unused subplots
-        for i in range(len(cut_indices), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        
-        # Return a single axis for a single plot, or list of axes for multiple plots
-        return axes[0] if len(axes) == 1 else axes
     
-    
-    def _set_parameter_value(self, param_name, value):
-        """Set a parameter value in the model."""
-        if param_name.startswith('trap_'):
-            # Trapezoid parameter
-            parts = param_name.split('_')
-            trap_idx = int(parts[1])
-            param_type = parts[2]
-            self.model_params['trapezoids'][trap_idx][param_type] = value
-        elif param_name.startswith('Bk_'):
-            # Background parameter for specific column
-            bk_idx = int(param_name.split('_')[1])
-            if isinstance(self.model_params['Bk'], list):
-                self.model_params['Bk'][bk_idx] = value
-            else:
-                # Convert to list if needed
-                n_cols = len(self.Bk) if isinstance(self.Bk, np.ndarray) else 1
-                self.model_params['Bk'] = [self.model_params['Bk']] * n_cols
-                self.model_params['Bk'][bk_idx] = value
-        else:
-            # Global parameter
-            self.model_params[param_name] = value
-        
-        # Update traditional parameters
-        self.update_traditional_from_model_params()
-    
-    def _create_optimization_params_excluding(self, excluded_params):
-        """Create optimization parameters excluding specified parameters."""
-        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
-            self.initialize_optimization_params()
-        
-        opt_params = {}
-        for param_name, param_config in self.model_params['optimization'].items():
-            if param_name not in excluded_params:
-                opt_params[param_name] = param_config
-        
-        return opt_params
-    
-
-        
     def simulate_structure(self, *args, **kwargs):
         """
         Simulate cylinder structure intensity.
