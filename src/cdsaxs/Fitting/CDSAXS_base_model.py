@@ -689,12 +689,6 @@ class CDSAXS_Model:
         dict
             Dictionary with sweep values, GF values, BIC values, and optimized parameters
         """
-        #### dbug
-        
-        print(f"Debug: Intensity shape: {self.Intensity.shape if hasattr(self, 'Intensity') else 'No Intensity attr'}")
-        print(f"Debug: Intensity sample: {self.Intensity[0,0] if hasattr(self, 'Intensity') else 'N/A'}")
-        print(f"Debug: Has NaN values: {np.any(np.isnan(self.Intensity)) if hasattr(self, 'Intensity') else 'N/A'}")
-        
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
         ### debug
@@ -756,8 +750,9 @@ class CDSAXS_Model:
                     opt_result = {}
                 else:
                     # Run optimization
-                    opt_result = self.CDSAXS_DiffEvolution(
+                    opt_result=self.CDSAXS_DiffEvolution(
                         params_to_optimize=opt_params,
+                        plot_results=False,
                         **optimization_kwargs
                     )
                     gf = self.GF
@@ -771,7 +766,7 @@ class CDSAXS_Model:
                 results['convergence_flags'].append(converged)
                 
                 if verbose:
-                    pbar.set_postfix({'GF': f'{gf:.4f}', 'BIC': f'{bic:.4f}'})
+                    self._print_sweep_summary_1d(results)
                     
             except Exception as e:
                 if verbose:
@@ -893,8 +888,9 @@ class CDSAXS_Model:
                         converged = True
                     else:
                         # Run optimization
-                        opt_result = self.CDSAXS_DiffEvolution(
+                        opt_result=self.CDSAXS_DiffEvolution(
                             params_to_optimize=opt_params,
+                            plot_results=False,
                             **optimization_kwargs
                         )
                         gf = self.GF
@@ -917,7 +913,7 @@ class CDSAXS_Model:
                         
                 except Exception as e:
                     if verbose:
-                        print(f"Error at {sweep_params[0]}={val1}, {sweep_params[1]}={val2}: {str(e)}")
+                        self._print_sweep_summary_2d(results)
                         pbar.update(1)
         
         if verbose:
@@ -972,12 +968,6 @@ class CDSAXS_Model:
         plt.tight_layout()
         plt.show()
         
-        # Print summary
-        print(f"\n1D Parameter Sweep Summary:")
-        print(f"Parameter: {results['sweep_param']}")
-        print(f"Range: {results['sweep_values'][0]:.4f} to {results['sweep_values'][-1]:.4f}")
-        print(f"Best GF: {min_gf:.4f} at {results['sweep_param']} = {min_param:.4f}")
-        print(f"Best BIC: {min_bic:.4f} at {results['sweep_param']} = {min_bic_param:.4f}")
     
     def _plot_2d_sweep_results(self, results, figsize, metric='GF'):
         """Plot 2D sweep results as heatmap."""
@@ -1035,17 +1025,6 @@ class CDSAXS_Model:
         
         plt.tight_layout()
         plt.show()
-        
-        # Print summary
-        min_val = plot_data[min_idx]
-        min_param1 = results['param1_values'][min_idx[1]]
-        min_param2 = results['param2_values'][min_idx[0]]
-        
-        print(f"\n2D Parameter Sweep Summary:")
-        print(f"Parameters: {param1_name} vs {param2_name}")
-        print(f"Grid size: {len(results['param1_values'])} x {len(results['param2_values'])}")
-        print(f"Best {metric}: {min_val:.4f}")
-        print(f"  at {param1_name} = {min_param1:.4f}, {param2_name} = {min_param2:.4f}")
     
     def _save_sweep_results(self, results, filename):
         """Save sweep results to file."""
@@ -2095,3 +2074,276 @@ class CDSAXS_Model:
             info['bic'] = self.BIC
         
         return info
+    
+    def _print_sweep_summary_1d(self, results):
+        """
+        Print a summary of 1D sweep results including the best fit details.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_1d
+        """
+        print(f"\n{'='*60}")
+        print(f"1D PARAMETER SWEEP SUMMARY")
+        print(f"{'='*60}")
+        
+        # Find best GF and BIC
+        gf_values = np.array(results['gf_values'])
+        bic_values = np.array(results['bic_values'])
+        
+        # Handle inf values
+        finite_gf_mask = np.isfinite(gf_values)
+        finite_bic_mask = np.isfinite(bic_values)
+        
+        if np.any(finite_gf_mask):
+            best_gf_idx = np.argmin(gf_values[finite_gf_mask])
+            best_gf_global_idx = np.where(finite_gf_mask)[0][best_gf_idx]
+            best_gf = gf_values[best_gf_global_idx]
+            best_gf_param = results['sweep_values'][best_gf_global_idx]
+            best_gf_bic = bic_values[best_gf_global_idx]
+        else:
+            best_gf = float('inf')
+            best_gf_param = None
+            best_gf_bic = float('inf')
+        
+        if np.any(finite_bic_mask):
+            best_bic_idx = np.argmin(bic_values[finite_bic_mask])
+            best_bic_global_idx = np.where(finite_bic_mask)[0][best_bic_idx]
+            best_bic = bic_values[best_bic_global_idx]
+            best_bic_param = results['sweep_values'][best_bic_global_idx]
+            best_bic_gf = gf_values[best_bic_global_idx]
+        else:
+            best_bic = float('inf')
+            best_bic_param = None
+            best_bic_gf = float('inf')
+        
+        # Print sweep info
+        param_name = results['sweep_param']
+        n_points = len(results['sweep_values'])
+        param_range = (results['sweep_values'][0], results['sweep_values'][-1])
+        convergence_rate = np.mean(results['convergence_flags']) * 100
+        
+        print(f"Parameter: {param_name}")
+        print(f"Range: {param_range[0]:.4f} to {param_range[1]:.4f}")
+        print(f"Points: {n_points}")
+        print(f"Convergence rate: {convergence_rate:.1f}%")
+        print()
+        
+        # Print best results
+        print(f"BEST GOODNESS OF FIT:")
+        if best_gf_param is not None:
+            print(f"  {param_name} = {best_gf_param:.4f}")
+            print(f"  GF = {best_gf:.4f}")
+            print(f"  BIC = {best_gf_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        print()
+        
+        print(f"BEST BIC:")
+        if best_bic_param is not None:
+            print(f"  {param_name} = {best_bic_param:.4f}")
+            print(f"  GF = {best_bic_gf:.4f}")
+            print(f"  BIC = {best_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        
+        print(f"{'='*60}")
+        print("TIP: Use model.show_best_fit_results(results) to see detailed optimization results for the best fit")
+
+
+    def _print_sweep_summary_2d(self, results):
+        """
+        Print a summary of 2D sweep results including the best fit details.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_2d
+        """
+        print(f"\n{'='*60}")
+        print(f"2D PARAMETER SWEEP SUMMARY")
+        print(f"{'='*60}")
+        
+        # Get matrices and handle inf values
+        gf_matrix = np.copy(results['gf_matrix'])
+        bic_matrix = np.copy(results['bic_matrix'])
+        
+        gf_matrix[np.isinf(gf_matrix)] = np.nan
+        bic_matrix[np.isinf(bic_matrix)] = np.nan
+        
+        # Find best results
+        if not np.all(np.isnan(gf_matrix)):
+            best_gf_idx = np.unravel_index(np.nanargmin(gf_matrix), gf_matrix.shape)
+            best_gf = gf_matrix[best_gf_idx]
+            best_gf_param1 = results['param1_values'][best_gf_idx[1]]
+            best_gf_param2 = results['param2_values'][best_gf_idx[0]]
+            best_gf_bic = results['bic_matrix'][best_gf_idx]
+        else:
+            best_gf = np.nan
+            best_gf_param1 = None
+            best_gf_param2 = None
+            best_gf_bic = np.nan
+        
+        if not np.all(np.isnan(bic_matrix)):
+            best_bic_idx = np.unravel_index(np.nanargmin(bic_matrix), bic_matrix.shape)
+            best_bic = bic_matrix[best_bic_idx]
+            best_bic_param1 = results['param1_values'][best_bic_idx[1]]
+            best_bic_param2 = results['param2_values'][best_bic_idx[0]]
+            best_bic_gf = results['gf_matrix'][best_bic_idx]
+        else:
+            best_bic = np.nan
+            best_bic_param1 = None
+            best_bic_param2 = None
+            best_bic_gf = np.nan
+        
+        # Print sweep info
+        param1_name, param2_name = results['sweep_params']
+        grid_size = (len(results['param1_values']), len(results['param2_values']))
+        param1_range = (results['param1_values'][0], results['param1_values'][-1])
+        param2_range = (results['param2_values'][0], results['param2_values'][-1])
+        convergence_rate = np.mean(results['convergence_matrix']) * 100
+        
+        print(f"Parameters: {param1_name} vs {param2_name}")
+        print(f"Grid size: {grid_size[0]} x {grid_size[1]}")
+        print(f"{param1_name} range: {param1_range[0]:.4f} to {param1_range[1]:.4f}")
+        print(f"{param2_name} range: {param2_range[0]:.4f} to {param2_range[1]:.4f}")
+        print(f"Convergence rate: {convergence_rate:.1f}%")
+        print()
+        
+        # Print best results
+        print(f"BEST GOODNESS OF FIT:")
+        if best_gf_param1 is not None and not np.isnan(best_gf):
+            print(f"  {param1_name} = {best_gf_param1:.4f}")
+            print(f"  {param2_name} = {best_gf_param2:.4f}")
+            print(f"  GF = {best_gf:.4f}")
+            print(f"  BIC = {best_gf_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        print()
+        
+        print(f"BEST BIC:")
+        if best_bic_param1 is not None and not np.isnan(best_bic):
+            print(f"  {param1_name} = {best_bic_param1:.4f}")
+            print(f"  {param2_name} = {best_bic_param2:.4f}")
+            print(f"  GF = {best_bic_gf:.4f}")
+            print(f"  BIC = {best_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        
+        print(f"{'='*60}")
+        print("TIP: Use model.show_best_fit_results(results) to see detailed optimization results for the best fit")
+        
+    def show_best_fit_results(self, results, criterion='GF', run_optimization=True):
+        """
+        Apply the best parameters from sweep results and show optimization details.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from any parameter sweep function
+        criterion : str, optional
+            Criterion for selecting best parameters ('GF' or 'BIC'). Default: 'GF'
+        run_optimization : bool, optional
+            Whether to re-run optimization with best parameters. Default: True
+        """
+        print(f"\n{'='*60}")
+        print(f"BEST FIT DETAILS ({criterion.upper()} CRITERION)")
+        print(f"{'='*60}")
+        
+        # Get the best parameters based on sweep type
+        if 'sweep_param' in results:
+            # 1D sweep
+            optimal = self.get_optimal_parameters_1d(results, criterion)
+            if optimal['optimized_parameters'] is None:
+                print("No valid optimized parameters found in results")
+                return
+            
+            print(f"Best parameter value:")
+            print(f"  {optimal['sweep_parameter']} = {optimal['optimal_value']:.4f}")
+            print(f"  GF = {optimal['gf']:.4f}")
+            print(f"  BIC = {optimal['bic']:.4f}")
+            print()
+            
+            # Apply the best parameters
+            self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+            
+        elif 'sweep_params' in results:
+            # 2D sweep
+            optimal = self.get_optimal_parameters_2d(results, criterion)
+            if optimal['optimized_parameters'] is None:
+                print("No valid optimized parameters found in results")
+                return
+            
+            print(f"Best parameter values:")
+            for param, value in optimal['optimal_values'].items():
+                print(f"  {param} = {value:.4f}")
+            print(f"  GF = {optimal['gf']:.4f}")
+            print(f"  BIC = {optimal['bic']:.4f}")
+            print()
+            
+            # Apply the best parameters
+            self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+            
+        elif 'sweep_type' in results and results['sweep_type'] == 'width_dw_1layer':
+            # 1-layer specialized sweep
+            optimal = self.get_optimal_width_dw_1layer(results)
+            
+            if criterion.upper() == 'GF':
+                best_result = optimal['best_gf']
+            else:
+                best_result = optimal['best_bic']
+                
+            print(f"Best parameter values:")
+            print(f"  Width = {best_result['width']:.1f} Å (both trap_0_width and trap_1_width)")
+            print(f"  DW = {best_result['dw']:.3f}")
+            print(f"  GF = {best_result['gf_value']:.4f}")
+            print(f"  BIC = {best_result['bic_value']:.4f}")
+            print()
+            
+            # Apply the best parameters manually for 1-layer case
+            self.model_params['trapezoids'][0]['width'] = best_result['width']
+            self.model_params['trapezoids'][1]['width'] = best_result['width']
+            self.model_params['DW'] = best_result['dw']
+        else:
+            print("Unknown sweep type")
+            return
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
+        
+        if run_optimization:
+            print("Re-running optimization with best parameters to show detailed results...")
+            print("-" * 60)
+            
+            # Get all optimizable parameters for the final detailed run
+            self.initialize_optimization_params()
+            all_params = self.model_params.get('optimization', {})
+            
+            if all_params:
+                # Run optimization with full output
+                final_result = self.CDSAXS_DiffEvolution(
+                    params_to_optimize=all_params,
+                    plot_results=True,  # Show all plots for best fit
+                    verbose=True       # Show all output details
+                )
+            else:
+                # Just simulate if no parameters to optimize
+                self.SimInt = self.simulate_structure()
+                self.GF = self.GF_calc(self.SimInt)
+                self.BIC = self.BIC_calc(self.GF)
+                
+                print(f"Final results:")
+                print(f"  GF = {self.GF:.4f}")
+                print(f"  BIC = {self.BIC:.4f}")
+        else:
+            # Just update simulation without showing optimization details
+            self.SimInt = self.simulate_structure()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Applied best parameters. Final metrics:")
+            print(f"  GF = {self.GF:.4f}")
+            print(f"  BIC = {self.BIC:.4f}")
+        
+        print(f"{'='*60}")

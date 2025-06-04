@@ -627,7 +627,8 @@ class CylinderModel(CDSAXS_Model):
         return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
 
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                            plot_structure=True, plot_grid=True, plot_combined=True, **kwargs):
+                            plot_structure=True, plot_grid=True, plot_combined=True,
+                            verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS cylindrical model fitting
         and shows before/after comparison plots.
@@ -757,10 +758,11 @@ class CylinderModel(CDSAXS_Model):
             self.BIC = self.BIC_calc(self.GF)
             
             # Print optimization results
-            print(f"Optimization complete after {result.nfev} function evaluations")
-            print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
-            print(f"Final goodness of fit: {self.GF:.4f}")
-            print(f"Improvement: {self.GF_Initial - self.GF:.4f} ({(1 - self.GF/self.GF_Initial)*100:.2f}%)")
+            if verbose:
+                print(f"Optimization complete after {result.nfev} function evaluations")
+                print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
+                print(f"Final goodness of fit: {self.GF:.4f}")
+                print(f"Improvement: {self.GF_Initial - self.GF:.4f} ({(1 - self.GF/self.GF_Initial)*100:.2f}%)")
             
             # Generate before/after comparison plots if requested
             if plot_results:
@@ -768,7 +770,8 @@ class CylinderModel(CDSAXS_Model):
                                             plot_structure, plot_grid, plot_combined)
             
             # Print parameter changes
-            self._print_parameter_changes(initial_model_params)
+            if verbose:
+                self._print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
