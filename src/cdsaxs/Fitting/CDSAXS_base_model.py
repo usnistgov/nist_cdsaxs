@@ -1625,13 +1625,14 @@ class CDSAXS_Model:
             q_value = q_component[0, idx]
             
             # Plot measured intensity
-            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'bo-', label='Measured')
+            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'o-', 
+                                color='grey', alpha=0.7, label='Measured')
             
             # Plot simulated intensity if available
             if SimInt is not None:
-                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'r-', label='Simulated')
+                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'b-', label='Simulated')
             elif hasattr(self, 'SimInt') and self.SimInt is not None:
-                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'r-', label='Simulated')
+                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'b-', label='Simulated')
             
             # Set logarithmic scale if requested
             if log_scale.lower() == 'yes':

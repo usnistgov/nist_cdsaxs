@@ -993,8 +993,8 @@ class CylinderModel(CDSAXS_Model):
             qr_value = self.Qr[0, i]
             
             # Plot measured data
-            ax.semilogy(qz_values, self.Intensity[:, i], 'ko', alpha=0.7, 
-                      markersize=4, label='Measured')
+            ax.semilogy(qz_values, self.Intensity[:, i], 'o', 
+                    color='grey', alpha=0.7, markersize=4, label='Measured')
             
             # Plot initial simulation
             ax.semilogy(qz_values, initial_simInt[:, i], 'b--', alpha=0.8, 
@@ -1052,8 +1052,8 @@ class CylinderModel(CDSAXS_Model):
             qz_values = self.Qz[:, i]
             
             # Plot measured data
-            plt.semilogy(qz_values, self.Intensity[:, i], 'ko', alpha=0.5, markersize=4)
-            
+            plt.semilogy(qz_values, self.Intensity[:, i], 'o', 
+                    color='grey', alpha=0.5, markersize=4)
             # Plot initial simulation
             plt.semilogy(qz_values, initial_simInt[:, i], 'b--', alpha=0.5, linewidth=1.5)
             
