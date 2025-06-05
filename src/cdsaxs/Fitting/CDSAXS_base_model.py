@@ -3187,250 +3187,361 @@ class CDSAXS_Model:
         # Should never reach here
         raise ValueError(f"Could not interpolate width for height {height}")
 
-    def _generate_new_structure_arrays(self, height_points, width_points, insertion_height, new_layer_height):
-        """
-        Generate new height and width arrays with the inserted layer.
-        
-        Parameters:
-        -----------
-        height_points : numpy.ndarray
-            Original height points
-        width_points : numpy.ndarray
-            Original width points  
-        insertion_height : float
-            Height where to insert new layer
-        new_layer_height : float
-            Height of the new layer
-            
-        Returns:
-        --------
-        tuple
-            (new_height_points, new_width_points) with inserted layer
-        """
-        # Create list for building new arrays
-        new_heights = []
-        new_widths = []
-        
-        # Calculate width at insertion point
-        insertion_width = self._calculate_width_from_relationship(insertion_height, height_points, width_points)
-        
-        print(f"DEBUG: Insertion at height {insertion_height:.1f} → width {insertion_width:.1f}")
-        print(f"DEBUG: New layer height: {new_layer_height:.1f}")
-        
-        # Add all original points up to the insertion height
-        for i, height in enumerate(height_points):
-            if height < insertion_height:
-                new_heights.append(height)
-                new_widths.append(width_points[i])
-                print(f"DEBUG: Added original point: h={height:.1f}, w={width_points[i]:.1f}")
-            elif height == insertion_height:
-                # Exact match - insert here
-                new_heights.append(height)
-                new_widths.append(insertion_width)
-                print(f"DEBUG: Added insertion point: h={height:.1f}, w={insertion_width:.1f}")
-                
-                # Add the new layer
-                new_heights.append(height + new_layer_height)
-                new_widths.append(insertion_width)  # Same width at top of new layer
-                print(f"DEBUG: Added new layer top: h={height + new_layer_height:.1f}, w={insertion_width:.1f}")
-                
-                # Add remaining original points (shifted up by new layer height)
-                for j in range(i + 1, len(height_points)):
-                    shifted_height = height_points[j] + new_layer_height
-                    new_heights.append(shifted_height)
-                    new_widths.append(width_points[j])
-                    print(f"DEBUG: Added shifted point: h={shifted_height:.1f}, w={width_points[j]:.1f}")
-                break
-            else:
-                # We've passed the insertion point - insert here
-                new_heights.append(insertion_height)
-                new_widths.append(insertion_width)
-                print(f"DEBUG: Added insertion point: h={insertion_height:.1f}, w={insertion_width:.1f}")
-                
-                # Add the new layer
-                new_heights.append(insertion_height + new_layer_height)
-                new_widths.append(insertion_width)
-                print(f"DEBUG: Added new layer top: h={insertion_height + new_layer_height:.1f}, w={insertion_width:.1f}")
-                
-                # Add remaining original points (shifted up by new layer height)
-                for j in range(i, len(height_points)):
-                    shifted_height = height_points[j] + new_layer_height
-                    new_heights.append(shifted_height)
-                    new_widths.append(width_points[j])
-                    print(f"DEBUG: Added shifted point: h={shifted_height:.1f}, w={width_points[j]:.1f}")
-                break
-        
-        return np.array(new_heights), np.array(new_widths)
-
-    def _build_structures_from_arrays(self, height_points, width_points):
-        """
-        Build trapezoid or cylinder structures from height and width arrays.
-        
-        Parameters:
-        -----------
-        height_points : numpy.ndarray
-            Array of height points
-        width_points : numpy.ndarray
-            Array of corresponding widths
-            
-        Returns:
-        --------
-        tuple
-            (structures, layers) where structures is the list of trapezoid/cylinder dicts
-        """
-        structures = []
-        
-        if self.geometry == 'trapezoid':
-            width_key = 'width'
-            structure_name = 'trapezoid'
-        elif self.geometry == 'cylinder':
-            width_key = 'radius'
-            structure_name = 'cylinder'
-        else:
-            raise ValueError(f"Unsupported geometry: {self.geometry}")
-        
-        # Build structures from the height/width points
-        for i in range(len(height_points) - 1):
-            layer_height = height_points[i + 1] - height_points[i]
-            structure = {
-                width_key: width_points[i],
-                'height': layer_height
-            }
-            structures.append(structure)
-            print(f"DEBUG: Created {structure_name} {i}: {width_key}={width_points[i]:.1f}, height={layer_height:.1f}")
-        
-        # Add the final top point (height = 0)
-        top_structure = {
-            width_key: width_points[-1],
-            'height': 0.0
-        }
-        structures.append(top_structure)
-        print(f"DEBUG: Created top {structure_name}: {width_key}={width_points[-1]:.1f}, height=0.0")
-        
-        layers = len(structures) - 1
-        print(f"DEBUG: Generated {len(structures)} {structure_name}s = {layers} layers")
-        
-        return structures, layers
-
-    def add_layer_regenerative(self, height_percentage: float, auto_setup_optimization: bool = True, 
+    def add_layer_height_fixed(self, height_percentage: float, auto_setup_optimization: bool = True, 
                             optimization_margin: float = 0.2, discretization_per_nm: float = 5.0,
                             new_layer_height: float = None):
         """
-        Add a layer by regenerating the entire structure from the width-height relationship.
+        SIMPLE FIX: Keep the working width-height approach, fix only the height positioning.
         
-        Parameters:
-        -----------
-        height_percentage : float
-            Percentage of total height where to insert new layer (0-100)
-        auto_setup_optimization : bool, optional
-            Whether to automatically setup optimization parameters. Default: True
-        optimization_margin : float, optional
-            Margin for optimization bounds as a fraction. Default: 0.2 (±20%)
-        discretization_per_nm : float, optional
-            For cylinder models: discretization points per nanometer. Default: 5.0
-        new_layer_height : float, optional
-            Height for the new layer in Angstroms. If None, calculates as 5% of total height
-            
-        Returns:
-        --------
-        CDSAXS_Model
-            New model with one additional layer
+        The working approach was:
+        1. Insert exactly 1 width + 1 height 
+        2. This gave exactly +1 layer
+        
+        Now we just need to insert them at the RIGHT position.
         """
+        import copy
+        import numpy as np
+        
         if not 0 <= height_percentage <= 100:
             raise ValueError("Height percentage must be between 0 and 100")
         
-        print(f"DEBUG: REGENERATIVE LAYER INSERTION")
-        print(f"DEBUG: Starting with {self.layers} layers")
+        print(f"=== SIMPLE HEIGHT FIX ===")
         
-        # Step 1: Extract the width-height relationship from current model
-        height_points, width_points = self._extract_width_height_relationship()
+        # Get structures (same as working version)
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            width_key = 'width'
+        else:
+            structures = self.model_params['cylinders']
+            width_key = 'radius'
         
-        # Step 2: Calculate insertion parameters
-        total_height = height_points[-1]
+        # Extract arrays (same as working version)
+        widths = [s[width_key] for s in structures]
+        heights = [s['height'] for s in structures[:-1]]
+        
+        print(f"Original: {len(widths)} widths, {len(heights)} heights, {self.layers} layers")
+        print(f"Widths: {[f'{w:.1f}' for w in widths]}")
+        print(f"Heights: {[f'{h:.1f}' for h in heights]}")
+        
+        # Calculate insertion (same as working version)
+        total_height = sum(heights)
         insertion_height = (height_percentage / 100) * total_height
-        
         if new_layer_height is None:
-            new_layer_height = max(2.0, total_height * 0.05)  # 5% of total, minimum 2 Å
+            new_layer_height = max(2.0, total_height * 0.05)
         
-        print(f"DEBUG: Total height: {total_height:.1f} Å")
-        print(f"DEBUG: Insertion height: {insertion_height:.1f} Å ({height_percentage}%)")
-        print(f"DEBUG: New layer height: {new_layer_height:.1f} Å")
+        print(f"Target insertion: {insertion_height:.1f} Å ({height_percentage}%)")
+        print(f"New layer height: {new_layer_height:.1f} Å")
         
-        # Step 3: Generate new height and width arrays with inserted layer
-        new_height_points, new_width_points = self._generate_new_structure_arrays(
-            height_points, width_points, insertion_height, new_layer_height
-        )
+        # FIXED: Find the correct insertion position
+        current_height = 0.0
+        insert_after_layer = None
+        height_into_target_layer = 0.0
         
-        # Step 4: Build new structures from the arrays
-        new_structures, new_layers = self._build_structures_from_arrays(new_height_points, new_width_points)
+        for i, layer_height in enumerate(heights):
+            layer_bottom = current_height
+            layer_top = current_height + layer_height
+            
+            print(f"Layer {i}: height={layer_height:.1f}, range=[{layer_bottom:.1f}, {layer_top:.1f}]")
+            
+            if layer_bottom <= insertion_height <= layer_top:
+                insert_after_layer = i
+                height_into_target_layer = insertion_height - layer_bottom
+                print(f"  → Found: insert after layer {i}, {height_into_target_layer:.1f} Å into layer")
+                break
+                
+            current_height += layer_height
         
-        # Step 5: Create new model parameters
+        if insert_after_layer is None:
+            raise ValueError(f"Could not find layer containing insertion height {insertion_height:.1f}")
+        
+        # Calculate width at insertion (same as working version)
+        bottom_width = widths[insert_after_layer]
+        top_width = widths[insert_after_layer + 1]
+        target_layer_height = heights[insert_after_layer]
+        
+        if target_layer_height > 0:
+            position_in_layer = height_into_target_layer / target_layer_height
+            insertion_width = bottom_width + position_in_layer * (top_width - bottom_width)
+        else:
+            insertion_width = bottom_width
+        
+        print(f"Insertion width: {insertion_width:.1f} (between {bottom_width:.1f} and {top_width:.1f})")
+        
+        # FIXED: Modify the height array to split the target layer
+        new_widths = widths.copy()
+        new_heights = heights.copy()
+        
+        # Split the target layer height
+        remaining_height = target_layer_height - height_into_target_layer
+        
+        print(f"Splitting layer {insert_after_layer}:")
+        print(f"  Original height: {target_layer_height:.1f}")
+        print(f"  Before insertion: {height_into_target_layer:.1f}")
+        print(f"  After insertion: {remaining_height:.1f}")
+        
+        # Modify the target layer to only go up to insertion point
+        new_heights[insert_after_layer] = height_into_target_layer
+        
+        # Insert width at insertion point (after the shortened layer)
+        new_widths.insert(insert_after_layer + 1, insertion_width)
+        
+        # Insert new layer height (after the insertion width)
+        new_heights.insert(insert_after_layer + 1, new_layer_height)
+        
+        # If there's remaining height, we need to account for it
+        if remaining_height > 0.01:  # Only if meaningful
+            # The next layer should start from the insertion width and have the remaining height
+            # But we need to be careful not to add extra layers
+            
+            # Option 1: Add the remaining height to the new layer
+            new_heights[insert_after_layer + 1] += remaining_height
+            print(f"  Added remaining height to new layer: {new_layer_height:.1f} + {remaining_height:.1f} = {new_heights[insert_after_layer + 1]:.1f}")
+        
+        print(f"Result: {len(new_widths)} widths, {len(new_heights)} heights")
+        print(f"New widths: {[f'{w:.1f}' for w in new_widths]}")
+        print(f"New heights: {[f'{h:.1f}' for h in new_heights]}")
+        
+        # Verify we added exactly 1 width + 1 height (same as working version)
+        width_change = len(new_widths) - len(widths)
+        height_change = len(new_heights) - len(heights)
+        
+        print(f"Changes: +{width_change} width, +{height_change} height")
+        
+        if width_change != 1 or height_change != 1:
+            print(f"❌ ERROR: Expected +1 width and +1 height, got +{width_change} width and +{height_change} height")
+            return None
+        
+        # Build structures (same as working version)
+        new_structures = []
+        for i in range(len(new_widths)):
+            if i < len(new_heights):
+                structure = {width_key: new_widths[i], 'height': new_heights[i]}
+            else:
+                structure = {width_key: new_widths[i], 'height': 0.0}
+            new_structures.append(structure)
+        
+        # Create new model (same as working version)
         new_model_params = copy.deepcopy(self.model_params)
-        
         if self.geometry == 'trapezoid':
             new_model_params['trapezoids'] = new_structures
-        elif self.geometry == 'cylinder':
-            new_model_params['cylinders'] = new_structures
-            
-            # Generate discretization array for cylinders
-            new_discretization = self._generate_discretization_array(new_structures, discretization_per_nm)
-            new_model_params['discretization'] = new_discretization
-            
-            print(f"DEBUG: Generated discretization array:")
-            for i, (struct, disc) in enumerate(zip(new_structures[:-1], new_discretization)):
-                height_nm = struct['height'] / 10.0
-                print(f"  Layer {i}: height = {struct['height']:.1f} Å → discretization = {disc}")
-        
-        new_model_params['layers'] = new_layers
-        
-        # Step 6: Verify the result
-        expected_layers = self.layers + 1
-        print(f"DEBUG: Expected {expected_layers} layers, got {new_layers} layers")
-        
-        if new_layers == expected_layers:
-            print(f"✅ SUCCESS: Added exactly 1 layer ({self.layers} → {new_layers})")
         else:
-            print(f"❌ ERROR: Expected +1 layer, got +{new_layers - self.layers}")
+            new_model_params['cylinders'] = new_structures
+            # Add discretization
+            new_discretization = []
+            for i in range(len(new_heights)):
+                h_nm = new_structures[i]['height'] / 10.0
+                disc = max(5, min(50, int(h_nm * discretization_per_nm)))
+                new_discretization.append(disc)
+            new_model_params['discretization'] = new_discretization
         
-        # Step 7: Create new model
+        new_model_params['layers'] = len(new_heights)
+        
+        # Create model
         new_model = self._create_new_model_from_params(new_model_params)
         self._copy_model_data(new_model)
         
-        # Step 8: Setup optimization parameters
         if auto_setup_optimization:
             new_model._setup_optimization_for_new_layers(optimization_margin)
-            
-            print(f"Layer insertion complete!")
-            print(f"Original layers: {self.layers} → New layers: {new_model.layers}")
-            if self.geometry == 'cylinder':
-                print(f"Discretization updated (resolution: {discretization_per_nm:.1f} points/nm)")
-            print(f"Optimization parameters automatically generated with ±{optimization_margin*100:.0f}% bounds")
-            print(f"Ready to run: new_model.CDSAXS_DiffEvolution()")
+        
+        print(f"✅ SUCCESS: {self.layers} → {new_model.layers} layers")
+        
+        # Verify insertion height
+        cumulative = 0.0
+        print(f"Height verification:")
+        for i, h in enumerate(new_heights):
+            print(f"  Layer {i}: {cumulative:.1f} to {cumulative + h:.1f} (height: {h:.1f})")
+            cumulative += h
         
         return new_model
 
-    def test_regenerative_insertion(model, height_pct=50.0):
+    def add_layer_height_fixed_v2(self, height_percentage: float, auto_setup_optimization: bool = True, 
+                                optimization_margin: float = 0.2, discretization_per_nm: float = 5.0,
+                                new_layer_height: float = None):
         """
-        Test the regenerative insertion approach.
+        ALTERNATIVE FIX: Different approach to height positioning.
+        
+        Instead of modifying existing layers, insert the new layer and adjust the following layer.
         """
-        print(f"=== TESTING REGENERATIVE LAYER INSERTION ===")
-        print(f"Original model: {model.layers} layers")
+        import copy
+        import numpy as np
         
-        # Extract and show the original relationship
-        height_points, width_points = model._extract_width_height_relationship()
-        print(f"Original structure profile:")
-        for i, (h, w) in enumerate(zip(height_points, width_points)):
-            print(f"  Point {i}: height={h:.1f} Å, width={w:.1f} Å")
+        if not 0 <= height_percentage <= 100:
+            raise ValueError("Height percentage must be between 0 and 100")
         
-        # Test the insertion
-        new_model = model.add_layer_regenerative(height_pct)
+        print(f"=== ALTERNATIVE HEIGHT FIX ===")
         
-        print(f"Result: {model.layers} → {new_model.layers} layers")
-        print(f"Change: +{new_model.layers - model.layers} layers")
-        
-        if new_model.layers == model.layers + 1:
-            print(f"✅ PERFECT: Exactly 1 layer added")
+        # Get structures
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            width_key = 'width'
         else:
-            print(f"❌ ERROR: Expected +1 layer, got +{new_model.layers - model.layers}")
+            structures = self.model_params['cylinders']
+            width_key = 'radius'
         
+        # Extract arrays
+        widths = [s[width_key] for s in structures]
+        heights = [s['height'] for s in structures[:-1]]
+        
+        print(f"Original: {len(widths)} widths, {len(heights)} heights")
+        
+        # Calculate insertion
+        total_height = sum(heights)
+        insertion_height = (height_percentage / 100) * total_height
+        if new_layer_height is None:
+            new_layer_height = max(2.0, total_height * 0.05)
+        
+        print(f"Target: {insertion_height:.1f} Å, new layer: {new_layer_height:.1f} Å")
+        
+        # Find insertion position
+        current_height = 0.0
+        insert_position = 0
+        
+        for i, layer_height in enumerate(heights):
+            if current_height + layer_height >= insertion_height:
+                insert_position = i
+                break
+            current_height += layer_height
+        
+        print(f"Inserting at position {insert_position}")
+        
+        # Calculate insertion width
+        bottom_width = widths[insert_position]
+        top_width = widths[insert_position + 1]
+        layer_height = heights[insert_position]
+        height_into_layer = insertion_height - current_height
+        
+        if layer_height > 0:
+            position_fraction = height_into_layer / layer_height
+            insertion_width = bottom_width + position_fraction * (top_width - bottom_width)
+        else:
+            insertion_width = bottom_width
+        
+        print(f"Insertion width: {insertion_width:.1f}")
+        
+        # Simple approach: Insert width and height at the calculated position
+        new_widths = widths.copy()
+        new_heights = heights.copy()
+        
+        # Insert the width
+        new_widths.insert(insert_position + 1, insertion_width)
+        
+        # Insert the height
+        new_heights.insert(insert_position + 1, new_layer_height)
+        
+        # Adjust the following layer height to account for the insertion
+        if insert_position + 1 < len(new_heights) - 1:  # If not the last layer
+            adjustment = -new_layer_height  # Reduce following layer
+            new_heights[insert_position + 2] = max(1.0, new_heights[insert_position + 2] + adjustment)
+        
+        print(f"Result: {len(new_widths)} widths, {len(new_heights)} heights")
+        
+        # Verify exactly +1 width and +1 height
+        if len(new_widths) - len(widths) != 1 or len(new_heights) - len(heights) != 1:
+            print(f"❌ ERROR: Wrong count changes")
+            return None
+        
+        # Build structures and model (same as before)
+        new_structures = []
+        for i in range(len(new_widths)):
+            if i < len(new_heights):
+                structure = {width_key: new_widths[i], 'height': new_heights[i]}
+            else:
+                structure = {width_key: new_widths[i], 'height': 0.0}
+            new_structures.append(structure)
+        
+        new_model_params = copy.deepcopy(self.model_params)
+        if self.geometry == 'trapezoid':
+            new_model_params['trapezoids'] = new_structures
+        else:
+            new_model_params['cylinders'] = new_structures
+            new_discretization = []
+            for i in range(len(new_heights)):
+                h_nm = new_structures[i]['height'] / 10.0
+                disc = max(5, min(50, int(h_nm * discretization_per_nm)))
+                new_discretization.append(disc)
+            new_model_params['discretization'] = new_discretization
+        
+        new_model_params['layers'] = len(new_heights)
+        
+        new_model = self._create_new_model_from_params(new_model_params)
+        self._copy_model_data(new_model)
+        
+        if auto_setup_optimization:
+            new_model._setup_optimization_for_new_layers(optimization_margin)
+        
+        print(f"✅ Result: {self.layers} → {new_model.layers} layers")
         return new_model
+
+    def test_simple_height_fixes(self, height_percentage: float = 50.0):
+        """
+        Test both simple height fix approaches.
+        """
+        print(f"=== TESTING SIMPLE HEIGHT FIXES ===")
+        print(f"Original: {self.layers} layers")
+        
+        # Test version 1
+        print(f"\n1. TESTING HEIGHT FIX V1:")
+        try:
+            model_v1 = self.add_layer_height_fixed(height_percentage, auto_setup_optimization=False)
+            if model_v1 is not None:
+                layer_change_v1 = model_v1.layers - self.layers
+                print(f"   Result: {self.layers} → {model_v1.layers} (+{layer_change_v1})")
+                if layer_change_v1 == 1:
+                    print("   ✅ V1 SUCCESS: Exactly +1 layer")
+                else:
+                    print(f"   ❌ V1 FAILED: Expected +1, got +{layer_change_v1}")
+            else:
+                print("   ❌ V1 FAILED: Returned None")
+                model_v1 = None
+        except Exception as e:
+            print(f"   ❌ V1 ERROR: {str(e)}")
+            model_v1 = None
+        
+        # Test version 2
+        print(f"\n2. TESTING HEIGHT FIX V2:")
+        try:
+            model_v2 = self.add_layer_height_fixed_v2(height_percentage, auto_setup_optimization=False)
+            if model_v2 is not None:
+                layer_change_v2 = model_v2.layers - self.layers
+                print(f"   Result: {self.layers} → {model_v2.layers} (+{layer_change_v2})")
+                if layer_change_v2 == 1:
+                    print("   ✅ V2 SUCCESS: Exactly +1 layer")
+                else:
+                    print(f"   ❌ V2 FAILED: Expected +1, got +{layer_change_v2}")
+            else:
+                print("   ❌ V2 FAILED: Returned None")
+                model_v2 = None
+        except Exception as e:
+            print(f"   ❌ V2 ERROR: {str(e)}")
+            model_v2 = None
+        
+        # Compare with original working version (for reference)
+        print(f"\n3. TESTING ORIGINAL WORKING VERSION:")
+        try:
+            model_orig = self.add_layer_simple_width_height(height_percentage, auto_setup_optimization=False)
+            if model_orig is not None:
+                layer_change_orig = model_orig.layers - self.layers
+                print(f"   Result: {self.layers} → {model_orig.layers} (+{layer_change_orig})")
+                if layer_change_orig == 1:
+                    print("   ✅ ORIGINAL SUCCESS: Exactly +1 layer")
+                else:
+                    print(f"   ❌ ORIGINAL FAILED: Expected +1, got +{layer_change_orig}")
+            else:
+                print("   ❌ ORIGINAL FAILED: Returned None")
+        except Exception as e:
+            print(f"   ❌ ORIGINAL ERROR: {str(e)}")
+            model_orig = None
+        
+        print(f"\n=== SUMMARY ===")
+        working_versions = []
+        if model_v1 is not None and model_v1.layers == self.layers + 1:
+            working_versions.append("V1")
+        if model_v2 is not None and model_v2.layers == self.layers + 1:
+            working_versions.append("V2")
+        
+        if working_versions:
+            print(f"Working versions: {', '.join(working_versions)}")
+            return model_v1 if 'V1' in working_versions else model_v2
+        else:
+            print("❌ No versions working for layer count")
+            return None
