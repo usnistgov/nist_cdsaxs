@@ -3154,4 +3154,1078 @@ class CDSAXS_Model:
         # Should never reach here
         raise ValueError(f"Could not interpolate width for height {height}")
 
-  
+
+
+    def batch_initialize_and_fit(self, initialization_params, n_points_per_param=5, 
+                            optimization_kwargs=None, max_fits=None, verbose=True,
+                            save_results=True, results_filename=None):
+        """
+        Perform batch initialization and fitting with different starting conditions.
+        
+        Parameters:
+        -----------
+        initialization_params : dict
+            Dictionary specifying parameters to vary and their ranges
+            Format: {'param_name': {'min': value, 'max': value, 'n_points': int}}
+            or: {'param_name': {'min': value, 'max': value}} (uses n_points_per_param)
+        n_points_per_param : int, optional
+            Default number of points per parameter if not specified. Default: 5
+        optimization_kwargs : dict, optional
+            Additional kwargs for CDSAXS_DiffEvolution
+        max_fits : int, optional
+            Maximum number of fits to perform (useful for large grids). Default: None (all)
+        verbose : bool, optional
+            Whether to print progress. Default: True
+        save_results : bool, optional
+            Whether to save results to file. Default: True
+        results_filename : str, optional
+            Filename for saved results. If None, auto-generates with timestamp
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing batch fitting results
+        """
+        if not hasattr(self, 'Intensity'):
+            raise ValueError("Data must be imported before performing batch fitting")
+        
+        # Set default optimization parameters
+        if optimization_kwargs is None:
+            optimization_kwargs = {
+                'maxiter': 50,
+                'popsize': 15,
+                'plot_results': False,  # Don't plot individual fits
+                'verbose': False       # Don't print individual fit details
+            }
+        
+        # Generate initialization grid
+        grid_points = self._generate_initialization_grid(initialization_params, n_points_per_param)
+        
+        # Limit number of fits if requested
+        if max_fits is not None and len(grid_points) > max_fits:
+            if verbose:
+                print(f"Limiting fits to {max_fits} out of {len(grid_points)} possible combinations")
+            # Randomly sample to get diverse coverage
+            indices = np.random.choice(len(grid_points), max_fits, replace=False)
+            grid_points = [grid_points[i] for i in sorted(indices)]
+        
+        if verbose:
+            print(f"Starting batch fitting with {len(grid_points)} different initializations...")
+            print(f"Varying parameters: {list(initialization_params.keys())}")
+        
+        # Store original parameters for restoration
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Initialize results storage
+        results = {
+            'initialization_params': initialization_params,
+            'n_total_fits': len(grid_points),
+            'fits': [],
+            'geometry': self.geometry,
+            'layers': self.layers
+        }
+        
+        # Progress bar
+        if verbose:
+            pbar = tqdm(enumerate(grid_points), total=len(grid_points), 
+                    desc="Batch Fitting")
+        else:
+            pbar = enumerate(grid_points)
+        
+        # Perform fits
+        for fit_idx, init_values in pbar:
+            try:
+                # Reset to original parameters
+                self.model_params = copy.deepcopy(original_params)
+                self.update_traditional_from_model_params()
+                
+                # Apply initialization values
+                for param_name, value in init_values.items():
+                    self._set_parameter_value(param_name, value)
+                
+                # Create optimization parameters (all fittable parameters)
+                opt_params = self._create_full_optimization_params()
+                
+                # Run optimization
+                optimized_params = self.CDSAXS_DiffEvolution(
+                    params_to_optimize=opt_params,
+                    **optimization_kwargs
+                )
+                
+                if optimized_params is not None:
+                    # Store fit result
+                    fit_result = {
+                        'fit_id': fit_idx + 1,
+                        'initialization': init_values.copy(),
+                        'final_params': copy.deepcopy(self.model_params),
+                        'gf': self.GF,
+                        'bic': self.BIC,
+                        'converged': True,
+                        'optimization_result': getattr(self, 'optimization_result', None)
+                    }
+                    
+                    # Check for parameters near bounds
+                    fit_result['near_bounds'] = self._check_parameters_near_bounds(opt_params)
+                    
+                    results['fits'].append(fit_result)
+                    
+                    # Update progress bar with current best
+                    if len(results['fits']) > 0:
+                        best_gf = min(fit['gf'] for fit in results['fits'])
+                        if verbose and hasattr(pbar, 'set_postfix'):
+                            pbar.set_postfix({
+                                'Best_GF': f'{best_gf:.4f}',
+                                'Current_GF': f'{self.GF:.4f}',
+                                'Fits': len(results['fits'])
+                            })
+                else:
+                    # Failed fit
+                    fit_result = {
+                        'fit_id': fit_idx + 1,
+                        'initialization': init_values.copy(),
+                        'final_params': None,
+                        'gf': float('inf'),
+                        'bic': float('inf'),
+                        'converged': False,
+                        'near_bounds': {}
+                    }
+                    results['fits'].append(fit_result)
+                    
+            except Exception as e:
+                if verbose:
+                    print(f"Error in fit {fit_idx + 1}: {str(e)}")
+                
+                # Store failed fit
+                fit_result = {
+                    'fit_id': fit_idx + 1,
+                    'initialization': init_values.copy(),
+                    'final_params': None,
+                    'gf': float('inf'),
+                    'bic': float('inf'),
+                    'converged': False,
+                    'error': str(e),
+                    'near_bounds': {}
+                }
+                results['fits'].append(fit_result)
+        
+        if verbose and hasattr(pbar, 'close'):
+            pbar.close()
+        
+        # Sort results by GF (best first)
+        results['fits'].sort(key=lambda x: x['gf'])
+        
+        # Add rankings
+        for i, fit in enumerate(results['fits']):
+            fit['rank'] = i + 1
+        
+        # Restore original parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Print summary
+        if verbose:
+            self._print_batch_summary(results)
+        
+        # Save results
+        if save_results:
+            filename = self._save_batch_results(results, results_filename)
+            if verbose:
+                print(f"Results saved to: {filename}")
+        
+        return results
+
+    def _generate_initialization_grid(self, initialization_params, n_points_per_param):
+        """
+        Generate grid of initialization points from parameter ranges.
+        
+        Parameters:
+        -----------
+        initialization_params : dict
+            Parameter specifications
+        n_points_per_param : int
+            Default number of points per parameter
+            
+        Returns:
+        --------
+        list
+            List of dictionaries, each containing initialization values
+        """
+        # Create arrays for each parameter
+        param_arrays = {}
+        param_names = []
+        
+        for param_name, param_spec in initialization_params.items():
+            param_names.append(param_name)
+            
+            # Determine number of points
+            if 'n_points' in param_spec:
+                n_points = param_spec['n_points']
+            else:
+                n_points = n_points_per_param
+            
+            # Generate values
+            if n_points == 1:
+                # Single point - use midpoint
+                mid_val = (param_spec['min'] + param_spec['max']) / 2
+                param_arrays[param_name] = [mid_val]
+            else:
+                # Multiple points - linspace
+                param_arrays[param_name] = np.linspace(
+                    param_spec['min'], 
+                    param_spec['max'], 
+                    n_points
+                )
+        
+        # Generate all combinations
+        grid_points = []
+        
+        def generate_combinations(param_idx, current_combo):
+            if param_idx == len(param_names):
+                grid_points.append(current_combo.copy())
+                return
+            
+            param_name = param_names[param_idx]
+            for value in param_arrays[param_name]:
+                current_combo[param_name] = value
+                generate_combinations(param_idx + 1, current_combo)
+        
+        generate_combinations(0, {})
+        
+        return grid_points
+
+    def _create_full_optimization_params(self, margin=0.3):
+        """
+        Create optimization parameters for all fittable parameters.
+        
+        Parameters:
+        -----------
+        margin : float, optional
+            Margin for bounds as fraction (0.3 = ±30%). Default: 0.3
+            
+        Returns:
+        --------
+        dict
+            Dictionary of optimization parameters
+        """
+        opt_params = {}
+        
+        if self.geometry == 'trapezoid':
+            # Add all trapezoid parameters
+            for i, trap in enumerate(self.model_params['trapezoids']):
+                # Width parameters
+                width_val = trap['width']
+                opt_params[f'trap_{i}_width'] = {
+                    'min': width_val * (1 - margin),
+                    'max': width_val * (1 + margin),
+                    'default': width_val
+                }
+                
+                # Height parameters (skip last trapezoid)
+                if i < len(self.model_params['trapezoids']) - 1:
+                    height_val = trap['height']
+                    opt_params[f'trap_{i}_height'] = {
+                        'min': height_val * (1 - margin),
+                        'max': height_val * (1 + margin),
+                        'default': height_val
+                    }
+        
+        elif self.geometry == 'cylinder':
+            # Add all cylinder parameters
+            for i, cyl in enumerate(self.model_params['cylinders']):
+                # Radius parameters
+                radius_val = cyl['radius']
+                opt_params[f'cyl_{i}_radius'] = {
+                    'min': radius_val * (1 - margin),
+                    'max': radius_val * (1 + margin),
+                    'default': radius_val
+                }
+                
+                # Height parameters (skip last cylinder)
+                if i < len(self.model_params['cylinders']) - 1:
+                    height_val = cyl['height']
+                    opt_params[f'cyl_{i}_height'] = {
+                        'min': height_val * (1 - margin),
+                        'max': height_val * (1 + margin),
+                        'default': height_val
+                    }
+        
+        # Add global parameters
+        opt_params['DW'] = {
+            'min': self.DW * (1 - margin),
+            'max': self.DW * (1 + margin),
+            'default': self.DW
+        }
+        
+        opt_params['I0'] = {
+            'min': self.I0 * (1 - margin),
+            'max': self.I0 * (1 + margin),
+            'default': self.I0
+        }
+        
+        # Handle background parameters
+        if isinstance(self.Bk, np.ndarray):
+            for i, bk_val in enumerate(self.Bk):
+                opt_params[f'Bk_{i}'] = {
+                    'min': bk_val * (1 - margin),
+                    'max': bk_val * (1 + margin),
+                    'default': bk_val
+                }
+        else:
+            opt_params['Bk'] = {
+                'min': self.Bk * (1 - margin),
+                'max': self.Bk * (1 + margin),
+                'default': self.Bk
+            }
+        
+        return opt_params
+
+    def _check_parameters_near_bounds(self, opt_params, tolerance=0.01):
+        """
+        Check which parameters are near their optimization bounds.
+        
+        Parameters:
+        -----------
+        opt_params : dict
+            Optimization parameters with bounds
+        tolerance : float, optional
+            Tolerance for "near bounds" (1% = 0.01). Default: 0.01
+            
+        Returns:
+        --------
+        dict
+            Dictionary indicating which parameters are near bounds
+        """
+        near_bounds = {}
+        
+        for param_name, param_config in opt_params.items():
+            try:
+                current_value = self._get_current_parameter_value(param_name)
+                param_range = param_config['max'] - param_config['min']
+                
+                # Check distance to bounds as fraction of range
+                dist_to_min = (current_value - param_config['min']) / param_range
+                dist_to_max = (param_config['max'] - current_value) / param_range
+                
+                near_min = dist_to_min < tolerance
+                near_max = dist_to_max < tolerance
+                
+                near_bounds[param_name] = {
+                    'near_min': near_min,
+                    'near_max': near_max,
+                    'near_either': near_min or near_max,
+                    'current_value': current_value,
+                    'min_bound': param_config['min'],
+                    'max_bound': param_config['max']
+                }
+                
+            except Exception as e:
+                near_bounds[param_name] = {'error': str(e)}
+        
+        return near_bounds
+
+    def _print_batch_summary(self, results):
+        """
+        Print a summary of batch fitting results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Batch fitting results
+        """
+        fits = results['fits']
+        successful_fits = [f for f in fits if f['converged'] and f['gf'] != float('inf')]
+        
+        print(f"\n{'='*80}")
+        print(f"BATCH FITTING SUMMARY")
+        print(f"{'='*80}")
+        print(f"Total initializations: {results['n_total_fits']}")
+        print(f"Successful fits: {len(successful_fits)}")
+        print(f"Failed fits: {results['n_total_fits'] - len(successful_fits)}")
+        
+        if successful_fits:
+            print(f"Best GF: {successful_fits[0]['gf']:.6f}")
+            print(f"Best BIC: {successful_fits[0]['bic']:.6f}")
+            
+            # Show distribution of GF values
+            gf_values = [f['gf'] for f in successful_fits]
+            print(f"GF range: {min(gf_values):.6f} to {max(gf_values):.6f}")
+            print(f"GF std dev: {np.std(gf_values):.6f}")
+        
+        print(f"{'='*80}")
+
+    def display_top_fits(self, results, n_top=10, show_near_bounds=True, 
+                        colorize=True, save_table=False, table_filename=None):
+        """
+        Display top fitting results in a formatted table.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        n_top : int, optional
+            Number of top fits to display. Default: 10
+        show_near_bounds : bool, optional
+            Whether to highlight parameters near bounds. Default: True
+        colorize : bool, optional
+            Whether to use color coding (red for near bounds). Default: True
+        save_table : bool, optional
+            Whether to save table to file. Default: False
+        table_filename : str, optional
+            Filename for saved table
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            DataFrame with the top fits
+        """
+        fits = results['fits']
+        top_fits = fits[:min(n_top, len(fits))]
+        
+        print(f"\n{'='*100}")
+        print(f"TOP {len(top_fits)} FITS (Ranked by Goodness of Fit)")
+        print(f"{'='*100}")
+        
+        # Create DataFrame for better formatting
+        table_data = []
+        
+        for fit in top_fits:
+            row = {
+                'Rank': fit['rank'],
+                'GF': fit['gf'],
+                'BIC': fit['bic'],
+                'Converged': '✓' if fit['converged'] else '✗'
+            }
+            
+            # Add parameter values
+            if fit['final_params'] is not None:
+                # Add key parameters based on geometry
+                if self.geometry == 'trapezoid':
+                    # Show first few trapezoid widths and heights
+                    for i in range(min(3, len(fit['final_params']['trapezoids']))):
+                        trap = fit['final_params']['trapezoids'][i]
+                        row[f'W{i}'] = trap['width']
+                        if i < len(fit['final_params']['trapezoids']) - 1:
+                            row[f'H{i}'] = trap['height']
+                
+                elif self.geometry == 'cylinder':
+                    # Show first few cylinder radii and heights
+                    for i in range(min(3, len(fit['final_params']['cylinders']))):
+                        cyl = fit['final_params']['cylinders'][i]
+                        row[f'R{i}'] = cyl['radius']
+                        if i < len(fit['final_params']['cylinders']) - 1:
+                            row[f'H{i}'] = cyl['height']
+                
+                # Add global parameters
+                row['DW'] = fit['final_params']['DW']
+                row['I0'] = fit['final_params']['I0']
+                
+                # Add background (first value if array)
+                bk = fit['final_params']['Bk']
+                if isinstance(bk, list):
+                    row['Bk'] = bk[0]
+                else:
+                    row['Bk'] = bk
+            
+            table_data.append(row)
+        
+        # Create DataFrame
+        df = pd.DataFrame(table_data)
+        
+        # Format numeric columns
+        numeric_cols = [col for col in df.columns if col not in ['Rank', 'Converged']]
+        for col in numeric_cols:
+            if col in ['GF', 'BIC']:
+                df[col] = df[col].apply(lambda x: f'{x:.6f}' if x != float('inf') else 'Failed')
+            else:
+                df[col] = df[col].apply(lambda x: f'{x:.3f}' if pd.notnull(x) else 'N/A')
+        
+        # Display table with color coding if requested
+        if colorize and show_near_bounds:
+            self._display_colorized_table(df, top_fits, results)
+        else:
+            print(df.to_string(index=False))
+        
+        # Save table if requested
+        if save_table:
+            filename = table_filename or f"top_fits_batch_results.csv"
+            df.to_csv(filename, index=False)
+            print(f"\nTable saved to: {filename}")
+        
+        return df
+
+    def _display_colorized_table(self, df, top_fits, results):
+        """
+        Display table with color coding for parameters near bounds.
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            Table data
+        top_fits : list
+            List of top fit results
+        results : dict
+            Full batch results
+        """
+        # Print header
+        header = "  ".join(f"{col:>10}" for col in df.columns)
+        print(header)
+        print("-" * len(header))
+        
+        # Print each row with color coding
+        for i, (_, row) in enumerate(df.iterrows()):
+            fit = top_fits[i]
+            row_str = ""
+            
+            for j, (col, value) in enumerate(row.items()):
+                # Check if this parameter is near bounds
+                near_bounds = False
+                if fit['converged'] and col not in ['Rank', 'GF', 'BIC', 'Converged']:
+                    # Map display column to parameter name
+                    param_name = self._map_column_to_param(col, fit)
+                    if param_name and param_name in fit.get('near_bounds', {}):
+                        near_bounds_info = fit['near_bounds'][param_name]
+                        near_bounds = near_bounds_info.get('near_either', False)
+                
+                # Format value with color
+                value_str = f"{value:>10}"
+                if near_bounds:
+                    # Red color for parameters near bounds
+                    value_str = f"\033[91m{value_str}\033[0m"
+                
+                row_str += value_str + "  "
+            
+            print(row_str)
+        
+        # Print legend
+        print("\n\033[91m■\033[0m = Parameter within 1% of optimization bounds")
+
+    def _map_column_to_param(self, col, fit):
+        """
+        Map display column name to parameter name.
+        
+        Parameters:
+        -----------
+        col : str
+            Column name from display table
+        fit : dict
+            Fit result
+            
+        Returns:
+        --------
+        str or None
+            Parameter name, or None if not found
+        """
+        # Map display columns to parameter names
+        if col.startswith('W') and col[1:].isdigit():
+            idx = int(col[1:])
+            return f'trap_{idx}_width'
+        elif col.startswith('H') and col[1:].isdigit():
+            idx = int(col[1:])
+            return f'trap_{idx}_height'
+        elif col.startswith('R') and col[1:].isdigit():
+            idx = int(col[1:])
+            return f'cyl_{idx}_radius'
+        elif col in ['DW', 'I0', 'Bk']:
+            return col
+        
+        return None
+
+    def plot_fit_comparison(self, results, fit_ranks=[1, 2, 3], figsize=(15, 10),
+                        show_structure=True, show_intensity=True):
+        """
+        Plot comparison of selected fit results side by side.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        fit_ranks : list, optional
+            List of fit rankings to compare (1-indexed). Default: [1, 2, 3]
+        figsize : tuple, optional
+            Figure size. Default: (15, 10)
+        show_structure : bool, optional
+            Whether to show structure plots. Default: True
+        show_intensity : bool, optional
+            Whether to show intensity comparison plots. Default: True
+        """
+        fits = results['fits']
+        
+        # Validate fit ranks
+        valid_ranks = []
+        for rank in fit_ranks:
+            if 1 <= rank <= len(fits) and fits[rank-1]['converged']:
+                valid_ranks.append(rank)
+            else:
+                print(f"Warning: Rank {rank} is invalid or failed - skipping")
+        
+        if not valid_ranks:
+            print("No valid fits to plot")
+            return
+        
+        n_fits = len(valid_ranks)
+        
+        # Store current model state
+        original_params = copy.deepcopy(self.model_params)
+        
+        try:
+            if show_structure and show_intensity:
+                # Create 2x3 grid (structure on top, intensity on bottom)
+                fig, axes = plt.subplots(2, n_fits, figsize=figsize)
+                if n_fits == 1:
+                    axes = axes.reshape(2, 1)
+            elif show_structure or show_intensity:
+                # Create 1xN grid
+                fig, axes = plt.subplots(1, n_fits, figsize=(figsize[0], figsize[1]//2))
+                if n_fits == 1:
+                    axes = [axes]
+            else:
+                print("Nothing to plot - both show_structure and show_intensity are False")
+                return
+            
+            colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown']
+            
+            for i, rank in enumerate(valid_ranks):
+                fit = fits[rank-1]
+                color = colors[i % len(colors)]
+                
+                # Apply fit parameters
+                self.model_params = copy.deepcopy(fit['final_params'])
+                self.update_traditional_from_model_params()
+                
+                # Plot structure
+                if show_structure:
+                    if show_intensity:
+                        ax_struct = axes[0, i]
+                    else:
+                        ax_struct = axes[i]
+                    
+                    plt.sca(ax_struct)
+                    self.plot_structure()
+                    ax_struct.set_title(f'Rank #{rank}\nGF: {fit["gf"]:.4f}', 
+                                    fontsize=12, color=color)
+                    
+                    # Highlight structure with color
+                    for line in ax_struct.get_lines():
+                        line.set_color(color)
+                        line.set_linewidth(2)
+                
+                # Plot intensity comparison
+                if show_intensity:
+                    if show_structure:
+                        ax_int = axes[1, i]
+                    else:
+                        ax_int = axes[i]
+                    
+                    # Simulate with current parameters
+                    if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                        self.SimInt = self.simulate_structure(self.discretization)
+                    else:
+                        self.SimInt = self.simulate_structure()
+                    
+                    # Plot first few cuts
+                    n_cuts_to_show = min(3, self.Intensity.shape[1])
+                    
+                    for cut_idx in range(n_cuts_to_show):
+                        if self.geometry == 'trapezoid':
+                            qz_values = self.Qz[:, cut_idx]
+                            q_value = self.Qx[0, cut_idx]
+                            q_label = 'Qx'
+                        else:
+                            qz_values = self.Qz[:, cut_idx]
+                            q_value = self.Qr[0, cut_idx]
+                            q_label = 'Qr'
+                        
+                        # Plot measured (gray) and simulated (colored)
+                        alpha = 0.7 - cut_idx * 0.2
+                        ax_int.semilogy(qz_values, self.Intensity[:, cut_idx], 
+                                    'o', color='gray', alpha=alpha, markersize=3,
+                                    label='Measured' if cut_idx == 0 else '')
+                        ax_int.semilogy(qz_values, self.SimInt[:, cut_idx], 
+                                    '-', color=color, alpha=alpha, linewidth=2,
+                                    label=f'Rank #{rank}' if cut_idx == 0 else '')
+                    
+                    ax_int.set_xlabel('Qz (Å⁻¹)')
+                    ax_int.set_ylabel('Intensity')
+                    ax_int.set_title(f'Intensity Fit\nBIC: {fit["bic"]:.4f}', 
+                                fontsize=12, color=color)
+                    ax_int.grid(True, alpha=0.3)
+                    
+                    if i == 0:  # Only show legend on first plot
+                        ax_int.legend()
+            
+            plt.tight_layout()
+            plt.show()
+            
+            # Print fit details
+            print(f"\nFit Comparison Details:")
+            print(f"{'Rank':<6} {'GF':<12} {'BIC':<12} {'Notes'}")
+            print("-" * 50)
+            
+            for rank in valid_ranks:
+                fit = fits[rank-1]
+                notes = []
+                
+                # Check for parameters near bounds
+                if fit.get('near_bounds'):
+                    near_bound_params = [name for name, info in fit['near_bounds'].items() 
+                                    if info.get('near_either', False)]
+                    if near_bound_params:
+                        notes.append(f"{len(near_bound_params)} params near bounds")
+                
+                notes_str = "; ".join(notes) if notes else "Good"
+                print(f"{rank:<6} {fit['gf']:<12.6f} {fit['bic']:<12.6f} {notes_str}")
+        
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+
+    def _save_batch_results(self, results, filename=None):
+        """
+        Save batch fitting results to file.
+        
+        Parameters:
+        -----------
+        results : dict
+            Batch fitting results
+        filename : str, optional
+            Filename for saving. If None, auto-generates
+            
+        Returns:
+        --------
+        str
+            Filename where results were saved
+        """
+        if filename is None:
+            filename = f"batch_fits_{self.geometry}_{self.layers}L.pkl"
+        
+        import pickle
+        with open(filename, 'wb') as f:
+            pickle.dump(results, f)
+        
+        return filename
+
+    def load_batch_results(self, filename):
+        """
+        Load batch fitting results from file.
+        
+        Parameters:
+        -----------
+        filename : str
+            Filename to load
+            
+        Returns:
+        --------
+        dict
+            Loaded batch fitting results
+        """
+        import pickle
+        with open(filename, 'rb') as f:
+            results = pickle.load(f)
+        return results
+
+    def apply_batch_fit_result(self, results, rank=1, recalculate=True):
+        """
+        Apply parameters from a specific batch fit result to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        rank : int, optional
+            Rank of fit to apply (1 = best). Default: 1
+        recalculate : bool, optional
+            Whether to recalculate simulation and metrics. Default: True
+        """
+        if rank < 1 or rank > len(results['fits']):
+            raise ValueError(f"Rank {rank} is out of range (1 to {len(results['fits'])})")
+        
+        fit = results['fits'][rank-1]
+        
+        if not fit['converged'] or fit['final_params'] is None:
+            raise ValueError(f"Rank {rank} fit failed or has no parameters")
+        
+        print(f"Applying parameters from rank #{rank} fit:")
+        print(f"  GF: {fit['gf']:.6f}")
+        print(f"  BIC: {fit['bic']:.6f}")
+        
+        # Apply parameters
+        self.model_params = copy.deepcopy(fit['final_params'])
+        self.update_traditional_from_model_params()
+        
+        if recalculate:
+            # Recalculate simulation and metrics
+            if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                self.SimInt = self.simulate_structure(self.discretization)
+            else:
+                self.SimInt = self.simulate_structure()
+            
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Model updated with rank #{rank} parameters")
+            print(f"Recalculated GF: {self.GF:.6f}")
+            print(f"Recalculated BIC: {self.BIC:.6f}")
+        else:
+            print(f"Model parameters updated (simulation not recalculated)")
+
+    def get_batch_fit_summary(self, results, criterion='GF', n_top=5):
+        """
+        Get a summary of batch fitting results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        criterion : str, optional
+            Criterion for ranking ('GF' or 'BIC'). Default: 'GF'
+        n_top : int, optional
+            Number of top results to include in summary. Default: 5
+            
+        Returns:
+        --------
+        dict
+            Summary information
+        """
+        fits = results['fits']
+        successful_fits = [f for f in fits if f['converged'] and f['gf'] != float('inf')]
+        
+        if not successful_fits:
+            return {
+                'error': 'No successful fits found',
+                'total_fits': len(fits),
+                'successful_fits': 0
+            }
+        
+        # Sort by criterion
+        if criterion.upper() == 'BIC':
+            successful_fits.sort(key=lambda x: x['bic'])
+        else:
+            successful_fits.sort(key=lambda x: x['gf'])
+        
+        # Calculate statistics
+        gf_values = [f['gf'] for f in successful_fits]
+        bic_values = [f['bic'] for f in successful_fits]
+        
+        summary = {
+            'total_fits': len(fits),
+            'successful_fits': len(successful_fits),
+            'failed_fits': len(fits) - len(successful_fits),
+            'success_rate': len(successful_fits) / len(fits),
+            'best_fit': {
+                'rank': 1,
+                'gf': successful_fits[0]['gf'],
+                'bic': successful_fits[0]['bic'],
+                'params': successful_fits[0]['final_params']
+            },
+            'statistics': {
+                'gf': {
+                    'min': min(gf_values),
+                    'max': max(gf_values),
+                    'mean': np.mean(gf_values),
+                    'std': np.std(gf_values),
+                    'median': np.median(gf_values)
+                },
+                'bic': {
+                    'min': min(bic_values),
+                    'max': max(bic_values),
+                    'mean': np.mean(bic_values),
+                    'std': np.std(bic_values),
+                    'median': np.median(bic_values)
+                }
+            },
+            'top_fits': successful_fits[:n_top],
+            'criterion_used': criterion.upper()
+        }
+        
+        # Count parameters near bounds
+        total_near_bounds = 0
+        for fit in successful_fits:
+            if 'near_bounds' in fit:
+                near_count = sum(1 for info in fit['near_bounds'].values() 
+                            if isinstance(info, dict) and info.get('near_either', False))
+                total_near_bounds += near_count
+        
+        summary['parameters_near_bounds'] = {
+            'total_instances': total_near_bounds,
+            'average_per_fit': total_near_bounds / len(successful_fits) if successful_fits else 0
+        }
+        
+        return summary
+
+    def export_batch_results_table(self, results, filename=None, format='csv', 
+                                include_all_params=False, n_fits=None):
+        """
+        Export batch fitting results to a table file.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        filename : str, optional
+            Output filename. If None, auto-generates
+        format : str, optional
+            Output format ('csv', 'xlsx', or 'json'). Default: 'csv'
+        include_all_params : bool, optional
+            Whether to include all parameter values. Default: False (summary only)
+        n_fits : int, optional
+            Number of fits to export. If None, exports all
+            
+        Returns:
+        --------
+        str
+            Filename where table was exported
+        """
+        fits = results['fits']
+        
+        if n_fits is not None:
+            fits = fits[:n_fits]
+        
+        # Create table data
+        table_data = []
+        
+        for fit in fits:
+            row = {
+                'Rank': fit['rank'],
+                'Fit_ID': fit['fit_id'],
+                'GF': fit['gf'],
+                'BIC': fit['bic'],
+                'Converged': fit['converged']
+            }
+            
+            # Add initialization values
+            for param, value in fit['initialization'].items():
+                row[f'Init_{param}'] = value
+            
+            # Add final parameter values
+            if fit['final_params'] is not None and include_all_params:
+                if self.geometry == 'trapezoid':
+                    for i, trap in enumerate(fit['final_params']['trapezoids']):
+                        row[f'Final_trap_{i}_width'] = trap['width']
+                        if 'height' in trap:
+                            row[f'Final_trap_{i}_height'] = trap['height']
+                elif self.geometry == 'cylinder':
+                    for i, cyl in enumerate(fit['final_params']['cylinders']):
+                        row[f'Final_cyl_{i}_radius'] = cyl['radius']
+                        if 'height' in cyl:
+                            row[f'Final_cyl_{i}_height'] = cyl['height']
+                
+                # Add global parameters
+                row['Final_DW'] = fit['final_params']['DW']
+                row['Final_I0'] = fit['final_params']['I0']
+                row['Final_Bk'] = fit['final_params']['Bk']
+            
+            # Add near bounds information
+            if 'near_bounds' in fit:
+                near_bound_count = sum(1 for info in fit['near_bounds'].values() 
+                                    if isinstance(info, dict) and info.get('near_either', False))
+                row['Params_Near_Bounds'] = near_bound_count
+                
+                # List parameters near bounds
+                near_params = [name for name, info in fit['near_bounds'].items() 
+                            if isinstance(info, dict) and info.get('near_either', False)]
+                row['Near_Bounds_List'] = '; '.join(near_params) if near_params else ''
+            
+            table_data.append(row)
+        
+        # Create DataFrame
+        df = pd.DataFrame(table_data)
+        
+        # Generate filename if not provided
+        if filename is None:
+            filename = f"batch_results_{self.geometry}_{self.layers}L"
+        
+        # Export based on format
+        if format.lower() == 'csv':
+            full_filename = f"{filename}.csv"
+            df.to_csv(full_filename, index=False)
+        elif format.lower() == 'xlsx':
+            full_filename = f"{filename}.xlsx"
+            df.to_excel(full_filename, index=False)
+        elif format.lower() == 'json':
+            full_filename = f"{filename}.json"
+            df.to_json(full_filename, orient='records', indent=2)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+        
+        print(f"Table exported to: {full_filename}")
+        print(f"Exported {len(df)} fits with {len(df.columns)} columns")
+        
+        return full_filename
+
+    def compare_batch_results(self, results_list, labels=None, figsize=(12, 8)):
+        """
+        Compare multiple batch fitting results.
+        
+        Parameters:
+        -----------
+        results_list : list
+            List of results dictionaries from batch_initialize_and_fit
+        labels : list, optional
+            Labels for each result set
+        figsize : tuple, optional
+            Figure size
+        """
+        if labels is None:
+            labels = [f"Batch {i+1}" for i in range(len(results_list))]
+        
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=figsize)
+        
+        colors = plt.cm.tab10(np.linspace(0, 1, len(results_list)))
+        
+        for i, (results, label, color) in enumerate(zip(results_list, labels, colors)):
+            fits = results['fits']
+            successful_fits = [f for f in fits if f['converged'] and f['gf'] != float('inf')]
+            
+            if not successful_fits:
+                continue
+            
+            gf_values = [f['gf'] for f in successful_fits]
+            bic_values = [f['bic'] for f in successful_fits]
+            ranks = list(range(1, len(successful_fits) + 1))
+            
+            # Plot 1: GF vs Rank
+            ax1.semilogy(ranks[:20], gf_values[:20], 'o-', color=color, label=label, alpha=0.7)
+            ax1.set_xlabel('Rank')
+            ax1.set_ylabel('Goodness of Fit (GF)')
+            ax1.set_title('GF vs Rank (Top 20)')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot 2: BIC vs Rank
+            ax2.semilogy(ranks[:20], bic_values[:20], 'o-', color=color, label=label, alpha=0.7)
+            ax2.set_xlabel('Rank')
+            ax2.set_ylabel('BIC')
+            ax2.set_title('BIC vs Rank (Top 20)')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # Plot 3: GF Distribution
+            ax3.hist(gf_values, bins=20, alpha=0.6, color=color, label=label, density=True)
+            ax3.set_xlabel('Goodness of Fit (GF)')
+            ax3.set_ylabel('Density')
+            ax3.set_title('GF Distribution')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # Plot 4: Success Rate and Statistics
+            stats = {
+                'Total Fits': len(fits),
+                'Successful': len(successful_fits),
+                'Success Rate': len(successful_fits) / len(fits),
+                'Best GF': min(gf_values),
+                'Best BIC': min(bic_values)
+            }
+            
+            y_pos = len(results_list) - i - 1
+            ax4.text(0.1, y_pos, f"{label}:", fontweight='bold', color=color)
+            ax4.text(0.3, y_pos, f"Success: {stats['Success Rate']:.1%} ({stats['Successful']}/{stats['Total Fits']})")
+            ax4.text(0.7, y_pos, f"Best GF: {stats['Best GF']:.4f}")
+        
+        ax4.set_xlim(0, 1)
+        ax4.set_ylim(-0.5, len(results_list) - 0.5)
+        ax4.set_title('Batch Comparison Summary')
+        ax4.axis('off')
+        
+        plt.tight_layout()
+        plt.show()
