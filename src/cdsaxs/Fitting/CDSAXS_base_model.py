@@ -2442,3 +2442,631 @@ class CDSAXS_Model:
         
         print(f"{'='*60}")
 
+
+    # Complete layer insertion methods for CDSAXS_base_model.py
+# These are fully self-contained and don't require any external imports
+
+    def calculate_width_at_height(self, height_position: float) -> float:
+        """
+        Calculate the width (trapezoid) or radius (cylinder) at a given height position.
+        
+        Parameters:
+        -----------
+        height_position : float
+            Height position from bottom (0 = bottom, total_height = top)
+            
+        Returns:
+        --------
+        float
+            Width or radius at the specified height
+        """
+        if not hasattr(self, 'model_params'):
+            raise AttributeError("Model must have model_params attribute")
+        
+        # Get structure data based on geometry
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            width_key = 'width'
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+            width_key = 'radius'
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        # Calculate total height
+        total_height = sum(struct['height'] for struct in structures[:-1])
+        
+        # Validate height position
+        if height_position < 0 or height_position > total_height:
+            raise ValueError(f"Height position {height_position:.2f} is outside valid range [0, {total_height:.2f}]")
+        
+        # Special cases
+        if height_position == 0:
+            return structures[0][width_key]
+        if height_position == total_height:
+            return structures[-1][width_key]
+        
+        # Find which layer contains this height
+        current_height = 0
+        for i in range(len(structures) - 1):
+            layer_height = structures[i]['height']
+            
+            if current_height <= height_position <= current_height + layer_height:
+                # Found the layer - interpolate between bottom and top widths
+                bottom_width = structures[i][width_key]
+                top_width = structures[i + 1][width_key]
+                
+                # Calculate position within this layer (0 = bottom, 1 = top)
+                layer_position = (height_position - current_height) / layer_height
+                
+                # Linear interpolation
+                interpolated_width = bottom_width + layer_position * (top_width - bottom_width)
+                return interpolated_width
+            
+            current_height += layer_height
+        
+        # Should never reach here if height_position is valid
+        raise ValueError(f"Could not find layer containing height {height_position:.2f}")
+
+    def get_total_structure_height(self) -> float:
+        """
+        Get the total height of the model structure.
+        
+        Returns:
+        --------
+        float
+            Total height of the structure
+        """
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        return sum(struct['height'] for struct in structures[:-1])
+
+    def _find_layer_at_height(self, height_position: float):
+        """
+        Find which layer contains the given height and the position within that layer.
+        
+        Parameters:
+        -----------
+        height_position : float
+            Height position from bottom
+            
+        Returns:
+        --------
+        tuple
+            (layer_index, position_in_layer) where position_in_layer is 0-1
+        """
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        current_height = 0
+        for i in range(len(structures) - 1):
+            layer_height = structures[i]['height']
+            
+            if current_height <= height_position <= current_height + layer_height:
+                position_in_layer = (height_position - current_height) / layer_height
+                return i, position_in_layer
+            
+            current_height += layer_height
+        
+        raise ValueError(f"Could not find layer containing height {height_position:.2f}")
+
+    def _copy_model_data(self, target_model):
+        """
+        Copy experimental data from this model to target model.
+        
+        Parameters:
+        -----------
+        target_model : CDSAXS_Model
+            Model to copy data to
+        """
+        data_attributes = ['Intensity', 'Qz', 'Qx', 'Qy', 'Qr', 'Alpha', 'numberpoints', 'numbercuts']
+        
+        for attr in data_attributes:
+            if hasattr(self, attr):
+                setattr(target_model, attr, getattr(self, attr))
+
+    def _create_new_model_from_params(self, new_model_params):
+        """
+        Create a new model from parameters using available methods.
+        This avoids import issues by using the class's existing capabilities.
+        """
+        # Try different approaches to create the new model
+        
+        # Method 1: Try using the create_model static method if available
+        if hasattr(self.__class__, 'create_model'):
+            try:
+                return self.__class__.create_model(
+                    geometry=self.geometry,
+                    model=self.model,
+                    layers=new_model_params['layers'],
+                    model_params=new_model_params
+                )
+            except:
+                pass
+        
+        # Method 2: Try creating using the class constructor directly
+        try:
+            new_model = self.__class__(
+                model=self.model,
+                layers=new_model_params['layers'],
+                model_params=new_model_params
+            )
+            return new_model
+        except:
+            pass
+        
+        # Method 3: Try using cdsaxs.create_model if available
+        try:
+            import cdsaxs
+            return cdsaxs.create_model(
+                geometry=self.geometry,
+                model=self.model,
+                layers=new_model_params['layers'],
+                model_params=new_model_params
+            )
+        except:
+            pass
+        
+        # Method 4: Manual class selection (fallback)
+        if self.geometry == 'trapezoid':
+            # Try to get TrapezoidModel class
+            try:
+                # First try to get it from the same module
+                import sys
+                current_module = sys.modules[self.__module__]
+                if hasattr(current_module, 'TrapezoidModel'):
+                    TrapezoidModel = getattr(current_module, 'TrapezoidModel')
+                else:
+                    # Try importing from parent package
+                    module_parts = self.__module__.split('.')
+                    if len(module_parts) > 1:
+                        parent_module = '.'.join(module_parts[:-1])
+                        try:
+                            import importlib
+                            parent = importlib.import_module(parent_module)
+                            TrapezoidModel = getattr(parent, 'TrapezoidModel')
+                        except:
+                            raise ImportError("Could not find TrapezoidModel")
+                    else:
+                        raise ImportError("Could not find TrapezoidModel")
+                
+                return TrapezoidModel(
+                    model=self.model,
+                    layers=new_model_params['layers'],
+                    model_params=new_model_params
+                )
+            except:
+                raise ImportError("Could not create TrapezoidModel")
+        
+        elif self.geometry == 'cylinder':
+            # Try to get CylinderModel class
+            try:
+                # Similar approach for cylinder model
+                import sys
+                current_module = sys.modules[self.__module__]
+                if hasattr(current_module, 'CylinderModel'):
+                    CylinderModel = getattr(current_module, 'CylinderModel')
+                else:
+                    module_parts = self.__module__.split('.')
+                    if len(module_parts) > 1:
+                        parent_module = '.'.join(module_parts[:-1])
+                        try:
+                            import importlib
+                            parent = importlib.import_module(parent_module)
+                            CylinderModel = getattr(parent, 'CylinderModel')
+                        except:
+                            raise ImportError("Could not find CylinderModel")
+                    else:
+                        raise ImportError("Could not find CylinderModel")
+                
+                return CylinderModel(
+                    model=self.model,
+                    layers=new_model_params['layers'],
+                    model_params=new_model_params
+                )
+            except:
+                raise ImportError("Could not create CylinderModel")
+        
+        raise ValueError(f"Could not create new model for geometry: {self.geometry}")
+
+    def add_layer_at_percentage(self, height_percentage: float, auto_setup_optimization: bool = True, 
+                          optimization_margin: float = 0.2):
+        """
+        Add a new layer at the specified height percentage while maintaining overall shape.
+        
+        Parameters:
+        -----------
+        height_percentage : float
+            Percentage of total height where to insert new layer (0-100)
+        auto_setup_optimization : bool, optional
+            Whether to automatically setup optimization parameters for the new model. Default: True
+        optimization_margin : float, optional
+            Margin for optimization bounds as a fraction (0.2 = ±20%). Default: 0.2
+            
+        Returns:
+        --------
+        CDSAXS_Model
+            New model with additional layer and optimization parameters ready
+        """
+        if not 0 <= height_percentage <= 100:
+            raise ValueError("Height percentage must be between 0 and 100")
+        
+        # Calculate insertion height
+        total_height = self.get_total_structure_height()
+        insertion_height = (height_percentage / 100) * total_height
+        
+        # Find which layer to split
+        layer_index, position_in_layer = self._find_layer_at_height(insertion_height)
+        
+        # Calculate width at insertion point
+        insertion_width = self.calculate_width_at_height(insertion_height)
+        
+        # Create new model with additional layer
+        if self.geometry == 'trapezoid':
+            new_model = self._add_trapezoid_layer(layer_index, position_in_layer, insertion_width)
+        elif self.geometry == 'cylinder':
+            new_model = self._add_cylinder_layer(layer_index, position_in_layer, insertion_width)
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        # Automatically setup optimization parameters for the new model
+        if auto_setup_optimization:
+            new_model._setup_optimization_for_new_layers(optimization_margin)
+            
+            print(f"Layer insertion complete!")
+            print(f"Original layers: {self.layers} → New layers: {new_model.layers}")
+            print(f"Optimization parameters automatically generated with ±{optimization_margin*100:.0f}% bounds")
+            print(f"Ready to run: new_model.CDSAXS_DiffEvolution()")
+        
+        return new_model
+
+    def _add_trapezoid_layer(self, layer_index: int, position_in_layer: float, insertion_width: float):
+        """
+        Add a layer to a trapezoid model by splitting an existing layer.
+        """
+        # Deep copy the original model parameters
+        new_model_params = copy.deepcopy(self.model_params)
+        
+        # Get original trapezoids
+        orig_trapezoids = new_model_params['trapezoids']
+        
+        # Calculate heights for the split layer
+        original_height = orig_trapezoids[layer_index]['height']
+        bottom_height = original_height * position_in_layer
+        top_height = original_height * (1 - position_in_layer)
+        
+        # Create new trapezoids list
+        new_trapezoids = []
+        
+        # Add all trapezoids before the split layer
+        for i in range(layer_index + 1):
+            if i == layer_index:
+                # Split this layer - add bottom part
+                new_trap = orig_trapezoids[i].copy()
+                new_trap['height'] = bottom_height
+                new_trapezoids.append(new_trap)
+            else:
+                new_trapezoids.append(orig_trapezoids[i].copy())
+        
+        # Add new intermediate trapezoid at insertion point
+        new_intermediate = {
+            'width': insertion_width,
+            'height': 0.1  # Small default height that can be optimized
+        }
+        new_trapezoids.append(new_intermediate)
+        
+        # Add top part of split layer
+        if top_height > 0:
+            top_trap = {
+                'width': insertion_width,  # Start with same width as insertion point
+                'height': top_height
+            }
+            new_trapezoids.append(top_trap)
+        
+        # Add remaining trapezoids (shift indices due to insertions)
+        for i in range(layer_index + 1, len(orig_trapezoids)):
+            new_trapezoids.append(orig_trapezoids[i].copy())
+        
+        # Update model parameters
+        new_model_params['trapezoids'] = new_trapezoids
+        new_model_params['layers'] = len(new_trapezoids) - 1
+        
+        # Update discretization if it exists for trapezoids (usually doesn't, but just in case)
+        if 'discretization' in new_model_params:
+            # Insert new discretization value at appropriate position
+            discretization = new_model_params['discretization'].copy()
+            discretization.insert(layer_index + 1, 10)  # Default discretization
+            new_model_params['discretization'] = discretization
+        
+        # Create new model using the helper method
+        new_model = self._create_new_model_from_params(new_model_params)
+        
+        # Copy data if present
+        self._copy_model_data(new_model)
+        
+        return new_model
+
+    def _add_cylinder_layer(self, layer_index: int, position_in_layer: float, insertion_radius: float):
+        """
+        Add a layer to a cylinder model by splitting an existing layer.
+        """
+        # Deep copy the original model parameters
+        new_model_params = copy.deepcopy(self.model_params)
+        
+        # Get original cylinders
+        orig_cylinders = new_model_params['cylinders']
+        
+        # Calculate heights for the split layer
+        original_height = orig_cylinders[layer_index]['height']
+        bottom_height = original_height * position_in_layer
+        top_height = original_height * (1 - position_in_layer)
+        
+        # Create new cylinders list
+        new_cylinders = []
+        
+        # Add all cylinders before the split layer
+        for i in range(layer_index + 1):
+            if i == layer_index:
+                # Split this layer - add bottom part
+                new_cyl = orig_cylinders[i].copy()
+                new_cyl['height'] = bottom_height
+                new_cylinders.append(new_cyl)
+            else:
+                new_cylinders.append(orig_cylinders[i].copy())
+        
+        # Add new intermediate cylinder at insertion point
+        new_intermediate = {
+            'radius': insertion_radius,
+            'height': 0.1  # Small default height that can be optimized
+        }
+        new_cylinders.append(new_intermediate)
+        
+        # Add top part of split layer
+        if top_height > 0:
+            top_cyl = {
+                'radius': insertion_radius,  # Start with same radius as insertion point
+                'height': top_height
+            }
+            new_cylinders.append(top_cyl)
+        
+        # Add remaining cylinders
+        for i in range(layer_index + 1, len(orig_cylinders)):
+            new_cylinders.append(orig_cylinders[i].copy())
+        
+        # Update model parameters
+        new_model_params['cylinders'] = new_cylinders
+        new_model_params['layers'] = len(new_cylinders) - 1
+        
+        # Update discretization
+        if 'discretization' in new_model_params:
+            discretization = new_model_params['discretization'].copy()
+            discretization.insert(layer_index + 1, 10)  # Default discretization
+            new_model_params['discretization'] = discretization
+        
+        # Create new model using the helper method
+        new_model = self._create_new_model_from_params(new_model_params)
+        
+        # Copy data if present
+        self._copy_model_data(new_model)
+        
+        return new_model
+
+    def add_multiple_layers(self, height_percentages: list, sequential: bool = False, 
+                       auto_setup_optimization: bool = True, optimization_margin: float = 0.2):
+        """
+        Add multiple layers at different height percentages.
+        
+        Parameters:
+        -----------
+        height_percentages : list
+            List of height percentages where to insert new layers (0-100)
+        sequential : bool, optional
+            If True, add all layers to a single model sequentially
+            If False, create separate models each with one additional layer
+        auto_setup_optimization : bool, optional
+            Whether to automatically setup optimization parameters for new models. Default: True
+        optimization_margin : float, optional
+            Margin for optimization bounds as a fraction (0.2 = ±20%). Default: 0.2
+            
+        Returns:
+        --------
+        CDSAXS_Model or List[CDSAXS_Model]
+            If sequential=True: Single model with all additional layers
+            If sequential=False: List of models, each with one additional layer
+            All models have optimization parameters ready
+        """
+        if sequential:
+            # Sort percentages to ensure proper insertion order
+            sorted_percentages = sorted(height_percentages)
+            
+            # Start with the original model
+            current_model = self
+            
+            # Add layers one by one, working from top to bottom
+            # (This ensures indices don't shift as we add layers)
+            for height_percentage in reversed(sorted_percentages):
+                current_model = current_model.add_layer_at_percentage(
+                    height_percentage, 
+                    auto_setup_optimization=False,  # Don't setup until the end
+                    optimization_margin=optimization_margin
+                )
+            
+            # Setup optimization for the final model
+            if auto_setup_optimization:
+                current_model._setup_optimization_for_new_layers(optimization_margin)
+                print(f"Sequential layer insertion complete!")
+                print(f"Original layers: {self.layers} → New layers: {current_model.layers}")
+                print(f"Optimization parameters automatically generated with ±{optimization_margin*100:.0f}% bounds")
+            
+            return current_model
+        else:
+            # Create separate models
+            new_models = []
+            
+            for height_percentage in height_percentages:
+                new_model = self.add_layer_at_percentage(
+                    height_percentage, 
+                    auto_setup_optimization=auto_setup_optimization,
+                    optimization_margin=optimization_margin
+                )
+                new_models.append(new_model)
+            
+            return new_models
+
+    def visualize_layer_addition(self, height_percentage: float, figsize=(12, 6)):
+        """
+        Visualize the original model and the model with inserted layer side by side.
+        
+        Parameters:
+        -----------
+        height_percentage : float
+            Height percentage where layer will be inserted
+        figsize : tuple
+            Figure size for the plot
+            
+        Returns:
+        --------
+        CDSAXS_Model
+            New model with the inserted layer
+        """
+        import matplotlib.pyplot as plt
+        
+        # Create new model with inserted layer
+        new_model = self.add_layer_at_percentage(height_percentage)
+        
+        # Create side-by-side plots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+        
+        # Plot original model
+        plt.sca(ax1)
+        self.plot_structure()
+        ax1.set_title(f'Original Model ({self.layers} layers)')
+        
+        # Add line showing insertion point
+        total_height = self.get_total_structure_height()
+        insertion_height = (height_percentage / 100) * total_height
+        insertion_width = self.calculate_width_at_height(insertion_height)
+        
+        if self.geometry == 'trapezoid':
+            ax1.axhline(y=insertion_height, color='red', linestyle='--', alpha=0.7, 
+                    label=f'Insertion at {height_percentage}%')
+            ax1.plot([-insertion_width/2, insertion_width/2], [insertion_height, insertion_height], 
+                    'ro', markersize=8, label=f'Width: {insertion_width:.1f}')
+        else:  # cylinder
+            ax1.axhline(y=insertion_height, color='red', linestyle='--', alpha=0.7, 
+                    label=f'Insertion at {height_percentage}%')
+            ax1.plot([-insertion_width, insertion_width], [insertion_height, insertion_height], 
+                    'ro', markersize=8, label=f'Radius: {insertion_width:.1f}')
+        
+        ax1.legend()
+        
+        # Plot new model
+        plt.sca(ax2)
+        new_model.plot_structure()
+        ax2.set_title(f'Modified Model ({new_model.layers} layers)')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        # Print summary
+        print(f"\nLayer Insertion Summary:")
+        print(f"Original layers: {self.layers}")
+        print(f"New layers: {new_model.layers}")
+        print(f"Insertion height: {insertion_height:.2f} Å ({height_percentage}% of total)")
+        print(f"{'Width' if self.geometry == 'trapezoid' else 'Radius'} at insertion: {insertion_width:.2f} Å")
+        
+        return new_model
+    
+    def _setup_optimization_for_new_layers(self, optimization_margin: float = 0.2):
+        """
+        Set up optimization parameters for the current model structure.
+        
+        Parameters:
+        -----------
+        optimization_margin : float, optional
+            Margin for optimization bounds as a fraction (0.2 = ±20%). Default: 0.2
+        """
+        # Initialize optimization parameters with the specified margin
+        param_limits = {}
+        
+        if self.geometry == 'trapezoid':
+            # Add trapezoid parameters
+            for i, trap in enumerate(self.model_params['trapezoids']):
+                # Width parameters
+                width_val = trap['width']
+                param_limits[f'trap_{i}_width'] = {
+                    'min': width_val * (1 - optimization_margin),
+                    'max': width_val * (1 + optimization_margin),
+                    'default': width_val
+                }
+                
+                # Height parameters (skip the last trapezoid which has height 0)
+                if i < len(self.model_params['trapezoids']) - 1:
+                    height_val = trap['height']
+                    param_limits[f'trap_{i}_height'] = {
+                        'min': height_val * (1 - optimization_margin),
+                        'max': height_val * (1 + optimization_margin),
+                        'default': height_val
+                    }
+        
+        elif self.geometry == 'cylinder':
+            # Add cylinder parameters
+            for i, cyl in enumerate(self.model_params['cylinders']):
+                # Radius parameters
+                radius_val = cyl['radius']
+                param_limits[f'cyl_{i}_radius'] = {
+                    'min': radius_val * (1 - optimization_margin),
+                    'max': radius_val * (1 + optimization_margin),
+                    'default': radius_val
+                }
+                
+                # Height parameters (skip the last cylinder which has height 0)
+                if i < len(self.model_params['cylinders']) - 1:
+                    height_val = cyl['height']
+                    param_limits[f'cyl_{i}_height'] = {
+                        'min': height_val * (1 - optimization_margin),
+                        'max': height_val * (1 + optimization_margin),
+                        'default': height_val
+                    }
+        
+        # Add global parameters
+        param_limits['DW'] = {
+            'min': self.DW * (1 - optimization_margin),
+            'max': self.DW * (1 + optimization_margin),
+            'default': self.DW
+        }
+        
+        param_limits['I0'] = {
+            'min': self.I0 * (1 - optimization_margin),
+            'max': self.I0 * (1 + optimization_margin),
+            'default': self.I0
+        }
+        
+        # Handle background parameters
+        if isinstance(self.Bk, np.ndarray):
+            for i, bk_val in enumerate(self.Bk):
+                param_limits[f'Bk_{i}'] = {
+                    'min': bk_val * (1 - optimization_margin),
+                    'max': bk_val * (1 + optimization_margin),
+                    'default': bk_val
+                }
+        else:
+            param_limits['Bk'] = {
+                'min': self.Bk * (1 - optimization_margin),
+                'max': self.Bk * (1 + optimization_margin),
+                'default': self.Bk
+            }
+        
+        # Store optimization parameters
+        self.model_params['optimization'] = param_limits
+        
+        return param_limits
