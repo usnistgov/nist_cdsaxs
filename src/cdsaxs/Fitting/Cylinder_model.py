@@ -1,8 +1,11 @@
+# Updated Cylinder_model.py with common functions moved to base class
+
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.special as sp
 import copy
 from scipy.optimize import differential_evolution
+from tqdm import tqdm
 
 from CDSAXS_base_model import CDSAXS_Model
 
@@ -237,22 +240,87 @@ class CylinderModel(CDSAXS_Model):
                 'default': self.Bk
             }
         else:
-            # Ensure default values are set if not provided
+            # FIXED: Ensure default values are set if not provided
             for param, limits in param_limits.items():
                 if 'default' not in limits:
-                    if param.startswith('cyl_'):
-                        parts = param.split('_')
-                        cyl_idx = int(parts[1])
-                        param_type = parts[2]
-                        limits['default'] = self.model_params['cylinders'][cyl_idx][param_type]
-                    else:
-                        limits['default'] = getattr(self, param)
+                    default_value = self._get_current_parameter_value(param)
+                    limits['default'] = default_value
+                    #print(f"INFO: Added missing default for {param}: {default_value}")
         
         # Store optimization parameters
         self.model_params['optimization'] = param_limits
         
         return param_limits
     
+    def _ensure_defaults_in_params(self, params_to_optimize):
+        """
+        Ensure all optimization parameters have default values set.
+        
+        Parameters:
+        -----------
+        params_to_optimize : dict
+            Dictionary of optimization parameters
+            
+        Returns:
+        --------
+        dict
+            Updated parameters with defaults ensured
+        """
+        updated_params = {}
+        
+        for param_name, param_config in params_to_optimize.items():
+            # Copy the existing configuration
+            updated_config = param_config.copy()
+            
+            # Add default if missing
+            if 'default' not in updated_config:
+                try:
+                    default_value = self._get_current_parameter_value(param_name)
+                    updated_config['default'] = default_value
+                    #print(f"INFO: Added missing default for {param_name}: {default_value}")
+                except Exception as e:
+                    # Fallback: use middle of min/max range
+                    if 'min' in updated_config and 'max' in updated_config:
+                        default_value = (updated_config['min'] + updated_config['max']) / 2
+                        updated_config['default'] = default_value
+                        print(f"WARNING: Could not get current value for {param_name}, using range midpoint: {default_value}")
+                    else:
+                        raise ValueError(f"Cannot determine default value for parameter {param_name}: {str(e)}")
+            
+            updated_params[param_name] = updated_config
+        
+        return updated_params
+
+    def _get_current_parameter_value(self, param_name):
+        """
+        Get the current value of a parameter from the model.
+        
+        Parameters:
+        -----------
+        param_name : str
+            Name of the parameter
+            
+        Returns:
+        --------
+        float
+            Current value of the parameter
+        """
+        if param_name.startswith('cyl_'):
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            return self.model_params['cylinders'][cyl_idx][param_type]
+        
+        elif param_name in ['DW', 'I0', 'Bk']:
+            return getattr(self, param_name)
+        
+        else:
+            # Try to get from model_params
+            if hasattr(self, 'model_params') and param_name in self.model_params:
+                return self.model_params[param_name]
+            else:
+                raise ValueError(f"Unknown parameter: {param_name}")
+        
     def _extract_PAR_from_model_params(self):
         """
         Helper method to extract PAR array from model_params.
@@ -556,7 +624,7 @@ class CylinderModel(CDSAXS_Model):
             if len(SimPar) < required_length:
                 raise ValueError(f"SimPar array must have at least {required_length} elements, but has {len(SimPar)}")
             
- # Reshape parameters
+            # Reshape parameters
             PARs = np.zeros([layers + 1, 2])
             PARs[:, 0:2] = np.reshape(SimPar[0:(layers + 1) * 2], (layers + 1, 2))
             
@@ -591,8 +659,42 @@ class CylinderModel(CDSAXS_Model):
             print(f"Error in SimCyl_GF: {str(e)}")
             return float('inf')  # Return infinity as worst-case fit
     
+    def _cylinder_optimization_wrapper(self, optimization_values):
+        """
+        Wrapper function for cylindrical optimization that can be pickled.
+        """
+        # Create PAR array from optimization values
+        temp_PAR = np.zeros((self.layers + 1, 2))
+        temp_DW = self.DW
+        temp_I0 = self.I0
+        temp_Bk = self.Bk
+        
+        for i, param_name in enumerate(self.param_names):
+            if param_name.startswith('cyl_'):
+                parts = param_name.split('_')
+                cyl_idx = int(parts[1])
+                param_type = parts[2]
+                
+                if param_type == 'radius':
+                    temp_PAR[cyl_idx, 0] = optimization_values[i]
+                elif param_type == 'height':
+                    temp_PAR[cyl_idx, 1] = optimization_values[i]
+            elif param_name == 'DW':
+                temp_DW = optimization_values[i]
+            elif param_name == 'I0':
+                temp_I0 = optimization_values[i]
+            elif param_name == 'Bk':
+                temp_Bk = optimization_values[i]
+        
+        # Create SimPar array for cylindrical GF function
+        SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
+        
+        # Call cylindrical GF function
+        return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                            plot_structure=True, plot_grid=True, plot_combined=True, **kwargs):
+                        plot_structure=True, plot_grid=True, plot_combined=True,
+                        verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS cylindrical model fitting
         and shows before/after comparison plots.
@@ -643,6 +745,9 @@ class CylinderModel(CDSAXS_Model):
             if params_to_optimize is None:
                 params_to_optimize = self.model_params['optimization']
             
+            # FIXED: Ensure all parameters have default values
+            params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+            
             # Create parameter names list and bounds list
             param_names = []
             bounds = []
@@ -651,7 +756,7 @@ class CylinderModel(CDSAXS_Model):
             for param_name, param_config in params_to_optimize.items():
                 param_names.append(param_name)
                 bounds.append((param_config['min'], param_config['max']))
-                initial_values.append(param_config['default'])
+                initial_values.append(param_config['default'])  # This should now always exist
             
             # Store for use in optimization
             self.param_names = param_names
@@ -682,40 +787,9 @@ class CylinderModel(CDSAXS_Model):
             # Run differential evolution optimization
             print(f"Starting optimization with {len(param_names)} parameters...")
             
-            # Create a wrapper function for cylindrical optimization
-            def cyl_wrapper(optimization_values):
-                # Create PAR array from optimization values
-                temp_PAR = np.zeros((self.layers + 1, 2))
-                temp_DW = self.DW
-                temp_I0 = self.I0
-                temp_Bk = self.Bk
-                
-                for i, param_name in enumerate(param_names):
-                    if param_name.startswith('cyl_'):
-                        parts = param_name.split('_')
-                        cyl_idx = int(parts[1])
-                        param_type = parts[2]
-                        
-                        if param_type == 'radius':
-                            temp_PAR[cyl_idx, 0] = optimization_values[i]
-                        elif param_type == 'height':
-                            temp_PAR[cyl_idx, 1] = optimization_values[i]
-                    elif param_name == 'DW':
-                        temp_DW = optimization_values[i]
-                    elif param_name == 'I0':
-                        temp_I0 = optimization_values[i]
-                    elif param_name == 'Bk':
-                        temp_Bk = optimization_values[i]
-                
-                # Create SimPar array for cylindrical GF function
-                SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
-                
-                # Call cylindrical GF function
-                return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
-            
-            # Run the optimization
+            # Run the optimization using the method-level wrapper (can be pickled)
             result = differential_evolution(
-                cyl_wrapper,
+                self._cylinder_optimization_wrapper,
                 bounds,
                 **optimization_params
             )
@@ -753,18 +827,20 @@ class CylinderModel(CDSAXS_Model):
             self.BIC = self.BIC_calc(self.GF)
             
             # Print optimization results
-            print(f"Optimization complete after {result.nfev} function evaluations")
-            print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
-            print(f"Final goodness of fit: {self.GF:.4f}")
-            print(f"Improvement: {self.GF_Initial - self.GF:.4f} ({(1 - self.GF/self.GF_Initial)*100:.2f}%)")
+            if verbose:
+                print(f"Optimization complete after {result.nfev} function evaluations")
+                print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
+                print(f"Final goodness of fit: {self.GF:.4f}")
+                print(f"Improvement: {self.GF_Initial - self.GF:.4f} ({(1 - self.GF/self.GF_Initial)*100:.2f}%)")
             
             # Generate before/after comparison plots if requested
             if plot_results:
                 self._plot_optimization_results(initial_model_params, initial_simInt,
-                                              plot_structure, plot_grid, plot_combined)
+                                            plot_structure, plot_grid, plot_combined)
             
             # Print parameter changes
-            self._print_parameter_changes(initial_model_params)
+            if verbose:
+                self._print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
@@ -876,8 +952,8 @@ class CylinderModel(CDSAXS_Model):
             plt.plot([], [], linestyle=linestyle, color=color, alpha=alpha, linewidth=2, label=label)
         
         plt.axis('equal')
-        plt.xlabel('Radius (nm)')
-        plt.ylabel('Height (nm)')
+        plt.xlabel('Radius (Å)')
+        plt.ylabel('Height (Å)')
         plt.grid(True, linestyle='--', alpha=0.3)
         
         return plt.gca()
@@ -918,8 +994,8 @@ class CylinderModel(CDSAXS_Model):
             qr_value = self.Qr[0, i]
             
             # Plot measured data
-            ax.semilogy(qz_values, self.Intensity[:, i], 'ko', alpha=0.7, 
-                      markersize=4, label='Measured')
+            ax.semilogy(qz_values, self.Intensity[:, i], 'o', 
+                    color='grey', alpha=0.7, markersize=4, label='Measured')
             
             # Plot initial simulation
             ax.semilogy(qz_values, initial_simInt[:, i], 'b--', alpha=0.8, 
@@ -931,7 +1007,7 @@ class CylinderModel(CDSAXS_Model):
             
             # Set labels and title
             ax.set_title(f'Cut at Qr = {qr_value:.4f}')
-            ax.set_xlabel('Qz (nm$^{-1}$)')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (a.u.)')
             ax.grid(True, linestyle='--', alpha=0.4)
             
@@ -977,8 +1053,8 @@ class CylinderModel(CDSAXS_Model):
             qz_values = self.Qz[:, i]
             
             # Plot measured data
-            plt.semilogy(qz_values, self.Intensity[:, i], 'ko', alpha=0.5, markersize=4)
-            
+            plt.semilogy(qz_values, self.Intensity[:, i], 'o', 
+                    color='grey', alpha=0.5, markersize=4)
             # Plot initial simulation
             plt.semilogy(qz_values, initial_simInt[:, i], 'b--', alpha=0.5, linewidth=1.5)
             
@@ -986,7 +1062,7 @@ class CylinderModel(CDSAXS_Model):
             plt.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=0.6, linewidth=1.5)
         
         plt.title('Intensity Comparison - All Cuts')
-        plt.xlabel('Qz (nm$^{-1}$)')
+        plt.xlabel('Qz (Å$^{-1}$)')
         plt.ylabel('Intensity (a.u.)')
         plt.legend()
         plt.grid(True, linestyle='--', alpha=0.4)
@@ -1071,579 +1147,14 @@ class CylinderModel(CDSAXS_Model):
         ax = self._plot_cylinder_structure(self.model_params)
         plt.title('Cylinder Structure')
         return ax
-
-    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
+    
+    def simulate_structure(self, *args, **kwargs):
         """
-        Plots intensity vs Qz for specific Qr cut(s)
-        
-        Parameters:
-        -----------
-        cut_index : int or list or None, optional
-            Index or indices of the Qr cut(s) to plot
-            If None, plots all available cuts
-        SimInt : numpy.ndarray, optional
-            Simulated intensity to plot alongside measured data
-            If None, uses self.SimInt if available
-        log_scale : str, optional
-            Whether to use logarithmic scale for intensity ('yes' or 'no')
+        Simulate cylinder structure intensity.
         
         Returns:
         --------
-        matplotlib.axes.Axes or list of Axes
-            The axes object(s) containing the plot(s)
+        numpy.ndarray
+            The simulated intensity (also sets self.SimInt)
         """
-        # Check if required attributes exist
-        if not hasattr(self, 'Qz') or not hasattr(self, 'Intensity'):
-            raise AttributeError("Missing required attributes: Qz and/or Intensity")
-        
-        # Determine which cuts to plot
-        if cut_index is None:
-            # Plot all cuts
-            cut_indices = list(range(self.Intensity.shape[1]))
-        elif isinstance(cut_index, (list, tuple, np.ndarray)):
-            # Plot multiple specified cuts
-            cut_indices = cut_index
-        else:
-            # Plot a single cut
-            cut_indices = [cut_index]
-        
-        # Create a figure with appropriate size
-        n_cuts = len(cut_indices)
-        if n_cuts == 1:
-            # Single plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            axes = [ax]
-        else:
-            # Multiple plots
-            fig_width = min(16, n_cuts * 5)  # Limit maximum width
-            fig_height = min(10, n_cuts * 3)  # Limit maximum height
-            
-            if n_cuts <= 4:
-                # Use a single row for 2-4 plots
-                n_rows = 1
-                n_cols = n_cuts
-            else:
-                # Create a grid for many plots
-                n_rows = int(np.ceil(np.sqrt(n_cuts)))
-                n_cols = int(np.ceil(n_cuts / n_rows))
-            
-            fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
-            if n_rows * n_cols > 1:
-                axes = axes.flatten()
-        
-        # Plot each cut
-        for i, (ax, idx) in enumerate(zip(axes, cut_indices)):
-            # Check if the index is valid
-            if idx < 0 or idx >= self.Intensity.shape[1]:
-                ax.text(0.5, 0.5, f"Invalid cut index: {idx}", 
-                       ha='center', va='center', transform=ax.transAxes)
-                continue
-            
-            # Get Qz values for the selected cut
-            qz_values = self.Qz[:, idx]
-            qr_value = self.Qr[0, idx]
-            
-            # Plot measured intensity
-            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'bo-', label='Measured')
-            
-            # Plot simulated intensity if available
-            if SimInt is not None:
-                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'r-', label='Simulated')
-            elif hasattr(self, 'SimInt') and self.SimInt is not None:
-                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'r-', label='Simulated')
-            
-            # Set logarithmic scale if requested
-            if log_scale.lower() == 'yes':
-                ax.set_yscale('log')
-            
-            # Set labels and title
-            ax.set_title(f'Cut at Qr = {qr_value:.4f}')
-            ax.set_xlabel('Qz (nm$^{-1}$)')
-            ax.set_ylabel('Intensity (counts)')
-            ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
-        
-        # Hide unused subplots
-        for i in range(len(cut_indices), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        
-        # Return a single axis for a single plot, or list of axes for multiple plots
-        return axes[0] if len(axes) == 1 else axes
-    
-    
-    def parameter_sweep_1d(self, sweep_param, sweep_range, n_points=20, 
-                        exclude_from_fit=None, plot_results=True, 
-                        figsize=(10, 6), save_results=False, filename=None,
-                        optimization_kwargs=None, verbose=True):
-        """
-        Perform a 1D parameter sweep, holding one parameter constant while optimizing others.
-        
-        Parameters:
-        -----------
-        sweep_param : str
-            Name of the parameter to sweep (e.g., 'trap_0_width', 'DW', 'I0')
-        sweep_range : tuple
-            (min_value, max_value) for the sweep parameter
-        n_points : int, optional
-            Number of points to sweep. Default: 20
-        exclude_from_fit : list, optional
-            List of parameter names to exclude from optimization (in addition to sweep_param)
-        plot_results : bool, optional
-            Whether to plot the results. Default: True
-        figsize : tuple, optional
-            Figure size for the plot. Default: (10, 6)
-        save_results : bool, optional
-            Whether to save results to file. Default: False
-        filename : str, optional
-            Filename for saving results. If None, auto-generates name
-        optimization_kwargs : dict, optional
-            Additional kwargs for CDSAXS_DiffEvolution
-        verbose : bool, optional
-            Whether to print progress. Default: True
-            
-        Returns:
-        --------
-        dict
-            Dictionary with sweep values, GF values, BIC values, and optimized parameters
-        """
-        if not hasattr(self, 'Intensity'):
-            raise ValueError("Data must be imported before performing parameter sweep")
-        
-        # Set default optimization parameters
-        if optimization_kwargs is None:
-            optimization_kwargs = {'maxiter': 30, 'popsize': 10, 'plot_results': False}
-        
-        # Create sweep values
-        sweep_values = np.linspace(sweep_range[0], sweep_range[1], n_points)
-        
-        # Initialize results storage
-        results = {
-            'sweep_param': sweep_param,
-            'sweep_values': sweep_values,
-            'gf_values': [],
-            'bic_values': [],
-            'optimized_params': [],
-            'convergence_flags': []
-        }
-        
-        # Store original parameters
-        original_params = copy.deepcopy(self.model_params)
-        
-        # Setup progress bar
-        if verbose:
-            pbar = tqdm(sweep_values, desc=f"Sweeping {sweep_param}")
-        else:
-            pbar = sweep_values
-        
-        for i, value in enumerate(pbar):
-            try:
-                # Reset to original parameters
-                self.model_params = copy.deepcopy(original_params)
-                self.update_traditional_from_model_params()
-                
-                # Set the sweep parameter value
-                self._set_parameter_value(sweep_param, value)
-                
-                # Create optimization parameters excluding the sweep parameter
-                opt_params = self._create_optimization_params_excluding(
-                    [sweep_param] + (exclude_from_fit or [])
-                )
-                
-                if not opt_params:
-                    # No parameters to optimize, just calculate GF
-                    self.SimInt = self.SimTrap_SM()
-                    gf = self.GF_calc(self.SimInt)
-                    bic = self.BIC_calc(gf)
-                    converged = True
-                    opt_result = {}
-                else:
-                    # Run optimization
-                    opt_result = self.CDSAXS_DiffEvolution(
-                        params_to_optimize=opt_params,
-                        **optimization_kwargs
-                    )
-                    gf = self.GF
-                    bic = self.BIC
-                    converged = opt_result is not None
-                
-                # Store results
-                results['gf_values'].append(gf)
-                results['bic_values'].append(bic)
-                results['optimized_params'].append(copy.deepcopy(self.model_params))
-                results['convergence_flags'].append(converged)
-                
-                if verbose:
-                    pbar.set_postfix({'GF': f'{gf:.4f}', 'BIC': f'{bic:.4f}'})
-                    
-            except Exception as e:
-                if verbose:
-                    print(f"Error at {sweep_param}={value}: {str(e)}")
-                results['gf_values'].append(float('inf'))
-                results['bic_values'].append(float('inf'))
-                results['optimized_params'].append(None)
-                results['convergence_flags'].append(False)
-        
-        # Restore original parameters
-        self.model_params = original_params
-        self.update_traditional_from_model_params()
-        
-        # Plot results
-        if plot_results:
-            self._plot_1d_sweep_results(results, figsize)
-        
-        # Save results
-        if save_results:
-            self._save_sweep_results(results, filename or f"{sweep_param}_sweep_1d")
-        
-        return results
-    
-    def parameter_sweep_2d(self, sweep_params, sweep_ranges, n_points=(10, 10),
-                          exclude_from_fit=None, plot_results=True, 
-                          figsize=(10, 8), save_results=False, filename=None,
-                          optimization_kwargs=None, verbose=True, metric='GF'):
-        """
-        Perform a 2D parameter sweep with heatmap visualization.
-        
-        Parameters:
-        -----------
-        sweep_params : tuple
-            (param1_name, param2_name) to sweep
-        sweep_ranges : tuple
-            ((min1, max1), (min2, max2)) for the sweep parameters
-        n_points : tuple, optional
-            (n_points1, n_points2) for each parameter. Default: (10, 10)
-        exclude_from_fit : list, optional
-            List of parameter names to exclude from optimization
-        plot_results : bool, optional
-            Whether to plot the heatmap. Default: True
-        figsize : tuple, optional
-            Figure size for the plot. Default: (10, 8)
-        save_results : bool, optional
-            Whether to save results to file. Default: False
-        filename : str, optional
-            Filename for saving results
-        optimization_kwargs : dict, optional
-            Additional kwargs for CDSAXS_DiffEvolution
-        verbose : bool, optional
-            Whether to print progress. Default: True
-        metric : str, optional
-            Metric to plot ('GF' or 'BIC'). Default: 'GF'
-            
-        Returns:
-        --------
-        dict
-            Dictionary with sweep values, GF/BIC matrices, and optimized parameters
-        """
-        if not hasattr(self, 'Intensity'):
-            raise ValueError("Data must be imported before performing parameter sweep")
-        
-        # Set default optimization parameters
-        if optimization_kwargs is None:
-            optimization_kwargs = {'maxiter': 20, 'popsize': 8, 'plot_results': False}
-        
-        # Create sweep values
-        param1_values = np.linspace(sweep_ranges[0][0], sweep_ranges[0][1], n_points[0])
-        param2_values = np.linspace(sweep_ranges[1][0], sweep_ranges[1][1], n_points[1])
-        
-        # Initialize results storage
-        results = {
-            'sweep_params': sweep_params,
-            'param1_values': param1_values,
-            'param2_values': param2_values,
-            'gf_matrix': np.full((n_points[1], n_points[0]), np.inf),
-            'bic_matrix': np.full((n_points[1], n_points[0]), np.inf),
-            'optimized_params': [[None for _ in range(n_points[0])] for _ in range(n_points[1])],
-            'convergence_matrix': np.full((n_points[1], n_points[0]), False, dtype=bool)
-        }
-        
-        # Store original parameters
-        original_params = copy.deepcopy(self.model_params)
-        
-        # Setup progress bar
-        total_points = n_points[0] * n_points[1]
-        if verbose:
-            pbar = tqdm(total=total_points, desc=f"2D Sweep: {sweep_params[0]} vs {sweep_params[1]}")
-        
-        for i, val1 in enumerate(param1_values):
-            for j, val2 in enumerate(param2_values):
-                try:
-                    # Reset to original parameters
-                    self.model_params = copy.deepcopy(original_params)
-                    self.update_traditional_from_model_params()
-                    
-                    # Set the sweep parameter values
-                    self._set_parameter_value(sweep_params[0], val1)
-                    self._set_parameter_value(sweep_params[1], val2)
-                    
-                    # Create optimization parameters excluding the sweep parameters
-                    opt_params = self._create_optimization_params_excluding(
-                        list(sweep_params) + (exclude_from_fit or [])
-                    )
-                    
-                    if not opt_params:
-                        # No parameters to optimize, just calculate GF
-                        self.SimInt = self.SimTrap_SM()
-                        gf = self.GF_calc(self.SimInt)
-                        bic = self.BIC_calc(gf)
-                        converged = True
-                    else:
-                        # Run optimization
-                        opt_result = self.CDSAXS_DiffEvolution(
-                            params_to_optimize=opt_params,
-                            **optimization_kwargs
-                        )
-                        gf = self.GF
-                        bic = self.BIC
-                        converged = opt_result is not None
-                    
-                    # Store results
-                    results['gf_matrix'][j, i] = gf
-                    results['bic_matrix'][j, i] = bic
-                    results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
-                    results['convergence_matrix'][j, i] = converged
-                    
-                    if verbose:
-                        pbar.set_postfix({
-                            f'{sweep_params[0]}': f'{val1:.3f}',
-                            f'{sweep_params[1]}': f'{val2:.3f}',
-                            'GF': f'{gf:.4f}'
-                        })
-                        pbar.update(1)
-                        
-                except Exception as e:
-                    if verbose:
-                        print(f"Error at {sweep_params[0]}={val1}, {sweep_params[1]}={val2}: {str(e)}")
-                        pbar.update(1)
-        
-        if verbose:
-            pbar.close()
-        
-        # Restore original parameters
-        self.model_params = original_params
-        self.update_traditional_from_model_params()
-        
-        # Plot results
-        if plot_results:
-            self._plot_2d_sweep_results(results, figsize, metric)
-        
-        # Save results
-        if save_results:
-            self._save_sweep_results(results, filename or f"{sweep_params[0]}_{sweep_params[1]}_sweep_2d")
-        
-        return results
-    
-    def _set_parameter_value(self, param_name, value):
-        """Set a parameter value in the model."""
-        if param_name.startswith('trap_'):
-            # Trapezoid parameter
-            parts = param_name.split('_')
-            trap_idx = int(parts[1])
-            param_type = parts[2]
-            self.model_params['trapezoids'][trap_idx][param_type] = value
-        elif param_name.startswith('Bk_'):
-            # Background parameter for specific column
-            bk_idx = int(param_name.split('_')[1])
-            if isinstance(self.model_params['Bk'], list):
-                self.model_params['Bk'][bk_idx] = value
-            else:
-                # Convert to list if needed
-                n_cols = len(self.Bk) if isinstance(self.Bk, np.ndarray) else 1
-                self.model_params['Bk'] = [self.model_params['Bk']] * n_cols
-                self.model_params['Bk'][bk_idx] = value
-        else:
-            # Global parameter
-            self.model_params[param_name] = value
-        
-        # Update traditional parameters
-        self.update_traditional_from_model_params()
-    
-    def _create_optimization_params_excluding(self, excluded_params):
-        """Create optimization parameters excluding specified parameters."""
-        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
-            self.initialize_optimization_params()
-        
-        opt_params = {}
-        for param_name, param_config in self.model_params['optimization'].items():
-            if param_name not in excluded_params:
-                opt_params[param_name] = param_config
-        
-        return opt_params
-    
-    def _plot_1d_sweep_results(self, results, figsize):
-        """Plot 1D sweep results."""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
-        
-        # Plot GF vs parameter
-        ax1.plot(results['sweep_values'], results['gf_values'], 'bo-', linewidth=2, markersize=6)
-        ax1.set_xlabel(results['sweep_param'])
-        ax1.set_ylabel('Goodness of Fit (GF)')
-        ax1.set_title(f'GF vs {results["sweep_param"]}')
-        ax1.grid(True, alpha=0.3)
-        
-        # Find and mark minimum
-        min_idx = np.argmin(results['gf_values'])
-        min_gf = results['gf_values'][min_idx]
-        min_param = results['sweep_values'][min_idx]
-        ax1.plot(min_param, min_gf, 'ro', markersize=10, label=f'Min GF: {min_gf:.4f}')
-        ax1.legend()
-        
-        # Plot BIC vs parameter
-        ax2.plot(results['sweep_values'], results['bic_values'], 'go-', linewidth=2, markersize=6)
-        ax2.set_xlabel(results['sweep_param'])
-        ax2.set_ylabel('Bayesian Information Criterion (BIC)')
-        ax2.set_title(f'BIC vs {results["sweep_param"]}')
-        ax2.grid(True, alpha=0.3)
-        
-        # Find and mark minimum BIC
-        min_bic_idx = np.argmin(results['bic_values'])
-        min_bic = results['bic_values'][min_bic_idx]
-        min_bic_param = results['sweep_values'][min_bic_idx]
-        ax2.plot(min_bic_param, min_bic, 'ro', markersize=10, label=f'Min BIC: {min_bic:.4f}')
-        ax2.legend()
-        
-        plt.tight_layout()
-        plt.show()
-        
-        # Print summary
-        print(f"\n1D Parameter Sweep Summary:")
-        print(f"Parameter: {results['sweep_param']}")
-        print(f"Range: {results['sweep_values'][0]:.4f} to {results['sweep_values'][-1]:.4f}")
-        print(f"Best GF: {min_gf:.4f} at {results['sweep_param']} = {min_param:.4f}")
-        print(f"Best BIC: {min_bic:.4f} at {results['sweep_param']} = {min_bic_param:.4f}")
-    
-    def _plot_2d_sweep_results(self, results, figsize, metric='GF'):
-        """Plot 2D sweep results as heatmap."""
-        # Choose which matrix to plot
-        if metric.upper() == 'GF':
-            data_matrix = results['gf_matrix']
-            title = 'Goodness of Fit (GF)'
-            cmap = 'viridis'
-        else:
-            data_matrix = results['bic_matrix']
-            title = 'Bayesian Information Criterion (BIC)'
-            cmap = 'viridis'
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Create heatmap
-        # Replace inf values for better visualization
-        plot_data = np.copy(data_matrix)
-        plot_data[np.isinf(plot_data)] = np.nan
-        
-        # Use log scale if the range is large
-        if np.nanmax(plot_data) / np.nanmin(plot_data) > 100:
-            norm = LogNorm(vmin=np.nanmin(plot_data), vmax=np.nanmax(plot_data))
-        else:
-            norm = None
-        
-        im = ax.imshow(plot_data, cmap=cmap, aspect='auto', origin='lower', norm=norm)
-        
-        # Set axis labels and ticks
-        param1_name, param2_name = results['sweep_params']
-        ax.set_xlabel(param1_name)
-        ax.set_ylabel(param2_name)
-        ax.set_title(f'{title} Heatmap: {param1_name} vs {param2_name}')
-        
-        # Set tick labels
-        n_ticks = 5
-        x_tick_indices = np.linspace(0, len(results['param1_values'])-1, n_ticks, dtype=int)
-        y_tick_indices = np.linspace(0, len(results['param2_values'])-1, n_ticks, dtype=int)
-        
-        ax.set_xticks(x_tick_indices)
-        ax.set_xticklabels([f'{results["param1_values"][i]:.3f}' for i in x_tick_indices])
-        ax.set_yticks(y_tick_indices)
-        ax.set_yticklabels([f'{results["param2_values"][i]:.3f}' for i in y_tick_indices])
-        
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label(title)
-        
-        # Mark minimum
-        min_idx = np.unravel_index(np.nanargmin(plot_data), plot_data.shape)
-        ax.plot(min_idx[1], min_idx[0], 'r*', markersize=15, 
-                label=f'Min {metric}: {plot_data[min_idx]:.4f}')
-        ax.legend()
-        
-        plt.tight_layout()
-        plt.show()
-        
-        # Print summary
-        min_val = plot_data[min_idx]
-        min_param1 = results['param1_values'][min_idx[1]]
-        min_param2 = results['param2_values'][min_idx[0]]
-        
-        print(f"\n2D Parameter Sweep Summary:")
-        print(f"Parameters: {param1_name} vs {param2_name}")
-        print(f"Grid size: {len(results['param1_values'])} x {len(results['param2_values'])}")
-        print(f"Best {metric}: {min_val:.4f}")
-        print(f"  at {param1_name} = {min_param1:.4f}, {param2_name} = {min_param2:.4f}")
-    
-    def _save_sweep_results(self, results, filename):
-        """Save sweep results to file."""
-        import pickle
-        
-        # Add timestamp to filename
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        full_filename = f"{filename}_{timestamp}.pkl"
-        
-        with open(full_filename, 'wb') as f:
-            pickle.dump(results, f)
-        
-        print(f"Results saved to: {full_filename}")
-    
-    def load_sweep_results(self, filename):
-        """Load sweep results from file."""
-        import pickle
-        
-        with open(filename, 'rb') as f:
-            results = pickle.load(f)
-        
-        return results
-    
-    def compare_sweep_results(self, results_list, labels=None, figsize=(12, 8)):
-        """
-        Compare multiple 1D sweep results on the same plot.
-        
-        Parameters:
-        -----------
-        results_list : list
-            List of results dictionaries from parameter_sweep_1d
-        labels : list, optional
-            Labels for each result set
-        figsize : tuple, optional
-            Figure size
-        """
-        if labels is None:
-            labels = [f"Sweep {i+1}" for i in range(len(results_list))]
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
-        
-        colors = plt.cm.tab10(np.linspace(0, 1, len(results_list)))
-        
-        for i, (results, label, color) in enumerate(zip(results_list, labels, colors)):
-            # Plot GF
-            ax1.plot(results['sweep_values'], results['gf_values'], 
-                    'o-', color=color, label=label, linewidth=2, markersize=4)
-            
-            # Plot BIC
-            ax2.plot(results['sweep_values'], results['bic_values'], 
-                    'o-', color=color, label=label, linewidth=2, markersize=4)
-        
-        ax1.set_xlabel('Parameter Value')
-        ax1.set_ylabel('Goodness of Fit (GF)')
-        ax1.set_title('GF Comparison')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        ax2.set_xlabel('Parameter Value')
-        ax2.set_ylabel('BIC')
-        ax2.set_title('BIC Comparison')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.show()
+        return self.SimCyl_SM(*args, **kwargs)

@@ -6,6 +6,7 @@ import pandas as pd
 from scipy.optimize import differential_evolution
 import matplotlib.pyplot as plt
 import copy
+from tqdm import tqdm
 
 class CDSAXS_Model:
     """
@@ -233,6 +234,207 @@ class CDSAXS_Model:
         
         return True  # Return success
     
+    def importScaledCDSAXS_Data(self, datafile, format='auto'):
+        """
+        Imports scaled CDSAXS data that was exported by export_scaled_data function.
+        This function can be added to the CDSAXS_Model base class.
+        
+        Parameters:
+        -----------
+        datafile : str
+            Path to the scaled data file (CSV or NPZ format)
+        format : str, optional
+            File format ('csv', 'numpy', or 'auto' for auto-detection)
+            
+        Returns:
+        --------
+        bool
+            True if import was successful, False otherwise
+        """
+        # Check if input variable exists and is valid
+        if datafile is None or not isinstance(datafile, str):
+            raise ValueError("Datafile must be a valid file path")
+        
+        # Check if file exists
+        if not os.path.isfile(datafile):
+            raise FileNotFoundError(f"File not found: {datafile}")
+        
+        # Auto-detect format if needed
+        if format == 'auto':
+            if datafile.lower().endswith('.csv'):
+                format = 'csv'
+            elif datafile.lower().endswith('.npz'):
+                format = 'numpy'
+            else:
+                raise ValueError("Cannot auto-detect format. Please specify 'csv' or 'numpy'")
+        
+        try:
+            if format.lower() == 'csv':
+                return self._import_scaled_csv(datafile)
+            elif format.lower() in ['numpy', 'npz']:
+                return self._import_scaled_numpy(datafile)
+            else:
+                raise ValueError(f"Unsupported format: {format}. Use 'csv' or 'numpy'")
+                
+        except Exception as e:
+            print(f"Error importing scaled data: {str(e)}")
+            return False
+
+
+    def _import_scaled_csv(self, datafile):
+        """
+        Import scaled data from CSV format.
+        
+        Parameters:
+        -----------
+        datafile : str
+            Path to the CSV file
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            # Read the CSV file
+            data = pd.read_csv(datafile)
+            
+            if data.empty:
+                raise ValueError("The data file is empty")
+            
+            # Parse column headers to extract cut information
+            # Expected format: "Qz_cut_N" and "Intensity_cut_N_qx_VALUE"
+            headers = data.columns.tolist()
+            
+            # Find unique cut indices and qx values
+            cut_info = {}
+            for header in headers:
+                if header.startswith('Intensity_cut_'):
+                    # Parse: "Intensity_cut_N_qx_VALUE"
+                    match = re.match(r'Intensity_cut_(\d+)_qx_([+-]?\d*\.?\d*)', header)
+                    if match:
+                        cut_idx = int(match.group(1))
+                        qx_value = float(match.group(2))
+                        cut_info[cut_idx] = qx_value
+            
+            if not cut_info:
+                raise ValueError("No valid intensity columns found in CSV file")
+            
+            # Sort cuts by index
+            sorted_cuts = sorted(cut_info.keys())
+            numbercuts = len(sorted_cuts)
+            
+            # Get data dimensions
+            data_rows = len(data)
+            
+            # Initialize arrays
+            self.Intensity = np.zeros([data_rows, numbercuts])
+            self.Qz = np.zeros([data_rows, numbercuts])
+            self.Qx = np.zeros([data_rows, numbercuts])
+            
+            # Fill arrays with data
+            for i, cut_idx in enumerate(sorted_cuts):
+                qz_col = f"Qz_cut_{cut_idx}"
+                intensity_col = f"Intensity_cut_{cut_idx}_qx_{cut_info[cut_idx]:.4f}"
+                
+                if qz_col not in data.columns:
+                    raise ValueError(f"Missing Qz column: {qz_col}")
+                if intensity_col not in data.columns:
+                    # Try to find a close match (handle floating point precision)
+                    intensity_candidates = [col for col in data.columns 
+                                        if col.startswith(f"Intensity_cut_{cut_idx}_qx_")]
+                    if not intensity_candidates:
+                        raise ValueError(f"Missing intensity column for cut {cut_idx}")
+                    intensity_col = intensity_candidates[0]
+                
+                self.Qz[:, i] = data[qz_col].values
+                self.Intensity[:, i] = data[intensity_col].values
+                self.Qx[:, i] = cut_info[cut_idx]
+            
+            # Create Qy array with zeros
+            self.Qy = np.zeros_like(self.Qx)
+            
+            # Calculate number of valid points and cuts
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            self.numbercuts = numbercuts
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            print(f"Successfully imported scaled CSV data:")
+            print(f"  - {numbercuts} cuts")
+            print(f"  - {data_rows} data points per cut")
+            print(f"  - {self.numberpoints} total valid points")
+            
+            # Process data according to geometry (if method exists)
+            if hasattr(self, 'process_imported_data'):
+                self.process_imported_data()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing scaled CSV data: {str(e)}")
+            return False
+
+
+    def _import_scaled_numpy(self, datafile):
+        """
+        Import scaled data from NumPy NPZ format.
+        
+        Parameters:
+        -----------
+        datafile : str
+            Path to the NPZ file
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            # Load the NPZ file
+            data = np.load(datafile)
+            
+            # Check required arrays
+            required_arrays = ['Intensity', 'Qz', 'Qx', 'Qy']
+            for array_name in required_arrays:
+                if array_name not in data:
+                    raise ValueError(f"Missing required array: {array_name}")
+            
+            # Load arrays
+            self.Intensity = data['Intensity']
+            self.Qz = data['Qz']
+            self.Qx = data['Qx']
+            self.Qy = data['Qy']
+            
+            # Validate shapes
+            if not all(arr.shape == self.Intensity.shape for arr in [self.Qz, self.Qx, self.Qy]):
+                raise ValueError("Array shapes are inconsistent")
+            
+            # Calculate derived values
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            self.numbercuts = self.Intensity.shape[1]
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            print(f"Successfully imported scaled NumPy data:")
+            print(f"  - {self.numbercuts} cuts")
+            print(f"  - {self.Intensity.shape[0]} data points per cut")
+            print(f"  - {self.numberpoints} total valid points")
+            
+            # Process data according to geometry (if method exists)
+            if hasattr(self, 'process_imported_data'):
+                self.process_imported_data()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error importing scaled NumPy data: {str(e)}")
+            return False
+    
     def process_imported_data(self):
         """
         Process imported data according to geometry.
@@ -427,3 +629,3603 @@ class CDSAXS_Model:
         To be implemented by subclasses.
         """
         raise NotImplementedError("Subclasses must implement this method")
+    
+    def simulate_structure(self, *args, **kwargs):
+        """
+        Abstract method to simulate the structure intensity.
+        To be implemented by subclasses with their specific simulation methods.
+        
+        Returns:
+        --------
+        numpy.ndarray
+            The simulated intensity (also sets self.SimInt)
+        """
+        if not opt_params:
+            print(f"Debug: About to call simulate_structure")
+            print(f"Debug: self.Intensity shape before sim: {self.Intensity.shape}")
+            
+            self.SimInt = self.simulate_structure()
+            
+            print(f"Debug: SimInt shape after sim: {self.SimInt.shape if self.SimInt is not None else 'None'}")
+            print(f"Debug: SimInt sample: {self.SimInt[0,0] if self.SimInt is not None else 'None'}")
+            
+            gf = self.GF_calc(self.SimInt)
+            print(f"Debug: GF value: {gf}")
+        
+        raise NotImplementedError("Subclasses must implement this method")
+    
+    
+    def parameter_sweep_1d(self, sweep_param, sweep_range, n_points=20, 
+                                exclude_from_fit=None, plot_results=True, 
+                                figsize=(10, 6), save_results=False, filename=None,
+                                optimization_kwargs=None, verbose=True):
+        """
+        Fixed version of parameter_sweep_1d with proper error handling and results storage.
+        """
+        if not hasattr(self, 'Intensity'):
+            raise ValueError("Data must be imported before performing parameter sweep")
+        
+        # Set default optimization parameters
+        if optimization_kwargs is None:
+            optimization_kwargs = {'maxiter': 30, 'popsize': 10}
+        
+        # Create sweep values
+        sweep_values = np.linspace(sweep_range[0], sweep_range[1], n_points)
+        
+        # Initialize results storage
+        results = {
+            'sweep_param': sweep_param,
+            'sweep_values': sweep_values,
+            'gf_values': [],
+            'bic_values': [],
+            'optimized_params': [],
+            'convergence_flags': []
+        }
+        
+        # Store original parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Setup progress bar
+        if verbose:
+            pbar = tqdm(sweep_values, desc=f"Sweeping {sweep_param}")
+        else:
+            pbar = sweep_values
+        
+        for i, value in enumerate(pbar):
+            try:
+                # Reset to original parameters
+                self.model_params = copy.deepcopy(original_params)
+                self.update_traditional_from_model_params()
+                
+                # Set the sweep parameter value
+                self._set_parameter_value(sweep_param, value)
+                
+                # Create optimization parameters excluding the sweep parameter
+                opt_params = self._create_optimization_params_excluding(
+                    [sweep_param] + (exclude_from_fit or [])
+                )
+                
+                # Initialize variables for this iteration
+                gf = float('inf')
+                bic = float('inf')
+                converged = False
+                
+                if not opt_params:
+                    # No parameters to optimize, just calculate GF
+                    try:
+                        # Handle both geometries correctly
+                        if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                            # Cylinder models need discretization parameter
+                            sim_result = self.simulate_structure(self.discretization)
+                        else:
+                            # Trapezoid models don't need discretization
+                            sim_result = self.simulate_structure()
+                        
+                        # Check if simulation succeeded
+                        if sim_result is not None:
+                            gf = self.GF_calc(sim_result)
+                            bic = self.BIC_calc(gf)
+                            converged = True
+                            
+                            # Debug output for first few points
+                            if verbose and i < 3:
+                                print(f"DEBUG: Point {i+1}: {sweep_param}={value:.1f}, GF={gf:.4f}")
+                        else:
+                            if verbose:
+                                print(f"Warning: Simulation failed at {sweep_param}={value}")
+                            
+                    except Exception as e:
+                        if verbose:
+                            print(f"Warning: Simulation error at {sweep_param}={value}: {e}")
+                else:
+                    # Run optimization with suppressed output
+                    try:
+                        # Don't assign the return value to avoid dictionary display
+                        self.CDSAXS_DiffEvolution(
+                            params_to_optimize=opt_params,
+                            plot_results=False,  # Suppress plots during sweep
+                            verbose=False,       # Suppress optimization output
+                            **optimization_kwargs
+                        )
+                        
+                        # Get results from model attributes
+                        if hasattr(self, 'GF') and hasattr(self, 'BIC'):
+                            gf = self.GF
+                            bic = self.BIC
+                            converged = True
+                        else:
+                            if verbose:
+                                print(f"Warning: No GF/BIC attributes after optimization at {sweep_param}={value}")
+                            
+                    except Exception as e:
+                        if verbose:
+                            print(f"Warning: Optimization failed at {sweep_param}={value}: {e}")
+                
+                # Store results (make sure we always store something)
+                results['gf_values'].append(gf)
+                results['bic_values'].append(bic)
+                results['optimized_params'].append(copy.deepcopy(self.model_params))
+                results['convergence_flags'].append(converged)
+                
+                # Update progress bar with current best
+                if verbose and hasattr(pbar, 'set_postfix'):
+                    finite_gfs = [g for g in results['gf_values'] if np.isfinite(g)]
+                    current_best_gf = min(finite_gfs) if finite_gfs else float('inf')
+                    pbar.set_postfix({
+                        f'{sweep_param}': f'{value:.3f}',
+                        'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
+                    })
+                    
+            except Exception as e:
+                if verbose:
+                    print(f"Error at {sweep_param}={value}: {str(e)}")
+                # Still store something to maintain array lengths
+                results['gf_values'].append(float('inf'))
+                results['bic_values'].append(float('inf'))
+                results['optimized_params'].append(None)
+                results['convergence_flags'].append(False)
+        
+        if verbose and hasattr(pbar, 'close'):
+            pbar.close()
+        
+        # Verify results before proceeding
+        expected_length = len(sweep_values)
+        actual_length = len(results['gf_values'])
+        
+        if actual_length != expected_length:
+            print(f"WARNING: Results length mismatch. Expected {expected_length}, got {actual_length}")
+            # Pad with inf values if needed
+            while len(results['gf_values']) < expected_length:
+                results['gf_values'].append(float('inf'))
+                results['bic_values'].append(float('inf'))
+                results['optimized_params'].append(None)
+                results['convergence_flags'].append(False)
+        
+        # Debug: Print a few results
+        if verbose:
+            print(f"DEBUG: First few results:")
+            for i in range(min(3, len(results['gf_values']))):
+                print(f"  {sweep_param}={sweep_values[i]:.1f} -> GF={results['gf_values'][i]}")
+        
+        # Print summary with best results
+        if verbose:
+            self._print_sweep_summary_1d(results)
+        
+        # Restore original parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Plot results
+        if plot_results:
+            self._plot_1d_sweep_results(results, figsize)
+        
+        # Save results
+        if save_results:
+            self._save_sweep_results(results, filename or f"{sweep_param}_sweep_1d")
+        
+        return results
+    
+    
+    
+    def parameter_sweep_2d(self, sweep_params, sweep_ranges, n_points=(10, 10),
+                      exclude_from_fit=None, plot_results=True, 
+                      figsize=(10, 8), save_results=False, filename=None,
+                      optimization_kwargs=None, verbose=True, metric='GF'):
+        """
+        Perform a 2D parameter sweep with heatmap visualization.
+        
+        Parameters:
+        -----------
+        sweep_params : tuple
+            (param1_name, param2_name) to sweep
+        sweep_ranges : tuple
+            ((min1, max1), (min2, max2)) for the sweep parameters
+        n_points : tuple, optional
+            (n_points1, n_points2) for each parameter. Default: (10, 10)
+        exclude_from_fit : list, optional
+            List of parameter names to exclude from optimization
+        plot_results : bool, optional
+            Whether to plot the heatmap. Default: True
+        figsize : tuple, optional
+            Figure size for the plot. Default: (10, 8)
+        save_results : bool, optional
+            Whether to save results to file. Default: False
+        filename : str, optional
+            Filename for saving results
+        optimization_kwargs : dict, optional
+            Additional kwargs for CDSAXS_DiffEvolution
+        verbose : bool, optional
+            Whether to print progress. Default: True
+        metric : str, optional
+            Metric to plot ('GF' or 'BIC'). Default: 'GF'
+            
+        Returns:
+        --------
+        dict
+            Dictionary with sweep values, GF/BIC matrices, and optimized parameters
+        """
+        import numpy as np
+        import copy
+        from tqdm import tqdm
+        
+        if not hasattr(self, 'Intensity'):
+            raise ValueError("Data must be imported before performing parameter sweep")
+        
+        # Set default optimization parameters
+        if optimization_kwargs is None:
+            optimization_kwargs = {'maxiter': 20, 'popsize': 8}
+        
+        # Create sweep values
+        param1_values = np.linspace(sweep_ranges[0][0], sweep_ranges[0][1], n_points[0])
+        param2_values = np.linspace(sweep_ranges[1][0], sweep_ranges[1][1], n_points[1])
+        
+        # Initialize results storage
+        results = {
+            'sweep_params': sweep_params,
+            'param1_values': param1_values,
+            'param2_values': param2_values,
+            'gf_matrix': np.full((n_points[1], n_points[0]), np.inf),
+            'bic_matrix': np.full((n_points[1], n_points[0]), np.inf),
+            'optimized_params': [[None for _ in range(n_points[0])] for _ in range(n_points[1])],
+            'convergence_matrix': np.full((n_points[1], n_points[0]), False, dtype=bool)
+        }
+        
+        # Store original parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Setup progress bar
+        total_points = n_points[0] * n_points[1]
+        if verbose:
+            pbar = tqdm(total=total_points, desc=f"2D Sweep: {sweep_params[0]} vs {sweep_params[1]}")
+        
+        for i, val1 in enumerate(param1_values):
+            for j, val2 in enumerate(param2_values):
+                # Initialize variables for this iteration
+                gf = float('inf')
+                bic = float('inf')
+                converged = False
+                
+                try:
+                    # Reset to original parameters
+                    self.model_params = copy.deepcopy(original_params)
+                    self.update_traditional_from_model_params()
+                    
+                    # Set the sweep parameter values
+                    self._set_parameter_value(sweep_params[0], val1)
+                    self._set_parameter_value(sweep_params[1], val2)
+                    
+                    # Create optimization parameters excluding the sweep parameters
+                    opt_params = self._create_optimization_params_excluding(
+                        list(sweep_params) + (exclude_from_fit or [])
+                    )
+                    
+                    if not opt_params:
+                        # No parameters to optimize, just calculate GF
+                        try:
+                            # Handle both geometries correctly
+                            if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                                # Cylinder models need discretization parameter
+                                sim_result = self.simulate_structure(self.discretization)
+                            else:
+                                # Trapezoid models don't need discretization
+                                sim_result = self.simulate_structure()
+                            
+                            # Check if simulation succeeded
+                            if sim_result is not None:
+                                gf = self.GF_calc(sim_result)
+                                bic = self.BIC_calc(gf)
+                                converged = True
+                            else:
+                                if verbose and total_points <= 25:  # Only print for small grids
+                                    print(f"Warning: Simulation failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
+                                
+                        except Exception as e:
+                            if verbose and total_points <= 25:  # Only print for small grids
+                                print(f"Warning: Simulation error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
+                    else:
+                        # Run optimization with suppressed output
+                        try:
+                            # Don't assign the return value to avoid dictionary display
+                            self.CDSAXS_DiffEvolution(
+                                params_to_optimize=opt_params,
+                                plot_results=False,  # Suppress plots during sweep
+                                verbose=False,       # Suppress optimization output
+                                **optimization_kwargs
+                            )
+                            
+                            # Get results from model attributes
+                            if hasattr(self, 'GF') and hasattr(self, 'BIC'):
+                                gf = self.GF
+                                bic = self.BIC
+                                converged = True
+                            else:
+                                if verbose and total_points <= 25:  # Only print for small grids
+                                    print(f"Warning: No GF/BIC attributes after optimization at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
+                                
+                        except Exception as e:
+                            if verbose and total_points <= 25:  # Only print for small grids
+                                print(f"Warning: Optimization failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
+                    
+                    # Store results
+                    results['gf_matrix'][j, i] = gf
+                    results['bic_matrix'][j, i] = bic
+                    results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
+                    results['convergence_matrix'][j, i] = converged
+                    
+                    # Update progress bar
+                    if verbose:
+                        # Calculate current best for progress display
+                        current_gf_matrix = results['gf_matrix'][:j+1, :i+1] if j > 0 or i > 0 else results['gf_matrix'][j:j+1, i:i+1]
+                        finite_gfs = current_gf_matrix[np.isfinite(current_gf_matrix)]
+                        current_best_gf = np.min(finite_gfs) if len(finite_gfs) > 0 else float('inf')
+                        
+                        pbar.set_postfix({
+                            f'{sweep_params[0]}': f'{val1:.3f}',
+                            f'{sweep_params[1]}': f'{val2:.3f}',
+                            'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
+                        })
+                        pbar.update(1)
+                        
+                except Exception as e:
+                    if verbose:
+                        print(f"Error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {str(e)}")
+                    
+                    # Store failed results
+                    results['gf_matrix'][j, i] = float('inf')
+                    results['bic_matrix'][j, i] = float('inf')
+                    results['optimized_params'][j][i] = None
+                    results['convergence_matrix'][j, i] = False
+                    
+                    if verbose:
+                        pbar.update(1)
+        
+        if verbose:
+            pbar.close()
+        
+        # Verify results matrices
+        expected_shape = (n_points[1], n_points[0])
+        if results['gf_matrix'].shape != expected_shape:
+            print(f"WARNING: GF matrix shape mismatch. Expected {expected_shape}, got {results['gf_matrix'].shape}")
+        if results['bic_matrix'].shape != expected_shape:
+            print(f"WARNING: BIC matrix shape mismatch. Expected {expected_shape}, got {results['bic_matrix'].shape}")
+        
+        # Print summary with best results
+        if verbose:
+            self._print_sweep_summary_2d(results)
+        
+        # Restore original parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Plot results
+        if plot_results:
+            self._plot_2d_sweep_results(results, figsize, metric)
+        
+        # Save results
+        if save_results:
+            self._save_sweep_results(results, filename or f"{sweep_params[0]}_{sweep_params[1]}_sweep_2d")
+        
+        return results
+    
+    def _plot_1d_sweep_results(self, results, figsize):
+        """Plot 1D sweep results."""
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+        
+        # Plot GF vs parameter
+        ax1.plot(results['sweep_values'], results['gf_values'], 'bo-', linewidth=2, markersize=6)
+        ax1.set_xlabel(results['sweep_param'])
+        ax1.set_ylabel('Goodness of Fit (GF)')
+        ax1.set_title(f'GF vs {results["sweep_param"]}')
+        ax1.grid(True, alpha=0.3)
+        
+        # Find and mark minimum
+        min_idx = np.argmin(results['gf_values'])
+        min_gf = results['gf_values'][min_idx]
+        min_param = results['sweep_values'][min_idx]
+        ax1.plot(min_param, min_gf, 'ro', markersize=10, label=f'Min GF: {min_gf:.4f}')
+        ax1.legend()
+        
+        # Plot BIC vs parameter
+        ax2.plot(results['sweep_values'], results['bic_values'], 'go-', linewidth=2, markersize=6)
+        ax2.set_xlabel(results['sweep_param'])
+        ax2.set_ylabel('Bayesian Information Criterion (BIC)')
+        ax2.set_title(f'BIC vs {results["sweep_param"]}')
+        ax2.grid(True, alpha=0.3)
+        
+        # Find and mark minimum BIC
+        min_bic_idx = np.argmin(results['bic_values'])
+        min_bic = results['bic_values'][min_bic_idx]
+        min_bic_param = results['sweep_values'][min_bic_idx]
+        ax2.plot(min_bic_param, min_bic, 'ro', markersize=10, label=f'Min BIC: {min_bic:.4f}')
+        ax2.legend()
+        
+        plt.tight_layout()
+        plt.show()
+        
+    
+    def _plot_2d_sweep_results(self, results, figsize, metric='GF'):
+        """Plot 2D sweep results as heatmap."""
+        # Choose which matrix to plot
+        if metric.upper() == 'GF':
+            data_matrix = results['gf_matrix']
+            title = 'Goodness of Fit (GF)'
+            cmap = 'viridis'
+        else:
+            data_matrix = results['bic_matrix']
+            title = 'Bayesian Information Criterion (BIC)'
+            cmap = 'viridis'
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        # Create heatmap
+        # Replace inf values for better visualization
+        plot_data = np.copy(data_matrix)
+        plot_data[np.isinf(plot_data)] = np.nan
+        
+        # Use log scale if the range is large
+        if np.nanmax(plot_data) / np.nanmin(plot_data) > 100:
+            norm = LogNorm(vmin=np.nanmin(plot_data), vmax=np.nanmax(plot_data))
+        else:
+            norm = None
+        
+        im = ax.imshow(plot_data, cmap=cmap, aspect='auto', origin='lower', norm=norm)
+        
+        # Set axis labels and ticks
+        param1_name, param2_name = results['sweep_params']
+        ax.set_xlabel(param1_name)
+        ax.set_ylabel(param2_name)
+        ax.set_title(f'{title} Heatmap: {param1_name} vs {param2_name}')
+        
+        # Set tick labels
+        n_ticks = 5
+        x_tick_indices = np.linspace(0, len(results['param1_values'])-1, n_ticks, dtype=int)
+        y_tick_indices = np.linspace(0, len(results['param2_values'])-1, n_ticks, dtype=int)
+        
+        ax.set_xticks(x_tick_indices)
+        ax.set_xticklabels([f'{results["param1_values"][i]:.3f}' for i in x_tick_indices])
+        ax.set_yticks(y_tick_indices)
+        ax.set_yticklabels([f'{results["param2_values"][i]:.3f}' for i in y_tick_indices])
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label(title)
+        
+        # Mark minimum
+        min_idx = np.unravel_index(np.nanargmin(plot_data), plot_data.shape)
+        ax.plot(min_idx[1], min_idx[0], 'r*', markersize=15, 
+                label=f'Min {metric}: {plot_data[min_idx]:.4f}')
+        ax.legend()
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def _save_sweep_results(self, results, filename):
+        """Save sweep results to file."""
+        import pickle
+        
+        # Add timestamp to filename
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        full_filename = f"{filename}_{timestamp}.pkl"
+        
+        with open(full_filename, 'wb') as f:
+            pickle.dump(results, f)
+        
+        print(f"Results saved to: {full_filename}")
+    
+    def load_sweep_results(self, filename):
+        """Load sweep results from file."""
+        import pickle
+        
+        with open(filename, 'rb') as f:
+            results = pickle.load(f)
+        
+        return results
+    
+    def compare_sweep_results(self, results_list, labels=None, figsize=(12, 8)):
+        """
+        Compare multiple 1D sweep results on the same plot.
+        
+        Parameters:
+        -----------
+        results_list : list
+            List of results dictionaries from parameter_sweep_1d
+        labels : list, optional
+            Labels for each result set
+        figsize : tuple, optional
+            Figure size
+        """
+        if labels is None:
+            labels = [f"Sweep {i+1}" for i in range(len(results_list))]
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+        
+        colors = plt.cm.tab10(np.linspace(0, 1, len(results_list)))
+        
+        for i, (results, label, color) in enumerate(zip(results_list, labels, colors)):
+            # Plot GF
+            ax1.plot(results['sweep_values'], results['gf_values'], 
+                    'o-', color=color, label=label, linewidth=2, markersize=4)
+            
+            # Plot BIC
+            ax2.plot(results['sweep_values'], results['bic_values'], 
+                    'o-', color=color, label=label, linewidth=2, markersize=4)
+        
+        ax1.set_xlabel('Parameter Value')
+        ax1.set_ylabel('Goodness of Fit (GF)')
+        ax1.set_title('GF Comparison')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        ax2.set_xlabel('Parameter Value')
+        ax2.set_ylabel('BIC')
+        ax2.set_title('BIC Comparison')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+        
+    
+    def get_sweep_summary(self, results):
+        """
+        Get a summary of sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from any parameter sweep
+            
+        Returns:
+        --------
+        dict
+            Summary information about the sweep
+        """
+        summary = {'sweep_type': 'unknown'}
+        
+        try:
+            if 'sweep_param' in results:
+                # 1D sweep
+                summary.update({
+                    'sweep_type': '1D',
+                    'parameter': results['sweep_param'],
+                    'range': (results['sweep_values'][0], results['sweep_values'][-1]),
+                    'n_points': len(results['sweep_values']),
+                    'best_gf': np.nanmin(results['gf_values']),
+                    'best_bic': np.nanmin(results['bic_values']),
+                    'convergence_rate': np.mean(results['convergence_flags'])
+                })
+            elif 'sweep_params' in results:
+                # 2D sweep
+                gf_matrix = np.copy(results['gf_matrix'])
+                gf_matrix[np.isinf(gf_matrix)] = np.nan
+                
+                bic_matrix = np.copy(results['bic_matrix'])
+                bic_matrix[np.isinf(bic_matrix)] = np.nan
+                
+                summary.update({
+                    'sweep_type': '2D',
+                    'parameters': results['sweep_params'],
+                    'ranges': [
+                        (results['param1_values'][0], results['param1_values'][-1]),
+                        (results['param2_values'][0], results['param2_values'][-1])
+                    ],
+                    'grid_size': (len(results['param1_values']), len(results['param2_values'])),
+                    'best_gf': np.nanmin(gf_matrix),
+                    'best_bic': np.nanmin(bic_matrix),
+                    'convergence_rate': np.mean(results['convergence_matrix'])
+                })
+            elif 'sweep_type' in results and results['sweep_type'] == 'width_dw_1layer':
+                # 1-layer specialized
+                gf_matrix = np.copy(results['gf_matrix'])
+                gf_matrix[np.isinf(gf_matrix)] = np.nan
+                
+                summary.update({
+                    'sweep_type': '1-layer Width+DW',
+                    'parameters': ['width_both', 'DW'],
+                    'ranges': [
+                        (results['width_values'][0], results['width_values'][-1]),
+                        (results['dw_values'][0], results['dw_values'][-1])
+                    ],
+                    'grid_size': (len(results['width_values']), len(results['dw_values'])),
+                    'best_gf': np.nanmin(gf_matrix),
+                    'best_bic': np.nanmin(results['bic_matrix']),
+                    'convergence_rate': np.mean(results['convergence_matrix'])
+                })
+        except Exception as e:
+            summary['error'] = str(e)
+        
+        return summary
+    
+    
+       
+    def compare_sweep_optima(self, results_list, labels=None, criterion='GF'):
+        """
+        Compare optimal values from multiple sweep results.
+        
+        Parameters:
+        -----------
+        results_list : list
+            List of results dictionaries from parameter sweeps
+        labels : list, optional
+            Labels for each result set
+        criterion : str, optional
+            Criterion for comparison ('GF' or 'BIC'). Default: 'GF'
+        """
+        if labels is None:
+            labels = [f"Sweep {i+1}" for i in range(len(results_list))]
+        
+        print(f"\nSweep Results Comparison (by {criterion}):")
+        print("=" * 80)
+        print(f"{'Label':<15} {'Type':<10} {'Parameters':<25} {'GF':<10} {'BIC':<10} {'Converged':<10}")
+        print("-" * 80)
+        
+        all_optima = []
+        
+        for result, label in zip(results_list, labels):
+            try:
+                if 'sweep_param' in result:
+                    # 1D sweep
+                    optimal = self.get_optimal_parameters_1d(result, criterion)
+                    sweep_type = "1D"
+                    param_str = f"{optimal['sweep_parameter']}={optimal['optimal_value']:.3f}"
+                elif 'sweep_params' in result:
+                    # 2D sweep
+                    optimal = self.get_optimal_parameters_2d(result, criterion)
+                    sweep_type = "2D"
+                    param_str = f"{optimal['sweep_parameters'][0]}={optimal['optimal_values'][optimal['sweep_parameters'][0]]:.3f}, " + \
+                               f"{optimal['sweep_parameters'][1]}={optimal['optimal_values'][optimal['sweep_parameters'][1]]:.3f}"
+                elif 'sweep_type' in result and result['sweep_type'] == 'width_dw_1layer':
+                    # 1-layer specialized sweep
+                    optimal = self.get_optimal_width_dw_1layer(result)
+                    sweep_type = "1L-WD"
+                    if criterion.upper() == 'GF':
+                        param_str = f"W={optimal['best_gf']['width']:.1f}, DW={optimal['best_gf']['dw']:.1f}"
+                        gf_val = optimal['best_gf']['gf_value']
+                        bic_val = optimal['best_gf']['bic_value']
+                    else:
+                        param_str = f"W={optimal['best_bic']['width']:.1f}, DW={optimal['best_bic']['dw']:.1f}"
+                        gf_val = optimal['best_bic']['gf_value']
+                        bic_val = optimal['best_bic']['bic_value']
+                    
+                    print(f"{label:<15} {sweep_type:<10} {param_str:<25} {gf_val:<10.4f} {bic_val:<10.4f} {'Yes':<10}")
+                    all_optima.append((label, gf_val if criterion.upper() == 'GF' else bic_val))
+                    continue
+                else:
+                    print(f"{label:<15} {'Unknown':<10} {'---':<25} {'---':<10} {'---':<10} {'---':<10}")
+                    continue
+                
+                converged_str = "Yes" if optimal['converged'] else "No"
+                
+                print(f"{label:<15} {sweep_type:<10} {param_str:<25} {optimal['gf']:<10.4f} {optimal['bic']:<10.4f} {converged_str:<10}")
+                all_optima.append((label, optimal[criterion.lower()]))
+                
+            except Exception as e:
+                print(f"{label:<15} {'Error':<10} {str(e)[:25]:<25} {'---':<10} {'---':<10} {'---':<10}")
+        
+        # Find and highlight best overall
+        if all_optima:
+            best_label, best_value = min(all_optima, key=lambda x: x[1])
+            print("-" * 80)
+            print(f"Best overall {criterion}: {best_label} with {criterion} = {best_value:.4f}")
+        
+        print("=" * 80)
+        
+    def apply_optimal_parameters_2d(self, results, criterion='GF', update_simulation=True):
+        """
+        Apply the optimal parameters from 2D sweep results to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_2d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+        update_simulation : bool, optional
+            Whether to recalculate simulation and metrics. Default: True
+        """
+        optimal = self.get_optimal_parameters_2d(results, criterion)
+        
+        if optimal['optimized_parameters'] is None:
+            raise ValueError("No valid optimized parameters found in results")
+        
+        print(f"Applying optimal {criterion} parameters:")
+        for param, value in optimal['optimal_values'].items():
+            print(f"  {param} = {value:.4f}")
+        print(f"  {criterion}: {optimal[criterion.lower()]:.4f}")
+        
+        # Update model parameters
+        self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+        self.update_traditional_from_model_params()
+        
+        if update_simulation:
+            # Recalculate simulation and metrics
+            if hasattr(self, 'discretization'):
+                # Cylinder models need discretization parameter
+                self.SimInt = self.simulate_structure(self.discretization)
+            else:
+                # Trapezoid models don't need discretization
+                self.SimInt = self.simulate_structure()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
+        else:
+            print("Model parameters updated (simulation not recalculated)")
+            
+    def get_optimal_parameters_2d(self, results, criterion='GF'):
+        """
+        Extract the optimal parameters from 2D sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_2d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+            
+        Returns:
+        --------
+        dict
+            Dictionary with optimal parameter values and corresponding metrics
+        """
+        if criterion.upper() == 'GF':
+            values_matrix = results['gf_matrix']
+            corresponding_matrix = results['bic_matrix']
+        else:
+            values_matrix = results['bic_matrix']
+            corresponding_matrix = results['gf_matrix']
+        
+        # Find minimum (handle inf values)
+        clean_matrix = np.copy(values_matrix)
+        clean_matrix[np.isinf(clean_matrix)] = np.nan
+        
+        min_idx = np.unravel_index(np.nanargmin(clean_matrix), clean_matrix.shape)
+        min_value = clean_matrix[min_idx]
+        corresponding_value = corresponding_matrix[min_idx]
+        
+        # Get parameter values
+        param1_value = results['param1_values'][min_idx[1]]
+        param2_value = results['param2_values'][min_idx[0]]
+        
+        # Get optimized parameters
+        optimal_params = results['optimized_params'][min_idx[0]][min_idx[1]]
+        converged = results['convergence_matrix'][min_idx]
+        
+        return {
+            'sweep_parameters': results['sweep_params'],
+            'optimal_values': {
+                results['sweep_params'][0]: param1_value,
+                results['sweep_params'][1]: param2_value
+            },
+            'gf': min_value if criterion.upper() == 'GF' else corresponding_value,
+            'bic': corresponding_value if criterion.upper() == 'GF' else min_value,
+            'optimized_parameters': optimal_params,
+            'converged': converged,
+            'criterion_used': criterion.upper()
+        }
+    
+        
+                
+        
+    def get_optimal_parameters_1d(self, results, criterion='GF'):
+        """
+        Extract the optimal parameters from 1D sweep results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_1d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+            
+        Returns:
+        --------
+        dict
+            Dictionary with optimal parameter value and corresponding metrics
+        """
+        if criterion.upper() == 'GF':
+            values_array = np.array(results['gf_values'])
+            min_idx = np.nanargmin(values_array)
+            min_value = values_array[min_idx]
+            corresponding_bic = results['bic_values'][min_idx]
+        else:
+            values_array = np.array(results['bic_values'])
+            min_idx = np.nanargmin(values_array)
+            min_value = values_array[min_idx]
+            corresponding_bic = min_value
+            corresponding_gf = results['gf_values'][min_idx]
+        
+        optimal_param_value = results['sweep_values'][min_idx]
+        optimal_params = results['optimized_params'][min_idx]
+        
+        return {
+            'sweep_parameter': results['sweep_param'],
+            'optimal_value': optimal_param_value,
+            'gf': results['gf_values'][min_idx] if criterion.upper() == 'GF' else corresponding_gf,
+            'bic': corresponding_bic if criterion.upper() == 'GF' else min_value,
+            'optimized_parameters': optimal_params,
+            'converged': results['convergence_flags'][min_idx],
+            'criterion_used': criterion.upper()
+        }
+    
+    def apply_optimal_parameters_1d(self, results, criterion='GF', update_simulation=True):
+        """
+        Apply the optimal parameters from 1D sweep results to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_1d
+        criterion : str, optional
+            Criterion for selecting optimal values ('GF' or 'BIC'). Default: 'GF'
+        update_simulation : bool, optional
+            Whether to recalculate simulation and metrics. Default: True
+        """
+        optimal = self.get_optimal_parameters_1d(results, criterion)
+        
+        if optimal['optimized_parameters'] is None:
+            raise ValueError("No valid optimized parameters found in results")
+        
+        print(f"Applying optimal {criterion} parameters:")
+        print(f"  {optimal['sweep_parameter']} = {optimal['optimal_value']:.4f}")
+        print(f"  {criterion}: {optimal[criterion.lower()]:.4f}")
+        
+        # Update model parameters
+        self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+        self.update_traditional_from_model_params()
+        
+        if update_simulation:
+            # Recalculate simulation and metrics
+            self.SimInt = self.SimTrap_SM()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Model updated. New GF: {self.GF:.4f}, BIC: {self.BIC:.4f}")
+        else:
+            print("Model parameters updated (simulation not recalculated)")
+  
+    def _set_parameter_value(self, param_name, value):
+        """Set a parameter value in the model."""
+        if param_name.startswith('trap_'):
+            # Trapezoid parameter
+            parts = param_name.split('_')
+            trap_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['trapezoids'][trap_idx][param_type] = value
+        elif param_name.startswith('cyl_'):
+            # Cylinder parameter
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['cylinders'][cyl_idx][param_type] = value
+        elif param_name.startswith('Bk_'):
+            # Background parameter for specific column
+            bk_idx = int(param_name.split('_')[1])
+            if isinstance(self.model_params['Bk'], list):
+                self.model_params['Bk'][bk_idx] = value
+            else:
+                # Convert to list if needed
+                n_cols = len(self.Bk) if isinstance(self.Bk, np.ndarray) else 1
+                self.model_params['Bk'] = [self.model_params['Bk']] * n_cols
+                self.model_params['Bk'][bk_idx] = value
+        else:
+            # Global parameter
+            self.model_params[param_name] = value
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
+
+    def _create_optimization_params_excluding(self, excluded_params):
+        """Create optimization parameters excluding specified parameters."""
+        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+            self.initialize_optimization_params()
+        
+        opt_params = {}
+        for param_name, param_config in self.model_params['optimization'].items():
+            if param_name not in excluded_params:
+                opt_params[param_name] = param_config
+        
+        return opt_params
+    
+    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
+        """
+        Plots intensity vs Qz for specific cuts (Qx for trapezoid, Qr for cylinder)
+        
+        Parameters:
+        -----------
+        cut_index : int or list or None, optional
+            Index or indices of the cut(s) to plot
+            If None, plots all available cuts
+        SimInt : numpy.ndarray, optional
+            Simulated intensity to plot alongside measured data
+            If None, uses self.SimInt if available
+        log_scale : str, optional
+            Whether to use logarithmic scale for intensity ('yes' or 'no')
+        
+        Returns:
+        --------
+        matplotlib.axes.Axes or list of Axes
+            The axes object(s) containing the plot(s)
+        """
+        # Check if required attributes exist
+        if not hasattr(self, 'Qz') or not hasattr(self, 'Intensity'):
+            raise AttributeError("Missing required attributes: Qz and/or Intensity")
+        
+        # Determine which cuts to plot
+        if cut_index is None:
+            # Plot all cuts
+            cut_indices = list(range(self.Intensity.shape[1]))
+        elif isinstance(cut_index, (list, tuple, np.ndarray)):
+            # Plot multiple specified cuts
+            cut_indices = cut_index
+        else:
+            # Plot a single cut
+            cut_indices = [cut_index]
+        
+        # Create a figure with appropriate size
+        n_cuts = len(cut_indices)
+        if n_cuts == 1:
+            # Single plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            axes = [ax]
+        else:
+            # Multiple plots
+            fig_width = min(16, n_cuts * 5)  # Limit maximum width
+            fig_height = min(10, n_cuts * 3)  # Limit maximum height
+            
+            if n_cuts <= 4:
+                # Use a single row for 2-4 plots
+                n_rows = 1
+                n_cols = n_cuts
+            else:
+                # Create a grid for many plots
+                n_rows = int(np.ceil(np.sqrt(n_cuts)))
+                n_cols = int(np.ceil(n_cuts / n_rows))
+            
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
+            if n_rows * n_cols > 1:
+                axes = axes.flatten()
+        
+        # Determine the appropriate Q-component for labeling
+        q_component = self.Qx if self.geometry == 'trapezoid' else self.Qr
+        q_label = 'Qx' if self.geometry == 'trapezoid' else 'Qr'
+        
+        # Plot each cut
+        for i, (ax, idx) in enumerate(zip(axes, cut_indices)):
+            # Check if the index is valid
+            if idx < 0 or idx >= self.Intensity.shape[1]:
+                ax.text(0.5, 0.5, f"Invalid cut index: {idx}", 
+                       ha='center', va='center', transform=ax.transAxes)
+                continue
+            
+            # Get Qz values for the selected cut
+            qz_values = self.Qz[:, idx]
+            q_value = q_component[0, idx]
+            
+            # Plot measured intensity
+            measured_line, = ax.plot(qz_values, self.Intensity[:, idx], 'o-', 
+                                color='grey', alpha=0.7, label='Measured')
+            
+            # Plot simulated intensity if available
+            if SimInt is not None:
+                simulated_line, = ax.plot(qz_values, SimInt[:, idx], 'b-', label='Simulated')
+            elif hasattr(self, 'SimInt') and self.SimInt is not None:
+                simulated_line, = ax.plot(qz_values, self.SimInt[:, idx], 'b-', label='Simulated')
+            
+            # Set logarithmic scale if requested
+            if log_scale.lower() == 'yes':
+                ax.set_yscale('log')
+            
+            # Set labels and title
+            ax.set_title(f'Cut at {q_label} = {q_value:.4f}')
+            ax.set_xlabel('Qz (Å$^{-1}$)')
+            ax.set_ylabel('Intensity (counts)')
+            ax.grid(True, linestyle='--', alpha=0.7)
+            ax.legend()
+        
+        # Hide unused subplots
+        for i in range(len(cut_indices), len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        
+        # Return a single axis for a single plot, or list of axes for multiple plots
+        return axes[0] if len(axes) == 1 else axes
+    
+    def export_scaled_data(self, output_file, format='csv', scaling_factor=None, 
+                          data_subset=None, metadata=None):
+        """
+        Export the current intensity data with optional scaling and subsetting.
+        
+        Parameters:
+        -----------
+        output_file : str
+            Path for the output file (without extension)
+        format : str, optional
+            Output format ('csv' or 'numpy'). Default: 'csv'
+        scaling_factor : float or numpy.ndarray, optional
+            Factor(s) to scale the intensity data
+            If array, must match the number of cuts
+        data_subset : dict, optional
+            Dictionary specifying data subset to export
+            e.g., {'qz_range': (min_qz, max_qz), 'cuts': [0, 2, 4]}
+        metadata : dict, optional
+            Additional metadata to include in the export
+            
+        Returns:
+        --------
+        str
+            Path of the exported file
+        """
+        # Check if required attributes exist
+        if not hasattr(self, 'Intensity') or not hasattr(self, 'Qz'):
+            raise AttributeError("Missing required attributes: Intensity and/or Qz")
+        
+        # Prepare data for export
+        intensity_data = self.Intensity.copy()
+        qz_data = self.Qz.copy()
+        
+        # Get Q-component data based on geometry
+        if self.geometry == 'trapezoid':
+            q_data = self.Qx.copy()
+            q_label = 'qx'
+        else:
+            q_data = self.Qr.copy()
+            q_label = 'qr'
+        
+        # Apply scaling if provided
+        if scaling_factor is not None:
+            if np.isscalar(scaling_factor):
+                intensity_data *= scaling_factor
+            else:
+                # Array scaling - must match number of cuts
+                if len(scaling_factor) != intensity_data.shape[1]:
+                    raise ValueError(f"Scaling factor array length ({len(scaling_factor)}) "
+                                   f"must match number of cuts ({intensity_data.shape[1]})")
+                intensity_data *= scaling_factor[np.newaxis, :]
+        
+        # Apply data subset if provided
+        if data_subset is not None:
+            # Subset by Qz range
+            if 'qz_range' in data_subset:
+                qz_min, qz_max = data_subset['qz_range']
+                valid_rows = []
+                for col in range(qz_data.shape[1]):
+                    col_mask = (qz_data[:, col] >= qz_min) & (qz_data[:, col] <= qz_max)
+                    if col == 0:
+                        valid_rows = col_mask
+                    else:
+                        valid_rows = valid_rows | col_mask
+                
+                intensity_data = intensity_data[valid_rows, :]
+                qz_data = qz_data[valid_rows, :]
+                q_data = q_data[valid_rows, :]
+            
+            # Subset by specific cuts
+            if 'cuts' in data_subset:
+                cut_indices = data_subset['cuts']
+                intensity_data = intensity_data[:, cut_indices]
+                qz_data = qz_data[:, cut_indices]
+                q_data = q_data[:, cut_indices]
+        
+        # Export based on format
+        if format.lower() == 'csv':
+            return self._export_csv(output_file, intensity_data, qz_data, q_data, q_label, metadata)
+        elif format.lower() in ['numpy', 'npz']:
+            return self._export_numpy(output_file, intensity_data, qz_data, q_data, metadata)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    def _export_csv(self, output_file, intensity_data, qz_data, q_data, q_label, metadata):
+        """Export data in CSV format."""
+        import pandas as pd
+        
+        # Create column names and data
+        columns = []
+        data_dict = {}
+        
+        for i in range(intensity_data.shape[1]):
+            q_value = q_data[0, i]  # Assuming q is constant per cut
+            
+            qz_col = f"Qz_cut_{i}"
+            intensity_col = f"Intensity_cut_{i}_{q_label}_{q_value:.4f}"
+            
+            columns.extend([qz_col, intensity_col])
+            data_dict[qz_col] = qz_data[:, i]
+            data_dict[intensity_col] = intensity_data[:, i]
+        
+        # Create DataFrame
+        df = pd.DataFrame(data_dict)
+        
+        # Add timestamp to filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{output_file}_{timestamp}.csv"
+        
+        # Save to CSV
+        df.to_csv(filename, index=False)
+        
+        # Add metadata as comments if provided
+        if metadata:
+            self._add_csv_metadata(filename, metadata)
+        
+        print(f"Data exported to: {filename}")
+        print(f"  - {intensity_data.shape[1]} cuts")
+        print(f"  - {intensity_data.shape[0]} data points per cut")
+        
+        return filename
+    
+    def _export_numpy(self, output_file, intensity_data, qz_data, q_data, metadata):
+        """Export data in NumPy format."""
+        # Create Qy data (zeros for both geometries in this context)
+        qy_data = np.zeros_like(q_data)
+        
+        # Prepare data dictionary
+        data_dict = {
+            'Intensity': intensity_data,
+            'Qz': qz_data,
+            'Qy': qy_data
+        }
+        
+        # Add the appropriate Q component
+        if self.geometry == 'trapezoid':
+            data_dict['Qx'] = q_data
+        else:
+            data_dict['Qr'] = q_data
+        
+        # Add metadata if provided
+        if metadata:
+            for key, value in metadata.items():
+                if isinstance(value, (str, int, float)):
+                    data_dict[f'metadata_{key}'] = value
+        
+        # Add timestamp to filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{output_file}_{timestamp}.npz"
+        
+        # Save to NPZ
+        np.savez_compressed(filename, **data_dict)
+        
+        print(f"Data exported to: {filename}")
+        print(f"  - {intensity_data.shape[1]} cuts")
+        print(f"  - {intensity_data.shape[0]} data points per cut")
+        
+        return filename
+    
+    def _add_csv_metadata(self, filename, metadata):
+        """Add metadata as comments to CSV file."""
+        # Read existing content
+        with open(filename, 'r') as f:
+            content = f.read()
+        
+        # Prepare metadata comments
+        metadata_lines = ["# Metadata:"]
+        for key, value in metadata.items():
+            metadata_lines.append(f"# {key}: {value}")
+        metadata_lines.append("# ")  # Empty line before data
+        
+        # Write metadata + content
+        with open(filename, 'w') as f:
+            f.write('\n'.join(metadata_lines) + '\n')
+            f.write(content)
+    
+    def validate_model_parameters(self, verbose=True):
+        """
+        Validate the current model parameters for consistency and physical reasonableness.
+        
+        Parameters:
+        -----------
+        verbose : bool, optional
+            Whether to print detailed validation results. Default: True
+            
+        Returns:
+        --------
+        dict
+            Dictionary with validation results and any issues found
+        """
+        validation_results = {
+            'valid': True,
+            'warnings': [],
+            'errors': [],
+            'parameter_summary': {}
+        }
+        
+        try:
+            # Check if model_params exists
+            if not hasattr(self, 'model_params'):
+                validation_results['errors'].append("No model_params found")
+                validation_results['valid'] = False
+                return validation_results
+            
+            # Validate basic structure
+            required_keys = ['layers', 'DW', 'I0', 'Bk']
+            for key in required_keys:
+                if key not in self.model_params:
+                    validation_results['errors'].append(f"Missing required parameter: {key}")
+                    validation_results['valid'] = False
+            
+            # Validate geometry-specific parameters
+            if self.geometry == 'trapezoid':
+                self._validate_trapezoid_params(validation_results)
+            elif self.geometry == 'cylinder':
+                self._validate_cylinder_params(validation_results)
+            
+            # Validate global parameters
+            self._validate_global_params(validation_results)
+            
+            # Generate parameter summary
+            self._generate_parameter_summary(validation_results)
+            
+            if verbose:
+                self._print_validation_results(validation_results)
+            
+        except Exception as e:
+            validation_results['errors'].append(f"Validation failed: {str(e)}")
+            validation_results['valid'] = False
+        
+        return validation_results
+    
+    def _validate_trapezoid_params(self, validation_results):
+        """Validate trapezoid-specific parameters."""
+        if 'trapezoids' not in self.model_params:
+            validation_results['errors'].append("Missing trapezoids parameter")
+            return
+        
+        trapezoids = self.model_params['trapezoids']
+        layers = self.model_params['layers']
+        
+        # Check number of trapezoids
+        if len(trapezoids) != layers + 1:
+            validation_results['errors'].append(
+                f"Number of trapezoids ({len(trapezoids)}) should be layers + 1 ({layers + 1})"
+            )
+        
+        # Validate each trapezoid
+        for i, trap in enumerate(trapezoids):
+            if 'width' not in trap:
+                validation_results['errors'].append(f"Trapezoid {i} missing width")
+                continue
+            
+            width = trap['width']
+            if width <= 0:
+                validation_results['errors'].append(f"Trapezoid {i} width ({width}) must be positive")
+            
+            # Check height for non-top trapezoids
+            if i < layers:
+                if 'height' not in trap:
+                    validation_results['errors'].append(f"Trapezoid {i} missing height")
+                    continue
+                
+                height = trap['height']
+                if height <= 0:
+                    validation_results['warnings'].append(f"Trapezoid {i} height ({height}) should be positive")
+        
+        # Check for tapering consistency
+        widths = [trap['width'] for trap in trapezoids]
+        if len(widths) > 1:
+            if not all(w1 >= w2 for w1, w2 in zip(widths[:-1], widths[1:])):
+                validation_results['warnings'].append("Trapezoid widths are not monotonically decreasing")
+    
+    def _validate_cylinder_params(self, validation_results):
+        """Validate cylinder-specific parameters."""
+        if 'cylinders' not in self.model_params:
+            validation_results['errors'].append("Missing cylinders parameter")
+            return
+        
+        cylinders = self.model_params['cylinders']
+        layers = self.model_params['layers']
+        
+        # Check number of cylinders
+        if len(cylinders) != layers + 1:
+            validation_results['errors'].append(
+                f"Number of cylinders ({len(cylinders)}) should be layers + 1 ({layers + 1})"
+            )
+        
+        # Validate each cylinder
+        for i, cyl in enumerate(cylinders):
+            if 'radius' not in cyl:
+                validation_results['errors'].append(f"Cylinder {i} missing radius")
+                continue
+            
+            radius = cyl['radius']
+            if radius <= 0:
+                validation_results['errors'].append(f"Cylinder {i} radius ({radius}) must be positive")
+            
+            # Check height for non-top cylinders
+            if i < layers:
+                if 'height' not in cyl:
+                    validation_results['errors'].append(f"Cylinder {i} missing height")
+                    continue
+                
+                height = cyl['height']
+                if height <= 0:
+                    validation_results['warnings'].append(f"Cylinder {i} height ({height}) should be positive")
+        
+        # Check for tapering consistency
+        radii = [cyl['radius'] for cyl in cylinders]
+        if len(radii) > 1:
+            if not all(r1 >= r2 for r1, r2 in zip(radii[:-1], radii[1:])):
+                validation_results['warnings'].append("Cylinder radii are not monotonically decreasing")
+    
+    def _validate_global_params(self, validation_results):
+        """Validate global parameters."""
+        # Validate DW (Debye-Waller factor)
+        dw = self.model_params.get('DW', None)
+        if dw is not None:
+            if dw < 0:
+                validation_results['errors'].append(f"DW ({dw}) must be non-negative")
+            elif dw > 10:
+                validation_results['warnings'].append(f"DW ({dw}) is unusually large")
+        
+        # Validate I0 (intensity scaling)
+        i0 = self.model_params.get('I0', None)
+        if i0 is not None:
+            if i0 <= 0:
+                validation_results['errors'].append(f"I0 ({i0}) must be positive")
+        
+        # Validate background
+        bk = self.model_params.get('Bk', None)
+        if bk is not None:
+            if np.isscalar(bk):
+                if bk < 0:
+                    validation_results['warnings'].append(f"Background ({bk}) is negative")
+            else:
+                # Array background
+                if np.any(np.array(bk) < 0):
+                    validation_results['warnings'].append("Some background values are negative")
+    
+    def _generate_parameter_summary(self, validation_results):
+        """Generate a summary of model parameters."""
+        summary = {}
+        
+        if hasattr(self, 'model_params'):
+            summary['geometry'] = self.geometry
+            summary['layers'] = self.model_params.get('layers', 'Unknown')
+            summary['DW'] = self.model_params.get('DW', 'Unknown')
+            summary['I0'] = self.model_params.get('I0', 'Unknown')
+            summary['Bk'] = self.model_params.get('Bk', 'Unknown')
+            
+            if self.geometry == 'trapezoid' and 'trapezoids' in self.model_params:
+                widths = [trap.get('width', 0) for trap in self.model_params['trapezoids']]
+                heights = [trap.get('height', 0) for trap in self.model_params['trapezoids'][:-1]]
+                summary['widths'] = widths
+                summary['heights'] = heights
+                summary['total_height'] = sum(heights)
+                summary['aspect_ratio'] = max(widths) / summary['total_height'] if summary['total_height'] > 0 else float('inf')
+            
+            elif self.geometry == 'cylinder' and 'cylinders' in self.model_params:
+                radii = [cyl.get('radius', 0) for cyl in self.model_params['cylinders']]
+                heights = [cyl.get('height', 0) for cyl in self.model_params['cylinders'][:-1]]
+                summary['radii'] = radii
+                summary['heights'] = heights
+                summary['total_height'] = sum(heights)
+                summary['aspect_ratio'] = max(radii) / summary['total_height'] if summary['total_height'] > 0 else float('inf')
+        
+        validation_results['parameter_summary'] = summary
+    
+    def _print_validation_results(self, validation_results):
+        """Print validation results in a formatted way."""
+        print("\n" + "="*60)
+        print("MODEL PARAMETER VALIDATION")
+        print("="*60)
+        
+        # Print overall status
+        status = "VALID" if validation_results['valid'] else "INVALID"
+        print(f"Status: {status}")
+        
+        # Print errors
+        if validation_results['errors']:
+            print(f"\nERRORS ({len(validation_results['errors'])}):")
+            for error in validation_results['errors']:
+                print(f"  ❌ {error}")
+        
+        # Print warnings
+        if validation_results['warnings']:
+            print(f"\nWARNINGS ({len(validation_results['warnings'])}):")
+            for warning in validation_results['warnings']:
+                print(f"  ⚠️  {warning}")
+        
+        # Print parameter summary
+        if validation_results['parameter_summary']:
+            print(f"\nPARAMETER SUMMARY:")
+            summary = validation_results['parameter_summary']
+            print(f"  Geometry: {summary.get('geometry', 'Unknown')}")
+            print(f"  Layers: {summary.get('layers', 'Unknown')}")
+            print(f"  DW: {summary.get('DW', 'Unknown')}")
+            print(f"  I0: {summary.get('I0', 'Unknown')}")
+            print(f"  Background: {summary.get('Bk', 'Unknown')}")
+            
+            if 'total_height' in summary:
+                print(f"  Total Height: {summary['total_height']:.2f}")
+            if 'aspect_ratio' in summary:
+                ratio = summary['aspect_ratio']
+                if ratio != float('inf'):
+                    print(f"  Aspect Ratio: {ratio:.2f}")
+        
+        if not validation_results['errors'] and not validation_results['warnings']:
+            print("\n✅ No issues found!")
+        
+        print("="*60)
+    
+    def copy_model(self, deep=True):
+        """
+        Create a copy of the current model.
+        
+        Parameters:
+        -----------
+        deep : bool, optional
+            Whether to create a deep copy. Default: True
+            
+        Returns:
+        --------
+        CDSAXS_Model
+            Copy of the current model
+        """
+        if deep:
+            # Create new model with copied parameters
+            new_model = self.__class__(
+                self.model,
+                self.layers,
+                model_params=copy.deepcopy(self.model_params) if hasattr(self, 'model_params') else None
+            )
+            
+            # Copy data if it exists
+            if hasattr(self, 'Intensity'):
+                new_model.Intensity = self.Intensity.copy()
+            if hasattr(self, 'Qz'):
+                new_model.Qz = self.Qz.copy()
+            if hasattr(self, 'Qx'):
+                new_model.Qx = self.Qx.copy()
+            if hasattr(self, 'Qy'):
+                new_model.Qy = self.Qy.copy()
+            if hasattr(self, 'SimInt'):
+                new_model.SimInt = self.SimInt.copy()
+            
+            # Copy other attributes
+            for attr in ['GF', 'BIC', 'numberpoints', 'numbercuts']:
+                if hasattr(self, attr):
+                    setattr(new_model, attr, getattr(self, attr))
+                    
+        else:
+            # Shallow copy
+            new_model = copy.copy(self)
+        
+        return new_model
+    
+    def reset_to_initial(self):
+        """
+        Reset model parameters to their initial values.
+        """
+        if hasattr(self, 'PAR_Initial') and self.PAR_Initial is not None:
+            self.PAR = self.PAR_Initial.copy()
+        
+        if hasattr(self, 'DW_Initial') and self.DW_Initial is not None:
+            self.DW = self.DW_Initial
+            
+        if hasattr(self, 'I0_Initial') and self.I0_Initial is not None:
+            self.I0 = self.I0_Initial
+            
+        if hasattr(self, 'Bk_Initial') and self.Bk_Initial is not None:
+            self.Bk = self.Bk_Initial
+        
+        # Rebuild model_params from initial traditional parameters
+        self.build_model_params_from_traditional()
+        
+        print("Model parameters reset to initial values")
+    
+    def get_model_info(self):
+        """
+        Get a comprehensive summary of the model.
+        
+        Returns:
+        --------
+        dict
+            Dictionary containing model information
+        """
+        info = {
+            'geometry': self.geometry,
+            'model_type': self.model,
+            'layers': self.layers,
+            'has_data': hasattr(self, 'Intensity'),
+            'has_simulation': hasattr(self, 'SimInt'),
+            'parameters': {}
+        }
+        
+        # Add parameter information
+        if hasattr(self, 'model_params'):
+            info['parameters'] = copy.deepcopy(self.model_params)
+        
+        # Add data information
+        if hasattr(self, 'Intensity'):
+            info['data_shape'] = self.Intensity.shape
+            info['number_points'] = getattr(self, 'numberpoints', 'Unknown')
+            info['number_cuts'] = getattr(self, 'numbercuts', self.Intensity.shape[1])
+        
+        # Add fitting results
+        if hasattr(self, 'GF'):
+            info['goodness_of_fit'] = self.GF
+        if hasattr(self, 'BIC'):
+            info['bic'] = self.BIC
+        
+        return info
+    
+    def _print_sweep_summary_1d(self, results):
+        """
+        Print a summary of 1D sweep results including the best fit details.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_1d
+        """
+        print(f"\n{'='*60}")
+        print(f"1D PARAMETER SWEEP SUMMARY")
+        print(f"{'='*60}")
+        
+        # Find best GF and BIC
+        gf_values = np.array(results['gf_values'])
+        bic_values = np.array(results['bic_values'])
+        
+        # Handle inf values
+        finite_gf_mask = np.isfinite(gf_values)
+        finite_bic_mask = np.isfinite(bic_values)
+        
+        if np.any(finite_gf_mask):
+            best_gf_idx = np.argmin(gf_values[finite_gf_mask])
+            best_gf_global_idx = np.where(finite_gf_mask)[0][best_gf_idx]
+            best_gf = gf_values[best_gf_global_idx]
+            best_gf_param = results['sweep_values'][best_gf_global_idx]
+            best_gf_bic = bic_values[best_gf_global_idx]
+        else:
+            best_gf = float('inf')
+            best_gf_param = None
+            best_gf_bic = float('inf')
+        
+        if np.any(finite_bic_mask):
+            best_bic_idx = np.argmin(bic_values[finite_bic_mask])
+            best_bic_global_idx = np.where(finite_bic_mask)[0][best_bic_idx]
+            best_bic = bic_values[best_bic_global_idx]
+            best_bic_param = results['sweep_values'][best_bic_global_idx]
+            best_bic_gf = gf_values[best_bic_global_idx]
+        else:
+            best_bic = float('inf')
+            best_bic_param = None
+            best_bic_gf = float('inf')
+        
+        # Print sweep info
+        param_name = results['sweep_param']
+        n_points = len(results['sweep_values'])
+        param_range = (results['sweep_values'][0], results['sweep_values'][-1])
+        convergence_rate = np.mean(results['convergence_flags']) * 100
+        
+        print(f"Parameter: {param_name}")
+        print(f"Range: {param_range[0]:.4f} to {param_range[1]:.4f}")
+        print(f"Points: {n_points}")
+        print(f"Convergence rate: {convergence_rate:.1f}%")
+        print()
+        
+        # Print best results
+        print(f"BEST GOODNESS OF FIT:")
+        if best_gf_param is not None:
+            print(f"  {param_name} = {best_gf_param:.4f}")
+            print(f"  GF = {best_gf:.4f}")
+            print(f"  BIC = {best_gf_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        print()
+        
+        print(f"BEST BIC:")
+        if best_bic_param is not None:
+            print(f"  {param_name} = {best_bic_param:.4f}")
+            print(f"  GF = {best_bic_gf:.4f}")
+            print(f"  BIC = {best_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        
+        print(f"{'='*60}")
+        print("TIP: Use model.show_best_fit_results(results) to see detailed optimization results for the best fit")
+
+
+    def _print_sweep_summary_2d(self, results):
+        """
+        Print a summary of 2D sweep results including the best fit details.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from parameter_sweep_2d
+        """
+        print(f"\n{'='*60}")
+        print(f"2D PARAMETER SWEEP SUMMARY")
+        print(f"{'='*60}")
+        
+        # Get matrices and handle inf values
+        gf_matrix = np.copy(results['gf_matrix'])
+        bic_matrix = np.copy(results['bic_matrix'])
+        
+        gf_matrix[np.isinf(gf_matrix)] = np.nan
+        bic_matrix[np.isinf(bic_matrix)] = np.nan
+        
+        # Find best results
+        if not np.all(np.isnan(gf_matrix)):
+            best_gf_idx = np.unravel_index(np.nanargmin(gf_matrix), gf_matrix.shape)
+            best_gf = gf_matrix[best_gf_idx]
+            best_gf_param1 = results['param1_values'][best_gf_idx[1]]
+            best_gf_param2 = results['param2_values'][best_gf_idx[0]]
+            best_gf_bic = results['bic_matrix'][best_gf_idx]
+        else:
+            best_gf = np.nan
+            best_gf_param1 = None
+            best_gf_param2 = None
+            best_gf_bic = np.nan
+        
+        if not np.all(np.isnan(bic_matrix)):
+            best_bic_idx = np.unravel_index(np.nanargmin(bic_matrix), bic_matrix.shape)
+            best_bic = bic_matrix[best_bic_idx]
+            best_bic_param1 = results['param1_values'][best_bic_idx[1]]
+            best_bic_param2 = results['param2_values'][best_bic_idx[0]]
+            best_bic_gf = results['gf_matrix'][best_bic_idx]
+        else:
+            best_bic = np.nan
+            best_bic_param1 = None
+            best_bic_param2 = None
+            best_bic_gf = np.nan
+        
+        # Print sweep info
+        param1_name, param2_name = results['sweep_params']
+        grid_size = (len(results['param1_values']), len(results['param2_values']))
+        param1_range = (results['param1_values'][0], results['param1_values'][-1])
+        param2_range = (results['param2_values'][0], results['param2_values'][-1])
+        convergence_rate = np.mean(results['convergence_matrix']) * 100
+        
+        print(f"Parameters: {param1_name} vs {param2_name}")
+        print(f"Grid size: {grid_size[0]} x {grid_size[1]}")
+        print(f"{param1_name} range: {param1_range[0]:.4f} to {param1_range[1]:.4f}")
+        print(f"{param2_name} range: {param2_range[0]:.4f} to {param2_range[1]:.4f}")
+        print(f"Convergence rate: {convergence_rate:.1f}%")
+        print()
+        
+        # Print best results
+        print(f"BEST GOODNESS OF FIT:")
+        if best_gf_param1 is not None and not np.isnan(best_gf):
+            print(f"  {param1_name} = {best_gf_param1:.4f}")
+            print(f"  {param2_name} = {best_gf_param2:.4f}")
+            print(f"  GF = {best_gf:.4f}")
+            print(f"  BIC = {best_gf_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        print()
+        
+        print(f"BEST BIC:")
+        if best_bic_param1 is not None and not np.isnan(best_bic):
+            print(f"  {param1_name} = {best_bic_param1:.4f}")
+            print(f"  {param2_name} = {best_bic_param2:.4f}")
+            print(f"  GF = {best_bic_gf:.4f}")
+            print(f"  BIC = {best_bic:.4f}")
+        else:
+            print("  No valid fits found")
+        
+        print(f"{'='*60}")
+        print("TIP: Use model.show_best_fit_results(results) to see detailed optimization results for the best fit")
+        
+    def show_best_fit_results(self, results, criterion='GF', run_optimization=True):
+        """
+        Apply the best parameters from sweep results and show optimization details.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from any parameter sweep function
+        criterion : str, optional
+            Criterion for selecting best parameters ('GF' or 'BIC'). Default: 'GF'
+        run_optimization : bool, optional
+            Whether to re-run optimization with best parameters. Default: True
+        """
+        print(f"\n{'='*60}")
+        print(f"BEST FIT DETAILS ({criterion.upper()} CRITERION)")
+        print(f"{'='*60}")
+        
+        # Get the best parameters based on sweep type
+        if 'sweep_param' in results:
+            # 1D sweep
+            optimal = self.get_optimal_parameters_1d(results, criterion)
+            if optimal['optimized_parameters'] is None:
+                print("No valid optimized parameters found in results")
+                return
+            
+            print(f"Best parameter value:")
+            print(f"  {optimal['sweep_parameter']} = {optimal['optimal_value']:.4f}")
+            print(f"  GF = {optimal['gf']:.4f}")
+            print(f"  BIC = {optimal['bic']:.4f}")
+            print()
+            
+            # Apply the best parameters
+            self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+            
+        elif 'sweep_params' in results:
+            # 2D sweep
+            optimal = self.get_optimal_parameters_2d(results, criterion)
+            if optimal['optimized_parameters'] is None:
+                print("No valid optimized parameters found in results")
+                return
+            
+            print(f"Best parameter values:")
+            for param, value in optimal['optimal_values'].items():
+                print(f"  {param} = {value:.4f}")
+            print(f"  GF = {optimal['gf']:.4f}")
+            print(f"  BIC = {optimal['bic']:.4f}")
+            print()
+            
+            # Apply the best parameters
+            self.model_params = copy.deepcopy(optimal['optimized_parameters'])
+            
+        elif 'sweep_type' in results and results['sweep_type'] == 'width_dw_1layer':
+            # 1-layer specialized sweep
+            optimal = self.get_optimal_width_dw_1layer(results)
+            
+            if criterion.upper() == 'GF':
+                best_result = optimal['best_gf']
+            else:
+                best_result = optimal['best_bic']
+                
+            print(f"Best parameter values:")
+            print(f"  Width = {best_result['width']:.1f} Å (both trap_0_width and trap_1_width)")
+            print(f"  DW = {best_result['dw']:.3f}")
+            print(f"  GF = {best_result['gf_value']:.4f}")
+            print(f"  BIC = {best_result['bic_value']:.4f}")
+            print()
+            
+            # Apply the best parameters manually for 1-layer case
+            self.model_params['trapezoids'][0]['width'] = best_result['width']
+            self.model_params['trapezoids'][1]['width'] = best_result['width']
+            self.model_params['DW'] = best_result['dw']
+        else:
+            print("Unknown sweep type")
+            return
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
+        
+        if run_optimization:
+            print("Re-running optimization with best parameters to show detailed results...")
+            print("-" * 60)
+            
+            # Get all optimizable parameters for the final detailed run
+            self.initialize_optimization_params()
+            all_params = self.model_params.get('optimization', {})
+            
+            if all_params:
+                # Run optimization with full output
+                final_result = self.CDSAXS_DiffEvolution(
+                    params_to_optimize=all_params,
+                    plot_results=True,  # Show all plots for best fit
+                    verbose=True       # Show all output details
+                )
+            else:
+                # Just simulate if no parameters to optimize
+                self.SimInt = self.simulate_structure()
+                self.GF = self.GF_calc(self.SimInt)
+                self.BIC = self.BIC_calc(self.GF)
+                
+                print(f"Final results:")
+                print(f"  GF = {self.GF:.4f}")
+                print(f"  BIC = {self.BIC:.4f}")
+        else:
+            # Just update simulation without showing optimization details
+            self.SimInt = self.simulate_structure()
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Applied best parameters. Final metrics:")
+            print(f"  GF = {self.GF:.4f}")
+            print(f"  BIC = {self.BIC:.4f}")
+        
+        print(f"{'='*60}")
+
+
+    # Complete layer insertion methods for CDSAXS_base_model.py
+# These are fully self-contained and don't require any external imports
+
+    def calculate_width_at_height(self, height_position: float):
+        """Calculate the width (trapezoid) or radius (cylinder) at a given height position."""
+        if not hasattr(self, 'model_params'):
+            raise AttributeError("Model must have model_params attribute")
+        
+        # Get structure data based on geometry
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            width_key = 'width'
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+            width_key = 'radius'
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        # Calculate total height
+        total_height = sum(struct['height'] for struct in structures[:-1])
+        
+        # Validate height position
+        if height_position < 0 or height_position > total_height:
+            raise ValueError(f"Height position {height_position:.2f} is outside valid range [0, {total_height:.2f}]")
+        
+        # Special cases
+        if height_position == 0:
+            return structures[0][width_key]
+        if height_position == total_height:
+            return structures[-1][width_key]
+        
+        # Find which layer contains this height
+        current_height = 0
+        for i in range(len(structures) - 1):
+            layer_height = structures[i]['height']
+            
+            if current_height <= height_position <= current_height + layer_height:
+                # Found the layer - interpolate between bottom and top widths
+                bottom_width = structures[i][width_key]
+                top_width = structures[i + 1][width_key]
+                
+                # Calculate position within this layer (0 = bottom, 1 = top)
+                layer_position = (height_position - current_height) / layer_height
+                
+                # Linear interpolation
+                interpolated_width = bottom_width + layer_position * (top_width - bottom_width)
+                return interpolated_width
+            
+            current_height += layer_height
+        
+        # Should never reach here if height_position is valid
+        raise ValueError(f"Could not find layer containing height {height_position:.2f}")
+
+    def get_total_structure_height(self):
+        """Get the total height of the model structure."""
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        return sum(struct['height'] for struct in structures[:-1])
+
+    def _find_layer_at_height(self, height_position: float):
+        """
+        Find which layer contains the given height and the position within that layer.
+        
+        Parameters:
+        -----------
+        height_position : float
+            Height position from bottom
+            
+        Returns:
+        --------
+        tuple
+            (layer_index, position_in_layer) where position_in_layer is 0-1
+        """
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        current_height = 0
+        for i in range(len(structures) - 1):
+            layer_height = structures[i]['height']
+            
+            if current_height <= height_position <= current_height + layer_height:
+                position_in_layer = (height_position - current_height) / layer_height
+                return i, position_in_layer
+            
+            current_height += layer_height
+        
+        raise ValueError(f"Could not find layer containing height {height_position:.2f}")
+
+    def _copy_model_data(self, target_model):
+        """
+        Copy experimental data from this model to target model.
+        Also store reference to source model for optimization inheritance.
+        """
+        data_attributes = ['Intensity', 'Qz', 'Qx', 'Qy', 'Qr', 'Alpha', 'numberpoints', 'numbercuts']
+        
+        for attr in data_attributes:
+            if hasattr(self, attr):
+                setattr(target_model, attr, getattr(self, attr))
+        
+        # Store reference to source model for optimization parameter inheritance
+        target_model._source_model = self
+
+    def _create_new_model_from_params(self, new_model_params):
+        """
+        Create a new model from parameters using available methods.
+        This avoids import issues by using the class's existing capabilities.
+        """
+        # Try different approaches to create the new model
+        
+        # Method 1: Try using the create_model static method if available
+        if hasattr(self.__class__, 'create_model'):
+            try:
+                return self.__class__.create_model(
+                    geometry=self.geometry,
+                    model=self.model,
+                    layers=new_model_params['layers'],
+                    model_params=new_model_params
+                )
+            except:
+                pass
+        
+        # Method 2: Try creating using the class constructor directly
+        try:
+            new_model = self.__class__(
+                model=self.model,
+                layers=new_model_params['layers'],
+                model_params=new_model_params
+            )
+            return new_model
+        except:
+            pass
+        
+        # Method 3: Try using cdsaxs.create_model if available
+        try:
+            import cdsaxs
+            return cdsaxs.create_model(
+                geometry=self.geometry,
+                model=self.model,
+                layers=new_model_params['layers'],
+                model_params=new_model_params
+            )
+        except:
+            pass
+        
+        # Method 4: Manual class selection (fallback)
+        if self.geometry == 'trapezoid':
+            # Try to get TrapezoidModel class
+            try:
+                # First try to get it from the same module
+                import sys
+                current_module = sys.modules[self.__module__]
+                if hasattr(current_module, 'TrapezoidModel'):
+                    TrapezoidModel = getattr(current_module, 'TrapezoidModel')
+                else:
+                    # Try importing from parent package
+                    module_parts = self.__module__.split('.')
+                    if len(module_parts) > 1:
+                        parent_module = '.'.join(module_parts[:-1])
+                        try:
+                            import importlib
+                            parent = importlib.import_module(parent_module)
+                            TrapezoidModel = getattr(parent, 'TrapezoidModel')
+                        except:
+                            raise ImportError("Could not find TrapezoidModel")
+                    else:
+                        raise ImportError("Could not find TrapezoidModel")
+                
+                return TrapezoidModel(
+                    model=self.model,
+                    layers=new_model_params['layers'],
+                    model_params=new_model_params
+                )
+            except:
+                raise ImportError("Could not create TrapezoidModel")
+        
+        elif self.geometry == 'cylinder':
+            # Try to get CylinderModel class
+            try:
+                # Similar approach for cylinder model
+                import sys
+                current_module = sys.modules[self.__module__]
+                if hasattr(current_module, 'CylinderModel'):
+                    CylinderModel = getattr(current_module, 'CylinderModel')
+                else:
+                    module_parts = self.__module__.split('.')
+                    if len(module_parts) > 1:
+                        parent_module = '.'.join(module_parts[:-1])
+                        try:
+                            import importlib
+                            parent = importlib.import_module(parent_module)
+                            CylinderModel = getattr(parent, 'CylinderModel')
+                        except:
+                            raise ImportError("Could not find CylinderModel")
+                    else:
+                        raise ImportError("Could not find CylinderModel")
+                
+                return CylinderModel(
+                    model=self.model,
+                    layers=new_model_params['layers'],
+                    model_params=new_model_params
+                )
+            except:
+                raise ImportError("Could not create CylinderModel")
+        
+        raise ValueError(f"Could not create new model for geometry: {self.geometry}")
+
+    def add_layer_at_percentage(self, height_percentage: float, auto_setup_optimization: bool = True, 
+                           optimization_margin: float = 0.2, discretization_per_nm: float = 5.0,
+                           new_layer_height: float = None, inherit_global_limits: bool = True):
+        """
+        Add exactly one layer at the specified height percentage.
+        
+        Parameters:
+        -----------
+        height_percentage : float
+            Percentage of total height where to insert new layer (0-100)
+        auto_setup_optimization : bool, optional
+            Whether to automatically setup optimization parameters. Default: True
+        optimization_margin : float, optional
+            Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
+        discretization_per_nm : float, optional
+            For cylinder models: discretization points per nanometer. Default: 5.0
+        new_layer_height : float, optional
+            Height for the new layer in Angstroms. If None, calculates as 5% of total height
+        inherit_global_limits : bool, optional
+            Whether to inherit DW, I0, Bk limits from the original model. Default: True
+            
+        Returns:
+        --------
+        CDSAXS_Model
+            New model with exactly one additional layer
+        """
+        import copy
+        import numpy as np
+        
+        if not 0 <= height_percentage <= 100:
+            raise ValueError("Height percentage must be between 0 and 100")
+        
+        # Get structures
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            width_key = 'width'
+        else:
+            structures = self.model_params['cylinders']
+            width_key = 'radius'
+        
+        # Extract width and height arrays
+        widths = [s[width_key] for s in structures]
+        heights = [s['height'] for s in structures[:-1]]
+        
+        # Calculate insertion parameters
+        total_height = sum(heights)
+        insertion_height = (height_percentage / 100) * total_height
+        if new_layer_height is None:
+            new_layer_height = max(2.0, total_height * 0.05)
+        
+        # Find which layer contains the insertion height
+        current_height = 0.0
+        insert_after_layer = None
+        height_into_target_layer = 0.0
+        
+        for i, layer_height in enumerate(heights):
+            layer_bottom = current_height
+            layer_top = current_height + layer_height
+            
+            if layer_bottom <= insertion_height <= layer_top:
+                insert_after_layer = i
+                height_into_target_layer = insertion_height - layer_bottom
+                break
+                
+            current_height += layer_height
+        
+        if insert_after_layer is None:
+            raise ValueError(f"Could not find layer containing insertion height {insertion_height:.1f}")
+        
+        # Calculate width at insertion point
+        bottom_width = widths[insert_after_layer]
+        top_width = widths[insert_after_layer + 1]
+        target_layer_height = heights[insert_after_layer]
+        
+        if target_layer_height > 0:
+            position_in_layer = height_into_target_layer / target_layer_height
+            insertion_width = bottom_width + position_in_layer * (top_width - bottom_width)
+        else:
+            insertion_width = bottom_width
+        
+        # Create new width and height arrays
+        new_widths = widths.copy()
+        new_heights = heights.copy()
+        
+        # Split the target layer height
+        remaining_height = target_layer_height - height_into_target_layer
+        
+        # Modify the target layer to only go up to insertion point
+        new_heights[insert_after_layer] = height_into_target_layer
+        
+        # Insert width at insertion point
+        new_widths.insert(insert_after_layer + 1, insertion_width)
+        
+        # Insert new layer height
+        new_heights.insert(insert_after_layer + 1, new_layer_height)
+        
+        # Add remaining height to the new layer if significant
+        if remaining_height > 0.01:
+            new_heights[insert_after_layer + 1] += remaining_height
+        
+        # Verify we added exactly 1 width + 1 height
+        if len(new_widths) - len(widths) != 1 or len(new_heights) - len(heights) != 1:
+            raise RuntimeError("Layer insertion failed: incorrect width/height count")
+        
+        # Build new structures
+        new_structures = []
+        for i in range(len(new_widths)):
+            if i < len(new_heights):
+                structure = {width_key: new_widths[i], 'height': new_heights[i]}
+            else:
+                structure = {width_key: new_widths[i], 'height': 0.0}
+            new_structures.append(structure)
+        
+        # Create new model parameters
+        new_model_params = copy.deepcopy(self.model_params)
+        
+        if self.geometry == 'trapezoid':
+            new_model_params['trapezoids'] = new_structures
+        else:
+            new_model_params['cylinders'] = new_structures
+            # Generate discretization for cylinders
+            new_discretization = []
+            for i in range(len(new_heights)):
+                h_nm = new_structures[i]['height'] / 10.0
+                disc = max(5, min(50, int(h_nm * discretization_per_nm)))
+                new_discretization.append(disc)
+            new_model_params['discretization'] = new_discretization
+        
+        new_model_params['layers'] = len(new_heights)
+        
+        # Create new model
+        new_model = self._create_new_model_from_params(new_model_params)
+        self._copy_model_data(new_model)
+        
+        # Setup optimization parameters if requested
+        if auto_setup_optimization:
+            new_model._setup_optimization_for_new_layers(optimization_margin, inherit_global_limits)
+        
+        return new_model
+
+
+
+
+    
+
+    def add_multiple_layers(self, height_percentages: list, sequential: bool = False, 
+                       auto_setup_optimization: bool = True, optimization_margin: float = 0.2,
+                       discretization_per_nm: float = 5.0, inherit_global_limits: bool = True):
+        """
+        Add multiple layers at different height percentages.
+        
+        Parameters:
+        -----------
+        height_percentages : list
+            List of height percentages where to insert new layers (0-100)
+        sequential : bool, optional
+            If True, add all layers to a single model sequentially
+            If False, create separate models each with one additional layer
+        auto_setup_optimization : bool, optional
+            Whether to automatically setup optimization parameters. Default: True
+        optimization_margin : float, optional
+            Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
+        discretization_per_nm : float, optional
+            For cylinder models: discretization points per nanometer. Default: 5.0
+        inherit_global_limits : bool, optional
+            Whether to inherit DW, I0, Bk limits from the original model. Default: True
+            
+        Returns:
+        --------
+        CDSAXS_Model or List[CDSAXS_Model]
+            If sequential=True: Single model with all additional layers
+            If sequential=False: List of models, each with one additional layer
+        """
+        if sequential:
+            # Sort percentages to ensure proper insertion order (top to bottom)
+            sorted_percentages = sorted(height_percentages, reverse=True)
+            
+            # Start with the original model
+            current_model = self
+            
+            # Add layers one by one, working from top to bottom
+            for height_percentage in sorted_percentages:
+                current_model = current_model.add_layer_at_percentage(
+                    height_percentage, 
+                    auto_setup_optimization=False,
+                    optimization_margin=optimization_margin,
+                    discretization_per_nm=discretization_per_nm,
+                    inherit_global_limits=inherit_global_limits
+                )
+            
+            # Setup optimization for the final model
+            if auto_setup_optimization:
+                current_model._setup_optimization_for_new_layers(optimization_margin, inherit_global_limits)
+            
+            return current_model
+        else:
+            # Create separate models
+            new_models = []
+            
+            for height_percentage in height_percentages:
+                new_model = self.add_layer_at_percentage(
+                    height_percentage, 
+                    auto_setup_optimization=auto_setup_optimization,
+                    optimization_margin=optimization_margin,
+                    discretization_per_nm=discretization_per_nm,
+                    inherit_global_limits=inherit_global_limits
+                )
+                new_models.append(new_model)
+            
+            return new_models
+
+    def visualize_layer_addition(self, height_percentage: float, figsize=(12, 6)):
+        """
+        Visualize the original model and the model with inserted layer side by side.
+        
+        Parameters:
+        -----------
+        height_percentage : float
+            Height percentage where layer will be inserted
+        figsize : tuple
+            Figure size for the plot
+            
+        Returns:
+        --------
+        CDSAXS_Model
+            New model with the inserted layer
+        """
+        import matplotlib.pyplot as plt
+        
+        # Create new model with inserted layer
+        new_model = self.add_layer_at_percentage(height_percentage, auto_setup_optimization=False)
+        
+        # Create side-by-side plots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+        
+        # Plot original model
+        plt.sca(ax1)
+        self.plot_structure()
+        ax1.set_title(f'Original Model ({self.layers} layers)')
+        
+        # Add line showing insertion point
+        total_height = self.get_total_structure_height()
+        insertion_height = (height_percentage / 100) * total_height
+        insertion_width = self.calculate_width_at_height(insertion_height)
+        
+        if self.geometry == 'trapezoid':
+            ax1.axhline(y=insertion_height, color='red', linestyle='--', alpha=0.7, 
+                    label=f'Insertion at {height_percentage}%')
+            ax1.plot([-insertion_width/2, insertion_width/2], [insertion_height, insertion_height], 
+                    'ro', markersize=8)
+        else:  # cylinder
+            ax1.axhline(y=insertion_height, color='red', linestyle='--', alpha=0.7, 
+                    label=f'Insertion at {height_percentage}%')
+            ax1.plot([-insertion_width, insertion_width], [insertion_height, insertion_height], 
+                    'ro', markersize=8)
+        
+        ax1.legend()
+        
+        # Plot new model
+        plt.sca(ax2)
+        new_model.plot_structure()
+        ax2.set_title(f'Modified Model ({new_model.layers} layers)')
+        
+        plt.tight_layout()
+        plt.show()
+        
+        return new_model
+    
+    def _setup_optimization_for_new_layers(self, optimization_margin: float = 0.2, inherit_global_limits: bool = True):
+        """
+        Set up optimization parameters for the current model structure.
+        
+        Parameters:
+        -----------
+        optimization_margin : float, optional
+            Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
+        inherit_global_limits : bool, optional
+            Whether to inherit DW, I0, Bk limits from previous model if available. Default: True
+        """
+        import numpy as np
+        
+        # Initialize optimization parameters with the specified margin
+        param_limits = {}
+        
+        if self.geometry == 'trapezoid':
+            # Add trapezoid parameters
+            for i, trap in enumerate(self.model_params['trapezoids']):
+                # Width parameters
+                width_val = trap['width']
+                param_limits[f'trap_{i}_width'] = {
+                    'min': width_val * (1 - optimization_margin),
+                    'max': width_val * (1 + optimization_margin),
+                    'default': width_val
+                }
+                
+                # Height parameters (skip the last trapezoid which has height 0)
+                if i < len(self.model_params['trapezoids']) - 1:
+                    height_val = trap['height']
+                    param_limits[f'trap_{i}_height'] = {
+                        'min': height_val * (1 - optimization_margin),
+                        'max': height_val * (1 + optimization_margin),
+                        'default': height_val
+                    }
+        
+        elif self.geometry == 'cylinder':
+            # Add cylinder parameters
+            for i, cyl in enumerate(self.model_params['cylinders']):
+                # Radius parameters
+                radius_val = cyl['radius']
+                param_limits[f'cyl_{i}_radius'] = {
+                    'min': radius_val * (1 - optimization_margin),
+                    'max': radius_val * (1 + optimization_margin),
+                    'default': radius_val
+                }
+                
+                # Height parameters (skip the last cylinder which has height 0)
+                if i < len(self.model_params['cylinders']) - 1:
+                    height_val = cyl['height']
+                    param_limits[f'cyl_{i}_height'] = {
+                        'min': height_val * (1 - optimization_margin),
+                        'max': height_val * (1 + optimization_margin),
+                        'default': height_val
+                    }
+        
+        # Add global parameters with inheritance option
+        if inherit_global_limits and hasattr(self, '_source_model') and hasattr(self._source_model, 'model_params'):
+            # Try to inherit from source model optimization parameters
+            source_optimization = self._source_model.model_params.get('optimization', {})
+            
+            # Inherit DW limits if available
+            if 'DW' in source_optimization:
+                inherited_dw = source_optimization['DW'].copy()
+                inherited_dw['default'] = self.DW  # Update default to current value
+                param_limits['DW'] = inherited_dw
+            else:
+                # Fallback to margin-based
+                param_limits['DW'] = {
+                    'min': self.DW * (1 - optimization_margin),
+                    'max': self.DW * (1 + optimization_margin),
+                    'default': self.DW
+                }
+            
+            # Inherit I0 limits if available
+            if 'I0' in source_optimization:
+                inherited_i0 = source_optimization['I0'].copy()
+                inherited_i0['default'] = self.I0  # Update default to current value
+                param_limits['I0'] = inherited_i0
+            else:
+                # Fallback to margin-based
+                param_limits['I0'] = {
+                    'min': self.I0 * (1 - optimization_margin),
+                    'max': self.I0 * (1 + optimization_margin),
+                    'default': self.I0
+                }
+            
+            # Inherit background limits if available
+            if isinstance(self.Bk, np.ndarray):
+                # Array background - inherit individual limits
+                for i, bk_val in enumerate(self.Bk):
+                    bk_param_name = f'Bk_{i}'
+                    if bk_param_name in source_optimization:
+                        inherited_bk = source_optimization[bk_param_name].copy()
+                        inherited_bk['default'] = bk_val  # Update default to current value
+                        param_limits[bk_param_name] = inherited_bk
+                    else:
+                        # Fallback to margin-based
+                        param_limits[bk_param_name] = {
+                            'min': bk_val * (1 - optimization_margin),
+                            'max': bk_val * (1 + optimization_margin),
+                            'default': bk_val
+                        }
+            else:
+                # Scalar background
+                if 'Bk' in source_optimization:
+                    inherited_bk = source_optimization['Bk'].copy()
+                    inherited_bk['default'] = self.Bk  # Update default to current value
+                    param_limits['Bk'] = inherited_bk
+                else:
+                    # Fallback to margin-based
+                    param_limits['Bk'] = {
+                        'min': self.Bk * (1 - optimization_margin),
+                        'max': self.Bk * (1 + optimization_margin),
+                        'default': self.Bk
+                    }
+        else:
+            # No inheritance - use margin-based approach for global parameters
+            param_limits['DW'] = {
+                'min': self.DW * (1 - optimization_margin),
+                'max': self.DW * (1 + optimization_margin),
+                'default': self.DW
+            }
+            
+            param_limits['I0'] = {
+                'min': self.I0 * (1 - optimization_margin),
+                'max': self.I0 * (1 + optimization_margin),
+                'default': self.I0
+            }
+            
+            # Handle background parameters
+            if isinstance(self.Bk, np.ndarray):
+                for i, bk_val in enumerate(self.Bk):
+                    param_limits[f'Bk_{i}'] = {
+                        'min': bk_val * (1 - optimization_margin),
+                        'max': bk_val * (1 + optimization_margin),
+                        'default': bk_val
+                    }
+            else:
+                param_limits['Bk'] = {
+                    'min': self.Bk * (1 - optimization_margin),
+                    'max': self.Bk * (1 + optimization_margin),
+                    'default': self.Bk
+                }
+        
+        # Store optimization parameters
+        self.model_params['optimization'] = param_limits
+        
+        return param_limits
+
+
+    def _extract_width_height_relationship(self):
+        """
+        Extract the width-height relationship from the current model.
+        
+        Returns:
+        --------
+        tuple
+            (height_points, width_points) arrays defining the structure profile
+        """
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            width_key = 'width'
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+            width_key = 'radius'
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        # Build arrays of height points and corresponding widths
+        height_points = [0.0]  # Start at bottom
+        width_points = [structures[0][width_key]]  # Bottom width
+        
+        current_height = 0.0
+        for i in range(len(structures) - 1):  # Exclude the top point
+            layer_height = structures[i]['height']
+            current_height += layer_height
+            height_points.append(current_height)
+            width_points.append(structures[i + 1][width_key])
+        
+        print(f"DEBUG: Extracted {len(height_points)} height points: {height_points}")
+        print(f"DEBUG: Corresponding widths: {width_points}")
+        
+        return np.array(height_points), np.array(width_points)
+
+    def _calculate_width_from_relationship(self, height, height_points, width_points):
+        """
+        Calculate width at given height using the extracted relationship.
+        
+        Parameters:
+        -----------
+        height : float
+            Height where to calculate width
+        height_points : numpy.ndarray
+            Array of height reference points
+        width_points : numpy.ndarray
+            Array of corresponding widths
+            
+        Returns:
+        --------
+        float
+            Interpolated width at the given height
+        """
+        # Handle edge cases
+        if height <= height_points[0]:
+            return width_points[0]
+        if height >= height_points[-1]:
+            return width_points[-1]
+        
+        # Find the interval containing the height
+        for i in range(len(height_points) - 1):
+            if height_points[i] <= height <= height_points[i + 1]:
+                # Linear interpolation between the two points
+                h1, h2 = height_points[i], height_points[i + 1]
+                w1, w2 = width_points[i], width_points[i + 1]
+                
+                if h2 == h1:  # Avoid division by zero
+                    return w1
+                
+                # Linear interpolation
+                fraction = (height - h1) / (h2 - h1)
+                width = w1 + fraction * (w2 - w1)
+                return width
+        
+        # Should never reach here
+        raise ValueError(f"Could not interpolate width for height {height}")
+
+
+
+    def batch_initialize_and_fit(self, initialization_params, n_points_per_param=5, 
+                            optimization_kwargs=None, max_fits=None, verbose=True,
+                            save_results=True, results_filename=None):
+        """
+        Perform batch initialization and fitting with different starting conditions.
+        
+        Parameters:
+        -----------
+        initialization_params : dict
+            Dictionary specifying parameters to vary and their ranges
+            Format: {'param_name': {'min': value, 'max': value, 'n_points': int}}
+            or: {'param_name': {'min': value, 'max': value}} (uses n_points_per_param)
+        n_points_per_param : int, optional
+            Default number of points per parameter if not specified. Default: 5
+        optimization_kwargs : dict, optional
+            Additional kwargs for CDSAXS_DiffEvolution
+        max_fits : int, optional
+            Maximum number of fits to perform (useful for large grids). Default: None (all)
+        verbose : bool, optional
+            Whether to print progress. Default: True
+        save_results : bool, optional
+            Whether to save results to file. Default: True
+        results_filename : str, optional
+            Filename for saved results. If None, auto-generates with timestamp
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing batch fitting results
+        """
+        if not hasattr(self, 'Intensity'):
+            raise ValueError("Data must be imported before performing batch fitting")
+        
+        # Set default optimization parameters
+        if optimization_kwargs is None:
+            optimization_kwargs = {
+                'maxiter': 50,
+                'popsize': 15,
+                'plot_results': False,  # Don't plot individual fits
+                'verbose': False       # Don't print individual fit details
+            }
+        
+        # Generate initialization grid
+        grid_points = self._generate_initialization_grid(initialization_params, n_points_per_param)
+        
+        # Limit number of fits if requested
+        if max_fits is not None and len(grid_points) > max_fits:
+            if verbose:
+                print(f"Limiting fits to {max_fits} out of {len(grid_points)} possible combinations")
+            # Randomly sample to get diverse coverage
+            indices = np.random.choice(len(grid_points), max_fits, replace=False)
+            grid_points = [grid_points[i] for i in sorted(indices)]
+        
+        if verbose:
+            print(f"Starting batch fitting with {len(grid_points)} different initializations...")
+            print(f"Varying parameters: {list(initialization_params.keys())}")
+        
+        # Store original parameters for restoration
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Initialize results storage
+        results = {
+            'initialization_params': initialization_params,
+            'n_total_fits': len(grid_points),
+            'fits': [],
+            'geometry': self.geometry,
+            'layers': self.layers
+        }
+        
+        # Progress bar
+        if verbose:
+            pbar = tqdm(enumerate(grid_points), total=len(grid_points), 
+                    desc="Batch Fitting")
+        else:
+            pbar = enumerate(grid_points)
+        
+        # Perform fits
+        for fit_idx, init_values in pbar:
+            try:
+                # Reset to original parameters
+                self.model_params = copy.deepcopy(original_params)
+                self.update_traditional_from_model_params()
+                
+                # Apply initialization values
+                for param_name, value in init_values.items():
+                    self._set_parameter_value(param_name, value)
+                
+                # Create optimization parameters (all fittable parameters)
+                opt_params = self._create_full_optimization_params()
+                
+                # Run optimization
+                optimized_params = self.CDSAXS_DiffEvolution(
+                    params_to_optimize=opt_params,
+                    **optimization_kwargs
+                )
+                
+                if optimized_params is not None:
+                    # Store fit result
+                    fit_result = {
+                        'fit_id': fit_idx + 1,
+                        'initialization': init_values.copy(),
+                        'final_params': copy.deepcopy(self.model_params),
+                        'gf': self.GF,
+                        'bic': self.BIC,
+                        'converged': True,
+                        'optimization_result': getattr(self, 'optimization_result', None)
+                    }
+                    
+                    # Check for parameters near bounds
+                    fit_result['near_bounds'] = self._check_parameters_near_bounds(opt_params)
+                    
+                    results['fits'].append(fit_result)
+                    
+                    # Update progress bar with current best
+                    if len(results['fits']) > 0:
+                        best_gf = min(fit['gf'] for fit in results['fits'])
+                        if verbose and hasattr(pbar, 'set_postfix'):
+                            pbar.set_postfix({
+                                'Best_GF': f'{best_gf:.4f}',
+                                'Current_GF': f'{self.GF:.4f}',
+                                'Fits': len(results['fits'])
+                            })
+                else:
+                    # Failed fit
+                    fit_result = {
+                        'fit_id': fit_idx + 1,
+                        'initialization': init_values.copy(),
+                        'final_params': None,
+                        'gf': float('inf'),
+                        'bic': float('inf'),
+                        'converged': False,
+                        'near_bounds': {}
+                    }
+                    results['fits'].append(fit_result)
+                    
+            except Exception as e:
+                if verbose:
+                    print(f"Error in fit {fit_idx + 1}: {str(e)}")
+                
+                # Store failed fit
+                fit_result = {
+                    'fit_id': fit_idx + 1,
+                    'initialization': init_values.copy(),
+                    'final_params': None,
+                    'gf': float('inf'),
+                    'bic': float('inf'),
+                    'converged': False,
+                    'error': str(e),
+                    'near_bounds': {}
+                }
+                results['fits'].append(fit_result)
+        
+        if verbose and hasattr(pbar, 'close'):
+            pbar.close()
+        
+        # Sort results by GF (best first)
+        results['fits'].sort(key=lambda x: x['gf'])
+        
+        # Add rankings
+        for i, fit in enumerate(results['fits']):
+            fit['rank'] = i + 1
+        
+        # Restore original parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Print summary
+        if verbose:
+            self._print_batch_summary(results)
+        
+        # Save results
+        if save_results:
+            filename = self._save_batch_results(results, results_filename)
+            if verbose:
+                print(f"Results saved to: {filename}")
+        
+        return results
+
+    def _generate_initialization_grid(self, initialization_params, n_points_per_param):
+        """
+        Generate grid of initialization points from parameter ranges.
+        
+        Parameters:
+        -----------
+        initialization_params : dict
+            Parameter specifications
+        n_points_per_param : int
+            Default number of points per parameter
+            
+        Returns:
+        --------
+        list
+            List of dictionaries, each containing initialization values
+        """
+        # Create arrays for each parameter
+        param_arrays = {}
+        param_names = []
+        
+        for param_name, param_spec in initialization_params.items():
+            param_names.append(param_name)
+            
+            # Determine number of points
+            if 'n_points' in param_spec:
+                n_points = param_spec['n_points']
+            else:
+                n_points = n_points_per_param
+            
+            # Generate values
+            if n_points == 1:
+                # Single point - use midpoint
+                mid_val = (param_spec['min'] + param_spec['max']) / 2
+                param_arrays[param_name] = [mid_val]
+            else:
+                # Multiple points - linspace
+                param_arrays[param_name] = np.linspace(
+                    param_spec['min'], 
+                    param_spec['max'], 
+                    n_points
+                )
+        
+        # Generate all combinations
+        grid_points = []
+        
+        def generate_combinations(param_idx, current_combo):
+            if param_idx == len(param_names):
+                grid_points.append(current_combo.copy())
+                return
+            
+            param_name = param_names[param_idx]
+            for value in param_arrays[param_name]:
+                current_combo[param_name] = value
+                generate_combinations(param_idx + 1, current_combo)
+        
+        generate_combinations(0, {})
+        
+        return grid_points
+
+    def _create_full_optimization_params(self, margin=0.3):
+        """
+        Create optimization parameters for all fittable parameters.
+        
+        Parameters:
+        -----------
+        margin : float, optional
+            Margin for bounds as fraction (0.3 = ±30%). Default: 0.3
+            
+        Returns:
+        --------
+        dict
+            Dictionary of optimization parameters
+        """
+        opt_params = {}
+        
+        if self.geometry == 'trapezoid':
+            # Add all trapezoid parameters
+            for i, trap in enumerate(self.model_params['trapezoids']):
+                # Width parameters
+                width_val = trap['width']
+                opt_params[f'trap_{i}_width'] = {
+                    'min': width_val * (1 - margin),
+                    'max': width_val * (1 + margin),
+                    'default': width_val
+                }
+                
+                # Height parameters (skip last trapezoid)
+                if i < len(self.model_params['trapezoids']) - 1:
+                    height_val = trap['height']
+                    opt_params[f'trap_{i}_height'] = {
+                        'min': height_val * (1 - margin),
+                        'max': height_val * (1 + margin),
+                        'default': height_val
+                    }
+        
+        elif self.geometry == 'cylinder':
+            # Add all cylinder parameters
+            for i, cyl in enumerate(self.model_params['cylinders']):
+                # Radius parameters
+                radius_val = cyl['radius']
+                opt_params[f'cyl_{i}_radius'] = {
+                    'min': radius_val * (1 - margin),
+                    'max': radius_val * (1 + margin),
+                    'default': radius_val
+                }
+                
+                # Height parameters (skip last cylinder)
+                if i < len(self.model_params['cylinders']) - 1:
+                    height_val = cyl['height']
+                    opt_params[f'cyl_{i}_height'] = {
+                        'min': height_val * (1 - margin),
+                        'max': height_val * (1 + margin),
+                        'default': height_val
+                    }
+        
+        # Add global parameters
+        opt_params['DW'] = {
+            'min': self.DW * (1 - margin),
+            'max': self.DW * (1 + margin),
+            'default': self.DW
+        }
+        
+        opt_params['I0'] = {
+            'min': self.I0 * (1 - margin),
+            'max': self.I0 * (1 + margin),
+            'default': self.I0
+        }
+        
+        # Handle background parameters
+        if isinstance(self.Bk, np.ndarray):
+            for i, bk_val in enumerate(self.Bk):
+                opt_params[f'Bk_{i}'] = {
+                    'min': bk_val * (1 - margin),
+                    'max': bk_val * (1 + margin),
+                    'default': bk_val
+                }
+        else:
+            opt_params['Bk'] = {
+                'min': self.Bk * (1 - margin),
+                'max': self.Bk * (1 + margin),
+                'default': self.Bk
+            }
+        
+        return opt_params
+
+    def _check_parameters_near_bounds(self, opt_params, tolerance=0.01):
+        """
+        Check which parameters are near their optimization bounds.
+        
+        Parameters:
+        -----------
+        opt_params : dict
+            Optimization parameters with bounds
+        tolerance : float, optional
+            Tolerance for "near bounds" (1% = 0.01). Default: 0.01
+            
+        Returns:
+        --------
+        dict
+            Dictionary indicating which parameters are near bounds
+        """
+        near_bounds = {}
+        
+        for param_name, param_config in opt_params.items():
+            try:
+                current_value = self._get_current_parameter_value(param_name)
+                param_range = param_config['max'] - param_config['min']
+                
+                # Check distance to bounds as fraction of range
+                dist_to_min = (current_value - param_config['min']) / param_range
+                dist_to_max = (param_config['max'] - current_value) / param_range
+                
+                near_min = dist_to_min < tolerance
+                near_max = dist_to_max < tolerance
+                
+                near_bounds[param_name] = {
+                    'near_min': near_min,
+                    'near_max': near_max,
+                    'near_either': near_min or near_max,
+                    'current_value': current_value,
+                    'min_bound': param_config['min'],
+                    'max_bound': param_config['max']
+                }
+                
+            except Exception as e:
+                near_bounds[param_name] = {'error': str(e)}
+        
+        return near_bounds
+
+    def _print_batch_summary(self, results):
+        """
+        Print a summary of batch fitting results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Batch fitting results
+        """
+        fits = results['fits']
+        successful_fits = [f for f in fits if f['converged'] and f['gf'] != float('inf')]
+        
+        print(f"\n{'='*80}")
+        print(f"BATCH FITTING SUMMARY")
+        print(f"{'='*80}")
+        print(f"Total initializations: {results['n_total_fits']}")
+        print(f"Successful fits: {len(successful_fits)}")
+        print(f"Failed fits: {results['n_total_fits'] - len(successful_fits)}")
+        
+        if successful_fits:
+            print(f"Best GF: {successful_fits[0]['gf']:.6f}")
+            print(f"Best BIC: {successful_fits[0]['bic']:.6f}")
+            
+            # Show distribution of GF values
+            gf_values = [f['gf'] for f in successful_fits]
+            print(f"GF range: {min(gf_values):.6f} to {max(gf_values):.6f}")
+            print(f"GF std dev: {np.std(gf_values):.6f}")
+        
+        print(f"{'='*80}")
+
+    def display_top_fits(self, results, n_top=10, show_near_bounds=True, 
+                        colorize=True, save_table=False, table_filename=None):
+        """
+        Display top fitting results in a formatted table.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        n_top : int, optional
+            Number of top fits to display. Default: 10
+        show_near_bounds : bool, optional
+            Whether to highlight parameters near bounds. Default: True
+        colorize : bool, optional
+            Whether to use color coding (red for near bounds). Default: True
+        save_table : bool, optional
+            Whether to save table to file. Default: False
+        table_filename : str, optional
+            Filename for saved table
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            DataFrame with the top fits
+        """
+        fits = results['fits']
+        top_fits = fits[:min(n_top, len(fits))]
+        
+        print(f"\n{'='*100}")
+        print(f"TOP {len(top_fits)} FITS (Ranked by Goodness of Fit)")
+        print(f"{'='*100}")
+        
+        # Create DataFrame for better formatting
+        table_data = []
+        
+        for fit in top_fits:
+            row = {
+                'Rank': fit['rank'],
+                'GF': fit['gf'],
+                'BIC': fit['bic'],
+                'Converged': '✓' if fit['converged'] else '✗'
+            }
+            
+            # Add parameter values
+            if fit['final_params'] is not None:
+                # Add key parameters based on geometry
+                if self.geometry == 'trapezoid':
+                    # Show first few trapezoid widths and heights
+                    for i in range(min(3, len(fit['final_params']['trapezoids']))):
+                        trap = fit['final_params']['trapezoids'][i]
+                        row[f'W{i}'] = trap['width']
+                        if i < len(fit['final_params']['trapezoids']) - 1:
+                            row[f'H{i}'] = trap['height']
+                
+                elif self.geometry == 'cylinder':
+                    # Show first few cylinder radii and heights
+                    for i in range(min(3, len(fit['final_params']['cylinders']))):
+                        cyl = fit['final_params']['cylinders'][i]
+                        row[f'R{i}'] = cyl['radius']
+                        if i < len(fit['final_params']['cylinders']) - 1:
+                            row[f'H{i}'] = cyl['height']
+                
+                # Add global parameters
+                row['DW'] = fit['final_params']['DW']
+                row['I0'] = fit['final_params']['I0']
+                
+                # Add background (first value if array)
+                bk = fit['final_params']['Bk']
+                if isinstance(bk, list):
+                    row['Bk'] = bk[0]
+                else:
+                    row['Bk'] = bk
+            
+            table_data.append(row)
+        
+        # Create DataFrame
+        df = pd.DataFrame(table_data)
+        
+        # Format numeric columns
+        numeric_cols = [col for col in df.columns if col not in ['Rank', 'Converged']]
+        for col in numeric_cols:
+            if col in ['GF', 'BIC']:
+                df[col] = df[col].apply(lambda x: f'{x:.6f}' if x != float('inf') else 'Failed')
+            else:
+                df[col] = df[col].apply(lambda x: f'{x:.3f}' if pd.notnull(x) else 'N/A')
+        
+        # Display table with color coding if requested
+        if colorize and show_near_bounds:
+            self._display_colorized_table(df, top_fits, results)
+        else:
+            print(df.to_string(index=False))
+        
+        # Save table if requested
+        if save_table:
+            filename = table_filename or f"top_fits_batch_results.csv"
+            df.to_csv(filename, index=False)
+            print(f"\nTable saved to: {filename}")
+        
+        return df
+
+    def _display_colorized_table(self, df, top_fits, results):
+        """
+        Display table with color coding for parameters near bounds.
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            Table data
+        top_fits : list
+            List of top fit results
+        results : dict
+            Full batch results
+        """
+        # Print header
+        header = "  ".join(f"{col:>10}" for col in df.columns)
+        print(header)
+        print("-" * len(header))
+        
+        # Print each row with color coding
+        for i, (_, row) in enumerate(df.iterrows()):
+            fit = top_fits[i]
+            row_str = ""
+            
+            for j, (col, value) in enumerate(row.items()):
+                # Check if this parameter is near bounds
+                near_bounds = False
+                if fit['converged'] and col not in ['Rank', 'GF', 'BIC', 'Converged']:
+                    # Map display column to parameter name
+                    param_name = self._map_column_to_param(col, fit)
+                    if param_name and param_name in fit.get('near_bounds', {}):
+                        near_bounds_info = fit['near_bounds'][param_name]
+                        near_bounds = near_bounds_info.get('near_either', False)
+                
+                # Format value with color
+                value_str = f"{value:>10}"
+                if near_bounds:
+                    # Red color for parameters near bounds
+                    value_str = f"\033[91m{value_str}\033[0m"
+                
+                row_str += value_str + "  "
+            
+            print(row_str)
+        
+        # Print legend
+        print("\n\033[91m■\033[0m = Parameter within 1% of optimization bounds")
+
+    def _map_column_to_param(self, col, fit):
+        """
+        Map display column name to parameter name.
+        
+        Parameters:
+        -----------
+        col : str
+            Column name from display table
+        fit : dict
+            Fit result
+            
+        Returns:
+        --------
+        str or None
+            Parameter name, or None if not found
+        """
+        # Map display columns to parameter names
+        if col.startswith('W') and col[1:].isdigit():
+            idx = int(col[1:])
+            return f'trap_{idx}_width'
+        elif col.startswith('H') and col[1:].isdigit():
+            idx = int(col[1:])
+            return f'trap_{idx}_height'
+        elif col.startswith('R') and col[1:].isdigit():
+            idx = int(col[1:])
+            return f'cyl_{idx}_radius'
+        elif col in ['DW', 'I0', 'Bk']:
+            return col
+        
+        return None
+
+    def plot_fit_comparison(self, results, fit_ranks=[1, 2, 3], figsize=(15, 10),
+                        show_structure=True, show_intensity=True):
+        """
+        Plot comparison of selected fit results side by side.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        fit_ranks : list, optional
+            List of fit rankings to compare (1-indexed). Default: [1, 2, 3]
+        figsize : tuple, optional
+            Figure size. Default: (15, 10)
+        show_structure : bool, optional
+            Whether to show structure plots. Default: True
+        show_intensity : bool, optional
+            Whether to show intensity comparison plots. Default: True
+        """
+        fits = results['fits']
+        
+        # Validate fit ranks
+        valid_ranks = []
+        for rank in fit_ranks:
+            if 1 <= rank <= len(fits) and fits[rank-1]['converged']:
+                valid_ranks.append(rank)
+            else:
+                print(f"Warning: Rank {rank} is invalid or failed - skipping")
+        
+        if not valid_ranks:
+            print("No valid fits to plot")
+            return
+        
+        n_fits = len(valid_ranks)
+        
+        # Store current model state
+        original_params = copy.deepcopy(self.model_params)
+        
+        try:
+            if show_structure and show_intensity:
+                # Create 2x3 grid (structure on top, intensity on bottom)
+                fig, axes = plt.subplots(2, n_fits, figsize=figsize)
+                if n_fits == 1:
+                    axes = axes.reshape(2, 1)
+            elif show_structure or show_intensity:
+                # Create 1xN grid
+                fig, axes = plt.subplots(1, n_fits, figsize=(figsize[0], figsize[1]//2))
+                if n_fits == 1:
+                    axes = [axes]
+            else:
+                print("Nothing to plot - both show_structure and show_intensity are False")
+                return
+            
+            colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown']
+            
+            for i, rank in enumerate(valid_ranks):
+                fit = fits[rank-1]
+                color = colors[i % len(colors)]
+                
+                # Apply fit parameters
+                self.model_params = copy.deepcopy(fit['final_params'])
+                self.update_traditional_from_model_params()
+                
+                # Plot structure
+                if show_structure:
+                    if show_intensity:
+                        ax_struct = axes[0, i]
+                    else:
+                        ax_struct = axes[i]
+                    
+                    plt.sca(ax_struct)
+                    self.plot_structure()
+                    ax_struct.set_title(f'Rank #{rank}\nGF: {fit["gf"]:.4f}', 
+                                    fontsize=12, color=color)
+                    
+                    # Highlight structure with color
+                    for line in ax_struct.get_lines():
+                        line.set_color(color)
+                        line.set_linewidth(2)
+                
+                # Plot intensity comparison
+                if show_intensity:
+                    if show_structure:
+                        ax_int = axes[1, i]
+                    else:
+                        ax_int = axes[i]
+                    
+                    # Simulate with current parameters
+                    if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                        self.SimInt = self.simulate_structure(self.discretization)
+                    else:
+                        self.SimInt = self.simulate_structure()
+                    
+                    # Plot first few cuts
+                    n_cuts_to_show = min(3, self.Intensity.shape[1])
+                    
+                    for cut_idx in range(n_cuts_to_show):
+                        if self.geometry == 'trapezoid':
+                            qz_values = self.Qz[:, cut_idx]
+                            q_value = self.Qx[0, cut_idx]
+                            q_label = 'Qx'
+                        else:
+                            qz_values = self.Qz[:, cut_idx]
+                            q_value = self.Qr[0, cut_idx]
+                            q_label = 'Qr'
+                        
+                        # Plot measured (gray) and simulated (colored)
+                        alpha = 0.7 - cut_idx * 0.2
+                        ax_int.semilogy(qz_values, self.Intensity[:, cut_idx], 
+                                    'o', color='gray', alpha=alpha, markersize=3,
+                                    label='Measured' if cut_idx == 0 else '')
+                        ax_int.semilogy(qz_values, self.SimInt[:, cut_idx], 
+                                    '-', color=color, alpha=alpha, linewidth=2,
+                                    label=f'Rank #{rank}' if cut_idx == 0 else '')
+                    
+                    ax_int.set_xlabel('Qz (Å⁻¹)')
+                    ax_int.set_ylabel('Intensity')
+                    ax_int.set_title(f'Intensity Fit\nBIC: {fit["bic"]:.4f}', 
+                                fontsize=12, color=color)
+                    ax_int.grid(True, alpha=0.3)
+                    
+                    if i == 0:  # Only show legend on first plot
+                        ax_int.legend()
+            
+            plt.tight_layout()
+            plt.show()
+            
+            # Print fit details
+            print(f"\nFit Comparison Details:")
+            print(f"{'Rank':<6} {'GF':<12} {'BIC':<12} {'Notes'}")
+            print("-" * 50)
+            
+            for rank in valid_ranks:
+                fit = fits[rank-1]
+                notes = []
+                
+                # Check for parameters near bounds
+                if fit.get('near_bounds'):
+                    near_bound_params = [name for name, info in fit['near_bounds'].items() 
+                                    if info.get('near_either', False)]
+                    if near_bound_params:
+                        notes.append(f"{len(near_bound_params)} params near bounds")
+                
+                notes_str = "; ".join(notes) if notes else "Good"
+                print(f"{rank:<6} {fit['gf']:<12.6f} {fit['bic']:<12.6f} {notes_str}")
+        
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+
+    def _save_batch_results(self, results, filename=None):
+        """
+        Save batch fitting results to file.
+        
+        Parameters:
+        -----------
+        results : dict
+            Batch fitting results
+        filename : str, optional
+            Filename for saving. If None, auto-generates
+            
+        Returns:
+        --------
+        str
+            Filename where results were saved
+        """
+        if filename is None:
+            filename = f"batch_fits_{self.geometry}_{self.layers}L.pkl"
+        
+        import pickle
+        with open(filename, 'wb') as f:
+            pickle.dump(results, f)
+        
+        return filename
+
+    def load_batch_results(self, filename):
+        """
+        Load batch fitting results from file.
+        
+        Parameters:
+        -----------
+        filename : str
+            Filename to load
+            
+        Returns:
+        --------
+        dict
+            Loaded batch fitting results
+        """
+        import pickle
+        with open(filename, 'rb') as f:
+            results = pickle.load(f)
+        return results
+
+    def apply_batch_fit_result(self, results, rank=1, recalculate=True):
+        """
+        Apply parameters from a specific batch fit result to the model.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        rank : int, optional
+            Rank of fit to apply (1 = best). Default: 1
+        recalculate : bool, optional
+            Whether to recalculate simulation and metrics. Default: True
+        """
+        if rank < 1 or rank > len(results['fits']):
+            raise ValueError(f"Rank {rank} is out of range (1 to {len(results['fits'])})")
+        
+        fit = results['fits'][rank-1]
+        
+        if not fit['converged'] or fit['final_params'] is None:
+            raise ValueError(f"Rank {rank} fit failed or has no parameters")
+        
+        print(f"Applying parameters from rank #{rank} fit:")
+        print(f"  GF: {fit['gf']:.6f}")
+        print(f"  BIC: {fit['bic']:.6f}")
+        
+        # Apply parameters
+        self.model_params = copy.deepcopy(fit['final_params'])
+        self.update_traditional_from_model_params()
+        
+        if recalculate:
+            # Recalculate simulation and metrics
+            if hasattr(self, 'discretization') and self.geometry == 'cylinder':
+                self.SimInt = self.simulate_structure(self.discretization)
+            else:
+                self.SimInt = self.simulate_structure()
+            
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            print(f"Model updated with rank #{rank} parameters")
+            print(f"Recalculated GF: {self.GF:.6f}")
+            print(f"Recalculated BIC: {self.BIC:.6f}")
+        else:
+            print(f"Model parameters updated (simulation not recalculated)")
+
+    def get_batch_fit_summary(self, results, criterion='GF', n_top=5):
+        """
+        Get a summary of batch fitting results.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        criterion : str, optional
+            Criterion for ranking ('GF' or 'BIC'). Default: 'GF'
+        n_top : int, optional
+            Number of top results to include in summary. Default: 5
+            
+        Returns:
+        --------
+        dict
+            Summary information
+        """
+        fits = results['fits']
+        successful_fits = [f for f in fits if f['converged'] and f['gf'] != float('inf')]
+        
+        if not successful_fits:
+            return {
+                'error': 'No successful fits found',
+                'total_fits': len(fits),
+                'successful_fits': 0
+            }
+        
+        # Sort by criterion
+        if criterion.upper() == 'BIC':
+            successful_fits.sort(key=lambda x: x['bic'])
+        else:
+            successful_fits.sort(key=lambda x: x['gf'])
+        
+        # Calculate statistics
+        gf_values = [f['gf'] for f in successful_fits]
+        bic_values = [f['bic'] for f in successful_fits]
+        
+        summary = {
+            'total_fits': len(fits),
+            'successful_fits': len(successful_fits),
+            'failed_fits': len(fits) - len(successful_fits),
+            'success_rate': len(successful_fits) / len(fits),
+            'best_fit': {
+                'rank': 1,
+                'gf': successful_fits[0]['gf'],
+                'bic': successful_fits[0]['bic'],
+                'params': successful_fits[0]['final_params']
+            },
+            'statistics': {
+                'gf': {
+                    'min': min(gf_values),
+                    'max': max(gf_values),
+                    'mean': np.mean(gf_values),
+                    'std': np.std(gf_values),
+                    'median': np.median(gf_values)
+                },
+                'bic': {
+                    'min': min(bic_values),
+                    'max': max(bic_values),
+                    'mean': np.mean(bic_values),
+                    'std': np.std(bic_values),
+                    'median': np.median(bic_values)
+                }
+            },
+            'top_fits': successful_fits[:n_top],
+            'criterion_used': criterion.upper()
+        }
+        
+        # Count parameters near bounds
+        total_near_bounds = 0
+        for fit in successful_fits:
+            if 'near_bounds' in fit:
+                near_count = sum(1 for info in fit['near_bounds'].values() 
+                            if isinstance(info, dict) and info.get('near_either', False))
+                total_near_bounds += near_count
+        
+        summary['parameters_near_bounds'] = {
+            'total_instances': total_near_bounds,
+            'average_per_fit': total_near_bounds / len(successful_fits) if successful_fits else 0
+        }
+        
+        return summary
+
+    def export_batch_results_table(self, results, filename=None, format='csv', 
+                                include_all_params=False, n_fits=None):
+        """
+        Export batch fitting results to a table file.
+        
+        Parameters:
+        -----------
+        results : dict
+            Results from batch_initialize_and_fit
+        filename : str, optional
+            Output filename. If None, auto-generates
+        format : str, optional
+            Output format ('csv', 'xlsx', or 'json'). Default: 'csv'
+        include_all_params : bool, optional
+            Whether to include all parameter values. Default: False (summary only)
+        n_fits : int, optional
+            Number of fits to export. If None, exports all
+            
+        Returns:
+        --------
+        str
+            Filename where table was exported
+        """
+        fits = results['fits']
+        
+        if n_fits is not None:
+            fits = fits[:n_fits]
+        
+        # Create table data
+        table_data = []
+        
+        for fit in fits:
+            row = {
+                'Rank': fit['rank'],
+                'Fit_ID': fit['fit_id'],
+                'GF': fit['gf'],
+                'BIC': fit['bic'],
+                'Converged': fit['converged']
+            }
+            
+            # Add initialization values
+            for param, value in fit['initialization'].items():
+                row[f'Init_{param}'] = value
+            
+            # Add final parameter values
+            if fit['final_params'] is not None and include_all_params:
+                if self.geometry == 'trapezoid':
+                    for i, trap in enumerate(fit['final_params']['trapezoids']):
+                        row[f'Final_trap_{i}_width'] = trap['width']
+                        if 'height' in trap:
+                            row[f'Final_trap_{i}_height'] = trap['height']
+                elif self.geometry == 'cylinder':
+                    for i, cyl in enumerate(fit['final_params']['cylinders']):
+                        row[f'Final_cyl_{i}_radius'] = cyl['radius']
+                        if 'height' in cyl:
+                            row[f'Final_cyl_{i}_height'] = cyl['height']
+                
+                # Add global parameters
+                row['Final_DW'] = fit['final_params']['DW']
+                row['Final_I0'] = fit['final_params']['I0']
+                row['Final_Bk'] = fit['final_params']['Bk']
+            
+            # Add near bounds information
+            if 'near_bounds' in fit:
+                near_bound_count = sum(1 for info in fit['near_bounds'].values() 
+                                    if isinstance(info, dict) and info.get('near_either', False))
+                row['Params_Near_Bounds'] = near_bound_count
+                
+                # List parameters near bounds
+                near_params = [name for name, info in fit['near_bounds'].items() 
+                            if isinstance(info, dict) and info.get('near_either', False)]
+                row['Near_Bounds_List'] = '; '.join(near_params) if near_params else ''
+            
+            table_data.append(row)
+        
+        # Create DataFrame
+        df = pd.DataFrame(table_data)
+        
+        # Generate filename if not provided
+        if filename is None:
+            filename = f"batch_results_{self.geometry}_{self.layers}L"
+        
+        # Export based on format
+        if format.lower() == 'csv':
+            full_filename = f"{filename}.csv"
+            df.to_csv(full_filename, index=False)
+        elif format.lower() == 'xlsx':
+            full_filename = f"{filename}.xlsx"
+            df.to_excel(full_filename, index=False)
+        elif format.lower() == 'json':
+            full_filename = f"{filename}.json"
+            df.to_json(full_filename, orient='records', indent=2)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+        
+        print(f"Table exported to: {full_filename}")
+        print(f"Exported {len(df)} fits with {len(df.columns)} columns")
+        
+        return full_filename
+
+    def compare_batch_results(self, results_list, labels=None, figsize=(12, 8)):
+        """
+        Compare multiple batch fitting results.
+        
+        Parameters:
+        -----------
+        results_list : list
+            List of results dictionaries from batch_initialize_and_fit
+        labels : list, optional
+            Labels for each result set
+        figsize : tuple, optional
+            Figure size
+        """
+        if labels is None:
+            labels = [f"Batch {i+1}" for i in range(len(results_list))]
+        
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=figsize)
+        
+        colors = plt.cm.tab10(np.linspace(0, 1, len(results_list)))
+        
+        for i, (results, label, color) in enumerate(zip(results_list, labels, colors)):
+            fits = results['fits']
+            successful_fits = [f for f in fits if f['converged'] and f['gf'] != float('inf')]
+            
+            if not successful_fits:
+                continue
+            
+            gf_values = [f['gf'] for f in successful_fits]
+            bic_values = [f['bic'] for f in successful_fits]
+            ranks = list(range(1, len(successful_fits) + 1))
+            
+            # Plot 1: GF vs Rank
+            ax1.semilogy(ranks[:20], gf_values[:20], 'o-', color=color, label=label, alpha=0.7)
+            ax1.set_xlabel('Rank')
+            ax1.set_ylabel('Goodness of Fit (GF)')
+            ax1.set_title('GF vs Rank (Top 20)')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot 2: BIC vs Rank
+            ax2.semilogy(ranks[:20], bic_values[:20], 'o-', color=color, label=label, alpha=0.7)
+            ax2.set_xlabel('Rank')
+            ax2.set_ylabel('BIC')
+            ax2.set_title('BIC vs Rank (Top 20)')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # Plot 3: GF Distribution
+            ax3.hist(gf_values, bins=20, alpha=0.6, color=color, label=label, density=True)
+            ax3.set_xlabel('Goodness of Fit (GF)')
+            ax3.set_ylabel('Density')
+            ax3.set_title('GF Distribution')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # Plot 4: Success Rate and Statistics
+            stats = {
+                'Total Fits': len(fits),
+                'Successful': len(successful_fits),
+                'Success Rate': len(successful_fits) / len(fits),
+                'Best GF': min(gf_values),
+                'Best BIC': min(bic_values)
+            }
+            
+            y_pos = len(results_list) - i - 1
+            ax4.text(0.1, y_pos, f"{label}:", fontweight='bold', color=color)
+            ax4.text(0.3, y_pos, f"Success: {stats['Success Rate']:.1%} ({stats['Successful']}/{stats['Total Fits']})")
+            ax4.text(0.7, y_pos, f"Best GF: {stats['Best GF']:.4f}")
+        
+        ax4.set_xlim(0, 1)
+        ax4.set_ylim(-0.5, len(results_list) - 0.5)
+        ax4.set_title('Batch Comparison Summary')
+        ax4.axis('off')
+        
+        plt.tight_layout()
+        plt.show()
