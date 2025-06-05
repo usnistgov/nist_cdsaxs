@@ -2543,17 +2543,16 @@ class CDSAXS_Model:
     def _copy_model_data(self, target_model):
         """
         Copy experimental data from this model to target model.
-        
-        Parameters:
-        -----------
-        target_model : CDSAXS_Model
-            Model to copy data to
+        Also store reference to source model for optimization inheritance.
         """
         data_attributes = ['Intensity', 'Qz', 'Qx', 'Qy', 'Qr', 'Alpha', 'numberpoints', 'numbercuts']
         
         for attr in data_attributes:
             if hasattr(self, attr):
                 setattr(target_model, attr, getattr(self, attr))
+        
+        # Store reference to source model for optimization parameter inheritance
+        target_model._source_model = self
 
     def _create_new_model_from_params(self, new_model_params):
         """
@@ -2660,8 +2659,8 @@ class CDSAXS_Model:
         raise ValueError(f"Could not create new model for geometry: {self.geometry}")
 
     def add_layer_at_percentage(self, height_percentage: float, auto_setup_optimization: bool = True, 
-                            optimization_margin: float = 0.2, discretization_per_nm: float = 5.0,
-                            new_layer_height: float = None):
+                           optimization_margin: float = 0.2, discretization_per_nm: float = 5.0,
+                           new_layer_height: float = None, inherit_global_limits: bool = True):
         """
         Add exactly one layer at the specified height percentage.
         
@@ -2672,11 +2671,13 @@ class CDSAXS_Model:
         auto_setup_optimization : bool, optional
             Whether to automatically setup optimization parameters. Default: True
         optimization_margin : float, optional
-            Margin for optimization bounds as a fraction. Default: 0.2 (±20%)
+            Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
         discretization_per_nm : float, optional
             For cylinder models: discretization points per nanometer. Default: 5.0
         new_layer_height : float, optional
             Height for the new layer in Angstroms. If None, calculates as 5% of total height
+        inherit_global_limits : bool, optional
+            Whether to inherit DW, I0, Bk limits from the original model. Default: True
             
         Returns:
         --------
@@ -2793,9 +2794,10 @@ class CDSAXS_Model:
         
         # Setup optimization parameters if requested
         if auto_setup_optimization:
-            new_model._setup_optimization_for_new_layers(optimization_margin)
+            new_model._setup_optimization_for_new_layers(optimization_margin, inherit_global_limits)
         
         return new_model
+
 
     def _add_trapezoid_layer_continuous(self, layer_index: int, position_in_layer: float, insertion_width: float):
         """
@@ -2951,7 +2953,7 @@ class CDSAXS_Model:
 
     def add_multiple_layers(self, height_percentages: list, sequential: bool = False, 
                        auto_setup_optimization: bool = True, optimization_margin: float = 0.2,
-                       discretization_per_nm: float = 5.0):
+                       discretization_per_nm: float = 5.0, inherit_global_limits: bool = True):
         """
         Add multiple layers at different height percentages.
         
@@ -2965,9 +2967,11 @@ class CDSAXS_Model:
         auto_setup_optimization : bool, optional
             Whether to automatically setup optimization parameters. Default: True
         optimization_margin : float, optional
-            Margin for optimization bounds as a fraction. Default: 0.2 (±20%)
+            Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
         discretization_per_nm : float, optional
             For cylinder models: discretization points per nanometer. Default: 5.0
+        inherit_global_limits : bool, optional
+            Whether to inherit DW, I0, Bk limits from the original model. Default: True
             
         Returns:
         --------
@@ -2988,12 +2992,13 @@ class CDSAXS_Model:
                     height_percentage, 
                     auto_setup_optimization=False,
                     optimization_margin=optimization_margin,
-                    discretization_per_nm=discretization_per_nm
+                    discretization_per_nm=discretization_per_nm,
+                    inherit_global_limits=inherit_global_limits
                 )
             
             # Setup optimization for the final model
             if auto_setup_optimization:
-                current_model._setup_optimization_for_new_layers(optimization_margin)
+                current_model._setup_optimization_for_new_layers(optimization_margin, inherit_global_limits)
             
             return current_model
         else:
@@ -3005,7 +3010,8 @@ class CDSAXS_Model:
                     height_percentage, 
                     auto_setup_optimization=auto_setup_optimization,
                     optimization_margin=optimization_margin,
-                    discretization_per_nm=discretization_per_nm
+                    discretization_per_nm=discretization_per_nm,
+                    inherit_global_limits=inherit_global_limits
                 )
                 new_models.append(new_model)
             
@@ -3068,15 +3074,19 @@ class CDSAXS_Model:
         
         return new_model
     
-    def _setup_optimization_for_new_layers(self, optimization_margin: float = 0.2):
+    def _setup_optimization_for_new_layers(self, optimization_margin: float = 0.2, inherit_global_limits: bool = True):
         """
         Set up optimization parameters for the current model structure.
         
         Parameters:
         -----------
         optimization_margin : float, optional
-            Margin for optimization bounds as a fraction (0.2 = ±20%). Default: 0.2
+            Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
+        inherit_global_limits : bool, optional
+            Whether to inherit DW, I0, Bk limits from previous model if available. Default: True
         """
+        import numpy as np
+        
         # Initialize optimization parameters with the specified margin
         param_limits = {}
         
@@ -3120,33 +3130,94 @@ class CDSAXS_Model:
                         'default': height_val
                     }
         
-        # Add global parameters
-        param_limits['DW'] = {
-            'min': self.DW * (1 - optimization_margin),
-            'max': self.DW * (1 + optimization_margin),
-            'default': self.DW
-        }
-        
-        param_limits['I0'] = {
-            'min': self.I0 * (1 - optimization_margin),
-            'max': self.I0 * (1 + optimization_margin),
-            'default': self.I0
-        }
-        
-        # Handle background parameters
-        if isinstance(self.Bk, np.ndarray):
-            for i, bk_val in enumerate(self.Bk):
-                param_limits[f'Bk_{i}'] = {
-                    'min': bk_val * (1 - optimization_margin),
-                    'max': bk_val * (1 + optimization_margin),
-                    'default': bk_val
+        # Add global parameters with inheritance option
+        if inherit_global_limits and hasattr(self, '_source_model') and hasattr(self._source_model, 'model_params'):
+            # Try to inherit from source model optimization parameters
+            source_optimization = self._source_model.model_params.get('optimization', {})
+            
+            # Inherit DW limits if available
+            if 'DW' in source_optimization:
+                inherited_dw = source_optimization['DW'].copy()
+                inherited_dw['default'] = self.DW  # Update default to current value
+                param_limits['DW'] = inherited_dw
+            else:
+                # Fallback to margin-based
+                param_limits['DW'] = {
+                    'min': self.DW * (1 - optimization_margin),
+                    'max': self.DW * (1 + optimization_margin),
+                    'default': self.DW
                 }
+            
+            # Inherit I0 limits if available
+            if 'I0' in source_optimization:
+                inherited_i0 = source_optimization['I0'].copy()
+                inherited_i0['default'] = self.I0  # Update default to current value
+                param_limits['I0'] = inherited_i0
+            else:
+                # Fallback to margin-based
+                param_limits['I0'] = {
+                    'min': self.I0 * (1 - optimization_margin),
+                    'max': self.I0 * (1 + optimization_margin),
+                    'default': self.I0
+                }
+            
+            # Inherit background limits if available
+            if isinstance(self.Bk, np.ndarray):
+                # Array background - inherit individual limits
+                for i, bk_val in enumerate(self.Bk):
+                    bk_param_name = f'Bk_{i}'
+                    if bk_param_name in source_optimization:
+                        inherited_bk = source_optimization[bk_param_name].copy()
+                        inherited_bk['default'] = bk_val  # Update default to current value
+                        param_limits[bk_param_name] = inherited_bk
+                    else:
+                        # Fallback to margin-based
+                        param_limits[bk_param_name] = {
+                            'min': bk_val * (1 - optimization_margin),
+                            'max': bk_val * (1 + optimization_margin),
+                            'default': bk_val
+                        }
+            else:
+                # Scalar background
+                if 'Bk' in source_optimization:
+                    inherited_bk = source_optimization['Bk'].copy()
+                    inherited_bk['default'] = self.Bk  # Update default to current value
+                    param_limits['Bk'] = inherited_bk
+                else:
+                    # Fallback to margin-based
+                    param_limits['Bk'] = {
+                        'min': self.Bk * (1 - optimization_margin),
+                        'max': self.Bk * (1 + optimization_margin),
+                        'default': self.Bk
+                    }
         else:
-            param_limits['Bk'] = {
-                'min': self.Bk * (1 - optimization_margin),
-                'max': self.Bk * (1 + optimization_margin),
-                'default': self.Bk
+            # No inheritance - use margin-based approach for global parameters
+            param_limits['DW'] = {
+                'min': self.DW * (1 - optimization_margin),
+                'max': self.DW * (1 + optimization_margin),
+                'default': self.DW
             }
+            
+            param_limits['I0'] = {
+                'min': self.I0 * (1 - optimization_margin),
+                'max': self.I0 * (1 + optimization_margin),
+                'default': self.I0
+            }
+            
+            # Handle background parameters
+            if isinstance(self.Bk, np.ndarray):
+                for i, bk_val in enumerate(self.Bk):
+                    param_limits[f'Bk_{i}'] = {
+                        'min': bk_val * (1 - optimization_margin),
+                        'max': bk_val * (1 + optimization_margin),
+                        'default': bk_val
+                    }
+            else:
+                param_limits['Bk'] = {
+                    'min': self.Bk * (1 - optimization_margin),
+                    'max': self.Bk * (1 + optimization_margin),
+                    'default': self.Bk
+                }
         
         # Store optimization parameters
         self.model_params['optimization'] = param_limits
