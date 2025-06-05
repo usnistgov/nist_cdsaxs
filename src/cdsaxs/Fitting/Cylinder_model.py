@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import scipy.special as sp
 import copy
 from scipy.optimize import differential_evolution
+from tqdm import tqdm
 
 from CDSAXS_base_model import CDSAXS_Model
 
