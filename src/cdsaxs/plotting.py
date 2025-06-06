@@ -16,11 +16,22 @@ import cdsaxs._plotting_tools as plotting_tools
 
 def plot2D(image: NDArray, axis0=None, axis1=None,
            axis0_type=None, axis1_type=None, title=None,
-           log_scale=True):
+           log_scale=True, vlimits=None):
     # TODO axis not rendering in vs code notebook - KNOWN ISSUE VSCODE/PLOTLY
 
     plot_image = np.copy(image)
+    if vlimits is not None:
+        vmin, vmax = vlimits
+    else:
+        vlimits = plotting_tools.get_image_vlimits(plot_image)
+    
     if log_scale:
+        plot_image = np.log10(plot_image)
+        plot_image[np.isneginf(plot_image)] = vmin-1
+        plot_image[np.isnan(plot_image)] = None
+
+
+    elif log_scale:
         with np.errstate(divide='ignore', invalid='ignore'):
             plot_image = np.log10(plot_image)
         vmin = np.nanmin(plot_image[plot_image > -np.inf])
@@ -95,6 +106,11 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
         x=x, y=y, mode='lines', line=dict(color='red')
     ))
 
+    fig_box = plot2D(data.image[ymin:ymax, xmin:xmax],
+                     axis0=data.qdy[ymin:ymax],
+                     axis1=data.qdx[xmin:xmax],
+                     axis0_type='qdy', axis1_type='qdx', log_scale=log_scale)
+
     # integrated 1D data
     fig_slice = go.Figure(data=go.Scatter(
         x=integrated_q_slice.q,
@@ -134,7 +150,7 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True):
             {'range': (0, np.nanmax(integrated_q_slice.Iq)*1.05)}
         )
 
-    return fig, fig_slice
+    return fig, fig_box, fig_slice
 
 
 def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,

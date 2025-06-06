@@ -4,6 +4,22 @@ Helpful plotting tools for cdsaxs.
 
 import numpy as np
 
+def get_image_vlimits(data, log_scale=True):
+    """
+    Returns vmin, vmax limits for colorbar plotting of intensity data.
+    """
+    if log_scale:
+        with np.errstate(divide='ignore', invalid='ignore')
+            data = np.log10(data)
+        vmin = np.nanmin(data[data > -np.inf])
+        vmax = np.nanmax(data)
+
+    else:
+        vmin = 0
+        vmax = np.nanmax(data)
+
+    return vmin, vmax
+
 
 def create_even_q_ticks(q, num=6, includes_zero=True):
     """
