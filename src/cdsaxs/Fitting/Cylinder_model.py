@@ -16,7 +16,7 @@ class CylinderModel(CDSAXS_Model):
     
     def __init__(self, model, layers, PAR=None, SLD=None, DW=None, I0=None, Bk=None, Pitch=None, model_params=None):
         """
-        Initialize the cylinder model.
+        Initialize the cylinder model with thickness-based discretization.
         
         Parameters:
         -----------
@@ -45,11 +45,24 @@ class CylinderModel(CDSAXS_Model):
         self.Qr = None
         self.Alpha = None
         
-        # Set default discretization if not provided
-        if not hasattr(self, 'discretization'):
-            self.discretization = [10] * self.layers
-            if hasattr(self, 'model_params'):
-                self.model_params['discretization'] = self.discretization
+        # Set default discretization per thickness (points per Angstrom)
+        self.discretization_per_thickness = 1/50  # 1 point per 50 Angstroms (0.02 points/Å)
+        
+        # Handle legacy discretization arrays in model_params
+        if hasattr(self, 'model_params') and 'discretization' in self.model_params:
+            legacy_disc = self.model_params['discretization']
+            if isinstance(legacy_disc, list) and len(legacy_disc) > 0:
+                print(f"Converting legacy discretization array {legacy_disc} to thickness-based discretization")
+                # Keep the legacy approach for now, but note the conversion
+                self._legacy_discretization = legacy_disc
+            else:
+                # Remove old discretization format
+                del self.model_params['discretization']
+        
+        # Store discretization in model_params
+        if hasattr(self, 'model_params'):
+            self.model_params['discretization_per_thickness'] = self.discretization_per_thickness
+    
     
     def build_model_params_from_traditional(self):
         """
@@ -74,7 +87,7 @@ class CylinderModel(CDSAXS_Model):
             'DW': self.DW,
             'I0': self.I0,
             'Bk': self.Bk,
-            'discretization': self.discretization if hasattr(self, 'discretization') else [10] * self.layers
+            'discretization_per_thickness': self.discretization_per_thickness
         }
         
         # Add optional parameters if they exist
@@ -86,43 +99,6 @@ class CylinderModel(CDSAXS_Model):
             
         return self.model_params
     
-    def update_traditional_from_model_params(self):
-        """
-        Update traditional parameters from model_params dictionary.
-        """
-        if not hasattr(self, 'model_params'):
-            return
-            
-        # Update PAR from cylinders
-        cylinders = self.model_params['cylinders']
-        if not hasattr(self, 'PAR') or self.PAR is None or self.PAR.shape[0] != len(cylinders):
-            self.PAR = np.zeros((len(cylinders), 2))
-            
-        for i, cyl in enumerate(cylinders):
-            self.PAR[i, 0] = cyl['radius']
-            self.PAR[i, 1] = cyl['height']
-        
-        # Update global parameters
-        self.DW = self.model_params['DW']
-        self.I0 = self.model_params['I0']
-        self.Bk = self.model_params['Bk']
-        
-        # Update discretization
-        if 'discretization' in self.model_params:
-            self.discretization = self.model_params['discretization']
-        
-        # Update optional parameters
-        if 'SLD' in self.model_params:
-            self.SLD = self.model_params['SLD']
-            
-        if 'Pitch' in self.model_params:
-            self.Pitch = self.model_params['Pitch']
-            
-        # Update SimPar
-        self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
-        
-        return True
-    
     def process_imported_data(self):
         """
         Process imported data for cylinder model.
@@ -131,18 +107,21 @@ class CylinderModel(CDSAXS_Model):
             # Convert Cartesian to cylindrical coordinates
             self.convert_Cartesian_Cylindrical()
             
+            # Calculate discretization array based on current heights
+            self.discretization = self._calculate_discretization_array()
+            
             # Run initial simulation
-            if not hasattr(self, 'discretization'):
-                self.discretization = [10] * self.layers
-                if hasattr(self, 'model_params'):
-                    self.model_params['discretization'] = self.discretization
-                    
             self.SimCyl_SM(self.discretization)
             self.SimInt_Initial = self.SimInt.copy() if hasattr(self, 'SimInt') else None
             self.GF = self.GF_calc(self.SimInt)
             self.GF_Initial = self.GF
             self.BIC = self.BIC_calc(self.GF)
             self.BIC_Initial = self.BIC
+            
+            print(f"Cylinder model initialized with discretization: {self.discretization}")
+            heights = [cyl['height'] for cyl in self.model_params['cylinders'][:-1]]
+            print(f"Layer heights: {[f'{h:.1f}' for h in heights]} Å")
+            
         except Exception as e:
             print(f"Warning: Error in cylinder initialization: {str(e)}")
             print("Data import successful, but cylinder initialization failed.")
@@ -345,6 +324,79 @@ class CylinderModel(CDSAXS_Model):
                 
         return PAR
     
+    def update_traditional_from_model_params(self):
+        """
+        Update traditional parameters from model_params dictionary.
+        """
+        if not hasattr(self, 'model_params'):
+            return
+            
+        # Update PAR from cylinders
+        cylinders = self.model_params['cylinders']
+        if not hasattr(self, 'PAR') or self.PAR is None or self.PAR.shape[0] != len(cylinders):
+            self.PAR = np.zeros((len(cylinders), 2))
+            
+        for i, cyl in enumerate(cylinders):
+            self.PAR[i, 0] = cyl['radius']
+            self.PAR[i, 1] = cyl['height']
+        
+        # Update global parameters
+        self.DW = self.model_params['DW']
+        self.I0 = self.model_params['I0']
+        self.Bk = self.model_params['Bk']
+        
+        # Update discretization per thickness
+        if 'discretization_per_thickness' in self.model_params:
+            self.discretization_per_thickness = self.model_params['discretization_per_thickness']
+        
+        # Update optional parameters
+        if 'SLD' in self.model_params:
+            self.SLD = self.model_params['SLD']
+            
+        if 'Pitch' in self.model_params:
+            self.Pitch = self.model_params['Pitch']
+            
+        # Update SimPar
+        self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
+        
+        return True
+    
+    def _calculate_discretization_array(self, min_points=3, max_points=100):
+        """
+        Calculate discretization array based on layer heights and discretization per thickness.
+        
+        Parameters:
+        -----------
+        min_points : int, optional
+            Minimum discretization points per layer. Default: 3
+        max_points : int, optional
+            Maximum discretization points per layer. Default: 100
+            
+        Returns:
+        --------
+        list
+            Discretization array for each layer
+        """
+        if not hasattr(self, 'model_params') or 'cylinders' not in self.model_params:
+            # Fallback to default
+            return [10] * self.layers
+        
+        cylinders = self.model_params['cylinders']
+        discretization_array = []
+        
+        for i in range(len(cylinders) - 1):  # Exclude the top cylinder (no height)
+            height = cylinders[i]['height']
+            
+            # Calculate points based on thickness
+            calculated_points = int(height * self.discretization_per_thickness)
+            
+            # Apply bounds
+            final_points = max(min_points, min(calculated_points, max_points))
+            discretization_array.append(final_points)
+        
+        return discretization_array
+    
+    
     def ConeFourierTransform(self, Discretization=None):
         """
         Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
@@ -509,7 +561,7 @@ class CylinderModel(CDSAXS_Model):
         -----------
         Discretization : list or numpy.ndarray, optional
             Number of discretization steps for each layer
-            If None, uses self.discretization
+            If None, calculates based on discretization_per_thickness
         
         Returns:
         --------
@@ -538,12 +590,9 @@ class CylinderModel(CDSAXS_Model):
             if not hasattr(self, 'layers'):
                 raise AttributeError("Missing required attribute: layers")
                 
-            # Use provided discretization or default
+            # Use provided discretization or calculate from thickness
             if Discretization is None:
-                if not hasattr(self, 'discretization'):
-                    # Create default discretization
-                    self.discretization = [10] * self.layers
-                Discretization = self.discretization
+                Discretization = self._calculate_discretization_array()
                 
             # Check discretization length
             if len(Discretization) < self.layers:
@@ -571,6 +620,8 @@ class CylinderModel(CDSAXS_Model):
             print(f"Error in SimCyl_SM: {str(e)}")
             self.SimInt = None
             return None
+            
+
     
     def SimCyl_GF(self, SimPar, layers, Intensity, Qr, Qz, Discretization):
         """
@@ -661,7 +712,7 @@ class CylinderModel(CDSAXS_Model):
     
     def _cylinder_optimization_wrapper(self, optimization_values):
         """
-        Wrapper function for cylindrical optimization that can be pickled.
+        Wrapper function for cylindrical optimization that automatically handles discretization.
         """
         # Create PAR array from optimization values
         temp_PAR = np.zeros((self.layers + 1, 2))
@@ -686,11 +737,19 @@ class CylinderModel(CDSAXS_Model):
             elif param_name == 'Bk':
                 temp_Bk = optimization_values[i]
         
+        # Calculate discretization based on current heights
+        temp_discretization = []
+        for i in range(self.layers):
+            height = temp_PAR[i, 1]
+            calculated_points = int(height * self.discretization_per_thickness)
+            final_points = max(3, min(calculated_points, 100))
+            temp_discretization.append(final_points)
+        
         # Create SimPar array for cylindrical GF function
         SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
         
-        # Call cylindrical GF function
-        return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+        # Call cylindrical GF function with calculated discretization
+        return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, temp_discretization)
 
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
                         plot_structure=True, plot_grid=True, plot_combined=True,
@@ -1158,3 +1217,49 @@ class CylinderModel(CDSAXS_Model):
             The simulated intensity (also sets self.SimInt)
         """
         return self.SimCyl_SM(*args, **kwargs)
+    
+    def set_discretization_per_thickness(self, points_per_angstrom):
+        """
+        Set the discretization per thickness parameter.
+        
+        Parameters:
+        -----------
+        points_per_angstrom : float
+            Number of discretization points per Angstrom of height
+        """
+        self.discretization_per_thickness = points_per_angstrom
+        
+        # Update in model_params if it exists
+        if hasattr(self, 'model_params'):
+            self.model_params['discretization_per_thickness'] = points_per_angstrom
+        
+        # Recalculate discretization array
+        if hasattr(self, 'model_params') and 'cylinders' in self.model_params:
+            self.discretization = self._calculate_discretization_array()
+            print(f"Updated discretization per thickness to {points_per_angstrom:.4f} points/Å")
+            print(f"New discretization array: {self.discretization}")
+    
+    def get_discretization_info(self):
+        """
+        Get information about current discretization settings.
+        
+        Returns:
+        --------
+        dict
+            Information about discretization
+        """
+        info = {
+            'discretization_per_thickness': self.discretization_per_thickness,
+            'points_per_50_angstrom': self.discretization_per_thickness * 50,
+        }
+        
+        if hasattr(self, 'discretization'):
+            info['current_discretization_array'] = self.discretization
+            
+        if hasattr(self, 'model_params') and 'cylinders' in self.model_params:
+            heights = [cyl['height'] for cyl in self.model_params['cylinders'][:-1]]
+            info['layer_heights'] = heights
+            info['total_height'] = sum(heights)
+            info['total_discretization_points'] = sum(self.discretization) if hasattr(self, 'discretization') else 0
+            
+        return info

@@ -1507,7 +1507,7 @@ class CDSAXS_Model:
             print("Model parameters updated (simulation not recalculated)")
   
     def _set_parameter_value(self, param_name, value):
-        """Set a parameter value in the model."""
+        """Set a parameter value in the model with automatic discretization handling."""
         if param_name.startswith('trap_'):
             # Trapezoid parameter
             parts = param_name.split('_')
@@ -1520,6 +1520,11 @@ class CDSAXS_Model:
             cyl_idx = int(parts[1])
             param_type = parts[2]
             self.model_params['cylinders'][cyl_idx][param_type] = value
+            
+            # For cylinder models, discretization is automatically handled by 
+            # the thickness-based approach in _calculate_discretization_array()
+            # No need for manual discretization updates!
+                
         elif param_name.startswith('Bk_'):
             # Background parameter for specific column
             bk_idx = int(param_name.split('_')[1])
@@ -2660,10 +2665,10 @@ class CDSAXS_Model:
         raise ValueError(f"Could not create new model for geometry: {self.geometry}")
 
     def add_layer_at_percentage(self, height_percentage: float, auto_setup_optimization: bool = True, 
-                           optimization_margin: float = 0.2, discretization_per_nm: float = 5.0,
-                           new_layer_height: float = None, inherit_global_limits: bool = True):
+                       optimization_margin: float = 0.2, discretization_per_thickness: float = None,
+                       new_layer_height: float = None, inherit_global_limits: bool = True):
         """
-        Add exactly one layer at the specified height percentage.
+        Add exactly one layer at the specified height percentage with consistent discretization.
         
         Parameters:
         -----------
@@ -2673,8 +2678,8 @@ class CDSAXS_Model:
             Whether to automatically setup optimization parameters. Default: True
         optimization_margin : float, optional
             Margin for optimization bounds as a fraction for new structure parameters. Default: 0.2 (±20%)
-        discretization_per_nm : float, optional
-            For cylinder models: discretization points per nanometer. Default: 5.0
+        discretization_per_thickness : float, optional
+            For cylinder models: discretization points per Angstrom. If None, inherits from parent model
         new_layer_height : float, optional
             Height for the new layer in Angstroms. If None, calculates as 5% of total height
         inherit_global_limits : bool, optional
@@ -2779,13 +2784,15 @@ class CDSAXS_Model:
             new_model_params['trapezoids'] = new_structures
         else:
             new_model_params['cylinders'] = new_structures
-            # Generate discretization for cylinders
-            new_discretization = []
-            for i in range(len(new_heights)):
-                h_nm = new_structures[i]['height'] / 10.0
-                disc = max(5, min(50, int(h_nm * discretization_per_nm)))
-                new_discretization.append(disc)
-            new_model_params['discretization'] = new_discretization
+            # Handle discretization consistently for cylinders
+            if discretization_per_thickness is None:
+                # Inherit from parent model
+                if hasattr(self, 'discretization_per_thickness'):
+                    new_model_params['discretization_per_thickness'] = self.discretization_per_thickness
+                else:
+                    new_model_params['discretization_per_thickness'] = 1/50  # Default: 1 point per 50 Å
+            else:
+                new_model_params['discretization_per_thickness'] = discretization_per_thickness
         
         new_model_params['layers'] = len(new_heights)
         
