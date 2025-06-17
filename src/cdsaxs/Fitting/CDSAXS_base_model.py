@@ -656,11 +656,11 @@ class CDSAXS_Model:
     
     
     def parameter_sweep_1d(self, sweep_param, sweep_range, n_points=20, 
-                                exclude_from_fit=None, plot_results=True, 
-                                figsize=(10, 6), save_results=False, filename=None,
-                                optimization_kwargs=None, verbose=True):
+                            exclude_from_fit=None, plot_results=True, 
+                            figsize=(10, 6), save_results=False, filename=None,
+                            optimization_kwargs=None, verbose=True):
         """
-        Fixed version of parameter_sweep_1d with proper error handling and results storage.
+        Fixed version of parameter_sweep_1d with proper cylinder model handling.
         """
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
@@ -713,13 +713,17 @@ class CDSAXS_Model:
                 if not opt_params:
                     # No parameters to optimize, just calculate GF
                     try:
-                        # Handle both geometries correctly
-                        if hasattr(self, 'discretization') and self.geometry == 'cylinder':
-                            # Cylinder models need discretization parameter
-                            sim_result = self.simulate_structure(self.discretization)
+                        # FIXED: Use the proper model-specific simulation method
+                        if self.geometry == 'cylinder':
+                            # For cylinder models, ensure discretization is recalculated
+                            if hasattr(self, '_calculate_discretization_array'):
+                                discretization = self._calculate_discretization_array()
+                                sim_result = self.SimCyl_SM(discretization)
+                            else:
+                                sim_result = self.SimCyl_SM()
                         else:
-                            # Trapezoid models don't need discretization
-                            sim_result = self.simulate_structure()
+                            # Trapezoid models
+                            sim_result = self.SimTrap_SM()
                         
                         # Check if simulation succeeded
                         if sim_result is not None:
@@ -738,10 +742,10 @@ class CDSAXS_Model:
                         if verbose:
                             print(f"Warning: Simulation error at {sweep_param}={value}: {e}")
                 else:
-                    # Run optimization with suppressed output
+                    # Run optimization with proper error handling
                     try:
-                        # Don't assign the return value to avoid dictionary display
-                        self.CDSAXS_DiffEvolution(
+                        # FIXED: Use the model's built-in optimization method instead of direct differential_evolution
+                        optimized_params = self.CDSAXS_DiffEvolution(
                             params_to_optimize=opt_params,
                             plot_results=False,  # Suppress plots during sweep
                             verbose=False,       # Suppress optimization output
@@ -749,13 +753,13 @@ class CDSAXS_Model:
                         )
                         
                         # Get results from model attributes
-                        if hasattr(self, 'GF') and hasattr(self, 'BIC'):
+                        if optimized_params is not None and hasattr(self, 'GF') and hasattr(self, 'BIC'):
                             gf = self.GF
                             bic = self.BIC
                             converged = True
                         else:
                             if verbose:
-                                print(f"Warning: No GF/BIC attributes after optimization at {sweep_param}={value}")
+                                print(f"Warning: Optimization returned None at {sweep_param}={value}")
                             
                     except Exception as e:
                         if verbose:
