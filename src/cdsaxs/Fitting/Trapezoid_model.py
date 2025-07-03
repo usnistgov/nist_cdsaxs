@@ -1521,9 +1521,26 @@ class TrapezoidModelArray(CDSAXS_Model):
     def _trapezoid_optimization_wrapper(self, optimization_values):
         """
         Wrapper function for trapezoid optimization that can be used with any scipy optimizer.
+        Fixed version that doesn't rely on self.param_names.
         """
-        return self.SimTrap_GF(optimization_values, self.param_names, 
-                            self.Intensity, self.Qx, self.Qz)
+        try:
+            # Get parameter names from optimization parameters if param_names isn't available
+            if hasattr(self, 'param_names'):
+                param_names = self.param_names
+            elif hasattr(self, 'mcmc_param_names'):
+                param_names = self.mcmc_param_names
+            else:
+                # Generate parameter names from optimization parameters
+                param_names = list(self.model_params.get('optimization', {}).keys())
+            
+            if len(optimization_values) != len(param_names):
+                raise ValueError(f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}")
+            
+            return self.SimTrap_GF(optimization_values, param_names, self.Intensity, self.Qx, self.Qz)
+            
+        except Exception as e:
+            print(f"Error in trapezoid wrapper: {e}")
+            return float('inf')
         
     
 # Create an alias for backward compatibility

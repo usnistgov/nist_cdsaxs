@@ -4836,3 +4836,1101 @@ class CDSAXS_Model:
                     optimized_params[param_name] = optimal_values[i]
         
         return optimized_params
+    
+    
+    import numpy as np
+    import copy
+    import matplotlib.pyplot as plt
+    import corner  # For corner plots
+    from tqdm import tqdm
+    import warnings
+
+    def CDSAXS_MCMC(self, params_to_sample=None, n_walkers=50, n_steps=1000, 
+                    burn_in=200, thin=1, progress=True, plot_results=True,
+                    plot_chains=True, plot_corner=True, plot_structure=True,
+                    save_chains=False, chain_filename=None, verbose=True,
+                    prior_type='uniform', sigma_multiplier=10.0, **emcee_kwargs):
+        """
+        Perform MCMC sampling using emcee to estimate parameters and uncertainties.
+        
+        Parameters:
+        -----------
+        params_to_sample : dict, optional
+            Dictionary containing parameters to sample with their bounds
+            If None, uses self.model_params['optimization']
+        n_walkers : int, optional
+            Number of MCMC walkers. Default: 50
+        n_steps : int, optional
+            Number of MCMC steps per walker. Default: 1000
+        burn_in : int, optional
+            Number of burn-in steps to discard. Default: 200
+        thin : int, optional
+            Thinning factor for chains. Default: 1 (no thinning)
+        progress : bool, optional
+            Whether to show progress bar. Default: True
+        plot_results : bool, optional
+            Whether to generate plots. Default: True
+        plot_chains : bool, optional
+            Whether to plot walker chains. Default: True
+        plot_corner : bool, optional
+            Whether to plot corner plot. Default: True
+        plot_structure : bool, optional
+            Whether to plot structure with uncertainties. Default: True
+        save_chains : bool, optional
+            Whether to save chains to file. Default: False
+        chain_filename : str, optional
+            Filename for saved chains
+        verbose : bool, optional
+            Whether to print detailed output. Default: True
+        prior_type : str, optional
+            Type of prior: 'uniform', 'gaussian'. Default: 'uniform'
+        sigma_multiplier : float, optional
+            For Gaussian priors: std = (max-min)/sigma_multiplier. Default: 10.0
+        **emcee_kwargs : dict
+            Additional arguments passed to emcee.EnsembleSampler
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing MCMC results, chains, and statistics
+        """
+        try:
+            # Check if emcee is available
+            try:
+                import emcee
+            except ImportError:
+                raise ImportError("emcee package is required. Install with: pip install emcee")
+            
+            # Check if required attributes exist
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                if self.geometry == 'cylinder' and hasattr(self, 'Qy'):
+                    self.convert_Cartesian_Cylindrical()
+                else:
+                    raise AttributeError("Missing required scattering vector attributes")
+            
+            # Initialize optimization parameters if needed
+            if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+                self.initialize_optimization_params()
+            
+            # Determine parameters to sample
+            if params_to_sample is None:
+                params_to_sample = self.model_params['optimization']
+            
+            # Ensure all parameters have default values
+            params_to_sample = self._ensure_defaults_in_params(params_to_sample)
+            
+            # Setup MCMC parameters
+            param_names = list(params_to_sample.keys())
+            n_params = len(param_names)
+            
+            if verbose:
+                print(f"Setting up MCMC with {n_params} parameters and {n_walkers} walkers")
+                print(f"Parameters to sample: {param_names}")
+            
+            # Store parameter info
+            self.mcmc_param_names = param_names
+            self.mcmc_param_info = params_to_sample
+            
+            # Setup priors and initial positions
+            bounds, initial_positions, log_prior_func = self._setup_mcmc_priors(
+                params_to_sample, n_walkers, prior_type, sigma_multiplier
+            )
+            
+            # Create log probability function
+            def log_probability(theta):
+                # Check priors
+                lp = log_prior_func(theta)
+                if not np.isfinite(lp):
+                    return -np.inf
+                
+                # Calculate likelihood
+                ll = self._mcmc_log_likelihood(theta)
+                if not np.isfinite(ll):
+                    return -np.inf
+                    
+                return lp + ll
+            
+            # Initialize sampler
+            sampler = emcee.EnsembleSampler(
+                n_walkers, n_params, log_probability, **emcee_kwargs
+            )
+            
+            if verbose:
+                print(f"Running MCMC: {n_steps} steps with {n_walkers} walkers")
+                print(f"Burn-in: {burn_in} steps, Thinning: {thin}")
+            
+            # Run MCMC
+            if progress:
+                # Run with progress bar
+                with tqdm(total=n_steps, desc="MCMC Progress") as pbar:
+                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps)):
+                        pbar.update(1)
+                        if i % 100 == 0 and verbose:
+                            acceptance = np.mean(sampler.acceptance_fraction)
+                            pbar.set_postfix({"Accept": f"{acceptance:.3f}"})
+            else:
+                # Run without progress bar
+                sampler.run_mcmc(initial_positions, n_steps)
+            
+            # Extract results
+            chains = sampler.get_chain()
+            log_prob = sampler.get_log_prob()
+            
+            # Apply burn-in and thinning
+            if burn_in > 0:
+                chains_burned = chains[burn_in:]
+                log_prob_burned = log_prob[burn_in:]
+            else:
+                chains_burned = chains
+                log_prob_burned = log_prob
+            
+            if thin > 1:
+                chains_final = chains_burned[::thin]
+                log_prob_final = log_prob_burned[::thin]
+            else:
+                chains_final = chains_burned
+                log_prob_final = log_prob_burned
+            
+            # Flatten chains for analysis
+            flat_chains = chains_final.reshape(-1, n_params)
+            flat_log_prob = log_prob_final.flatten()
+            
+            # Calculate statistics
+            param_stats = self._calculate_mcmc_statistics(flat_chains, param_names)
+            
+            # Find best-fit parameters
+            best_idx = np.argmax(flat_log_prob)
+            best_params = flat_chains[best_idx]
+            
+            # Create results dictionary
+            results = {
+                'chains': chains,
+                'chains_burned': chains_burned,
+                'chains_final': chains_final,
+                'flat_chains': flat_chains,
+                'log_prob': log_prob,
+                'log_prob_final': log_prob_final,
+                'param_names': param_names,
+                'param_stats': param_stats,
+                'best_params': best_params,
+                'best_log_prob': flat_log_prob[best_idx],
+                'n_walkers': n_walkers,
+                'n_steps': n_steps,
+                'burn_in': burn_in,
+                'thin': thin,
+                'acceptance_fraction': sampler.acceptance_fraction,
+                'mean_acceptance': np.mean(sampler.acceptance_fraction),
+                'autocorr_time': None,  # Will calculate if possible
+                'effective_samples': len(flat_chains)
+            }
+            
+            # Calculate autocorrelation time if possible
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    autocorr_time = sampler.get_autocorr_time(quiet=True)
+                    results['autocorr_time'] = autocorr_time
+                    results['mean_autocorr_time'] = np.mean(autocorr_time)
+            except Exception:
+                if verbose:
+                    print("Warning: Could not calculate autocorrelation time")
+            
+            # Apply best-fit parameters to model
+            self._apply_mcmc_parameters(best_params, param_names)
+            
+            # Print summary
+            if verbose:
+                self._print_mcmc_summary(results)
+            
+            # Generate plots
+            if plot_results:
+                self._plot_mcmc_results(results, plot_chains, plot_corner, plot_structure)
+            
+            # Save chains if requested
+            if save_chains:
+                filename = self._save_mcmc_chains(results, chain_filename)
+                if verbose:
+                    print(f"Chains saved to: {filename}")
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in CDSAXS_MCMC: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _setup_mcmc_priors(self, params_to_sample, n_walkers, prior_type, sigma_multiplier):
+        """
+        Setup priors and initial walker positions for MCMC.
+        
+        Parameters:
+        -----------
+        params_to_sample : dict
+            Parameters to sample with bounds
+        n_walkers : int
+            Number of walkers
+        prior_type : str
+            Type of prior ('uniform' or 'gaussian')
+        sigma_multiplier : float
+            For Gaussian priors
+            
+        Returns:
+        --------
+        tuple
+            (bounds, initial_positions, log_prior_function)
+        """
+        param_names = list(params_to_sample.keys())
+        n_params = len(param_names)
+        
+        bounds = []
+        defaults = []
+        
+        for param_name in param_names:
+            param_info = params_to_sample[param_name]
+            bounds.append((param_info['min'], param_info['max']))
+            defaults.append(param_info['default'])
+        
+        bounds = np.array(bounds)
+        defaults = np.array(defaults)
+        
+        # Generate initial positions
+        if prior_type == 'uniform':
+            # Uniform distribution around default values
+            widths = bounds[:, 1] - bounds[:, 0]
+            initial_positions = []
+            
+            for _ in range(n_walkers):
+                pos = defaults + 0.1 * widths * (np.random.random(n_params) - 0.5)
+                # Ensure within bounds
+                pos = np.clip(pos, bounds[:, 0], bounds[:, 1])
+                initial_positions.append(pos)
+            
+            initial_positions = np.array(initial_positions)
+            
+            # Define uniform log prior
+            def log_prior_uniform(theta):
+                if np.all((theta >= bounds[:, 0]) & (theta <= bounds[:, 1])):
+                    return 0.0
+                else:
+                    return -np.inf
+                    
+            log_prior_func = log_prior_uniform
+            
+        elif prior_type == 'gaussian':
+            # Gaussian priors centered on defaults
+            sigmas = (bounds[:, 1] - bounds[:, 0]) / sigma_multiplier
+            
+            # Generate initial positions from Gaussian around defaults
+            initial_positions = []
+            for _ in range(n_walkers):
+                pos = np.random.normal(defaults, sigmas * 0.5)
+                # Ensure within bounds
+                pos = np.clip(pos, bounds[:, 0], bounds[:, 1])
+                initial_positions.append(pos)
+            
+            initial_positions = np.array(initial_positions)
+            
+            # Define Gaussian log prior
+            def log_prior_gaussian(theta):
+                if np.all((theta >= bounds[:, 0]) & (theta <= bounds[:, 1])):
+                    # Gaussian prior
+                    log_prior = -0.5 * np.sum(((theta - defaults) / sigmas) ** 2)
+                    return log_prior
+                else:
+                    return -np.inf
+                    
+            log_prior_func = log_prior_gaussian
+            
+        else:
+            raise ValueError(f"Unknown prior_type: {prior_type}")
+        
+        return bounds, initial_positions, log_prior_func
+
+    def _mcmc_log_likelihood(self, theta):
+        """
+        Calculate log likelihood for MCMC with better error handling.
+        
+        Parameters:
+        -----------
+        theta : array_like
+            Parameter values
+            
+        Returns:
+        --------
+        float
+            Log likelihood
+        """
+        try:
+            # Ensure param_names is available for the wrapper functions
+            if not hasattr(self, 'param_names') and not hasattr(self, 'mcmc_param_names'):
+                if hasattr(self, 'model_params') and 'optimization' in self.model_params:
+                    self.mcmc_param_names = list(self.model_params['optimization'].keys())
+                else:
+                    return -np.inf
+            
+            # Choose wrapper function based on geometry
+            if self.geometry == 'cylinder':
+                gf = self._cylinder_optimization_wrapper(theta)
+            elif self.geometry == 'trapezoid':
+                gf = self._trapezoid_optimization_wrapper(theta)
+            else:
+                return -np.inf
+            
+            if not np.isfinite(gf) or gf <= 0:
+                return -np.inf
+            
+            # Convert goodness of fit to log likelihood
+            # Assuming Chi-square likelihood: log_likelihood = -0.5 * chi2
+            log_likelihood = -0.5 * gf
+            
+            return log_likelihood
+            
+        except Exception as e:
+            # Don't print errors during MCMC as it will spam the output
+            return -np.inf
+
+    def _apply_mcmc_parameters(self, params, param_names):
+        """
+        Apply MCMC parameter values to the model.
+        
+        Parameters:
+        -----------
+        params : array_like
+            Parameter values
+        param_names : list
+            Parameter names
+        """
+        # Create a copy of current model parameters
+        updated_params = copy.deepcopy(self.model_params)
+        
+        # Update parameters based on geometry
+        if self.geometry == 'trapezoid':
+            # Make a deep copy of trapezoids
+            updated_params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+            
+            # Initialize background
+            if isinstance(self.Bk, np.ndarray):
+                updated_bk = self.Bk.copy()
+            else:
+                updated_bk = self.Bk
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('trap_'):
+                    parts = param_name.split('_')
+                    trap_idx = int(parts[1])
+                    param_type = parts[2]
+                    updated_params['trapezoids'][trap_idx][param_type] = params[i]
+                elif param_name.startswith('Bk_'):
+                    bk_idx = int(param_name.split('_')[1])
+                    if isinstance(updated_bk, np.ndarray):
+                        updated_bk[bk_idx] = params[i]
+                    else:
+                        n_columns = self.Intensity.shape[1]
+                        updated_bk = np.full(n_columns, updated_bk)
+                        updated_bk[bk_idx] = params[i]
+                elif param_name == 'Bk':
+                    updated_bk = params[i]
+                else:
+                    updated_params[param_name] = params[i]
+            
+            # Update background
+            updated_params['Bk'] = updated_bk.tolist() if isinstance(updated_bk, np.ndarray) else updated_bk
+            
+        elif self.geometry == 'cylinder':
+            # Make a deep copy of cylinders
+            updated_params['cylinders'] = [cyl.copy() for cyl in self.model_params['cylinders']]
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('cyl_'):
+                    parts = param_name.split('_')
+                    cyl_idx = int(parts[1])
+                    param_type = parts[2]
+                    updated_params['cylinders'][cyl_idx][param_type] = params[i]
+                else:
+                    updated_params[param_name] = params[i]
+        
+        # Apply updated parameters
+        self.model_params = updated_params
+        self.update_traditional_from_model_params()
+        
+        # Update simulation
+        self.SimInt = self.simulate_structure()
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC = self.BIC_calc(self.GF)
+
+    def _calculate_mcmc_statistics(self, flat_chains, param_names):
+        """
+        Calculate statistics from MCMC chains.
+        
+        Parameters:
+        -----------
+        flat_chains : ndarray
+            Flattened MCMC chains
+        param_names : list
+            Parameter names
+            
+        Returns:
+        --------
+        dict
+            Dictionary of parameter statistics
+        """
+        param_stats = {}
+        
+        for i, param_name in enumerate(param_names):
+            chain = flat_chains[:, i]
+            
+            # Calculate percentiles
+            percentiles = np.percentile(chain, [2.5, 16, 50, 84, 97.5])
+            
+            param_stats[param_name] = {
+                'mean': np.mean(chain),
+                'median': percentiles[2],
+                'std': np.std(chain),
+                'percentile_2.5': percentiles[0],
+                'percentile_16': percentiles[1],
+                'percentile_84': percentiles[3],
+                'percentile_97.5': percentiles[4],
+                'confidence_68': [percentiles[1], percentiles[3]],
+                'confidence_95': [percentiles[0], percentiles[4]],
+                'samples': chain
+            }
+        
+        return param_stats
+
+    def _print_mcmc_summary(self, results):
+        """
+        Print a summary of MCMC results.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results dictionary
+        """
+        print(f"\n{'='*80}")
+        print(f"MCMC SAMPLING SUMMARY")
+        print(f"{'='*80}")
+        
+        print(f"Walkers: {results['n_walkers']}")
+        print(f"Steps: {results['n_steps']} (burn-in: {results['burn_in']}, thin: {results['thin']})")
+        print(f"Effective samples: {results['effective_samples']}")
+        print(f"Mean acceptance fraction: {results['mean_acceptance']:.3f}")
+        
+        if results['autocorr_time'] is not None:
+            print(f"Mean autocorrelation time: {results['mean_autocorr_time']:.1f}")
+            
+            # Check convergence
+            n_effective = results['n_steps'] - results['burn_in']
+            if results['mean_autocorr_time'] > 0:
+                n_independent = n_effective / results['mean_autocorr_time']
+                print(f"Independent samples per walker: ~{n_independent:.0f}")
+                
+                if n_independent < 50:
+                    print("⚠️  Warning: Low number of independent samples. Consider longer chains.")
+                elif n_independent > 100:
+                    print("✓ Good number of independent samples")
+        
+        print(f"\nBest-fit log probability: {results['best_log_prob']:.3f}")
+        print(f"Best-fit GF: {self.GF:.6f}")
+        print(f"Best-fit BIC: {self.BIC:.6f}")
+        
+        print(f"\nParameter Estimates (68% confidence intervals):")
+        print(f"{'Parameter':<20} {'Median':<12} {'68% CI':<20} {'95% CI':<20}")
+        print("-" * 80)
+        
+        for param_name, stats in results['param_stats'].items():
+            median = stats['median']
+            ci_68 = stats['confidence_68']
+            ci_95 = stats['confidence_95']
+            
+            ci_68_str = f"[{ci_68[0]:.4f}, {ci_68[1]:.4f}]"
+            ci_95_str = f"[{ci_95[0]:.4f}, {ci_95[1]:.4f}]"
+            
+            print(f"{param_name:<20} {median:<12.4f} {ci_68_str:<20} {ci_95_str:<20}")
+        
+        print(f"{'='*80}")
+
+    def _plot_mcmc_results(self, results, plot_chains=True, plot_corner=True, plot_structure=True):
+        """
+        Generate plots for MCMC results.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        plot_chains : bool
+            Whether to plot walker chains
+        plot_corner : bool
+            Whether to plot corner plot
+        plot_structure : bool
+            Whether to plot structure with uncertainties
+        """
+        
+        if plot_chains:
+            self._plot_mcmc_chains(results)
+        
+        if plot_corner:
+            self._plot_mcmc_corner(results)
+        
+        if plot_structure:
+            self._plot_mcmc_structure_uncertainty(results)
+
+    def _plot_mcmc_chains(self, results):
+        """
+        Plot MCMC walker chains to check convergence.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        """
+        chains = results['chains']
+        param_names = results['param_names']
+        burn_in = results['burn_in']
+        n_params = len(param_names)
+        
+        # Create subplots
+        fig, axes = plt.subplots(n_params, 1, figsize=(12, 2.5 * n_params), sharex=True)
+        if n_params == 1:
+            axes = [axes]
+        
+        for i, (ax, param_name) in enumerate(zip(axes, param_names)):
+            # Plot all walker chains
+            for walker in range(results['n_walkers']):
+                ax.plot(chains[:, walker, i], alpha=0.3, color='steelblue', linewidth=0.5)
+            
+            # Mark burn-in
+            if burn_in > 0:
+                ax.axvline(burn_in, color='red', linestyle='--', alpha=0.7, label='Burn-in')
+            
+            ax.set_ylabel(param_name)
+            if i == 0 and burn_in > 0:
+                ax.legend()
+            
+            # Add statistics
+            stats = results['param_stats'][param_name]
+            ax.axhline(stats['median'], color='orange', linestyle='-', alpha=0.8, linewidth=1)
+            ax.axhline(stats['confidence_68'][0], color='orange', linestyle=':', alpha=0.6)
+            ax.axhline(stats['confidence_68'][1], color='orange', linestyle=':', alpha=0.6)
+        
+        axes[-1].set_xlabel('Step')
+        plt.suptitle('MCMC Walker Chains', fontsize=14)
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_mcmc_corner(self, results):
+        """
+        Plot corner plot showing parameter correlations.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        """
+        try:
+            import corner
+        except ImportError:
+            print("Corner package not available. Install with: pip install corner")
+            return
+        
+        flat_chains = results['flat_chains']
+        param_names = results['param_names']
+        
+        # Create labels with units (customize as needed)
+        labels = []
+        for name in param_names:
+            if 'width' in name or 'radius' in name or 'height' in name:
+                labels.append(f"{name} (Å)")
+            elif name == 'DW':
+                labels.append("DW (Å)")
+            elif name == 'I0':
+                labels.append("I0")
+            elif name.startswith('Bk'):
+                labels.append(f"{name}")
+            else:
+                labels.append(name)
+        
+        # Calculate quantiles for plotting
+        quantiles = [0.16, 0.5, 0.84]
+        
+        fig = corner.corner(
+            flat_chains,
+            labels=labels,
+            quantiles=quantiles,
+            show_titles=True,
+            title_kwargs={"fontsize": 12},
+            color='steelblue',
+            plot_density=True,
+            plot_contours=True,
+            fill_contours=True,
+            levels=(0.68, 0.95),
+            smooth=1.0
+        )
+        
+        plt.suptitle('Parameter Posterior Distributions', fontsize=16, y=0.98)
+        plt.show()
+
+    def _plot_mcmc_structure_uncertainty(self, results):
+        """
+        Plot structure with uncertainty bands from MCMC samples.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        """
+        # Sample parameter sets from posterior
+        flat_chains = results['flat_chains']
+        param_names = results['param_names']
+        n_samples = min(100, len(flat_chains))  # Limit for performance
+        
+        # Randomly select parameter sets
+        indices = np.random.choice(len(flat_chains), n_samples, replace=False)
+        
+        # Store original parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Calculate structures for sampled parameters
+        structures_samples = []
+        
+        for idx in indices:
+            params = flat_chains[idx]
+            self._apply_mcmc_parameters(params, param_names)
+            
+            # Extract structure points for plotting
+            if self.geometry == 'trapezoid':
+                heights, widths = self._extract_width_height_relationship()
+                structures_samples.append((heights, widths))
+            elif self.geometry == 'cylinder':
+                heights, radii = self._extract_width_height_relationship()
+                structures_samples.append((heights, radii))
+        
+        # Restore original (best-fit) parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Apply best-fit parameters
+        best_params = results['best_params']
+        self._apply_mcmc_parameters(best_params, param_names)
+        
+        # Plot structure uncertainty
+        plt.figure(figsize=(10, 6))
+        
+        # Plot sample structures
+        for heights, widths in structures_samples:
+            if self.geometry == 'trapezoid':
+                # Plot trapezoid outline
+                x_coords = []
+                y_coords = []
+                base_width = widths[0]
+                for i in range(len(heights)):
+                    width = widths[i]
+                    height = heights[i]
+                    x_left = (base_width - width) / 2
+                    x_right = x_left + width
+                    x_coords.extend([-x_right, -x_left, x_left, x_right])
+                    y_coords.extend([height, height, height, height])
+                
+                plt.plot(x_coords, y_coords, 'b-', alpha=0.02, linewidth=0.5)
+                
+            elif self.geometry == 'cylinder':
+                # Plot cylinder outline
+                for i in range(len(heights)):
+                    radius = widths[i]  # widths are actually radii for cylinders
+                    height = heights[i]
+                    plt.plot([-radius, radius], [height, height], 'b-', alpha=0.02, linewidth=0.5)
+        
+        # Plot best-fit structure on top
+        self.plot_structure()
+        
+        plt.title(f'Structure Uncertainty from MCMC\n({n_samples} posterior samples)', fontsize=14)
+        plt.xlabel('Width/Radius (Å)')
+        plt.ylabel('Height (Å)')
+        
+        # Add text with confidence info
+        plt.text(0.02, 0.98, f'Blue envelope: Posterior uncertainty\nRed line: Best fit', 
+                transform=plt.gca().transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.show()
+
+    def _save_mcmc_chains(self, results, filename=None):
+        """
+        Save MCMC chains and results to file.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        filename : str, optional
+            Output filename
+            
+        Returns:
+        --------
+        str
+            Filename where data was saved
+        """
+        if filename is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"mcmc_chains_{self.geometry}_{self.layers}L_{timestamp}.npz"
+        
+        # Save chains and key results
+        np.savez_compressed(
+            filename,
+            chains=results['chains'],
+            flat_chains=results['flat_chains'],
+            log_prob=results['log_prob'],
+            param_names=results['param_names'],
+            best_params=results['best_params'],
+            acceptance_fraction=results['acceptance_fraction'],
+            autocorr_time=results['autocorr_time'] if results['autocorr_time'] is not None else np.array([]),
+            n_walkers=results['n_walkers'],
+            n_steps=results['n_steps'],
+            burn_in=results['burn_in'],
+            thin=results['thin']
+        )
+        
+        return filename
+
+    def load_mcmc_chains(filename):
+        """
+        Load MCMC chains from file.
+        
+        Parameters:
+        -----------
+        filename : str
+            Filename to load
+            
+        Returns:
+        --------
+        dict
+            Loaded MCMC results
+        """
+        data = np.load(filename, allow_pickle=True)
+        
+        results = {
+            'chains': data['chains'],
+            'flat_chains': data['flat_chains'],
+            'log_prob': data['log_prob'],
+            'param_names': data['param_names'].tolist(),
+            'best_params': data['best_params'],
+            'acceptance_fraction': data['acceptance_fraction'],
+            'n_walkers': int(data['n_walkers']),
+            'n_steps': int(data['n_steps']),
+            'burn_in': int(data['burn_in']),
+            'thin': int(data['thin'])
+        }
+        
+        if 'autocorr_time' in data and len(data['autocorr_time']) > 0:
+            results['autocorr_time'] = data['autocorr_time']
+        else:
+            results['autocorr_time'] = None
+        
+        return results
+    
+    # Debug MCMC variable passing to SimTrap_GF
+
+    def debug_mcmc_variable_passing(self):
+        """
+        Debug how variables are being passed through the MCMC chain.
+        """
+        print("="*60)
+        print("DEBUGGING MCMC VARIABLE PASSING")
+        print("="*60)
+        
+        # Step 1: Check optimization parameters
+        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+            print("❌ No optimization parameters found")
+            return
+        
+        opt_params = self.model_params['optimization']
+        param_names = list(opt_params.keys())
+        param_values = [opt_params[name]['default'] for name in param_names]
+        
+        print(f"Parameter names: {param_names}")
+        print(f"Parameter values: {param_values}")
+        print(f"Parameter types: {[type(v) for v in param_values]}")
+        
+        # Step 2: Test the wrapper function directly
+        print(f"\n--- Testing {self.geometry} wrapper function ---")
+        
+        # Set param_names for the wrapper
+        self.mcmc_param_names = param_names
+        
+        try:
+            if self.geometry == 'trapezoid':
+                wrapper_result = self._trapezoid_optimization_wrapper(param_values)
+            elif self.geometry == 'cylinder':
+                wrapper_result = self._cylinder_optimization_wrapper(param_values)
+            else:
+                print("❌ Unknown geometry")
+                return
+                
+            print(f"Wrapper result: {wrapper_result}")
+            
+            if wrapper_result == float('inf'):
+                print("❌ Wrapper returned infinity")
+                return self.debug_wrapper_infinity(param_values, param_names)
+            else:
+                print("✅ Wrapper works correctly")
+                
+        except Exception as e:
+            print(f"❌ Wrapper error: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        # Step 3: Test MCMC log likelihood
+        print(f"\n--- Testing MCMC log likelihood ---")
+        
+        try:
+            log_like = self._mcmc_log_likelihood(param_values)
+            print(f"MCMC log likelihood: {log_like}")
+            
+            if log_like == -np.inf:
+                print("❌ MCMC log likelihood returned -inf")
+            else:
+                print("✅ MCMC log likelihood works")
+                
+        except Exception as e:
+            print(f"❌ MCMC log likelihood error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Step 4: Test with numpy array conversion
+        print(f"\n--- Testing with explicit numpy conversion ---")
+        
+        param_array = np.array(param_values, dtype=float)
+        print(f"Numpy array: {param_array}")
+        print(f"Array dtype: {param_array.dtype}")
+        print(f"Array shape: {param_array.shape}")
+        
+        try:
+            if self.geometry == 'trapezoid':
+                wrapper_result_array = self._trapezoid_optimization_wrapper(param_array)
+            elif self.geometry == 'cylinder':
+                wrapper_result_array = self._cylinder_optimization_wrapper(param_array)
+                
+            print(f"Wrapper with numpy array: {wrapper_result_array}")
+            
+        except Exception as e:
+            print(f"❌ Wrapper with numpy array error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Step 5: Compare direct SimTrap_GF call
+        print(f"\n--- Testing direct SimTrap_GF call ---")
+        
+        try:
+            # Test both list and array
+            print("Testing with list:")
+            direct_result_list = self.SimTrap_GF(param_values, param_names, self.Intensity, self.Qx, self.Qz)
+            print(f"Direct result (list): {direct_result_list}")
+            
+            print("Testing with numpy array:")
+            direct_result_array = self.SimTrap_GF(param_array, param_names, self.Intensity, self.Qx, self.Qz)
+            print(f"Direct result (array): {direct_result_array}")
+            
+        except Exception as e:
+            print(f"❌ Direct SimTrap_GF error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        print("="*60)
+
+    def debug_wrapper_infinity(self, param_values, param_names):
+        """
+        Debug why the wrapper function returns infinity.
+        """
+        print(f"\n--- Debugging wrapper infinity ---")
+        
+        # Check what's happening inside the wrapper
+        if self.geometry == 'trapezoid':
+            print("Tracing trapezoid wrapper execution...")
+            
+            # Trace through the wrapper logic
+            try:
+                print(f"Input param_values: {param_values}")
+                print(f"Input param_names: {param_names}")
+                print(f"Length check: {len(param_values)} == {len(param_names)} ? {len(param_values) == len(param_names)}")
+                
+                # Call SimTrap_GF directly with the same arguments
+                print("Calling SimTrap_GF directly...")
+                result = self.SimTrap_GF(param_values, param_names, self.Intensity, self.Qx, self.Qz)
+                print(f"Direct SimTrap_GF result: {result}")
+                
+                return result
+                
+            except Exception as e:
+                print(f"Error in direct call: {e}")
+                import traceback
+                traceback.print_exc()
+                return float('inf')
+        
+        elif self.geometry == 'cylinder':
+            print("Tracing cylinder wrapper execution...")
+            # Similar debugging for cylinder...
+            return float('inf')
+
+    def trace_simtrap_gf_call(self, optimization_values, param_names):
+        """
+        Trace a SimTrap_GF call step by step.
+        """
+        print(f"\n--- Tracing SimTrap_GF call ---")
+        print(f"optimization_values type: {type(optimization_values)}")
+        print(f"optimization_values content: {optimization_values}")
+        print(f"param_names: {param_names}")
+        print(f"Intensity shape: {self.Intensity.shape}")
+        print(f"Qx shape: {self.Qx.shape}")
+        print(f"Qz shape: {self.Qz.shape}")
+        
+        # Convert to numpy array if needed
+        if not isinstance(optimization_values, np.ndarray):
+            print("Converting to numpy array...")
+            optimization_values = np.array(optimization_values, dtype=float)
+            print(f"Converted array: {optimization_values}")
+        
+        try:
+            result = self.SimTrap_GF(optimization_values, param_names, self.Intensity, self.Qx, self.Qz)
+            print(f"SimTrap_GF result: {result}")
+            return result
+        except Exception as e:
+            print(f"SimTrap_GF error: {e}")
+            import traceback
+            traceback.print_exc()
+            return float('inf')
+
+    # Fixed wrapper functions with better error handling and tracing
+    def _trapezoid_optimization_wrapper_debug(self, optimization_values):
+        """
+        Debug version of trapezoid wrapper with detailed tracing.
+        """
+        print(f"\n[WRAPPER DEBUG] Input type: {type(optimization_values)}")
+        print(f"[WRAPPER DEBUG] Input content: {optimization_values}")
+        
+        try:
+            # Get parameter names
+            if hasattr(self, 'param_names'):
+                param_names = self.param_names
+            elif hasattr(self, 'mcmc_param_names'):
+                param_names = self.mcmc_param_names
+            else:
+                param_names = list(self.model_params.get('optimization', {}).keys())
+            
+            print(f"[WRAPPER DEBUG] Parameter names: {param_names}")
+            
+            # Check input format
+            if len(optimization_values) != len(param_names):
+                error_msg = f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}"
+                print(f"[WRAPPER DEBUG] ERROR: {error_msg}")
+                return float('inf')
+            
+            # Ensure numpy array
+            if not isinstance(optimization_values, np.ndarray):
+                print("[WRAPPER DEBUG] Converting to numpy array...")
+                optimization_values = np.array(optimization_values, dtype=float)
+            
+            print(f"[WRAPPER DEBUG] Calling SimTrap_GF...")
+            print(f"[WRAPPER DEBUG] Arg 1 (values): {optimization_values}")
+            print(f"[WRAPPER DEBUG] Arg 2 (names): {param_names}")
+            print(f"[WRAPPER DEBUG] Arg 3 (Intensity): shape {self.Intensity.shape}")
+            print(f"[WRAPPER DEBUG] Arg 4 (Qx): shape {self.Qx.shape}")
+            print(f"[WRAPPER DEBUG] Arg 5 (Qz): shape {self.Qz.shape}")
+            
+            result = self.SimTrap_GF(optimization_values, param_names, self.Intensity, self.Qx, self.Qz)
+            
+            print(f"[WRAPPER DEBUG] SimTrap_GF returned: {result}")
+            
+            if result == float('inf'):
+                print("[WRAPPER DEBUG] WARNING: SimTrap_GF returned infinity!")
+            
+            return result
+            
+        except Exception as e:
+            print(f"[WRAPPER DEBUG] Exception: {e}")
+            import traceback
+            traceback.print_exc()
+            return float('inf')
+
+    # Test the entire MCMC chain with a single parameter set
+    def test_mcmc_chain_single_step(self):
+        """
+        Test a single step through the entire MCMC chain.
+        """
+        print("="*60)
+        print("TESTING SINGLE MCMC CHAIN STEP")
+        print("="*60)
+        
+        # Get test parameters
+        if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+            self.initialize_optimization_params()
+        
+        opt_params = self.model_params['optimization']
+        param_names = list(opt_params.keys())
+        test_theta = np.array([opt_params[name]['default'] for name in param_names])
+        
+        print(f"Test theta: {test_theta}")
+        print(f"Parameter names: {param_names}")
+        
+        # Set param names
+        self.mcmc_param_names = param_names
+        
+        # Test each step of the MCMC evaluation
+        
+        # Step 1: Prior evaluation
+        print(f"\n1. Testing prior evaluation...")
+        try:
+            # Create bounds and prior function (simplified version)
+            bounds = []
+            for param_name in param_names:
+                param_info = opt_params[param_name]
+                bounds.append((param_info['min'], param_info['max']))
+            bounds = np.array(bounds)
+            
+            # Simple uniform prior
+            if np.all((test_theta >= bounds[:, 0]) & (test_theta <= bounds[:, 1])):
+                log_prior = 0.0
+                print(f"✅ Prior: {log_prior}")
+            else:
+                log_prior = -np.inf
+                print(f"❌ Prior: {log_prior} (outside bounds)")
+                return
+            
+        except Exception as e:
+            print(f"❌ Prior error: {e}")
+            return
+        
+        # Step 2: Likelihood evaluation
+        print(f"\n2. Testing likelihood evaluation...")
+        try:
+            log_likelihood = self._mcmc_log_likelihood(test_theta)
+            print(f"Log likelihood: {log_likelihood}")
+            
+            if log_likelihood == -np.inf:
+                print("❌ Likelihood is -inf, investigating...")
+                # Use debug wrapper
+                if self.geometry == 'trapezoid':
+                    gf_result = self._trapezoid_optimization_wrapper_debug(test_theta)
+                
+        except Exception as e:
+            print(f"❌ Likelihood error: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        # Step 3: Total log probability
+        log_prob = log_prior + log_likelihood
+        print(f"\n3. Total log probability: {log_prob}")
+        
+        if np.isfinite(log_prob):
+            print("✅ MCMC step would be valid!")
+        else:
+            print("❌ MCMC step would be rejected")
+        
+        print("="*60)
+        
