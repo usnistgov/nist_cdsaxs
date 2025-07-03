@@ -3376,8 +3376,6 @@ class CDSAXS_Model:
             height_points.append(current_height)
             width_points.append(structures[i + 1][width_key])
         
-        print(f"DEBUG: Extracted {len(height_points)} height points: {height_points}")
-        print(f"DEBUG: Corresponding widths: {width_points}")
         
         return np.array(height_points), np.array(width_points)
 
@@ -5475,7 +5473,7 @@ class CDSAXS_Model:
 
     def _plot_mcmc_structure_uncertainty(self, results):
         """
-        Plot structure with uncertainty bands from MCMC samples.
+        Fixed version: Plot structure with uncertainty bands from MCMC samples.
         
         Parameters:
         -----------
@@ -5519,32 +5517,112 @@ class CDSAXS_Model:
         # Plot structure uncertainty
         plt.figure(figsize=(10, 6))
         
-        # Plot sample structures
+        # Plot sample structures properly
         for heights, widths in structures_samples:
             if self.geometry == 'trapezoid':
-                # Plot trapezoid outline
+                # Plot proper trapezoid shape
+                base_width = widths[0]
+                
+                # Create trapezoid outline coordinates
                 x_coords = []
                 y_coords = []
-                base_width = widths[0]
-                for i in range(len(heights)):
-                    width = widths[i]
-                    height = heights[i]
-                    x_left = (base_width - width) / 2
-                    x_right = x_left + width
-                    x_coords.extend([-x_right, -x_left, x_left, x_right])
-                    y_coords.extend([height, height, height, height])
                 
-                plt.plot(x_coords, y_coords, 'b-', alpha=0.02, linewidth=0.5)
+                # Bottom edge
+                x_coords.extend([-base_width/2, base_width/2])
+                y_coords.extend([0, 0])
                 
+                # Right edge going up
+                for i in range(len(heights)-1):
+                    h1, h2 = heights[i], heights[i+1]
+                    w1, w2 = widths[i], widths[i+1]
+                    x_coords.extend([w1/2, w2/2])
+                    y_coords.extend([h1, h2])
+                
+                # Top edge
+                top_width = widths[-1]
+                x_coords.extend([top_width/2, -top_width/2])
+                y_coords.extend([heights[-1], heights[-1]])
+                
+                # Left edge going down
+                for i in range(len(heights)-1, 0, -1):
+                    h1, h2 = heights[i], heights[i-1]
+                    w1, w2 = widths[i], widths[i-1]
+                    x_coords.extend([-w1/2, -w2/2])
+                    y_coords.extend([h1, h2])
+                
+                # Close the shape
+                x_coords.append(-base_width/2)
+                y_coords.append(0)
+                
+                plt.plot(x_coords, y_coords, 'b-', alpha=0.05, linewidth=0.5)
+                    
             elif self.geometry == 'cylinder':
-                # Plot cylinder outline
+                # Plot cylinder outline (both sides)
                 for i in range(len(heights)):
                     radius = widths[i]  # widths are actually radii for cylinders
                     height = heights[i]
-                    plt.plot([-radius, radius], [height, height], 'b-', alpha=0.02, linewidth=0.5)
+                    plt.plot([-radius, radius], [height, height], 'b-', alpha=0.05, linewidth=0.5)
+                    
+                    # Connect layers with vertical lines
+                    if i > 0:
+                        prev_radius = widths[i-1]
+                        prev_height = heights[i-1]
+                        plt.plot([prev_radius, radius], [prev_height, height], 'b-', alpha=0.05, linewidth=0.5)
+                        plt.plot([-prev_radius, -radius], [prev_height, height], 'b-', alpha=0.05, linewidth=0.5)
         
-        # Plot best-fit structure on top
-        self.plot_structure()
+        # Plot best-fit structure on top (on the same axes)
+        best_heights, best_widths = self._extract_width_height_relationship()
+        
+        if self.geometry == 'trapezoid':
+            # Plot best-fit trapezoid in red
+            base_width = best_widths[0]
+            
+            # Create trapezoid outline coordinates
+            x_coords = []
+            y_coords = []
+            
+            # Bottom edge
+            x_coords.extend([-base_width/2, base_width/2])
+            y_coords.extend([0, 0])
+            
+            # Right edge going up
+            for i in range(len(best_heights)-1):
+                h1, h2 = best_heights[i], best_heights[i+1]
+                w1, w2 = best_widths[i], best_widths[i+1]
+                x_coords.extend([w1/2, w2/2])
+                y_coords.extend([h1, h2])
+            
+            # Top edge
+            top_width = best_widths[-1]
+            x_coords.extend([top_width/2, -top_width/2])
+            y_coords.extend([best_heights[-1], best_heights[-1]])
+            
+            # Left edge going down
+            for i in range(len(best_heights)-1, 0, -1):
+                h1, h2 = best_heights[i], best_heights[i-1]
+                w1, w2 = best_widths[i], best_widths[i-1]
+                x_coords.extend([-w1/2, -w2/2])
+                y_coords.extend([h1, h2])
+            
+            # Close the shape
+            x_coords.append(-base_width/2)
+            y_coords.append(0)
+            
+            plt.plot(x_coords, y_coords, 'r-', linewidth=2, label='Best fit')
+            
+        elif self.geometry == 'cylinder':
+            # Plot best-fit cylinder in red
+            for i in range(len(best_heights)):
+                radius = best_widths[i]
+                height = best_heights[i]
+                plt.plot([-radius, radius], [height, height], 'r-', linewidth=2)
+                
+                # Connect layers with vertical lines
+                if i > 0:
+                    prev_radius = best_widths[i-1]
+                    prev_height = best_heights[i-1]
+                    plt.plot([prev_radius, radius], [prev_height, height], 'r-', linewidth=2)
+                    plt.plot([-prev_radius, -radius], [prev_height, height], 'r-', linewidth=2)
         
         plt.title(f'Structure Uncertainty from MCMC\n({n_samples} posterior samples)', fontsize=14)
         plt.xlabel('Width/Radius (Å)')
