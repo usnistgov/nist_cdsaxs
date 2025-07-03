@@ -1106,11 +1106,14 @@ class CylinderModel(CDSAXS_Model):
     
     def _cylinder_optimization_wrapper(self, optimization_values):
         """
-        Wrapper function for cylindrical optimization that can be used with any scipy optimizer.
-        Fixed version that doesn't rely on self.param_names.
+        Fixed wrapper function for cylinder optimization that ensures numpy array input.
         """
         try:
-            # Get parameter names from optimization parameters if param_names isn't available
+            # CRITICAL FIX: Always convert to numpy array first
+            if not isinstance(optimization_values, np.ndarray):
+                optimization_values = np.array(optimization_values, dtype=float)
+            
+            # Get parameter names from available sources
             if hasattr(self, 'param_names'):
                 param_names = self.param_names
             elif hasattr(self, 'mcmc_param_names'):
