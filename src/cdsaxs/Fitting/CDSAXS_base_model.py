@@ -925,11 +925,11 @@ class CDSAXS_Model:
     
     
     def parameter_sweep_1d(self, sweep_param, sweep_range, n_points=20, 
-                                exclude_from_fit=None, plot_results=True, 
-                                figsize=(10, 6), save_results=False, filename=None,
-                                optimization_kwargs=None, verbose=True):
+                            exclude_from_fit=None, plot_results=True, 
+                            figsize=(10, 6), save_results=False, filename=None,
+                            optimization_kwargs=None, verbose=True):
         """
-        Fixed version of parameter_sweep_1d with proper error handling and results storage.
+        Clean version of parameter_sweep_1d with minimal progress bar updates.
         """
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
@@ -954,7 +954,7 @@ class CDSAXS_Model:
         # Store original parameters
         original_params = copy.deepcopy(self.model_params)
         
-        # Setup progress bar
+        # Setup progress bar with fixed description (no updates)
         if verbose:
             pbar = tqdm(sweep_values, desc=f"Sweeping {sweep_param}")
         else:
@@ -984,32 +984,22 @@ class CDSAXS_Model:
                     try:
                         # Handle both geometries correctly
                         if hasattr(self, 'discretization') and self.geometry == 'cylinder':
-                            # Cylinder models need discretization parameter
                             sim_result = self.simulate_structure(self.discretization)
                         else:
-                            # Trapezoid models don't need discretization
                             sim_result = self.simulate_structure()
                         
-                        # Check if simulation succeeded
                         if sim_result is not None:
                             gf = self.GF_calc(sim_result)
                             bic = self.BIC_calc(gf)
                             converged = True
                             
-                            # Debug output for first few points
-                            if verbose and i < 3:
-                                print(f"DEBUG: Point {i+1}: {sweep_param}={value:.1f}, GF={gf:.4f}")
-                        else:
-                            if verbose:
-                                print(f"Warning: Simulation failed at {sweep_param}={value}")
-                            
                     except Exception as e:
-                        if verbose:
-                            print(f"Warning: Simulation error at {sweep_param}={value}: {e}")
+                        if verbose and i < 3:  # Only print errors for first few points
+                            print(f"Warning: Simulation failed at {sweep_param}={value}")
+                            
                 else:
                     # Run optimization with suppressed output
                     try:
-                        # Don't assign the return value to avoid dictionary display
                         self.CDSAXS_DiffEvolution(
                             params_to_optimize=opt_params,
                             plot_results=False,  # Suppress plots during sweep
@@ -1017,36 +1007,25 @@ class CDSAXS_Model:
                             **optimization_kwargs
                         )
                         
-                        # Get results from model attributes
                         if hasattr(self, 'GF') and hasattr(self, 'BIC'):
                             gf = self.GF
                             bic = self.BIC
                             converged = True
-                        else:
-                            if verbose:
-                                print(f"Warning: No GF/BIC attributes after optimization at {sweep_param}={value}")
                             
                     except Exception as e:
-                        if verbose:
+                        if verbose and i < 3:  # Only print errors for first few points
                             print(f"Warning: Optimization failed at {sweep_param}={value}: {e}")
                 
-                # Store results (make sure we always store something)
+                # Store results
                 results['gf_values'].append(gf)
                 results['bic_values'].append(bic)
                 results['optimized_params'].append(copy.deepcopy(self.model_params))
                 results['convergence_flags'].append(converged)
                 
-                # Update progress bar with current best
-                if verbose and hasattr(pbar, 'set_postfix'):
-                    finite_gfs = [g for g in results['gf_values'] if np.isfinite(g)]
-                    current_best_gf = min(finite_gfs) if finite_gfs else float('inf')
-                    pbar.set_postfix({
-                        f'{sweep_param}': f'{value:.3f}',
-                        'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
-                    })
+                # No progress bar updates - just let it show the percentage
                     
             except Exception as e:
-                if verbose:
+                if verbose and i < 3:  # Only print errors for first few points
                     print(f"Error at {sweep_param}={value}: {str(e)}")
                 # Still store something to maintain array lengths
                 results['gf_values'].append(float('inf'))
@@ -1063,18 +1042,11 @@ class CDSAXS_Model:
         
         if actual_length != expected_length:
             print(f"WARNING: Results length mismatch. Expected {expected_length}, got {actual_length}")
-            # Pad with inf values if needed
             while len(results['gf_values']) < expected_length:
                 results['gf_values'].append(float('inf'))
                 results['bic_values'].append(float('inf'))
                 results['optimized_params'].append(None)
                 results['convergence_flags'].append(False)
-        
-        # Debug: Print a few results
-        if verbose:
-            print(f"DEBUG: First few results:")
-            for i in range(min(3, len(results['gf_values']))):
-                print(f"  {sweep_param}={sweep_values[i]:.1f} -> GF={results['gf_values'][i]}")
         
         # Print summary with best results
         if verbose:
@@ -1096,42 +1068,12 @@ class CDSAXS_Model:
     
     
     
-    def parameter_sweep_2d(self, sweep_params, sweep_ranges, n_points=(10, 10),
+    def parameter_sweep_2d_clean(self, sweep_params, sweep_ranges, n_points=(10, 10),
                       exclude_from_fit=None, plot_results=True, 
                       figsize=(10, 8), save_results=False, filename=None,
                       optimization_kwargs=None, verbose=True, metric='GF'):
         """
-        Perform a 2D parameter sweep with heatmap visualization.
-        
-        Parameters:
-        -----------
-        sweep_params : tuple
-            (param1_name, param2_name) to sweep
-        sweep_ranges : tuple
-            ((min1, max1), (min2, max2)) for the sweep parameters
-        n_points : tuple, optional
-            (n_points1, n_points2) for each parameter. Default: (10, 10)
-        exclude_from_fit : list, optional
-            List of parameter names to exclude from optimization
-        plot_results : bool, optional
-            Whether to plot the heatmap. Default: True
-        figsize : tuple, optional
-            Figure size for the plot. Default: (10, 8)
-        save_results : bool, optional
-            Whether to save results to file. Default: False
-        filename : str, optional
-            Filename for saving results
-        optimization_kwargs : dict, optional
-            Additional kwargs for CDSAXS_DiffEvolution
-        verbose : bool, optional
-            Whether to print progress. Default: True
-        metric : str, optional
-            Metric to plot ('GF' or 'BIC'). Default: 'GF'
-            
-        Returns:
-        --------
-        dict
-            Dictionary with sweep values, GF/BIC matrices, and optimized parameters
+        Clean version of 2D parameter sweep with minimal progress bar updates.
         """
         import numpy as np
         import copy
@@ -1162,13 +1104,16 @@ class CDSAXS_Model:
         # Store original parameters
         original_params = copy.deepcopy(self.model_params)
         
-        # Setup progress bar
+        # Setup progress bar with fixed description (no updates)
         total_points = n_points[0] * n_points[1]
         if verbose:
             pbar = tqdm(total=total_points, desc=f"2D Sweep: {sweep_params[0]} vs {sweep_params[1]}")
         
+        point_count = 0
         for i, val1 in enumerate(param1_values):
             for j, val2 in enumerate(param2_values):
+                point_count += 1
+                
                 # Initialize variables for this iteration
                 gf = float('inf')
                 bic = float('inf')
@@ -1191,48 +1136,36 @@ class CDSAXS_Model:
                     if not opt_params:
                         # No parameters to optimize, just calculate GF
                         try:
-                            # Handle both geometries correctly
                             if hasattr(self, 'discretization') and self.geometry == 'cylinder':
-                                # Cylinder models need discretization parameter
                                 sim_result = self.simulate_structure(self.discretization)
                             else:
-                                # Trapezoid models don't need discretization
                                 sim_result = self.simulate_structure()
                             
-                            # Check if simulation succeeded
                             if sim_result is not None:
                                 gf = self.GF_calc(sim_result)
                                 bic = self.BIC_calc(gf)
                                 converged = True
-                            else:
-                                if verbose and total_points <= 25:  # Only print for small grids
-                                    print(f"Warning: Simulation failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
                                 
                         except Exception as e:
-                            if verbose and total_points <= 25:  # Only print for small grids
-                                print(f"Warning: Simulation error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
+                            if verbose and total_points <= 25 and point_count <= 3:
+                                print(f"Warning: Simulation failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
                     else:
                         # Run optimization with suppressed output
                         try:
-                            # Don't assign the return value to avoid dictionary display
                             self.CDSAXS_DiffEvolution(
                                 params_to_optimize=opt_params,
-                                plot_results=False,  # Suppress plots during sweep
-                                verbose=False,       # Suppress optimization output
+                                plot_results=False,
+                                verbose=False,
                                 **optimization_kwargs
                             )
                             
-                            # Get results from model attributes
                             if hasattr(self, 'GF') and hasattr(self, 'BIC'):
                                 gf = self.GF
                                 bic = self.BIC
                                 converged = True
-                            else:
-                                if verbose and total_points <= 25:  # Only print for small grids
-                                    print(f"Warning: No GF/BIC attributes after optimization at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
                                 
                         except Exception as e:
-                            if verbose and total_points <= 25:  # Only print for small grids
+                            if verbose and total_points <= 25 and point_count <= 3:
                                 print(f"Warning: Optimization failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
                     
                     # Store results
@@ -1241,22 +1174,12 @@ class CDSAXS_Model:
                     results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
                     results['convergence_matrix'][j, i] = converged
                     
-                    # Update progress bar
+                    # Just update progress, no description changes
                     if verbose:
-                        # Calculate current best for progress display
-                        current_gf_matrix = results['gf_matrix'][:j+1, :i+1] if j > 0 or i > 0 else results['gf_matrix'][j:j+1, i:i+1]
-                        finite_gfs = current_gf_matrix[np.isfinite(current_gf_matrix)]
-                        current_best_gf = np.min(finite_gfs) if len(finite_gfs) > 0 else float('inf')
-                        
-                        pbar.set_postfix({
-                            f'{sweep_params[0]}': f'{val1:.3f}',
-                            f'{sweep_params[1]}': f'{val2:.3f}',
-                            'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
-                        })
                         pbar.update(1)
                         
                 except Exception as e:
-                    if verbose:
+                    if verbose and point_count <= 3:
                         print(f"Error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {str(e)}")
                     
                     # Store failed results
@@ -1270,13 +1193,6 @@ class CDSAXS_Model:
         
         if verbose:
             pbar.close()
-        
-        # Verify results matrices
-        expected_shape = (n_points[1], n_points[0])
-        if results['gf_matrix'].shape != expected_shape:
-            print(f"WARNING: GF matrix shape mismatch. Expected {expected_shape}, got {results['gf_matrix'].shape}")
-        if results['bic_matrix'].shape != expected_shape:
-            print(f"WARNING: BIC matrix shape mismatch. Expected {expected_shape}, got {results['bic_matrix'].shape}")
         
         # Print summary with best results
         if verbose:
@@ -4499,40 +4415,11 @@ class CDSAXS_Model:
         
         
     def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
-                    plot_results=True, plot_structure=True, plot_grid=True, 
-                    plot_combined=True, verbose=False, **kwargs):
+                plot_results=True, plot_structure=True, plot_grid=True, 
+                plot_combined=True, verbose=False, **kwargs):
         """
         Flexible optimization method for CDSAXS model fitting using various scipy optimizers.
-        
-        Parameters:
-        -----------
-        params_to_optimize : dict, optional
-            Dictionary containing parameters to optimize with their bounds
-            If None, uses self.model_params['optimization']
-        optimizer : str, optional
-            Scipy optimizer to use. Options:
-            - 'differential_evolution' (default)
-            - 'dual_annealing' 
-            - 'shgo'
-            - 'basinhopping'
-            - 'minimize' (for local optimization with method specified in kwargs)
-        plot_results : bool, optional
-            Whether to generate any plots (master switch for all plotting)
-        plot_structure : bool, optional
-            Whether to plot structure comparison
-        plot_grid : bool, optional
-            Whether to plot the grid of individual cuts
-        plot_combined : bool, optional
-            Whether to plot the combined view with all cuts
-        verbose : bool, optional
-            Whether to print optimization details
-        **kwargs : dict
-            Additional keyword arguments to pass to the scipy optimizer
-            
-        Returns:
-        --------
-        dict
-            Optimized parameter dictionary with the same structure as the input model_params
+        Fixed to respect verbose parameter.
         """
         try:
             # Check if required attributes exist
@@ -4580,7 +4467,6 @@ class CDSAXS_Model:
             initial_simInt = copy.deepcopy(self.SimInt)
             self._initial_model_params = initial_model_params
             
-            
             # Calculate initial goodness of fit if not already done
             if not hasattr(self, 'GF_Initial') or self.GF_Initial is None:
                 self.GF_Initial = self.GF_calc(self.SimInt)
@@ -4620,25 +4506,22 @@ class CDSAXS_Model:
             self.GF = self.GF_calc(self.SimInt)
             self.BIC = self.BIC_calc(self.GF)
             
-            # # Print optimization results
-            # if verbose:
-            #     self._print_optimization_summary(result, optimizer)
-            
             # Generate before/after comparison plots if requested
             if plot_results:
                 self._plot_optimization_results(initial_model_params, initial_simInt,
                                             plot_structure, plot_grid, plot_combined)
             
-            # Print parameter changes
+            # Print parameter changes only if verbose
             if verbose:
                 self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
         except Exception as e:
-            print(f"Error in CDSAXS_Optimize: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if verbose:  # Only print errors if verbose
+                print(f"Error in CDSAXS_Optimize: {str(e)}")
+                import traceback
+                traceback.print_exc()
             return None
 
     def _run_scipy_optimizer(self, optimizer, objective_func, bounds, initial_values, verbose, **kwargs):

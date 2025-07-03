@@ -782,32 +782,13 @@ class TrapezoidModelArray(CDSAXS_Model):
             return float('inf')  # Return infinity as worst-case fit
     
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                        plot_structure=True, plot_grid=True, plot_combined=True,
-                        verbose=False,**kwargs):
+                    plot_structure=True, plot_grid=True, plot_combined=True,
+                    verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS trapezoid model fitting
         with array background support and shows before/after comparison plots.
         
-        Parameters:
-        -----------
-        params_to_optimize : dict, optional
-            Dictionary containing parameters to optimize with their bounds
-            If None, uses self.model_params['optimization']
-        plot_results : bool, optional
-            Whether to generate any plots (master switch for all plotting)
-        plot_structure : bool, optional
-            Whether to plot trapezoid structure comparison
-        plot_grid : bool, optional
-            Whether to plot the grid of individual Qz cuts
-        plot_combined : bool, optional
-            Whether to plot the combined view with all cuts
-        **kwargs : dict
-            Additional keyword arguments to pass to scipy's differential_evolution function
-            
-        Returns:
-        --------
-        dict
-            Optimized parameter dictionary with the same structure as the input model_params
+        Fixed to respect verbose parameter properly.
         """
         try:
             # Check if required attributes exist
@@ -865,7 +846,9 @@ class TrapezoidModelArray(CDSAXS_Model):
                 self.GF_Initial = self.GF_calc(self.SimInt)
             
             # Run differential evolution optimization
-            print(f"Starting optimization with {len(param_names)} parameters...")
+            if verbose:  # Only print if verbose=True
+                print(f"Starting optimization with {len(param_names)} parameters...")
+            
             result = differential_evolution(
                 self.SimTrap_GF,
                 bounds, 
@@ -927,7 +910,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             self.GF = self.GF_calc(self.SimInt)
             self.BIC = self.BIC_calc(self.GF)
             
-            # Print optimization results
+            # Print optimization results only if verbose
             if verbose:
                 print(f"Optimization complete after {result.nfev} function evaluations")
                 print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
@@ -939,17 +922,19 @@ class TrapezoidModelArray(CDSAXS_Model):
                 self._plot_optimization_results(initial_model_params, initial_simInt,
                                             plot_structure, plot_grid, plot_combined)
             
-            # Print parameter changes
+            # Print parameter changes only if verbose
             if verbose:
                 self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
         except Exception as e:
-            print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if verbose:  # Only print errors if verbose
+                print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
+                import traceback
+                traceback.print_exc()
             return None
+
     
     def _plot_optimization_results(self, initial_model_params, initial_simInt, 
                                   plot_structure=True, plot_grid=True, plot_combined=True):
