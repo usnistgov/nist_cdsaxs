@@ -846,7 +846,7 @@ class CylinderModel(CDSAXS_Model):
             
             # Print parameter changes
             if verbose:
-                self._print_parameter_changes(initial_model_params)
+                self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
@@ -1076,69 +1076,7 @@ class CylinderModel(CDSAXS_Model):
         plt.tight_layout()
         plt.show()
     
-    def _print_parameter_changes(self, initial_model_params):
-        """
-        Print a table of parameter changes from optimization.
-        
-        Parameters:
-        -----------
-        initial_model_params : dict
-            Model parameters before optimization
-        """
-        print("\nParameter Changes:")
-        print("=" * 60)
-        print(f"{'Parameter':<20} {'Initial':<15} {'Optimized':<15} {'Change %':<10}")
-        print("-" * 60)
-        
-        # Print cylinder parameters
-        initial_cyls = initial_model_params['cylinders']
-        optimized_cyls = self.model_params['cylinders']
-        max_cyls = max(len(initial_cyls), len(optimized_cyls))
-        
-        for i in range(max_cyls):
-            # Handle the case where the cylinder exists in both models
-            if i < len(initial_cyls) and i < len(optimized_cyls):
-                # Print radius
-                radius_init = initial_cyls[i]['radius']
-                radius_optim = optimized_cyls[i]['radius']
-                radius_change = (radius_optim - radius_init) / radius_init * 100 if radius_init != 0 else float('inf')
-                print(f"Cyl {i} Radius{'':<10} {radius_init:<15.4f} {radius_optim:<15.4f} {radius_change:+.2f}%")
-                
-                # Print height if this isn't the top-most cylinder (which might not have a height)
-                if 'height' in initial_cyls[i] and 'height' in optimized_cyls[i]:
-                    height_init = initial_cyls[i]['height']
-                    height_optim = optimized_cyls[i]['height']
-                    height_change = (height_optim - height_init) / height_init * 100 if height_init != 0 else float('inf')
-                    print(f"Cyl {i} Height{'':<9} {height_init:<15.4f} {height_optim:<15.4f} {height_change:+.2f}%")
-            
-            # Handle the case where the cylinder only exists in the initial model
-            elif i < len(initial_cyls):
-                radius_init = initial_cyls[i]['radius']
-                print(f"Cyl {i} Radius{'':<10} {radius_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-                
-                if 'height' in initial_cyls[i]:
-                    height_init = initial_cyls[i]['height']
-                    print(f"Cyl {i} Height{'':<9} {height_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-            
-            # Handle the case where the cylinder only exists in the optimized model
-            elif i < len(optimized_cyls):
-                radius_optim = optimized_cyls[i]['radius']
-                print(f"Cyl {i} Radius{'':<10} {'N/A':<15} {radius_optim:<15.4f} {'N/A':<10}")
-                
-                if 'height' in optimized_cyls[i]:
-                    height_optim = optimized_cyls[i]['height']
-                    print(f"Cyl {i} Height{'':<9} {'N/A':<15} {height_optim:<15.4f} {'N/A':<10}")
-        
-        # Print global parameters
-        for param in ['DW', 'I0', 'Bk']:
-            if param in initial_model_params and param in self.model_params:
-                init_val = initial_model_params[param]
-                optim_val = self.model_params[param]
-                change = (optim_val - init_val) / init_val * 100 if init_val != 0 else float('inf')
-                
-                print(f"{param:<20} {init_val:<15.6f} {optim_val:<15.6f} {change:+.2f}%")
-        
-        print("=" * 60)
+    
     
     def plot_structure(self):
         """

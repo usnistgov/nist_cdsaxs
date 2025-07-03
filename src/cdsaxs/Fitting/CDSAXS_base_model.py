@@ -622,12 +622,275 @@ class CDSAXS_Model:
         """
         raise NotImplementedError("Subclasses must implement this method")
 
-    def _print_parameter_changes(self, initial_model_params):
+    def print_parameter_changes(self, initial_model_params=None, boundary_threshold=1.0, use_colors=True):
         """
-        Print a table of parameter changes from optimization.
-        To be implemented by subclasses.
+        Print a table of parameter changes from optimization with bounds and color coding.
+        
+        Parameters:
+        -----------
+        initial_model_params : dict, optional
+            Model parameters before optimization
+            If None, uses self._initial_model_params if available
+        boundary_threshold : float, optional
+            Percentage threshold for boundary warning (default: 1.0%)
+        use_colors : bool, optional
+            Whether to use color coding (default: True)
         """
-        raise NotImplementedError("Subclasses must implement this method")
+        if initial_model_params is None:
+            if hasattr(self, '_initial_model_params'):
+                initial_model_params = self._initial_model_params
+            else:
+                print("Error: No initial parameters available for comparison.")
+                print("Either provide initial_model_params or run optimization first.")
+                return
+        
+        # Color codes for terminal output
+        if use_colors:
+            RED = '\033[91m'
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+        else:
+            RED = GREEN = YELLOW = RESET = BOLD = ''
+        
+        # Get optimization parameters to extract bounds
+        optimization_params = getattr(self, 'model_params', {}).get('optimization', {})
+        if not optimization_params:
+            # Try to get from stored optimization info
+            optimization_params = getattr(self, 'mcmc_param_info', {})
+        
+        print(f"\n{BOLD}Parameter Changes with Optimization Bounds:{RESET}")
+        print("=" * 80)
+        print(f"{'Parameter':<20} {'Initial':<12} {'Lower':<12} {'Optimized':<12} {'Upper':<12}")
+        print("-" * 80)
+        
+        try:
+            # Print trapezoid parameters
+            if self.geometry == 'trapezoid':
+                initial_traps = initial_model_params.get('trapezoids', [])
+                current_traps = self.model_params.get('trapezoids', [])
+                
+                max_traps = max(len(initial_traps), len(current_traps))
+                
+                for i in range(max_traps):
+                    if i < len(initial_traps) and i < len(current_traps):
+                        initial_trap = initial_traps[i]
+                        current_trap = current_traps[i]
+                        
+                        # Print width
+                        if 'width' in initial_trap and 'width' in current_trap:
+                            param_name = f'trap_{i}_width'
+                            initial_val = initial_trap['width']
+                            current_val = current_trap['width']
+                            
+                            # Get bounds and apply color coding
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Trap {i} Width{'':<8} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+                        
+                        # Print height
+                        if 'height' in initial_trap and 'height' in current_trap:
+                            param_name = f'trap_{i}_height'
+                            initial_val = initial_trap['height']
+                            current_val = current_trap['height']
+                            
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Trap {i} Height{'':<7} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+            
+            # Print cylinder parameters
+            elif self.geometry == 'cylinder':
+                initial_cyls = initial_model_params.get('cylinders', [])
+                current_cyls = self.model_params.get('cylinders', [])
+                
+                max_cyls = max(len(initial_cyls), len(current_cyls))
+                
+                for i in range(max_cyls):
+                    if i < len(initial_cyls) and i < len(current_cyls):
+                        initial_cyl = initial_cyls[i]
+                        current_cyl = current_cyls[i]
+                        
+                        # Print radius
+                        if 'radius' in initial_cyl and 'radius' in current_cyl:
+                            param_name = f'cyl_{i}_radius'
+                            initial_val = initial_cyl['radius']
+                            current_val = current_cyl['radius']
+                            
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Cyl {i} Radius{'':<8} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+                        
+                        # Print height
+                        if 'height' in initial_cyl and 'height' in current_cyl:
+                            param_name = f'cyl_{i}_height'
+                            initial_val = initial_cyl['height']
+                            current_val = current_cyl['height']
+                            
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Cyl {i} Height{'':<8} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+            
+            # Print global parameters (DW, I0)
+            for param in ['DW', 'I0']:
+                if param in initial_model_params and param in self.model_params:
+                    initial_val = initial_model_params[param]
+                    current_val = self.model_params[param]
+                    
+                    param_info = optimization_params.get(param, {})
+                    lower_bound = param_info.get('min')
+                    upper_bound = param_info.get('max')
+                    colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                    boundary_threshold, use_colors)
+                    
+                    lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
+                    upper_str = f"{upper_bound:.6f}" if upper_bound is not None else "N/A"
+                    
+                    print(f"{param:<20} {initial_val:<12.6f} {lower_str:<12} "
+                        f"{colored_value:<12} {upper_str:<12}")
+            
+            # Print background parameters
+            initial_bk = initial_model_params.get('Bk')
+            current_bk = self.model_params.get('Bk')
+            
+            if initial_bk is not None and current_bk is not None:
+                # Handle array background
+                if isinstance(initial_bk, (list, np.ndarray)) and isinstance(current_bk, (list, np.ndarray)):
+                    initial_bk = np.array(initial_bk)
+                    current_bk = np.array(current_bk)
+                    
+                    for i in range(min(len(initial_bk), len(current_bk))):
+                        param_name = f'Bk_{i}'
+                        initial_val = initial_bk[i]
+                        current_val = current_bk[i]
+                        
+                        param_info = optimization_params.get(param_name, {})
+                        lower_bound = param_info.get('min')
+                        upper_bound = param_info.get('max')
+                        colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                        boundary_threshold, use_colors)
+                        
+                        lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
+                        upper_str = f"{upper_bound:.6f}" if upper_bound is not None else "N/A"
+                        
+                        print(f"Bk_{i:<17} {initial_val:<12.6f} {lower_str:<12} "
+                            f"{colored_value:<12} {upper_str:<12}")
+                
+                # Handle scalar background
+                elif not isinstance(initial_bk, (list, np.ndarray)) and not isinstance(current_bk, (list, np.ndarray)):
+                    param_info = optimization_params.get('Bk', {})
+                    lower_bound = param_info.get('min')
+                    upper_bound = param_info.get('max')
+                    colored_value = self._get_colored_value(current_bk, lower_bound, upper_bound, 
+                                                    boundary_threshold, use_colors)
+                    
+                    lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
+                    upper_str = f"{upper_bound:.6f}" if upper_bound is not None else "N/A"
+                    
+                    print(f"Bk{'':<18} {initial_bk:<12.6f} {lower_str:<12} "
+                        f"{colored_value:<12} {upper_str:<12}")
+        
+        except Exception as e:
+            print(f"Error printing parameter changes: {str(e)}")
+            print("Falling back to basic display...")
+            
+            # Basic fallback - just show current parameters
+            print("Current parameters:")
+            for key, value in self.model_params.items():
+                if isinstance(value, (int, float)):
+                    print(f"{key:<20} {value:<12.6f}")
+        
+        print("=" * 80)
+        
+        if use_colors:
+            print(f"\n{GREEN}Green{RESET}: Parameter safely within bounds")
+            print(f"{RED}Red{RESET}: Parameter within {boundary_threshold}% of optimization boundary") 
+            print(f"{YELLOW}Yellow{RESET}: No bounds information available")
+
+
+    def _get_colored_value(self, value, lower_bound, upper_bound, threshold_percent=1.0, use_colors=True):
+        """
+        Get colored value string based on proximity to bounds.
+        
+        Parameters:
+        -----------
+        value : float
+            Current parameter value
+        lower_bound : float or None
+            Lower optimization bound
+        upper_bound : float or None
+            Upper optimization bound  
+        threshold_percent : float
+            Percentage threshold for boundary warning
+        use_colors : bool
+            Whether to use color codes
+            
+        Returns:
+        --------
+        str
+            Colored value string
+        """
+        if use_colors:
+            RED = '\033[91m'
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            RESET = '\033[0m'
+        else:
+            RED = GREEN = YELLOW = RESET = ''
+        
+        # Format the value
+        if abs(value) < 1:
+            value_str = f"{value:.6f}"
+        else:
+            value_str = f"{value:.4f}"
+        
+        if lower_bound is None or upper_bound is None:
+            return f"{YELLOW}{value_str}{RESET}"
+        
+        # Calculate threshold distances
+        bound_range = upper_bound - lower_bound
+        threshold_distance = bound_range * (threshold_percent / 100)
+        
+        # Check proximity to bounds
+        distance_to_lower = value - lower_bound
+        distance_to_upper = upper_bound - value
+        
+        if distance_to_lower <= threshold_distance or distance_to_upper <= threshold_distance:
+            return f"{RED}{value_str}{RESET}"
+        else:
+            return f"{GREEN}{value_str}{RESET}"
 
     def plot_structure(self):
         """
@@ -4317,6 +4580,8 @@ class CDSAXS_Model:
                 
             # Store initial simulation results
             initial_simInt = copy.deepcopy(self.SimInt)
+            self._initial_model_params = initial_model_params
+            
             
             # Calculate initial goodness of fit if not already done
             if not hasattr(self, 'GF_Initial') or self.GF_Initial is None:
@@ -4357,9 +4622,9 @@ class CDSAXS_Model:
             self.GF = self.GF_calc(self.SimInt)
             self.BIC = self.BIC_calc(self.GF)
             
-            # Print optimization results
-            if verbose:
-                self._print_optimization_summary(result, optimizer)
+            # # Print optimization results
+            # if verbose:
+            #     self._print_optimization_summary(result, optimizer)
             
             # Generate before/after comparison plots if requested
             if plot_results:
@@ -4368,7 +4633,7 @@ class CDSAXS_Model:
             
             # Print parameter changes
             if verbose:
-                self._print_parameter_changes(initial_model_params)
+                self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 

@@ -941,7 +941,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             
             # Print parameter changes
             if verbose:
-                self._print_parameter_changes(initial_model_params)
+                self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
@@ -1182,86 +1182,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         plt.tight_layout()
         plt.show()
     
-    def _print_parameter_changes(self, initial_model_params):
-        """
-        Print a table of parameter changes from optimization, including array background.
-        
-        Parameters:
-        -----------
-        initial_model_params : dict
-            Model parameters before optimization
-        """
-        print("\nParameter Changes:")
-        print("=" * 60)
-        print(f"{'Parameter':<20} {'Initial':<15} {'Optimized':<15} {'Change %':<10}")
-        print("-" * 60)
-        
-        # Print trapezoid parameters
-        initial_traps = initial_model_params['trapezoids']
-        optimized_traps = self.model_params['trapezoids']
-        max_traps = max(len(initial_traps), len(optimized_traps))
-        
-        for i in range(max_traps):
-            # Handle the case where the trapezoid exists in both models
-            if i < len(initial_traps) and i < len(optimized_traps):
-                # Print width
-                width_init = initial_traps[i]['width']
-                width_optim = optimized_traps[i]['width']
-                width_change = (width_optim - width_init) / width_init * 100 if width_init != 0 else float('inf')
-                print(f"Trap {i} Width{'':<10} {width_init:<15.4f} {width_optim:<15.4f} {width_change:+.2f}%")
-                
-                # Print height if this isn't the top-most trapezoid (which might not have a height)
-                if 'height' in initial_traps[i] and 'height' in optimized_traps[i]:
-                    height_init = initial_traps[i]['height']
-                    height_optim = optimized_traps[i]['height']
-                    height_change = (height_optim - height_init) / height_init * 100 if height_init != 0 else float('inf')
-                    print(f"Trap {i} Height{'':<9} {height_init:<15.4f} {height_optim:<15.4f} {height_change:+.2f}%")
-            
-            # Handle the case where the trapezoid only exists in the initial model
-            elif i < len(initial_traps):
-                width_init = initial_traps[i]['width']
-                print(f"Trap {i} Width{'':<10} {width_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-                
-                if 'height' in initial_traps[i]:
-                    height_init = initial_traps[i]['height']
-                    print(f"Trap {i} Height{'':<9} {height_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-            
-            # Handle the case where the trapezoid only exists in the optimized model
-            elif i < len(optimized_traps):
-                width_optim = optimized_traps[i]['width']
-                print(f"Trap {i} Width{'':<10} {'N/A':<15} {width_optim:<15.4f} {'N/A':<10}")
-                
-                if 'height' in optimized_traps[i]:
-                    height_optim = optimized_traps[i]['height']
-                    print(f"Trap {i} Height{'':<9} {'N/A':<15} {height_optim:<15.4f} {'N/A':<10}")
-        
-        # Print global parameters
-        for param in ['DW', 'I0']:
-            if param in initial_model_params and param in self.model_params:
-                init_val = initial_model_params[param]
-                optim_val = self.model_params[param]
-                change = (optim_val - init_val) / init_val * 100 if init_val != 0 else float('inf')
-                
-                print(f"{param:<20} {init_val:<15.6f} {optim_val:<15.6f} {change:+.2f}%")
-        
-        # Print background parameters
-        initial_bk = initial_model_params['Bk']
-        optimized_bk = self.model_params['Bk']
-        
-        if isinstance(initial_bk, list) and isinstance(optimized_bk, list):
-            # Array background
-            for i, (init_val, optim_val) in enumerate(zip(initial_bk, optimized_bk)):
-                change = (optim_val - init_val) / init_val * 100 if init_val != 0 else float('inf')
-                print(f"Bk_{i:<17} {init_val:<15.6f} {optim_val:<15.6f} {change:+.2f}%")
-        elif not isinstance(initial_bk, list) and not isinstance(optimized_bk, list):
-            # Scalar background
-            change = (optimized_bk - initial_bk) / initial_bk * 100 if initial_bk != 0 else float('inf')
-            print(f"Bk{'':<18} {initial_bk:<15.6f} {optimized_bk:<15.6f} {change:+.2f}%")
-        else:
-            # Mixed case (shouldn't happen in normal use)
-            print(f"Bk{'':<18} {str(initial_bk):<15} {str(optimized_bk):<15} {'Mixed':<10}")
-        
-        print("=" * 60)
+    
     
     def plot_structure(self, figsize=(10, 6), xlim=None, ylim=None, title='Trapezoid Structure', 
                       show_dimensions=False, color='blue', linewidth=2, equal_aspect=True, **kwargs):
