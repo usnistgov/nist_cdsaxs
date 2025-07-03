@@ -622,9 +622,11 @@ class CDSAXS_Model:
         """
         raise NotImplementedError("Subclasses must implement this method")
 
+    
     def print_parameter_changes(self, initial_model_params=None, boundary_threshold=1.0, use_colors=True):
         """
         Print a table of parameter changes from optimization with bounds and color coding.
+        Now includes original and final GF values at the top.
         
         Parameters:
         -----------
@@ -649,10 +651,13 @@ class CDSAXS_Model:
             RED = '\033[91m'
             GREEN = '\033[92m'
             YELLOW = '\033[93m'
+            BLUE = '\033[94m'
+            MAGENTA = '\033[95m'
+            CYAN = '\033[96m'
             RESET = '\033[0m'
             BOLD = '\033[1m'
         else:
-            RED = GREEN = YELLOW = RESET = BOLD = ''
+            RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = RESET = BOLD = ''
         
         # Get optimization parameters to extract bounds
         optimization_params = getattr(self, 'model_params', {}).get('optimization', {})
@@ -662,6 +667,33 @@ class CDSAXS_Model:
         
         print(f"\n{BOLD}Parameter Changes with Optimization Bounds:{RESET}")
         print("=" * 80)
+        
+        # Add GF comparison at the top
+        if hasattr(self, 'GF_Initial') and hasattr(self, 'GF'):
+            initial_gf = self.GF_Initial
+            final_gf = self.GF
+            improvement = initial_gf - final_gf
+            improvement_pct = (improvement / initial_gf) * 100 if initial_gf > 0 else 0
+            
+            print(f"{BOLD}Goodness of Fit Summary:{RESET}")
+            print(f"{'Original GF:':<15} {CYAN}{initial_gf:<12.6f}{RESET}")
+            print(f"{'Final GF:':<15} {GREEN if improvement > 0 else RED}{final_gf:<12.6f}{RESET}")
+            print(f"{'Improvement:':<15} {GREEN if improvement > 0 else RED}{improvement:<12.6f}{RESET} ({improvement_pct:+.2f}%)")
+            
+            # Add BIC if available
+            if hasattr(self, 'BIC_Initial') and hasattr(self, 'BIC'):
+                initial_bic = self.BIC_Initial
+                final_bic = self.BIC
+                bic_improvement = initial_bic - final_bic
+                bic_improvement_pct = (bic_improvement / initial_bic) * 100 if initial_bic > 0 else 0
+                
+                print(f"{'Original BIC:':<15} {CYAN}{initial_bic:<12.6f}{RESET}")
+                print(f"{'Final BIC:':<15} {GREEN if bic_improvement > 0 else RED}{final_bic:<12.6f}{RESET}")
+                print(f"{'BIC Improvement:':<15} {GREEN if bic_improvement > 0 else RED}{bic_improvement:<12.6f}{RESET} ({bic_improvement_pct:+.2f}%)")
+            
+            print("=" * 80)
+        
+        # Parameter change table
         print(f"{'Parameter':<20} {'Initial':<12} {'Lower':<12} {'Optimized':<12} {'Upper':<12}")
         print("-" * 80)
         
@@ -891,7 +923,6 @@ class CDSAXS_Model:
             return f"{RED}{value_str}{RESET}"
         else:
             return f"{GREEN}{value_str}{RESET}"
-
     def plot_structure(self):
         """
         Plots the current structure.
