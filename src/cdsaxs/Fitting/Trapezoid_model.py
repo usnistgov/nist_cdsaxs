@@ -3,7 +3,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-from scipy.optimize import differential_evolution
+from scipy.optimize import (
+    differential_evolution, 
+    dual_annealing, 
+    shgo, 
+    basinhopping, 
+    minimize
+)
 from tqdm import tqdm
 import seaborn as sns
 
@@ -1586,5 +1592,19 @@ class TrapezoidModelArray(CDSAXS_Model):
                 return self.model_params[param_name]
             else:
                 raise ValueError(f"Unknown parameter: {param_name}")
+            
+            
+            
+            
+            
+    def _trapezoid_optimization_wrapper(self, optimization_values):
+        """
+        Wrapper function for trapezoid optimization that can be used with any scipy optimizer.
+        """
+        return self.SimTrap_GF(optimization_values, self.param_names, 
+                            self.Intensity, self.Qx, self.Qz)
+        
+    
 # Create an alias for backward compatibility
 TrapezoidModel = TrapezoidModelArray
+

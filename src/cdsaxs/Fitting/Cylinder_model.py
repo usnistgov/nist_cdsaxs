@@ -4,7 +4,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.special as sp
 import copy
-from scipy.optimize import differential_evolution
+from scipy.optimize import (
+    differential_evolution, 
+    dual_annealing, 
+    shgo, 
+    basinhopping, 
+    minimize
+)
 from tqdm import tqdm
 
 from CDSAXS_base_model import CDSAXS_Model
@@ -1158,3 +1164,31 @@ class CylinderModel(CDSAXS_Model):
             The simulated intensity (also sets self.SimInt)
         """
         return self.SimCyl_SM(*args, **kwargs)
+    
+    
+    def _cylinder_optimization_wrapper(self, optimization_values):
+        """
+        Wrapper function for cylindrical optimization that can be used with any scipy optimizer.
+        """
+        # Create PAR array from optimization values
+        temp_PAR = np.zeros((self.layers + 1, 2))
+        temp_DW = self.DW
+        temp_I0 = self.I0
+        temp_Bk = self.Bk
+        
+        for i, param_name in enumerate(self.param_names):
+            if param_name.startswith('cyl_'):
+                parts = param_name.split('_')
+                cyl_idx = int(parts[1])
+                param_type = parts[2]
+                
+                if param_type == 'radius':
+                    temp_PAR[cyl_idx, 0] = optimization_values[i]
+                elif param_type == 'height':
+                    temp_PAR[cyl_idx, 1] = optimization_values[i]
+            elif param_name == 'DW':
+                temp_DW = optimization_values[i]
+            elif param_name == 'I0':
+                temp_I0 = optimization_values[i]
+            elif param_name == 'Bk':
+                temp_Bk = optimization_values[i]

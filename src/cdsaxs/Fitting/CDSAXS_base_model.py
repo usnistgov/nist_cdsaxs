@@ -3,7 +3,13 @@ import re
 import math
 import numpy as np
 import pandas as pd
-from scipy.optimize import differential_evolution
+from scipy.optimize import (
+    differential_evolution, 
+    dual_annealing, 
+    shgo, 
+    basinhopping, 
+    minimize
+)
 import matplotlib.pyplot as plt
 import copy
 from tqdm import tqdm
@@ -4229,3 +4235,339 @@ class CDSAXS_Model:
         
         plt.tight_layout()
         plt.show()
+        
+        
+    def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
+                    plot_results=True, plot_structure=True, plot_grid=True, 
+                    plot_combined=True, verbose=False, **kwargs):
+        """
+        Flexible optimization method for CDSAXS model fitting using various scipy optimizers.
+        
+        Parameters:
+        -----------
+        params_to_optimize : dict, optional
+            Dictionary containing parameters to optimize with their bounds
+            If None, uses self.model_params['optimization']
+        optimizer : str, optional
+            Scipy optimizer to use. Options:
+            - 'differential_evolution' (default)
+            - 'dual_annealing' 
+            - 'shgo'
+            - 'basinhopping'
+            - 'minimize' (for local optimization with method specified in kwargs)
+        plot_results : bool, optional
+            Whether to generate any plots (master switch for all plotting)
+        plot_structure : bool, optional
+            Whether to plot structure comparison
+        plot_grid : bool, optional
+            Whether to plot the grid of individual cuts
+        plot_combined : bool, optional
+            Whether to plot the combined view with all cuts
+        verbose : bool, optional
+            Whether to print optimization details
+        **kwargs : dict
+            Additional keyword arguments to pass to the scipy optimizer
+            
+        Returns:
+        --------
+        dict
+            Optimized parameter dictionary with the same structure as the input model_params
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                if self.geometry == 'cylinder' and hasattr(self, 'Qy'):
+                    self.convert_Cartesian_Cylindrical()
+                else:
+                    raise AttributeError("Missing required scattering vector attributes")
+            
+            # Initialize optimization parameters if needed
+            if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+                self.initialize_optimization_params()
+            
+            # Determine parameters to optimize
+            if params_to_optimize is None:
+                params_to_optimize = self.model_params['optimization']
+            
+            # Ensure all parameters have default values
+            params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+            
+            # Create parameter names list and bounds list
+            param_names = []
+            bounds = []
+            initial_values = []
+            
+            for param_name, param_config in params_to_optimize.items():
+                param_names.append(param_name)
+                bounds.append((param_config['min'], param_config['max']))
+                initial_values.append(param_config['default'])
+            
+            # Store for use in optimization
+            self.param_names = param_names
+            
+            # Store current parameters and simulation results for before/after comparison
+            initial_model_params = copy.deepcopy(self.model_params)
+            
+            # Calculate initial simulated intensity if not already done
+            if not hasattr(self, 'SimInt') or self.SimInt is None:
+                self.SimInt = self.simulate_structure()
+                
+            # Store initial simulation results
+            initial_simInt = copy.deepcopy(self.SimInt)
+            
+            # Calculate initial goodness of fit if not already done
+            if not hasattr(self, 'GF_Initial') or self.GF_Initial is None:
+                self.GF_Initial = self.GF_calc(self.SimInt)
+            
+            # Choose wrapper function based on geometry
+            if self.geometry == 'cylinder':
+                wrapper_func = self._cylinder_optimization_wrapper
+            elif self.geometry == 'trapezoid':
+                wrapper_func = self._trapezoid_optimization_wrapper
+            else:
+                raise ValueError(f"Unsupported geometry: {self.geometry}")
+            
+            # Run optimization based on chosen optimizer
+            if verbose:
+                print(f"Starting optimization with {optimizer} using {len(param_names)} parameters...")
+            
+            result = self._run_scipy_optimizer(
+                optimizer, wrapper_func, bounds, initial_values, verbose, **kwargs
+            )
+            
+            # Store the optimization result
+            self.optimization_result = result
+            
+            # Update model parameters with optimized values
+            optimized_params = self._update_model_with_optimization_result(
+                result, param_names, initial_model_params
+            )
+            
+            # Update class attributes with optimized values
+            self.model_params = optimized_params
+            self.update_traditional_from_model_params()
+            
+            # Simulate with optimized parameters
+            self.SimInt = self.simulate_structure()
+            
+            # Calculate goodness of fit and BIC
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            # Print optimization results
+            if verbose:
+                self._print_optimization_summary(result, optimizer)
+            
+            # Generate before/after comparison plots if requested
+            if plot_results:
+                self._plot_optimization_results(initial_model_params, initial_simInt,
+                                            plot_structure, plot_grid, plot_combined)
+            
+            # Print parameter changes
+            if verbose:
+                self._print_parameter_changes(initial_model_params)
+            
+            return self.model_params
+                
+        except Exception as e:
+            print(f"Error in CDSAXS_Optimize: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _run_scipy_optimizer(self, optimizer, objective_func, bounds, initial_values, verbose, **kwargs):
+        """
+        Run the specified scipy optimizer with appropriate parameters.
+        
+        Parameters:
+        -----------
+        optimizer : str
+            Name of the scipy optimizer
+        objective_func : callable
+            Objective function to minimize
+        bounds : list
+            Parameter bounds
+        initial_values : list
+            Initial parameter values
+        verbose : bool
+            Whether to print progress
+        **kwargs : dict
+            Additional optimizer-specific arguments
+            
+        Returns:
+        --------
+        scipy.optimize.OptimizeResult
+            Optimization result object
+        """
+        
+        if optimizer == 'differential_evolution':
+            # Default parameters for differential_evolution
+            default_params = {
+                'polish': True,
+                'x0': np.array(initial_values),
+                'maxiter': 100,
+                'popsize': 15
+            }
+            default_params.update(kwargs)
+            
+            result = differential_evolution(
+                objective_func, bounds, **default_params
+            )
+            
+        elif optimizer == 'dual_annealing':
+            # Default parameters for dual_annealing
+            default_params = {
+                'x0': np.array(initial_values),
+                'maxiter': 1000,
+                'local_search_options': {'method': 'L-BFGS-B'}
+            }
+            default_params.update(kwargs)
+            
+            result = dual_annealing(
+                objective_func, bounds, **default_params
+            )
+            
+        elif optimizer == 'shgo':
+            # Default parameters for SHGO (Simplicial Homology Global Optimization)
+            default_params = {
+                'n': 100,  # Number of sampling points
+                'iters': 3,  # Number of iterations
+                'sampling_method': 'sobol'
+            }
+            default_params.update(kwargs)
+            
+            result = shgo(
+                objective_func, bounds, **default_params
+            )
+            
+        elif optimizer == 'basinhopping':
+            # Basin hopping requires an initial point and local minimizer
+            default_params = {
+                'niter': 100,
+                'T': 1.0,
+                'stepsize': 0.5,
+                'minimizer_kwargs': {
+                    'method': 'L-BFGS-B',
+                    'bounds': bounds
+                }
+            }
+            default_params.update(kwargs)
+            
+            # Start from initial values
+            x0 = np.array(initial_values)
+            
+            result = basinhopping(
+                objective_func, x0, **default_params
+            )
+            
+        elif optimizer == 'minimize':
+            # Local optimization - requires method to be specified
+            method = kwargs.pop('method', 'L-BFGS-B')
+            
+            default_params = {
+                'method': method,
+                'bounds': bounds if method in ['L-BFGS-B', 'TNC', 'SLSQP'] else None,
+                'options': {'maxiter': 1000}
+            }
+            default_params.update(kwargs)
+            
+            x0 = np.array(initial_values)
+            
+            result = minimize(
+                objective_func, x0, **default_params
+            )
+            
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer}. "
+                            f"Supported options: 'differential_evolution', 'dual_annealing', "
+                            f"'shgo', 'basinhopping', 'minimize'")
+        
+        return result
+    
+    def _update_model_with_optimization_result(self, result, param_names, initial_model_params):
+        """
+        Update model parameters with optimization results.
+        
+        Parameters:
+        -----------
+        result : scipy.optimize.OptimizeResult
+            Optimization result
+        param_names : list
+            List of parameter names
+        initial_model_params : dict
+            Initial model parameters
+            
+        Returns:
+        --------
+        dict
+            Updated model parameters
+        """
+        optimized_params = copy.deepcopy(initial_model_params)
+        
+        # Handle different result types
+        if hasattr(result, 'x'):
+            optimal_values = result.x
+        elif hasattr(result, 'best_x'):  # Some optimizers use this
+            optimal_values = result.best_x
+        else:
+            raise ValueError("Could not extract optimal values from optimization result")
+        
+        # Update parameters based on geometry
+        if self.geometry == 'trapezoid':
+            # Make a deep copy of trapezoids to avoid modifying the original
+            optimized_params['trapezoids'] = [trap.copy() for trap in initial_model_params['trapezoids']]
+            
+            # Initialize background array for updates
+            if isinstance(self.Bk, np.ndarray):
+                optimized_bk = self.Bk.copy()
+            else:
+                optimized_bk = self.Bk
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('trap_'):
+                    # Parse trapezoid parameter
+                    parts = param_name.split('_')
+                    trap_idx = int(parts[1])
+                    param_type = parts[2]  # 'width' or 'height'
+                    
+                    optimized_params['trapezoids'][trap_idx][param_type] = optimal_values[i]
+                elif param_name.startswith('Bk_'):
+                    # Background parameter for specific column
+                    bk_idx = int(param_name.split('_')[1])
+                    if isinstance(optimized_bk, np.ndarray):
+                        optimized_bk[bk_idx] = optimal_values[i]
+                    else:
+                        # Convert scalar to array if needed
+                        n_columns = self.Intensity.shape[1]
+                        optimized_bk = np.full(n_columns, optimized_bk)
+                        optimized_bk[bk_idx] = optimal_values[i]
+                elif param_name == 'Bk':
+                    # Scalar background parameter
+                    optimized_bk = optimal_values[i]
+                else:
+                    # Global parameter (DW, I0)
+                    optimized_params[param_name] = optimal_values[i]
+            
+            # Update background in optimized parameters
+            optimized_params['Bk'] = optimized_bk.tolist() if isinstance(optimized_bk, np.ndarray) else optimized_bk
+            
+        elif self.geometry == 'cylinder':
+            # Make a deep copy of cylinders to avoid modifying the original
+            optimized_params['cylinders'] = [cyl.copy() for cyl in initial_model_params['cylinders']]
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('cyl_'):
+                    # Parse cylinder parameter
+                    parts = param_name.split('_')
+                    cyl_idx = int(parts[1])
+                    param_type = parts[2]  # 'radius' or 'height'
+                    
+                    optimized_params['cylinders'][cyl_idx][param_type] = optimal_values[i]
+                else:
+                    # Global parameter (DW, I0, Bk)
+                    optimized_params[param_name] = optimal_values[i]
+        
+        return optimized_params
