@@ -56,10 +56,13 @@ class CylinderModel(CDSAXS_Model):
             self.discretization = [10] * self.layers
             if hasattr(self, 'model_params'):
                 self.model_params['discretization'] = self.discretization
+                
+        # Initialize SLD values
+        self._initialize_sld_values()
     
     def build_model_params_from_traditional(self):
         """
-        Build model_params dictionary from traditional parameters.
+        Build model_params dictionary from traditional parameters including SLD support.
         """
         if not hasattr(self, 'PAR') or self.PAR is None:
             return
@@ -83,10 +86,19 @@ class CylinderModel(CDSAXS_Model):
             'discretization': self.discretization if hasattr(self, 'discretization') else [10] * self.layers
         }
         
+        # Add SLD values to model_params
+        if hasattr(self, 'sld_values'):
+            self.model_params['slds'] = self.sld_values.tolist()
+        
         # Add optional parameters if they exist
         if hasattr(self, 'SLD') and self.SLD is not None:
-            self.model_params['SLD'] = self.SLD
-            
+            # For backward compatibility, but slds takes precedence
+            if 'slds' not in self.model_params:
+                if np.isscalar(self.SLD):
+                    self.model_params['slds'] = [self.SLD] * (self.layers)
+                else:
+                    self.model_params['slds'] = self.SLD.tolist()
+        
         if hasattr(self, 'Pitch') and self.Pitch is not None:
             self.model_params['Pitch'] = self.Pitch
             
@@ -94,7 +106,7 @@ class CylinderModel(CDSAXS_Model):
     
     def update_traditional_from_model_params(self):
         """
-        Update traditional parameters from model_params dictionary.
+        Update traditional parameters from model_params dictionary including SLD support.
         """
         if not hasattr(self, 'model_params'):
             return
@@ -116,6 +128,14 @@ class CylinderModel(CDSAXS_Model):
         # Update discretization
         if 'discretization' in self.model_params:
             self.discretization = self.model_params['discretization']
+        
+        # Update SLD parameters
+        if 'slds' in self.model_params:
+            sld_values = self.model_params['slds']
+            if isinstance(sld_values, list):
+                self.sld_values = np.array(sld_values, dtype=float)
+            else:
+                self.sld_values = np.array([sld_values], dtype=float)
         
         # Update optional parameters
         if 'SLD' in self.model_params:
@@ -193,18 +213,7 @@ class CylinderModel(CDSAXS_Model):
     
     def initialize_optimization_params(self, param_limits=None):
         """
-        Initialize optimization parameters with bounds.
-        
-        Parameters:
-        -----------
-        param_limits : dict, optional
-            Dictionary of parameters to optimize with their limits
-            If None, creates default limits of ±10% for all parameters
-            
-        Returns:
-        --------
-        dict
-            Dictionary of optimization parameters with limits
+        Initialize optimization parameters with bounds including SLD support.
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
@@ -246,14 +255,37 @@ class CylinderModel(CDSAXS_Model):
                 'default': self.Bk
             }
         else:
-            # FIXED: Ensure default values are set if not provided
+            # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
                 if 'default' not in limits:
-                    default_value = self._get_current_parameter_value(param)
-                    limits['default'] = default_value
-                    #print(f"INFO: Added missing default for {param}: {default_value}")
+                    try:
+                        # Get default value from current model state
+                        default_value = self._get_current_parameter_value(param)
+                        limits['default'] = default_value
+                    except Exception as e:
+                        # Fallback: use middle of min/max range
+                        if 'min' in limits and 'max' in limits:
+                            default_value = (limits['min'] + limits['max']) / 2
+                            limits['default'] = default_value
+                            print(f"WARNING: Could not get current value for {param}, using range midpoint: {default_value}")
+                        else:
+                            raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
         
-        # Store optimization parameters
+        # Add SLD parameters - they're treated just like other parameters
+        if hasattr(self, 'sld_values'):
+            for i, sld_val in enumerate(self.sld_values):
+                param_name = f'sld_{i}'
+                
+                # Only add to optimization if not already specified
+                if param_name not in param_limits:
+                    # Set reasonable default bounds for SLD values
+                    param_limits[param_name] = {
+                        'min': max(0.1, sld_val * 0.5),  # Positive SLD with 50% range
+                        'max': sld_val * 2.0,
+                        'default': sld_val
+                    }
+        
+        # Update stored optimization parameters
         self.model_params['optimization'] = param_limits
         
         return param_limits
@@ -299,19 +331,26 @@ class CylinderModel(CDSAXS_Model):
 
     def _get_current_parameter_value(self, param_name):
         """
-        Get the current value of a parameter from the model.
-        
-        Parameters:
-        -----------
-        param_name : str
-            Name of the parameter
-            
-        Returns:
-        --------
-        float
-            Current value of the parameter
+        Get the current value of a parameter from the model including SLD support.
+        FIXED: Ensures SLD values are returned as floats.
         """
-        if param_name.startswith('cyl_'):
+        if param_name.startswith('sld_'):
+            sld_idx = int(param_name.split('_')[1])
+            if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
+                # FIXED: Ensure return value is Python float, not numpy type
+                return float(self.sld_values[sld_idx])
+            elif hasattr(self, 'model_params') and 'slds' in self.model_params:
+                slds = self.model_params['slds']
+                if isinstance(slds, list) and sld_idx < len(slds):
+                    # FIXED: Ensure return value is float
+                    return float(slds[sld_idx])
+                elif isinstance(slds, np.ndarray) and sld_idx < len(slds):
+                    # FIXED: Ensure return value is float
+                    return float(slds[sld_idx])
+            else:
+                raise ValueError(f"SLD index {sld_idx} out of range or SLD values not initialized")
+        
+        elif param_name.startswith('cyl_'):
             parts = param_name.split('_')
             cyl_idx = int(parts[1])
             param_type = parts[2]
@@ -326,6 +365,49 @@ class CylinderModel(CDSAXS_Model):
                 return self.model_params[param_name]
             else:
                 raise ValueError(f"Unknown parameter: {param_name}")
+            
+    def _set_parameter_value(self, param_name, value):
+        """
+        Set a parameter value in the model including SLD support.
+        """
+        if param_name.startswith('sld_'):
+            sld_idx = int(param_name.split('_')[1])
+            if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
+                self.sld_values[sld_idx] = float(value)
+                # Update model_params if it exists
+                if hasattr(self, 'model_params') and 'slds' in self.model_params:
+                    self.model_params['slds'][sld_idx] = float(value)
+            else:
+                # Initialize sld_values if it doesn't exist
+                if not hasattr(self, 'sld_values'):
+                    self.sld_values = np.ones(self.layers, dtype=float)
+                if sld_idx < len(self.sld_values):
+                    self.sld_values[sld_idx] = float(value)
+                    # Also update model_params
+                    if hasattr(self, 'model_params'):
+                        if 'slds' not in self.model_params:
+                            self.model_params['slds'] = self.sld_values.tolist()
+                        else:
+                            self.model_params['slds'][sld_idx] = float(value)
+                else:
+                    raise ValueError(f"SLD index {sld_idx} out of range")
+        
+        elif param_name.startswith('cyl_'):
+            # Cylinder parameter
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['cylinders'][cyl_idx][param_type] = value
+        
+        else:
+            # Global parameter (DW, I0, Bk)
+            if hasattr(self, param_name):
+                setattr(self, param_name, value)
+            if hasattr(self, 'model_params'):
+                self.model_params[param_name] = value
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
         
     def _extract_PAR_from_model_params(self):
         """
@@ -351,15 +433,17 @@ class CylinderModel(CDSAXS_Model):
                 
         return PAR
     
-    def ConeFourierTransform(self, Discretization=None):
+    def ConeFourierTransform(self, Discretization=None, sld_values=None):
         """
-        Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
+        Fourier transform for a cone in cylindrical coordinates (Qr,Qz) with SLD support
         
         Parameters:
         -----------
         Discretization : list or numpy.ndarray, optional
             Number of discretization steps for each layer
             If None, uses self.discretization
+        sld_values : numpy.ndarray, optional
+            SLD values for each layer. If None, uses self.sld_values
             
         Returns:
         --------
@@ -388,12 +472,27 @@ class CylinderModel(CDSAXS_Model):
             if len(Discretization) < self.layers:
                 raise ValueError(f"Discretization array must have at least {self.layers} elements")
             
+            # Determine SLD values to use
+            if sld_values is not None:
+                sld_array = np.array(sld_values, dtype=float)
+            elif hasattr(self, 'sld_values'):
+                sld_array = self.sld_values.copy()
+            else:
+                sld_array = np.ones(self.layers, dtype=float)
+            
+            # STRICT VALIDATION
+            if len(sld_array) != self.layers:
+                raise ValueError(
+                    f"SLD array length ({len(sld_array)}) must exactly match number of layers ({self.layers}). "
+                    f"Each layer requires its own SLD value."
+                )
+            
             # Initialize variables
             H1 = 0
             H2 = 0
             self.form = np.zeros([int(len(self.Qr[:,0])), int(len(self.Qr[0,:]))])
             
-            # Perform Fourier transform
+            # Perform Fourier transform with SLD support
             for i in range(self.layers):
                 H2 = H2 + self.PAR[i, 1]
                 stepsize = self.PAR[i, 1] / Discretization[i]
@@ -416,10 +515,13 @@ class CylinderModel(CDSAXS_Model):
                     RI2 = (z[ii+1] - H1) / Slope + R1
                     fa = 2 * np.pi * RI1 / self.Qr * sp.jv(1, self.Qr * RI1) * np.exp(1j * self.Qz * z[ii])
                     fb = 2 * np.pi * RI2 / self.Qr * sp.jv(1, self.Qr * RI2) * np.exp(1j * self.Qz * z[ii+1])
-                    self.form = self.form + stepsize * (fb + fa) / 2  # If you had an SLD variation you would multiply by the SLD here
+                    
+                    # FIXED: Multiply by SLD of this layer (layer i gets sld_array[i])
+                    layer_sld = sld_array[i]
+                    self.form = self.form + stepsize * (fb + fa) / 2 * layer_sld
             
             return self.form
-            
+        
         except Exception as e:
             print(f"Error in ConeFourierTransform: {str(e)}")
             self.form = None
@@ -697,6 +799,52 @@ class CylinderModel(CDSAXS_Model):
         
         # Call cylindrical GF function
         return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+    
+    def _initialize_sld_values(self):
+        """
+        Initialize SLD values from various sources, with sensible defaults.
+        FIXED: Ensures SLD values are always float dtype for mathematical operations.
+        """
+        # For cylinders, we need SLD values for each LAYER (cylinder), not each vertex
+        n_sld_values = self.layers  # Number of actual cylinders/layers
+        
+        # Priority order: model_params['slds'] > SLD parameter > default values
+        if hasattr(self, 'model_params') and 'slds' in self.model_params:
+            # Use SLD values from model_params (main approach)
+            sld_values = self.model_params['slds']
+            if isinstance(sld_values, list):
+                # FIXED: Explicitly convert to float dtype
+                self.sld_values = np.array(sld_values, dtype=float)
+            else:
+                # FIXED: Ensure single values are also float
+                self.sld_values = np.array([float(sld_values)])
+                
+        elif hasattr(self, 'SLD') and self.SLD is not None:
+            # Use legacy SLD parameter for backward compatibility
+            if np.isscalar(self.SLD):
+                # FIXED: Use float dtype
+                self.sld_values = np.full(n_sld_values, float(self.SLD))
+            else:
+                # FIXED: Convert array to float dtype
+                self.sld_values = np.array(self.SLD, dtype=float)
+                
+        else:
+            # Default: all SLDs = 1.0 (single material behavior)
+            # FIXED: Use float dtype for defaults
+            self.sld_values = np.ones(n_sld_values, dtype=float)
+        
+        # Ensure correct array size
+        if len(self.sld_values) != n_sld_values:
+            if len(self.sld_values) == 1:
+                # Extend single value to all layers
+                # FIXED: Maintain float dtype
+                self.sld_values = np.full(n_sld_values, float(self.sld_values[0]))
+            else:
+                # Resize array to correct length
+                # FIXED: Ensure float dtype after resize
+                self.sld_values = np.resize(self.sld_values, n_sld_values).astype(float)
+                print(f"Warning: Resized SLD array to {n_sld_values} elements for {self.layers} layers")
+
 
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
                     plot_structure=True, plot_grid=True, plot_combined=True,
