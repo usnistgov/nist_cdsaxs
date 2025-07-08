@@ -469,31 +469,15 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     def SymCoordAssign(self, PAR=None, layers=None, sld_values=None):
         """
-        Enhanced coordinate assignment function with SLD support.
-        This replaces SymCoordAssign_SingleMaterial with SLD capabilities.
-        
-        Parameters:
-        -----------
-        PAR : numpy.ndarray, optional
-            Array with parameters for each layer
-        layers : int, optional
-            Number of layers in the trapezoid structure
-        sld_values : numpy.ndarray, optional
-            SLD values for each trapezoid layer. If None, uses self.sld_values
-            
-        Returns:
-        --------
-        numpy.ndarray or bool
-            Coordinate array for the trapezoid structure
-            If called with self attributes, also sets self.Coord and returns True
+        Alternative implementation with even clearer SLD assignment logic.
+        Each coordinate index directly corresponds to its layer index.
         """
         try:
-            # Determine whether to use passed parameters or class attributes
+            # Parameter validation (same as above)
             using_self = False
             
             if PAR is None:
                 if not hasattr(self, 'PAR'):
-                    # Try to use model_params if available
                     if hasattr(self, 'model_params'):
                         PAR = self._extract_PAR_from_model_params()
                     else:
@@ -506,66 +490,68 @@ class TrapezoidModelArray(CDSAXS_Model):
                     raise AttributeError("Missing required attribute: layers")
                 layers = self.layers
                 
-            # Determine SLD values to use
             if sld_values is not None:
-                # Use provided SLD values
-                sld_array = np.array(sld_values)
+                sld_array = np.array(sld_values, dtype=float)
             elif hasattr(self, 'sld_values'):
-                # Use current SLD configuration
                 sld_array = self.sld_values.copy()
             else:
-                # Default fallback to single material (all SLDs = 1)
-                sld_array = np.ones(layers)
+                sld_array = np.ones(layers, dtype=float)
             
-            # Ensure SLD array has correct length (one per layer, not per vertex)
+            # STRICT VALIDATION
             if len(sld_array) != layers:
-                if len(sld_array) == 1:
-                    sld_array = np.full(layers, sld_array[0])
-                else:
-                    sld_array = np.resize(sld_array, layers)
+                raise ValueError(
+                    f"SLD array length ({len(sld_array)}) must exactly match number of layers ({layers}). "
+                    f"Each layer requires its own SLD value."
+                )
             
-            # Validate PAR dimensions
-            if not isinstance(PAR, np.ndarray):
-                raise TypeError("PAR must be a numpy array")
-                
-            if len(PAR) < layers + 1:
-                raise ValueError(f"PAR array must have at least {layers + 1} rows, but has {len(PAR)}")
-                
-            # Check PAR shape
-            if len(PAR.shape) < 2 or PAR.shape[1] < 2:
-                raise ValueError(f"PAR must have at least 2 columns, but has shape {PAR.shape}")
+            # Validate PAR
+            if not isinstance(PAR, np.ndarray) or len(PAR) < layers + 1 or PAR.shape[1] < 2:
+                raise ValueError("Invalid PAR array dimensions")
             
-            # Main calculation code - enhanced with SLD support
-            Coord = np.zeros([layers+1, 5, 1])
-            for T in range(layers+1):
+            # Initialize coordinate array
+            Coord = np.zeros([layers + 1, 5, 1])
+            
+            # Assign coordinates and SLD values
+            for layer_idx in range(layers):
+                # Each layer_idx corresponds to coordinate index layer_idx
+                T = layer_idx
+                
                 if T == 0:
+                    # Bottom layer
                     Coord[T, 0, 0] = 0
                     Coord[T, 1, 0] = PAR[0, 0]
                     Coord[T, 2, 0] = PAR[0, 1]
                     Coord[T, 3, 0] = 0
-                    # For the bottom vertex, use the SLD of the first layer
-                    Coord[T, 4, 0] = sld_array[0] if len(sld_array) > 0 else 1.0
                 else:
+                    # Upper layers
                     Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
                     Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
                     Coord[T, 2, 0] = PAR[T, 1]
                     Coord[T, 3, 0] = 0
-                    # Use SLD from the layer we just finished (T-1)
-                    layer_idx = min(T-1, len(sld_array)-1)
-                    Coord[T, 4, 0] = sld_array[layer_idx]
+                
+                # CLEAR SLD ASSIGNMENT: layer_idx gets sld_array[layer_idx]
+                Coord[T, 4, 0] = sld_array[layer_idx]
             
-            # If using self attributes, update self.Coord
+            # Handle the top vertex (T = layers)
+            T = layers
+            Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+            Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
+            Coord[T, 2, 0] = PAR[T, 1]
+            Coord[T, 3, 0] = 0
+            Coord[T, 4, 0] = 0.0  # Top vertex - no layer associated
+            
             if using_self:
                 self.Coord = Coord
                 return True
                 
             return Coord
-        
+            
         except Exception as e:
-            print(f"Error in SymCoordAssign: {str(e)}")
+            print(f"Error in SymCoordAssign_Alternative: {str(e)}")
             if using_self:
                 return False
             return None
+
     
     def _get_current_parameter_value(self, param_name):
         """
@@ -574,7 +560,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         if param_name.startswith('sld_'):
             sld_idx = int(param_name.split('_')[1])
             if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
-                return self.sld_values[sld_idx]
+                return float(self.sld_values[sld_idx])
             else:
                 raise ValueError(f"SLD index {sld_idx} out of range")
         
@@ -656,6 +642,7 @@ class TrapezoidModelArray(CDSAXS_Model):
     def _initialize_sld_values(self):
         """
         Initialize SLD values from various sources, with sensible defaults.
+        FIXED: Ensures SLD values are always float dtype for mathematical operations.
         """
         # For trapezoids, we need SLD values for each LAYER (trapezoid), not each vertex
         n_sld_values = self.layers  # Number of actual trapezoids/layers
@@ -665,29 +652,36 @@ class TrapezoidModelArray(CDSAXS_Model):
             # Use SLD values from model_params (main approach)
             sld_values = self.model_params['slds']
             if isinstance(sld_values, list):
-                self.sld_values = np.array(sld_values)
+                # FIXED: Explicitly convert to float dtype
+                self.sld_values = np.array(sld_values, dtype=float)
             else:
-                self.sld_values = np.array([sld_values])  # Single value
+                # FIXED: Ensure single values are also float
+                self.sld_values = np.array([float(sld_values)])
                 
         elif hasattr(self, 'SLD') and self.SLD is not None:
             # Use legacy SLD parameter for backward compatibility
             if np.isscalar(self.SLD):
-                self.sld_values = np.full(n_sld_values, self.SLD)
+                # FIXED: Use float dtype
+                self.sld_values = np.full(n_sld_values, float(self.SLD))
             else:
-                self.sld_values = np.array(self.SLD)
+                # FIXED: Convert array to float dtype
+                self.sld_values = np.array(self.SLD, dtype=float)
                 
         else:
             # Default: all SLDs = 1.0 (single material behavior)
-            self.sld_values = np.ones(n_sld_values)
+            # FIXED: Use float dtype for defaults
+            self.sld_values = np.ones(n_sld_values, dtype=float)
         
         # Ensure correct array size
         if len(self.sld_values) != n_sld_values:
             if len(self.sld_values) == 1:
                 # Extend single value to all layers
-                self.sld_values = np.full(n_sld_values, self.sld_values[0])
+                # FIXED: Maintain float dtype
+                self.sld_values = np.full(n_sld_values, float(self.sld_values[0]))
             else:
                 # Resize array to correct length
-                self.sld_values = np.resize(self.sld_values, n_sld_values)
+                # FIXED: Ensure float dtype after resize
+                self.sld_values = np.resize(self.sld_values, n_sld_values).astype(float)
                 print(f"Warning: Resized SLD array to {n_sld_values} elements for {self.layers} layers")
     
     def FreeFormTrapezoid(self, Coord=None, layers=None, Qx=None, Qz=None):
@@ -1691,56 +1685,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         return self.SimTrap_SM(*args, **kwargs)
 
 
-
-    def _get_current_parameter_value(self, param_name):
-        """
-        Get the current value of a parameter from the model.
-        
-        Parameters:
-        -----------
-        param_name : str
-            Name of the parameter
-            
-        Returns:
-        --------
-        float
-            Current value of the parameter
-        """
-        if param_name.startswith('trap_'):
-            parts = param_name.split('_')
-            trap_idx = int(parts[1])
-            param_type = parts[2]
-            return self.model_params['trapezoids'][trap_idx][param_type]
-        
-        elif param_name.startswith('cyl_'):
-            parts = param_name.split('_')
-            cyl_idx = int(parts[1])
-            param_type = parts[2]
-            return self.model_params['cylinders'][cyl_idx][param_type]
-        
-        elif param_name.startswith('Bk_'):
-            bk_idx = int(param_name.split('_')[1])
-            if isinstance(self.Bk, np.ndarray):
-                return self.Bk[bk_idx]
-            else:
-                return self.Bk
-        
-        elif param_name == 'Bk':
-            if isinstance(self.Bk, np.ndarray):
-                return self.Bk[0]  # Return first element for scalar case
-            else:
-                return self.Bk
-        
-        elif param_name in ['DW', 'I0']:
-            return getattr(self, param_name)
-        
-        else:
-            # Try to get from model_params
-            if hasattr(self, 'model_params') and param_name in self.model_params:
-                return self.model_params[param_name]
-            else:
-                raise ValueError(f"Unknown parameter: {param_name}")
-            
+         
             
             
             
