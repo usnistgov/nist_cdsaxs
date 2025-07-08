@@ -226,7 +226,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                     self.Bk_Initial = self.Bk.copy()
             
             # For trapezoid model, run initial simulation
-            self.SymCoordAssign_SingleMaterial()
+            self.SymCoordAssign()
             self.SimTrap_SM()
             self.SimInt_Initial = self.SimInt.copy() if hasattr(self, 'SimInt') else None
             self.GF = self.GF_calc(self.SimInt)
