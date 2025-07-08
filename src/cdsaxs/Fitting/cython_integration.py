@@ -20,7 +20,7 @@ except ImportError as e:
     print(f"Cython modules not available: {e}")
     print("Falling back to pure Python implementations")
     CYTHON_AVAILABLE = False
-
+    
 def enable_cython():
     """Enable Cython acceleration if available."""
     global USE_CYTHON

@@ -8,7 +8,10 @@ cimport numpy as cnp
 cimport cython
 from libc.math cimport exp, log, sqrt, pow, isfinite, fabs, sin, cos, atan2
 from libc.stdlib cimport malloc, free
-from scipy.special import jv  # Import as Python function for now
+
+# Import scipy.special.jv as a Python function
+# Note: For production, you might want to use a C implementation of Bessel functions
+from scipy.special import jv
 
 # Declare numpy array types
 ctypedef cnp.float64_t DTYPE_t
@@ -20,7 +23,7 @@ def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
                                  int layers,
                                  cnp.ndarray[DTYPE_t, ndim=2] qr,
                                  cnp.ndarray[DTYPE_t, ndim=2] qz,
-                                 cnp.ndarray[int, ndim=1] discretization,
+                                 cnp.ndarray[cnp.int32_t, ndim=1] discretization,
                                  cnp.ndarray[DTYPE_t, ndim=1] sld_values):
     """
     Cythonized Fourier transform for a cone in cylindrical coordinates with SLD support.
@@ -35,7 +38,7 @@ def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
         Radial component of scattering vector
     qz : ndarray[float64, ndim=2]
         Z-component of scattering vector
-    discretization : ndarray[int, ndim=1]
+    discretization : ndarray[int32, ndim=1]
         Number of discretization steps for each layer
     sld_values : ndarray[float64, ndim=1]
         SLD values for each layer
@@ -55,7 +58,8 @@ def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
     cdef DTYPE_t stepsize, r1, r2, slope
     cdef DTYPE_t ri1, ri2, qr_val, qz_val, sld_val
     cdef DTYPE_t bessel1, bessel2, pi_factor, phase1, phase2
-    cdef CTYPE_t fa, fb, contrib, exp_term1, exp_term2
+    cdef DTYPE_t cos_val1, sin_val1, cos_val2, sin_val2
+    cdef CTYPE_t fa, fb, contrib
     cdef cnp.ndarray[DTYPE_t, ndim=1] z
     
     pi_factor = 2.0 * np.pi
@@ -68,7 +72,6 @@ def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
             h1 = h1 + par[i-1, 1]
         
         # Create z array for this layer
-        z_steps = int((h2 - h1) / stepsize) + 1
         z = np.arange(h1, h2 + 0.01, stepsize)
         
         r1 = par[i, 0]
@@ -92,8 +95,7 @@ def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
                     
                     if qr_val > 0:
                         # Calculate Bessel function contributions
-                        # Note: Using Python jv function here for simplicity
-                        # In production, you might want to use a faster C implementation
+                        # Using Python jv function - in production, consider C implementation
                         bessel1 = jv(1, qr_val * ri1)
                         bessel2 = jv(1, qr_val * ri2)
                         
@@ -101,19 +103,20 @@ def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
                         phase1 = qz_val * z[ii]
                         phase2 = qz_val * z[ii+1]
                         
-                        # Create complex exponential terms
-                        exp_term1 = cos(phase1) + 1j * sin(phase1)
-                        exp_term2 = cos(phase2) + 1j * sin(phase2)
+                        # Create complex exponential terms using cos and sin
+                        cos_val1 = cos(phase1)
+                        sin_val1 = sin(phase1)
+                        cos_val2 = cos(phase2)
+                        sin_val2 = sin(phase2)
                         
                         # Calculate contributions
-                        fa = (pi_factor * ri1 / qr_val) * bessel1 * exp_term1
-                        fb = (pi_factor * ri2 / qr_val) * bessel2 * exp_term2
+                        fa = (pi_factor * ri1 / qr_val) * bessel1 * (cos_val1 + 1j * sin_val1)
+                        fb = (pi_factor * ri2 / qr_val) * bessel2 * (cos_val2 + 1j * sin_val2)
                         
                         contrib = stepsize * (fb + fa) / 2.0 * sld_val
                         form[row, col] = form[row, col] + contrib
     
     return form
-
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -124,7 +127,7 @@ def sim_cyl_sm_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
                      DTYPE_t dw,
                      DTYPE_t i0,
                      DTYPE_t background,
-                     cnp.ndarray[int, ndim=1] discretization,
+                     cnp.ndarray[cnp.int32_t, ndim=1] discretization,
                      cnp.ndarray[DTYPE_t, ndim=1] sld_values):
     """
     Cythonized simulation for single material cylinder.
@@ -145,7 +148,7 @@ def sim_cyl_sm_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
         Intensity scaling factor
     background : float
         Background intensity
-    discretization : ndarray[int, ndim=1]
+    discretization : ndarray[int32, ndim=1]
         Discretization for each layer
     sld_values : ndarray[float64, ndim=1]
         SLD values for each layer
@@ -196,7 +199,7 @@ def sim_cyl_gf_cython(cnp.ndarray[DTYPE_t, ndim=1] sim_par,
                      cnp.ndarray[DTYPE_t, ndim=2] intensity,
                      cnp.ndarray[DTYPE_t, ndim=2] qr,
                      cnp.ndarray[DTYPE_t, ndim=2] qz,
-                     cnp.ndarray[int, ndim=1] discretization,
+                     cnp.ndarray[cnp.int32_t, ndim=1] discretization,
                      cnp.ndarray[DTYPE_t, ndim=1] sld_values):
     """
     Cythonized goodness of fit calculation for cylinder optimization.
@@ -213,7 +216,7 @@ def sim_cyl_gf_cython(cnp.ndarray[DTYPE_t, ndim=1] sim_par,
         Radial component of scattering vector
     qz : ndarray[float64, ndim=2]
         Z-component of scattering vector
-    discretization : ndarray[int, ndim=1]
+    discretization : ndarray[int32, ndim=1]
         Discretization for each layer
     sld_values : ndarray[float64, ndim=1]
         SLD values for each layer
@@ -244,10 +247,9 @@ def sim_cyl_gf_cython(cnp.ndarray[DTYPE_t, ndim=1] sim_par,
         pars, layers, qr, qz, discretization, sld_values
     )
     
-    # Calculate intensity
+    # Calculate intensity and goodness of fit
     cdef int rows = qr.shape[0]
     cdef int cols = qr.shape[1]
-    cdef cnp.ndarray[DTYPE_t, ndim=2] sim_int = np.zeros((rows, cols), dtype=np.float64)
     
     cdef DTYPE_t q_squared, dw_squared = dw * dw
     cdef CTYPE_t form_val

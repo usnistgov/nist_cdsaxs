@@ -4,24 +4,46 @@ Accelerated model classes that integrate Cython optimization with fallback to pu
 
 import numpy as np
 import copy
-from .cython_integration import (
-    gf_calc_accelerated,
-    debye_waller_factor_accelerated,
-    intensity_calculation_accelerated,
-    sym_coord_assign_accelerated,
-    free_form_trapezoid_accelerated,
-    sim_trap_sm_accelerated,
-    cone_fourier_transform_accelerated,
-    sim_cyl_sm_accelerated,
-    sim_cyl_gf_accelerated,
-    convert_cartesian_cylindrical_accelerated,
-    USE_CYTHON,
-    CYTHON_AVAILABLE
-)
+
+# Try relative imports first, then absolute imports as fallback
+try:
+    from .cython_integration import (
+        gf_calc_accelerated,
+        debye_waller_factor_accelerated,
+        intensity_calculation_accelerated,
+        sym_coord_assign_accelerated,
+        free_form_trapezoid_accelerated,
+        sim_trap_sm_accelerated,
+        cone_fourier_transform_accelerated,
+        sim_cyl_sm_accelerated,
+        sim_cyl_gf_accelerated,
+        convert_cartesian_cylindrical_accelerated,
+        USE_CYTHON,
+        CYTHON_AVAILABLE
+    )
+except ImportError:
+    from cython_integration import (
+        gf_calc_accelerated,
+        debye_waller_factor_accelerated,
+        intensity_calculation_accelerated,
+        sym_coord_assign_accelerated,
+        free_form_trapezoid_accelerated,
+        sim_trap_sm_accelerated,
+        cone_fourier_transform_accelerated,
+        sim_cyl_sm_accelerated,
+        sim_cyl_gf_accelerated,
+        convert_cartesian_cylindrical_accelerated,
+        USE_CYTHON,
+        CYTHON_AVAILABLE
+    )
 
 # Import original models
-from .Trapezoid_model import TrapezoidModelArray
-from .Cylinder_model import CylinderModel
+try:
+    from .Trapezoid_model import TrapezoidModelArray
+    from .Cylinder_model import CylinderModel
+except ImportError:
+    from Trapezoid_model import TrapezoidModelArray
+    from Cylinder_model import CylinderModel
 
 class AcceleratedTrapezoidModel(TrapezoidModelArray):
     """
