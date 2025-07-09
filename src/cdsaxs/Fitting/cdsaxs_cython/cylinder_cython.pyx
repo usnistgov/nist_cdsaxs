@@ -9,51 +9,50 @@ cimport cython
 from libc.math cimport exp, log, sqrt, pow, isfinite, fabs, sin, cos, atan2
 from libc.stdlib cimport malloc, free
 
-# Import scipy.special.jv more efficiently
-cdef extern from "math.h":
-    double j1(double x) nogil
-
-# For more advanced Bessel functions, we'll use a fast approximation
-cdef double bessel_j1_fast(double x) nogil:
-    """Fast approximation for Bessel function J1(x)."""
-    if x == 0.0:
-        return 0.0
-    elif fabs(x) < 8.0:
-        # Use series expansion for small x
-        cdef double ax = fabs(x)
-        cdef double y = x * x
-        cdef double ans1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1 
-                + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))))
-        cdef double ans2 = 144725228442.0 + y * (2300535178.0 + y * (18583304.74 
-                + y * (99447.43394 + y * (376.9991397 + y * 1.0))))
-        return ans1 / ans2
-    else:
-        # Use asymptotic expansion for large x
-        cdef double z = 8.0 / x
-        cdef double y = z * z
-        cdef double xx = x - 2.356194491
-        cdef double ans1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396496e-4 
-                + y * (0.2457520174e-5 + y * (-0.240337019e-6))))
-        cdef double ans2 = 0.04687499995 + y * (-0.2002690873e-3 
-                + y * (0.8449199096e-5 + y * (-0.88228987e-6 
-                + y * 0.105787412e-6)))
-        return sqrt(0.636619772 / x) * (cos(xx) * ans1 - z * sin(xx) * ans2)
-
 # Declare numpy array types
 ctypedef cnp.float64_t DTYPE_t
 ctypedef cnp.complex128_t CTYPE_t
 
+cdef double bessel_j1_fast(double x) nogil:
+    """Fast approximation for Bessel function J1(x)."""
+    # Declare all variables at the top
+    cdef double ax, y, ans1, ans2, z, xx
+    
+    if x == 0.0:
+        return 0.0
+    elif fabs(x) < 8.0:
+        # Use series expansion for small x
+        ax = fabs(x)
+        y = x * x
+        ans1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1 
+                + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))))
+        ans2 = 144725228442.0 + y * (2300535178.0 + y * (18583304.74 
+                + y * (99447.43394 + y * (376.9991397 + y * 1.0))))
+        return ans1 / ans2
+    else:
+        # Use asymptotic expansion for large x
+        z = 8.0 / x
+        y = z * z
+        xx = x - 2.356194491
+        ans1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396496e-4 
+                + y * (0.2457520174e-5 + y * (-0.240337019e-6))))
+        ans2 = 0.04687499995 + y * (-0.2002690873e-3 
+                + y * (0.8449199096e-5 + y * (-0.88228987e-6 
+                + y * 0.105787412e-6)))
+        return sqrt(0.636619772 / x) * (cos(xx) * ans1 - z * sin(xx) * ans2)
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def cone_fourier_transform_cython_optimized(cnp.ndarray[DTYPE_t, ndim=2] par,
-                                           int layers,
-                                           cnp.ndarray[DTYPE_t, ndim=2] qr,
-                                           cnp.ndarray[DTYPE_t, ndim=2] qz,
-                                           cnp.ndarray[cnp.int32_t, ndim=1] discretization,
-                                           cnp.ndarray[DTYPE_t, ndim=1] sld_values):
+def cone_fourier_transform_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
+                                 int layers,
+                                 cnp.ndarray[DTYPE_t, ndim=2] qr,
+                                 cnp.ndarray[DTYPE_t, ndim=2] qz,
+                                 cnp.ndarray[cnp.int32_t, ndim=1] discretization,
+                                 cnp.ndarray[DTYPE_t, ndim=1] sld_values):
     """
     Optimized Cythonized Fourier transform for a cone in cylindrical coordinates.
     """
+    # Declare all variables at the top
     cdef int rows = qr.shape[0]
     cdef int cols = qr.shape[1]
     cdef cnp.ndarray[CTYPE_t, ndim=2] form = np.zeros((rows, cols), dtype=np.complex128)
@@ -67,6 +66,8 @@ def cone_fourier_transform_cython_optimized(cnp.ndarray[DTYPE_t, ndim=2] par,
     cdef DTYPE_t cos_val1, sin_val1, cos_val2, sin_val2
     cdef DTYPE_t real_contrib, imag_contrib
     cdef DTYPE_t two_pi_over_qr, stepsize_half_sld
+    cdef int n_steps
+    cdef DTYPE_t *z_array
     
     # Pre-calculate constants
     pi_factor = 2.0 * np.pi
@@ -89,8 +90,8 @@ def cone_fourier_transform_cython_optimized(cnp.ndarray[DTYPE_t, ndim=2] par,
         slope = (h2 - h1) / (r2 - r1)
         
         # Pre-calculate z points for this layer
-        cdef int n_steps = int((h2 - h1) / stepsize) + 1
-        cdef DTYPE_t *z_array = <DTYPE_t *>malloc(n_steps * sizeof(DTYPE_t))
+        n_steps = int((h2 - h1) / stepsize) + 1
+        z_array = <DTYPE_t *>malloc(n_steps * sizeof(DTYPE_t))
         
         if z_array == NULL:
             raise MemoryError("Could not allocate memory for z_array")
@@ -143,16 +144,16 @@ def cone_fourier_transform_cython_optimized(cnp.ndarray[DTYPE_t, ndim=2] par,
 
 @cython.boundscheck(False) 
 @cython.wraparound(False)
-def convert_cartesian_cylindrical_cython_optimized(cnp.ndarray[DTYPE_t, ndim=2] qx,
-                                                  cnp.ndarray[DTYPE_t, ndim=2] qy):
+def convert_cartesian_cylindrical_cython(cnp.ndarray[DTYPE_t, ndim=2] qx,
+                                        cnp.ndarray[DTYPE_t, ndim=2] qy):
     """
     Highly optimized conversion from Cartesian to cylindrical coordinates.
     """
+    # Declare all variables at the top
     cdef int rows = qx.shape[0]
     cdef int cols = qx.shape[1]
     cdef cnp.ndarray[DTYPE_t, ndim=2] qr = np.empty((rows, cols), dtype=np.float64)
     cdef cnp.ndarray[DTYPE_t, ndim=2] alpha = np.empty((rows, cols), dtype=np.float64)
-    
     cdef int i, j
     cdef DTYPE_t qx_val, qy_val, qr_val
     
@@ -173,6 +174,90 @@ def convert_cartesian_cylindrical_cython_optimized(cnp.ndarray[DTYPE_t, ndim=2] 
     
     return qr, alpha
 
-# Use the optimized functions by default
-cone_fourier_transform_cython = cone_fourier_transform_cython_optimized
-convert_cartesian_cylindrical_cython = convert_cartesian_cylindrical_cython_optimized
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def sim_cyl_sm_cython(cnp.ndarray[DTYPE_t, ndim=2] par,
+                     int layers,
+                     cnp.ndarray[DTYPE_t, ndim=2] qr,
+                     cnp.ndarray[DTYPE_t, ndim=2] qz,
+                     DTYPE_t dw,
+                     DTYPE_t i0,
+                     DTYPE_t background,
+                     cnp.ndarray[cnp.int32_t, ndim=1] discretization,
+                     cnp.ndarray[DTYPE_t, ndim=1] sld_values):
+    """
+    Cythonized cylinder simulation.
+    """
+    # Declare all variables at the top
+    cdef cnp.ndarray[CTYPE_t, ndim=2] form = cone_fourier_transform_cython(par, layers, qr, qz, discretization, sld_values)
+    cdef int rows = qr.shape[0]
+    cdef int cols = qr.shape[1]
+    cdef cnp.ndarray[DTYPE_t, ndim=2] sim_int = np.zeros((rows, cols), dtype=np.float64)
+    cdef int i, j
+    cdef DTYPE_t q_squared, dw_squared = dw * dw
+    cdef DTYPE_t m_val
+    cdef CTYPE_t form_val
+    cdef DTYPE_t real_part, imag_part, magnitude_squared
+    
+    for i in range(rows):
+        for j in range(cols):
+            # Calculate Debye-Waller factor
+            q_squared = qr[i, j] * qr[i, j] + qz[i, j] * qz[i, j]
+            m_val = sqrt(exp(-q_squared * dw_squared))
+            
+            # Apply Debye-Waller factor to form factor
+            form_val = form[i, j] * m_val
+            
+            # Calculate magnitude squared
+            real_part = form_val.real
+            imag_part = form_val.imag
+            magnitude_squared = real_part * real_part + imag_part * imag_part
+            
+            # Calculate intensity
+            sim_int[i, j] = magnitude_squared * i0 + background
+    
+    return sim_int
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def sim_cyl_gf_cython(cnp.ndarray[DTYPE_t, ndim=1] sim_par,
+                     int layers,
+                     cnp.ndarray[DTYPE_t, ndim=2] intensity,
+                     cnp.ndarray[DTYPE_t, ndim=2] qr,
+                     cnp.ndarray[DTYPE_t, ndim=2] qz,
+                     cnp.ndarray[cnp.int32_t, ndim=1] discretization,
+                     cnp.ndarray[DTYPE_t, ndim=1] sld_values):
+    """
+    Cythonized cylinder GF calculation.
+    """
+    # Declare all variables at the top
+    cdef cnp.ndarray[DTYPE_t, ndim=2] pars = np.zeros((layers + 1, 2), dtype=np.float64)
+    cdef DTYPE_t i0, dw, background
+    cdef int i, j
+    cdef int rows = intensity.shape[0]
+    cdef int cols = intensity.shape[1]
+    cdef DTYPE_t gf = 0.0
+    cdef DTYPE_t log_diff, sim_val, exp_val
+    cdef cnp.ndarray[DTYPE_t, ndim=2] sim_int
+    
+    # Extract parameters
+    pars[:, 0:2] = sim_par[0:(layers + 1) * 2].reshape((layers + 1, 2))
+    i0 = sim_par[(layers + 1) * 2]
+    dw = sim_par[(layers + 1) * 2 + 1]
+    background = sim_par[(layers + 1) * 2 + 2]
+    
+    # Calculate simulated intensity
+    sim_int = sim_cyl_sm_cython(pars, layers, qr, qz, dw, i0, background, discretization, sld_values)
+    
+    # Calculate goodness of fit
+    for i in range(rows):
+        for j in range(cols):
+            sim_val = sim_int[i, j]
+            exp_val = intensity[i, j]
+            
+            if sim_val > 0 and exp_val > 0 and isfinite(sim_val) and isfinite(exp_val):
+                log_diff = log(exp_val) - log(sim_val)
+                if isfinite(log_diff):
+                    gf += fabs(log_diff)
+    
+    return gf
