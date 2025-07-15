@@ -7,7 +7,7 @@ _Insert basic installation instructions here._
 ## Installation & Usage Instructions (Legacy GUI)
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
 2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
-3. Create an environment with the `environment_legacy.yml` file:
+3. Create an environment with the `environment_legacy.yml` file using the following command. *Note: depending on your Python access capabilities or limitations, you may need to reconfigure your channel in the environment_legacy.yml file.*
 ```
 conda env create -f environment_legacy.yml
 ```
