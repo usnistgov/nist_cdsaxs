@@ -1,7 +1,6 @@
 name: cdsaxs_legacy
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - certifi=2018.8.24=py35_1001
   - pip=20.3.4=pyhd8ed1ab_0
