@@ -1,120 +1,69 @@
 """
-Setup script for building Cython extensions for CDSAXS optimization.
-Fixed for math library compatibility issues.
+Compatible setup.py for CDSAXS Cython extensions.
+Keeps SSE but disables higher-level vectorization that causes issues.
 """
 
 from setuptools import setup, Extension
 from Cython.Build import cythonize
 import numpy
 import os
-import sys
-import platform
 
-# Create the cdsaxs_cython directory if it doesn't exist
+# Ensure directory exists
 os.makedirs("cdsaxs_cython", exist_ok=True)
+if not os.path.exists("cdsaxs_cython/__init__.py"):
+    with open("cdsaxs_cython/__init__.py", "w") as f:
+        f.write('"""Cython acceleration package"""\n')
 
-# Create __init__.py file for the package
-init_content = """# Cython acceleration package for CDSAXS
-"""
+# Compatible flags - keep basic SSE but disable problematic vectorization
+compile_args = [
+    "-O1",                      # Minimal optimization
+    "-fno-tree-vectorize",      # Disable tree vectorization  
+    "-fno-fast-math",           # No fast math
+    "-mno-avx",                 # No AVX (this is what causes the SVML issues)
+    "-mno-avx2",                # No AVX2
+    "-mno-fma",                 # No FMA
+    # Keep SSE enabled as system headers need it
+]
 
-with open("cdsaxs_cython/__init__.py", "w") as f:
-    f.write(init_content)
+link_args = ["-lm"]
 
-# Determine platform-specific compiler flags
-def get_compiler_flags():
-    """Get appropriate compiler flags for the platform."""
-    base_flags = ["-O3"]
-    link_flags = ["-O3"]
-    
-    # Check if we're on Linux
-    if platform.system() == "Linux":
-        # More conservative flags to avoid vectorization issues
-        base_flags.extend([
-            "-fno-fast-math",  # Disable fast math that can cause symbol issues
-            "-fno-vectorize",  # Disable automatic vectorization
-            "-fno-slp-vectorize",  # Disable SLP vectorization
-        ])
-        
-        # Add math library explicitly
-        link_flags.extend(["-lm"])
-        
-    elif platform.system() == "Darwin":  # macOS
-        base_flags.extend(["-ffast-math"])
-        
-    elif platform.system() == "Windows":
-        # Windows-specific flags
-        base_flags = ["/O2"]
-        link_flags = []
-    
-    return base_flags, link_flags
-
-# Get platform-appropriate flags
-compile_flags, link_flags = get_compiler_flags()
-
-print(f"Using compile flags: {compile_flags}")
-print(f"Using link flags: {link_flags}")
-
-# Define extensions with robust compilation settings
 extensions = [
     Extension(
         "cdsaxs_cython.base_cython",
         ["cdsaxs_cython/base_cython.pyx"],
         include_dirs=[numpy.get_include()],
-        define_macros=[
-            ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
-            ("CYTHON_WITHOUT_ASSERTIONS", "1")
-        ],
-        extra_compile_args=compile_flags,
-        extra_link_args=link_flags,
-        libraries=["m"] if platform.system() == "Linux" else []
+        define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+        extra_compile_args=compile_args,
+        extra_link_args=link_args,
+        libraries=["m"]
     ),
     Extension(
         "cdsaxs_cython.trapezoid_cython",
         ["cdsaxs_cython/trapezoid_cython.pyx"],
         include_dirs=[numpy.get_include()],
-        define_macros=[
-            ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
-            ("CYTHON_WITHOUT_ASSERTIONS", "1")
-        ],
-        extra_compile_args=compile_flags,
-        extra_link_args=link_flags,
-        libraries=["m"] if platform.system() == "Linux" else []
+        define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+        extra_compile_args=compile_args,
+        extra_link_args=link_args,
+        libraries=["m"]
     ),
     Extension(
         "cdsaxs_cython.cylinder_cython",
         ["cdsaxs_cython/cylinder_cython.pyx"],
         include_dirs=[numpy.get_include()],
-        define_macros=[
-            ("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION"),
-            ("CYTHON_WITHOUT_ASSERTIONS", "1")
-        ],
-        extra_compile_args=compile_flags,
-        extra_link_args=link_flags,
-        libraries=["m"] if platform.system() == "Linux" else []
+        define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+        extra_compile_args=compile_args,
+        extra_link_args=link_args,
+        libraries=["m"]
     )
 ]
 
-# Conservative compiler directives to avoid issues
-compiler_directives = {
-    'boundscheck': False,
-    'wraparound': False,
-    'cdivision': True,
-    'profile': False,
-    'language_level': 3,
-    'embedsignature': True,
-    'initializedcheck': False,
-    'overflowcheck': False
-}
-
 setup(
     name="cdsaxs_cython",
-    ext_modules=cythonize(extensions, compiler_directives=compiler_directives),
-    zip_safe=False,
-    packages=['cdsaxs_cython'],
-    package_dir={'cdsaxs_cython': 'cdsaxs_cython'},
-    install_requires=[
-        'numpy',
-        'scipy',
-        'cython'
-    ]
+    ext_modules=cythonize(extensions, compiler_directives={
+        'boundscheck': False,
+        'wraparound': False,
+        'cdivision': True,
+        'language_level': 3
+    }),
+    zip_safe=False
 )
