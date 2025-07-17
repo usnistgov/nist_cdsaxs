@@ -112,7 +112,7 @@ class Sample():
         overwrite : bool
             If set to True, any parameters provided to this method will
             overwrite the existing value in this instance if it already
-            exists in self.uer_params.
+            exists in self.user_params.
             Default value is True.
         """
         for key, value in params.items():

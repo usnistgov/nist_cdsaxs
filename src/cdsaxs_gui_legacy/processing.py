@@ -236,7 +236,7 @@ class DatasetGeneralCSV_TIFF(object):
     List of accepted CSV column headers and definitions:
         Required
         --------
-        filename
+        filename : file name as it appears in directory
         sample_phi_deg : sample rotation angle during cd-saxs measurement in degrees
         energy_ev : source energy in eV (cannot be used with wavelength_nm)
         wavelength_nm : source wavelength in nm (cannot be used with energy_ev)
@@ -247,6 +247,8 @@ class DatasetGeneralCSV_TIFF(object):
         sample_label : user-specified sample label
         sdd_cm : sample-to-detector distance in cm
         sample_chi_deg : rotation in the sample xy plane about the z axis
+        bpm : beam position monitor (cannot be used with IO)
+        IO : incident intensity (cannot be used with bpm)
 
     Attributes:
         filelist: list of .tif files
@@ -297,7 +299,7 @@ class DatasetBIN_INFO(object):
             info = np.genfromtxt(filename_info, delimiter='=', skip_header=1, dtype=str)
             info = {key: value for key, value in info}
             info['Sample Theta'] = float(info['Sample Theta ']) if 'Sample Theta ' in info else float(info['Theta '])
-            info['mono_act'] = 24200
+            info['mono_act'] = 9249.789 if info['Radiation '] == ' Gallium' else 24200
             info['Seconds'] = float(info['LiveTime '])
             infostr = '--- Specific to one image file ---\n'
             infostr += '\n'.join(['{0}: {1}'.format(key, info[key]) for key in sorted(info)])
@@ -417,6 +419,16 @@ class ScatteringFile(object):
             self.sample_theta = info['sample_phi_deg']
             if params.normalize_exposure:
                 self.scaling_factor /= info['exposure_time_s']
+            # this isn't quite correct, just a patch for SMI data
+            # TODO: fix SMI bpm normalization
+            if params.normalize_I0:
+                if 'bpm' in info.keys():
+                    self.scaling_factor /= info['bpm']
+                elif 'IO' in info.keys():
+                    self.scaling_factor /= info['IO']
+                #TODO: Implement error handling if bpm or IO not given but box selected. Currently left commented out as place holder.
+                #else:
+                    #warning.warn("No incident beam intensity found in csv. Data not normalized by IO.")
             if 'sdd_cm' in info.keys():
                 params = params._replace(SDD_cm=info['sdd_cm'])
             self.dataqxzqy = DataQxzQy(fileformat, self.sample_theta, fullfilename, params, self.lambda_nm, self.scaling_factor)

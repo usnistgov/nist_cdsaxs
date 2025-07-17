@@ -71,6 +71,17 @@ def importCDSAXS1D(Intensitydata,Qxdata,Qzdata):
     Qz[Qz == 0]=np.nan
     return Intensity,Qx,Qz
 
+def importCDSAXS1D(Intensitydata,Qxdata,Qzdata):
+    # imports data from a 1D grating
+    Intensity = np.loadtxt(Intensitydata)
+    Qx=np.loadtxt(Qxdata)
+    Qz=np.loadtxt(Qzdata)
+    
+    Intensity[Intensity == 0]=np.nan # replaces 
+    Qx[Qx == 0]=np.nan
+    Qz[Qz == 0]=np.nan
+    return Intensity,Qx,Qz
+
 def SymCoordAssign(TPAR,SLD):
     # assigns trapezoid coordinates for a symmetric trapezoid
     

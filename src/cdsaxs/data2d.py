@@ -43,7 +43,12 @@ class Data2D():
         to right.
     """
 
-    _ccw_rotation_counter = 0
+    # Will keep track of image rotations and flips.
+    # R# indicates number of counter-clockwise 90 degree rotations
+    # Example: R3 indicates 270 degree counter-clockwise rotation
+    # VF indicates a vertical flip
+    # HF indicates a horizontal flip
+    _image_transformations = []
 
     def __init__(self, image: NDArray[np.floating]):
         """
@@ -63,8 +68,8 @@ class Data2D():
         Rotate the image by a specified numer of degrees in the
         direction specified.
 
-        The current image rotation with respect to the original image
-        is saved. The rotations can be undone with 'reset_rotations'.
+        The original image is always saved and can be recalled by
+        using 'reset_image_orientation'.
 
         Parameters
         ----------
@@ -87,27 +92,47 @@ class Data2D():
                 "counter-clockwise is the same as a 90 degree clockwise "
                 "rotation. Did you intend this?"
             )
-        # determine number of 90 degree rotations counterclockwise
-        k = int(degrees/90) % 4
+        # switch to counterclockwise degrees
         if direction == 'cw':
-            k *= -1
+            degrees = 360 - degrees % 360
+        else:
+            degrees = degrees % 360
+        # determine number of 90 degree rotations counterclockwise
+        # this will round down to the nearest 90 degree rotation
+        k = int(degrees/90)
 
         if k != 0:
             self.image = np.rot90(self.image, k=k, axes=(0, 1))
+            self._image_transformations.append("R"+str(k))
 
-        self._ccw_rotation_counter = (self._ccw_rotation_counter + k) % 4
+    def flip_horizontally(self):
 
-    def reset_rotations(self):
+        self.image = np.flip(self.image, axis=1)
+        self._image_transformations.append("HF")
+
+    def flip_vertically(self):
+
+        self.image = np.flip(self.image, axis=0)
+        self._image_transformations.append("VF")
+
+    def reset_image_orientation(self, transformations=None):
         """
         Return the image to its original orientation removing any
-        rotations that have been done.
+        rotations or flips that have been done.
         """
-        if self._ccw_rotation_counter != 0:
-            degrees = -90*self._ccw_rotation_counter
-            with warnings.catch_warnings():
-                # ignore the warning meant for direct use of rotate()
-                warnings.simplefilter('ignore')
-                self.rotate_image(degrees)
+        if transformations is None:
+            transformations = self._image_transformations[::-1]
+
+        for tf in transformations:
+            if tf == "VF":
+                self.flip_vertically()
+            elif tf == "HF":
+                self.flip_horizontally()
+            else:
+                k = int(tf[1:])
+                self.rotate_image(degrees=90*k, direction="cw")
+
+        self._image_transformations = []
 
     def integrate_box(
             self,
@@ -379,28 +404,33 @@ class DataQdyQdx(Data2D):
             if word not in self.metadata.keys():
                 missing_keywords.append(word)
         if len(missing_keywords) > 0 and not suppress_errors:
+            self.qdy = None
+            self.qdx = None
             raise ValueError(
                 "The following metadta is missing to calculate q: "
                 f"{missing_keywords}"
             )
-
-        # TODO: update this when diffraction.py is refactored
-        qdy = diffraction.qy_pixels_to_qy(
-            -1*np.arange(0, self.image.shape[0])
-            + self.metadata['center_px'][0],
-            self.metadata["wavelength_nm"],
-            self.metadata["pixel_size_um"],
-            self.metadata["sdd_cm"],
-        )
-        qdx = diffraction.qxz_pixels_to_qxz(
-            -1*np.arange(0, self.image.shape[1])
-            + self.metadata['center_px'][1],
-            self.metadata["wavelength_nm"],
-            self.metadata["pixel_size_um"],
-            self.metadata["sdd_cm"],
-        )
-        self.qdy = qdy
-        self.qdx = qdx
+        elif len(missing_keywords) > 0:
+            self.qdy = None
+            self.qdx = None
+        else:
+            # TODO: update this when diffraction.py is refactored
+            qdy = diffraction.qy_pixels_to_qy(
+                -1*np.arange(0, self.image.shape[0])
+                + self.metadata['center_px'][0],
+                self.metadata["wavelength_nm"],
+                self.metadata["pixel_size_um"],
+                self.metadata["sdd_cm"],
+            )
+            qdx = diffraction.qxz_pixels_to_qxz(
+                -1*np.arange(0, self.image.shape[1])
+                + self.metadata['center_px'][1],
+                self.metadata["wavelength_nm"],
+                self.metadata["pixel_size_um"],
+                self.metadata["sdd_cm"],
+            )
+            self.qdy = qdy
+            self.qdx = qdx
 
     def rotate_image(self, degrees, direction='ccw'):
         """
@@ -424,57 +454,87 @@ class DataQdyQdx(Data2D):
             counterclockwise rotation. Set as 'cw' to indicate a
             clockwise rotation.
         """
-        # do image rotation but keep track of the steps taken
-        before_rotation = self._ccw_rotation_counter
-        super().rotate_image(degrees, direction=direction)
-        after_rotation = self._ccw_rotation_counter
-        ccw_steps = after_rotation - before_rotation
-
-        # update scattering vectors and beam center if they exist
-        qdy_before = np.copy(self.qdy)
-        qdx_before = np.copy(self.qdx)
+        # temporarily store information about current state
+        length0 = self.image.shape[0]
+        length1 = self.image.shape[1]
         try:
-            center_px_before = self.metadata['center_px']
+            center_px = self.metadata['center_px']
         except KeyError:
-            center_px_before = None
+            center_px = None
 
-        if ccw_steps == 1 or ccw_steps == -3:
-            if qdy_before is not None and qdx_before is not None:
-                self.qdy = -1*np.flip(qdx_before)
-                self.qdx = qdy_before
-            if center_px_before:
+        # do the rotation and store original image information if needed
+        super().rotate_image(degrees, direction=direction)
+        k = int(self._image_transformations[-1][1:])
+
+        if k == 1:
+            if center_px is not None:
                 self.metadata['center_px'] = [
-                    len(qdx_before)-center_px_before[1]-1,
-                    center_px_before[0]]
+                    length1-center_px[1]-1,
+                    center_px[0]]
 
-        if ccw_steps == 2 or ccw_steps == -2:
-            if qdy_before is not None and qdx_before is not None:
-                self.qdy = -1*np.flip(qdy_before)
-                self.qdx = -1*np.flip(qdx_before)
-            if center_px_before:
+        if k == 2:
+            if center_px is not None:
                 self.metadata['center_px'] = [
-                    len(qdy_before)-center_px_before[0]-1,
-                    len(qdx_before)-center_px_before[1]-1]
+                    length0-center_px[0]-1,
+                    length1-center_px[1]-1]
 
-        if ccw_steps == 3 or ccw_steps == -1:
-            if qdy_before is not None and qdx_before is not None:
-                self.qdy = qdx_before
-                self.qdx = -1*np.flip(qdy_before)
-            if center_px_before:
+        if k == 3:
+            if center_px is not None:
                 self.metadata['center_px'] = [
-                    center_px_before[1],
-                    len(qdy_before)-center_px_before[0]-1]
+                    center_px[1],
+                    length0-center_px[0]-1]
 
-    def reset_rotations(self):
+        # recalcualte q if possible
+        self.calculate_q(suppress_errors=True)
+
+    def flip_horizontally(self):
+        super().flip_horizontally()
+        try:
+            center_px = self.metadata['center_px']
+            self.metadata['center_px'] = [
+                center_px[0],
+                self.image.shape[1] - center_px[1] - 1
+            ]
+        except KeyError:
+            pass
+
+        # recalcualte q if possible
+        self.calculate_q(suppress_errors=True)
+
+    def flip_vertically(self):
+        super().flip_vertically()
+        try:
+            center_px = self.metadata['center_px']
+            self.metadata['center_px'] = [
+                self.image.shape[0] - center_px[0] - 1,
+                center_px[1]
+            ]
+        except KeyError:
+            pass
+
+        # recalcualte q if possible
+        self.calculate_q(suppress_errors=True)
+
+    def reset_image_orientation(self, transformations=None):
         """
         Return the scattering image to its original orientation
         removing any rotations that may have been done. The beam center
         and scattering vectors will be tracked and updated through this
         process (if they exist).
         """
-        if self._ccw_rotation_counter != 0:
-            degrees = -90*self._ccw_rotation_counter
-            self.rotate_image(degrees)
+        if transformations is None:
+            transformations = self._image_transformations[::-1]
+
+        for tf in transformations:
+            if tf == "VF":
+                self.flip_vertically()
+            elif tf == "HF":
+                self.flip_horizontally()
+            else:
+                k = int(tf[1:])
+                self.rotate_image(degrees=90*k, direction="cw")
+
+        self._image_transformations = []
 
     def integrate_box(
         self,

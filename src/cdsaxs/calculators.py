@@ -3,7 +3,7 @@ Simple calculators and frequently used functions.
 """
 
 # Global constants
-EV_NM = 1239.84
+EV_NM = 1239.8420452127
 
 
 def wavelength_to_energy(wavelength_nm: float) -> float:
