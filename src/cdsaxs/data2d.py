@@ -194,7 +194,7 @@ class Data2D():
             image = image.rotate(box_angle_deg, resample=resample,
                                  center=(rotation_center[1], rotation_center[0]),
                                  fillcolor=-50)
-            image = np.array(Image)
+            image = np.array(image)
 
         if mode == 'sum':
             integrated_i = np.nansum(
@@ -221,7 +221,8 @@ class Data2D():
                 'limits_axis1': limits_axis1,
                 'box_angle_deg': box_angle_deg,
                 'rotation_center': rotation_center,
-                'rotation_sampling_mode': rotation_sampling_mode
+                'rotation_sampling_mode': rotation_sampling_mode,
+                'rotated_image': np.copy(image) if box_angle_deg != 0 else None
             }
 
 
@@ -546,6 +547,7 @@ class DataQdyQdx(Data2D):
         log_scale=True,
         box_angle_deg: float = 0,
         rotation_sampling_mode: str = 'bicubic',
+        rotation_center_point: list | tuple = None,
         # interactive_plot=True
     ) -> IntegratedQSlice:
         """
@@ -578,8 +580,8 @@ class DataQdyQdx(Data2D):
             Default value is True.
         box_angle_deg : float
             Rotate the box by the set number of degrees clockwise
-            about the center point. Rotating the box will maintain the
-            size of the box.
+            about the beam center point. Rotating the box will maintain 
+            the size of the box.
             Units are in degrees.
             Default value is 0.
         rotation_sampling_mode : str
@@ -638,6 +640,10 @@ class DataQdyQdx(Data2D):
             limits_axis1=params["limits_axis1"],
             mode=mode,
             integration_axis=params["axis"],
+            box_angle_deg=params['box_angle_deg'],
+            rotation_sampling_mode=params['rotation_sampling_mode'],
+            rotation_center=params['rotation_center'],
+            rotated_image=params['rotated_image']
         )
 
         if show_plot:
@@ -1263,8 +1269,11 @@ class DataQdyQdx(Data2D):
         if show_plot:
             fig_peak, _ = plotting.plot_QdyQdx_find_peaks(
                 self, integrated_q_slice_peak, np.array(peaks_px))
-            vmin = np.log10(fig_peak.layout.coloraxis['cmin'])
-            vmax = np.log10(fig_peak.layout.coloraxis['cmax'])
+            # TODO: look into what is correct here
+            # vmin = np.log10(fig_peak.layout.coloraxis['cmin'])
+            # vmax = np.log10(fig_peak.layout.coloraxis['cmax'])
+            vmin = fig_peak.layout.coloraxis['cmin']
+            vmax = fig_peak.layout.coloraxis['cmax']
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self, integrated_q_slice=integrated_q_slice,
                 log_scale=True, vmin=vmin, vmax=vmax)

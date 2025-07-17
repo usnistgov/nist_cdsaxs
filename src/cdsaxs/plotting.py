@@ -95,7 +95,7 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
                              center=(integrated_q_slice.rotation_center[1],
                                      integrated_q_slice.rotation_center[0]),
                              fillcolor=-50)
-        image = np.array(Image)
+        image = np.array(image)
     fig = plot2D(image, axis0=data.qdy, axis1=data.qdx,
                  axis0_type='qdy', axis1_type='qdx', log_scale=log_scale,
                  vmin=vmin, vmax=vmax)
