@@ -285,7 +285,7 @@ class DatasetGeneralCSV_TIFF(object):
 
             self.filelist.append(os.path.join(self.folder, row[label2index['filename']]))
             self.scatteringfilelist.append(ScatteringFile('gencsvtiff', self.filelist[-1], params, info, infostr))
-        
+    
 
 class DatasetBIN_INFO(object):
     def __init__(self, params, filenames_bin):

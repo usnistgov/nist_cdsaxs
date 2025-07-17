@@ -25,6 +25,21 @@ python src/cdsaxs_gui_legacy/mainwindow.py
 ```
 The above command assumes you are still in the root directory of the project. The filepath can be updated to wherever `src/cdsaxs_gui_legacy/mainwindow.py` is located.
 
+## Installation & Usage Instructions (Developers)
+1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
+2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
+3. Create an environment with the `environment_legacy.yml` file:
+```
+conda env create -f environment_dev.yml
+```
+4. Activate the environment, replacing `cdsaxs_legacy` with your environment name if it is different.
+```
+conda activate cdsaxs_dev
+```
+
+To access the developers version of the code until proper installation is enabled,
+you may need to add the 'cdsaxs/src' directory to your python path.
+
 ## Citation Information
 _Insert information here about how to cite this software._
 
