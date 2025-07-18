@@ -415,13 +415,14 @@ def plot_reduced_slices(dataset, index=0, q_slice_axis='qsx', log_scale=True,
                     label=np.round(qsx, 6),
                     fmt='o-')
 
-    ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1),
+              title=plotting_tools.generate_axis_label_units(q_slice_axis))
 
     if log_scale:
         ax.set_yscale('log')
 
     ax.set_ylabel("Intensity")
-    ax.set_xlabel(plotting_tools.generate_axis_label_units(q_slice_axis))
+    ax.set_xlabel(plotting_tools.generate_axis_label_units(data.q_axis))
 
     plt.close()
     return fig
