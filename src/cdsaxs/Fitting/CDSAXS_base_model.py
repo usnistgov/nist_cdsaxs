@@ -114,6 +114,21 @@ class CDSAXS_Model:
         # Create SimPar for compatibility with existing code
         if self.PAR is not None:
             self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
+            
+        # Initialize callback data storage
+        self._callback_data = {
+            'iteration': [],
+            'objective_values': [],
+            'best_objective': [],
+            'parameter_values': [],
+            'convergence': [],
+            'acceptance_flags': [],  # For dual_annealing
+            'optimizer_type': None
+        }
+        
+        # Simple callback settings
+        self._callback_enabled = False
+        self._callback_print_frequency = 10
     
     def build_model_params_from_traditional(self):
         """
@@ -4446,11 +4461,39 @@ class CDSAXS_Model:
         
         
     def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
-                plot_results=True, plot_structure=True, plot_grid=True, 
-                plot_combined=False, verbose=False, **kwargs):
+                       plot_results=True, plot_structure=True, plot_grid=True, 
+                       plot_combined=False, verbose=False, use_callbacks=False, 
+                       callback_frequency=10, **kwargs):
         """
-        Flexible optimization method for CDSAXS model fitting using various scipy optimizers.
-        Fixed to respect verbose parameter.
+        Flexible optimization method for CDSAXS model fitting with optional callback monitoring.
+        
+        Parameters:
+        -----------
+        params_to_optimize : dict, optional
+            Dictionary containing parameters to optimize with their bounds
+        optimizer : str, optional
+            Optimizer to use ('differential_evolution', 'dual_annealing', etc.). Default: 'differential_evolution'
+        plot_results : bool, optional
+            Whether to generate before/after comparison plots. Default: True
+        plot_structure : bool, optional
+            Whether to plot structure comparison. Default: True
+        plot_grid : bool, optional
+            Whether to plot grid of individual cuts. Default: True
+        plot_combined : bool, optional
+            Whether to plot combined view with all cuts. Default: True
+        verbose : bool, optional
+            Whether to print detailed output. Default: False
+        use_callbacks : bool, optional
+            Whether to enable callback monitoring. Default: False
+        callback_frequency : int, optional
+            Print progress every N iterations when using callbacks. Default: 10
+        **kwargs : dict
+            Additional arguments passed to the scipy optimizer
+            
+        Returns:
+        --------
+        dict or None
+            Optimized model parameters or None if failed
         """
         try:
             # Check if required attributes exist
@@ -4487,6 +4530,23 @@ class CDSAXS_Model:
             # Store for use in optimization
             self.param_names = param_names
             
+            # Setup callbacks if requested
+            if use_callbacks:
+                self._callback_enabled = True
+                self._callback_print_frequency = callback_frequency
+                self._clear_callback_data()
+                
+                # Add appropriate callback to kwargs based on optimizer
+                if optimizer == 'differential_evolution':
+                    kwargs['callback'] = self._create_differential_evolution_callback()
+                elif optimizer == 'dual_annealing':
+                    kwargs['callback'] = self._create_dual_annealing_callback()
+                
+                if verbose:
+                    print(f"Callbacks enabled for {optimizer} (print every {callback_frequency} iterations)")
+            else:
+                self._callback_enabled = False
+            
             # Store current parameters and simulation results for before/after comparison
             initial_model_params = copy.deepcopy(self.model_params)
             
@@ -4510,7 +4570,7 @@ class CDSAXS_Model:
             else:
                 raise ValueError(f"Unsupported geometry: {self.geometry}")
             
-            # Run optimization based on chosen optimizer
+            # Run optimization
             if verbose:
                 print(f"Starting optimization with {optimizer} using {len(param_names)} parameters...")
             
@@ -4537,6 +4597,14 @@ class CDSAXS_Model:
             self.GF = self.GF_calc(self.SimInt)
             self.BIC = self.BIC_calc(self.GF)
             
+            # Print callback summary if callbacks were used
+            if use_callbacks and verbose:
+                self._print_callback_summary()
+            
+            # Generate callback plots if callbacks were used
+            if use_callbacks:
+                self._plot_callback_results()
+            
             # Generate before/after comparison plots if requested
             if plot_results:
                 self._plot_optimization_results(initial_model_params, initial_simInt,
@@ -4549,12 +4617,13 @@ class CDSAXS_Model:
             return self.model_params
                 
         except Exception as e:
-            if verbose:  # Only print errors if verbose
+            if verbose:
                 print(f"Error in CDSAXS_Optimize: {str(e)}")
                 import traceback
                 traceback.print_exc()
             return None
-
+        
+        
     def _run_scipy_optimizer(self, optimizer, objective_func, bounds, initial_values, verbose, **kwargs):
         """
         Run the specified scipy optimizer with appropriate parameters.
@@ -6128,3 +6197,267 @@ class CDSAXS_Model:
         # Plot horizontal lines
         for i in range(len(radii)):
             plt.plot([-radii[i], radii[i]], [cyl_heights[i], cyl_heights[i]], **kwargs)
+            
+            
+    def _clear_callback_data(self):
+        """Clear stored callback data."""
+        self._callback_data = {
+            'iteration': [],
+            'objective_values': [],
+            'best_objective': [],
+            'parameter_values': [],
+            'convergence': [],
+            'acceptance_flags': [],
+            'optimizer_type': None
+        }
+    
+    def _create_differential_evolution_callback(self):
+        """Create callback for differential_evolution."""
+        def de_callback(xk, convergence=None):
+            if not self._callback_enabled:
+                return False
+            
+            iteration = len(self._callback_data['iteration']) + 1
+            self._callback_data['iteration'].append(iteration)
+            self._callback_data['optimizer_type'] = 'differential_evolution'
+            
+            # Calculate objective function value
+            try:
+                if hasattr(self, '_cylinder_optimization_wrapper'):
+                    objective_value = self._cylinder_optimization_wrapper(xk)
+                elif hasattr(self, '_trapezoid_optimization_wrapper'):
+                    objective_value = self._trapezoid_optimization_wrapper(xk)
+                else:
+                    objective_value = float('inf')
+            except Exception as e:
+                objective_value = float('inf')
+            
+            # Store results
+            self._callback_data['objective_values'].append(objective_value)
+            self._callback_data['parameter_values'].append(xk.copy())
+            self._callback_data['convergence'].append(convergence)
+            
+            # Track best objective
+            if self._callback_data['best_objective']:
+                best_so_far = min(self._callback_data['best_objective'][-1], objective_value)
+            else:
+                best_so_far = objective_value
+            self._callback_data['best_objective'].append(best_so_far)
+            
+            # Print progress
+            if iteration % self._callback_print_frequency == 0:
+                conv_str = f", Conv = {convergence:.6f}" if convergence is not None else ""
+                print(f"DE Iter {iteration:4d}: Objective = {objective_value:.6f}, "
+                      f"Best = {best_so_far:.6f}{conv_str}")
+            
+            return False
+        
+        return de_callback
+    
+    def _create_dual_annealing_callback(self):
+        """Create callback for dual_annealing."""
+        def da_callback(x, f, accept):
+            if not self._callback_enabled:
+                return False
+            
+            iteration = len(self._callback_data['iteration']) + 1
+            self._callback_data['iteration'].append(iteration)
+            self._callback_data['optimizer_type'] = 'dual_annealing'
+            
+            # Store results
+            self._callback_data['objective_values'].append(f)
+            self._callback_data['parameter_values'].append(x.copy())
+            self._callback_data['acceptance_flags'].append(accept)
+            
+            # Track best objective
+            if self._callback_data['best_objective']:
+                best_so_far = min(self._callback_data['best_objective'][-1], f)
+            else:
+                best_so_far = f
+            self._callback_data['best_objective'].append(best_so_far)
+            
+            # Print progress with acceptance rate
+            if iteration % self._callback_print_frequency == 0:
+                recent_accepts = sum(self._callback_data['acceptance_flags'][-self._callback_print_frequency:])
+                accept_rate = recent_accepts / min(self._callback_print_frequency, 
+                                                 len(self._callback_data['acceptance_flags'])) * 100
+                print(f"DA Iter {iteration:4d}: Objective = {f:.6f}, Best = {best_so_far:.6f}, "
+                      f"Accept = {accept}, Recent Accept Rate = {accept_rate:.1f}%")
+            
+            return False
+        
+        return da_callback
+    
+    def _plot_callback_results(self):
+        """Plot callback results after optimization."""
+        if len(self._callback_data['objective_values']) < 2:
+            return
+        
+        optimizer_type = self._callback_data.get('optimizer_type', 'unknown')
+        
+        if optimizer_type == 'dual_annealing':
+            self._plot_dual_annealing_results()
+        else:
+            self._plot_differential_evolution_results()
+    
+    def _plot_differential_evolution_results(self):
+        """Plot differential_evolution results."""
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        # Plot 1: Convergence
+        axes[0].plot(self._callback_data['iteration'], self._callback_data['objective_values'], 
+                    'b-', alpha=0.7, label='Current')
+        axes[0].plot(self._callback_data['iteration'], self._callback_data['best_objective'], 
+                    'r-', linewidth=2, label='Best so far')
+        axes[0].set_xlabel('Iteration')
+        axes[0].set_ylabel('Objective Function (GF)')
+        axes[0].set_title('Differential Evolution Convergence')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_yscale('log')
+        
+        # Plot 2: Parameter evolution (first 4 parameters)
+        param_array = np.array(self._callback_data['parameter_values'])
+        n_params_to_show = min(4, param_array.shape[1])
+        
+        for i in range(n_params_to_show):
+            param_name = getattr(self, 'param_names', [f'Param_{i}'])[i] if hasattr(self, 'param_names') else f'Param_{i}'
+            axes[1].plot(self._callback_data['iteration'], param_array[:, i], 
+                        label=param_name, alpha=0.8)
+        
+        axes[1].set_xlabel('Iteration')
+        axes[1].set_ylabel('Parameter Value')
+        axes[1].set_title('Parameter Evolution (First 4)')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+        
+        # Plot 3: Improvement rate
+        improvements = []
+        for i in range(1, len(self._callback_data['best_objective'])):
+            if self._callback_data['best_objective'][i-1] > 0:
+                improvement = (self._callback_data['best_objective'][i-1] - 
+                             self._callback_data['best_objective'][i]) / self._callback_data['best_objective'][i-1]
+                improvements.append(improvement)
+            else:
+                improvements.append(0)
+        
+        if improvements:
+            axes[2].plot(self._callback_data['iteration'][1:], improvements, 'g-', alpha=0.7)
+            axes[2].set_xlabel('Iteration')
+            axes[2].set_ylabel('Relative Improvement')
+            axes[2].set_title('Best Objective Improvement Rate')
+            axes[2].grid(True, alpha=0.3)
+            axes[2].axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def _plot_dual_annealing_results(self):
+        """Plot dual_annealing results."""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        
+        # Plot 1: Convergence
+        axes[0, 0].plot(self._callback_data['iteration'], self._callback_data['objective_values'], 
+                       'b-', alpha=0.7, label='Current')
+        axes[0, 0].plot(self._callback_data['iteration'], self._callback_data['best_objective'], 
+                       'r-', linewidth=2, label='Best so far')
+        axes[0, 0].set_xlabel('Iteration')
+        axes[0, 0].set_ylabel('Objective Function (GF)')
+        axes[0, 0].set_title('Dual Annealing Convergence')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 0].set_yscale('log')
+        
+        # Plot 2: Acceptance pattern
+        window_size = min(20, len(self._callback_data['acceptance_flags']) // 4)
+        if window_size > 1:
+            accept_array = np.array(self._callback_data['acceptance_flags'])
+            moving_accept = np.convolve(accept_array, np.ones(window_size)/window_size, mode='valid')
+            moving_iterations = self._callback_data['iteration'][window_size-1:]
+            axes[0, 1].plot(moving_iterations, moving_accept * 100, 'g-', linewidth=2, 
+                           label=f'Moving Average (window={window_size})')
+        
+        # Scatter plot of accepts/rejects
+        accepts = [i for i, flag in enumerate(self._callback_data['acceptance_flags']) if flag == 1]
+        rejects = [i for i, flag in enumerate(self._callback_data['acceptance_flags']) if flag == 0]
+        
+        if accepts:
+            axes[0, 1].scatter([self._callback_data['iteration'][i] for i in accepts], [100] * len(accepts), 
+                              c='green', alpha=0.6, s=10, label='Accepted')
+        if rejects:
+            axes[0, 1].scatter([self._callback_data['iteration'][i] for i in rejects], [0] * len(rejects), 
+                              c='red', alpha=0.6, s=10, label='Rejected')
+        
+        axes[0, 1].set_xlabel('Iteration')
+        axes[0, 1].set_ylabel('Acceptance (%)')
+        axes[0, 1].set_title('Acceptance Pattern')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 1].set_ylim(-5, 105)
+        
+        # Plot 3: Parameter evolution
+        param_array = np.array(self._callback_data['parameter_values'])
+        n_params_to_show = min(4, param_array.shape[1])
+        
+        for i in range(n_params_to_show):
+            param_name = getattr(self, 'param_names', [f'Param_{i}'])[i] if hasattr(self, 'param_names') else f'Param_{i}'
+            axes[1, 0].plot(self._callback_data['iteration'], param_array[:, i], 
+                           label=param_name, alpha=0.8)
+        
+        axes[1, 0].set_xlabel('Iteration')
+        axes[1, 0].set_ylabel('Parameter Value')
+        axes[1, 0].set_title('Parameter Evolution (First 4)')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Plot 4: Running acceptance rate
+        if len(self._callback_data['acceptance_flags']) > 20:
+            window = min(50, len(self._callback_data['acceptance_flags']) // 4)
+            running_accept = []
+            for i in range(window, len(self._callback_data['acceptance_flags'])):
+                recent_rate = sum(self._callback_data['acceptance_flags'][i-window:i]) / window * 100
+                running_accept.append(recent_rate)
+            
+            axes[1, 1].plot(self._callback_data['iteration'][window:], running_accept, 'orange', linewidth=2)
+            axes[1, 1].set_xlabel('Iteration')
+            axes[1, 1].set_ylabel('Running Acceptance Rate (%)')
+            axes[1, 1].set_title(f'Running Acceptance Rate (window={window})')
+            axes[1, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def _print_callback_summary(self):
+        """Print summary of callback results."""
+        if len(self._callback_data['objective_values']) == 0:
+            return
+        
+        optimizer_type = self._callback_data.get('optimizer_type', 'unknown')
+        
+        print(f"\n{'='*60}")
+        print(f"OPTIMIZATION SUMMARY ({optimizer_type.upper()})")
+        print(f"{'='*60}")
+        
+        total_iterations = len(self._callback_data['iteration'])
+        initial_obj = self._callback_data['objective_values'][0]
+        final_obj = self._callback_data['objective_values'][-1]
+        best_obj = min(self._callback_data['objective_values'])
+        
+        print(f"Total iterations: {total_iterations}")
+        print(f"Initial objective: {initial_obj:.6f}")
+        print(f"Final objective: {final_obj:.6f}")
+        print(f"Best objective: {best_obj:.6f}")
+        
+        total_improvement = initial_obj - best_obj
+        relative_improvement = total_improvement / initial_obj * 100 if initial_obj > 0 else 0
+        
+        print(f"Total improvement: {total_improvement:.6f}")
+        print(f"Relative improvement: {relative_improvement:.2f}%")
+        
+        # Dual annealing specific stats
+        if optimizer_type == 'dual_annealing' and self._callback_data['acceptance_flags']:
+            total_accepts = sum(self._callback_data['acceptance_flags'])
+            accept_rate = total_accepts / len(self._callback_data['acceptance_flags']) * 100
+            print(f"Overall acceptance rate: {accept_rate:.1f}% ({total_accepts}/{len(self._callback_data['acceptance_flags'])})")
+        
+        print(f"{'='*60}")
