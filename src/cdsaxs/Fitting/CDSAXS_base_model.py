@@ -4759,7 +4759,7 @@ class CDSAXS_Model:
 
     def CDSAXS_MCMC(self, params_to_sample=None, n_walkers=50, n_steps=1000, 
                     burn_in=200, thin=1, progress=True, plot_results=True,
-                    plot_chains=True, plot_corner=True, plot_structure=True,
+                    plot_chains=True, plot_corner=True, plot_structure=False,
                     save_chains=False, chain_filename=None, verbose=True,
                     prior_type='uniform', sigma_multiplier=10.0, **emcee_kwargs):
         """
