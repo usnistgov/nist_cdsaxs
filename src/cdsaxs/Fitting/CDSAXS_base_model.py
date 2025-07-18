@@ -4447,7 +4447,7 @@ class CDSAXS_Model:
         
     def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
                 plot_results=True, plot_structure=True, plot_grid=True, 
-                plot_combined=True, verbose=False, **kwargs):
+                plot_combined=False, verbose=False, **kwargs):
         """
         Flexible optimization method for CDSAXS model fitting using various scipy optimizers.
         Fixed to respect verbose parameter.
@@ -4599,7 +4599,7 @@ class CDSAXS_Model:
             default_params = {
                 'x0': np.array(initial_values),
                 'maxiter': 1000,
-                'local_search_options': {'method': 'L-BFGS-B'}
+                #'local_search_options': {'method': 'L-BFGS-B'}
             }
             default_params.update(kwargs)
             
@@ -5627,3 +5627,504 @@ class CDSAXS_Model:
     
 
 
+
+    def plot_mcmc_uncertainty_envelope(self, mcmc_results, n_samples=100, n_slices=101, 
+                                 confidence_level=0.95, plot_results=True, 
+                                 figsize=(10, 6), show_best_fit=True, show_mean=True,
+                                 show_base=True, colors=None):
+        """
+        Plot uncertainty envelope around structure from emcee MCMC results.
+        
+        Parameters:
+        -----------
+        mcmc_results : dict
+            Results from CDSAXS_MCMC containing chains and parameter info
+        n_samples : int, optional
+            Number of MCMC samples to use for uncertainty calculation. Default: 100
+        n_slices : int, optional
+            Number of height slices for uncertainty envelope. Default: 101
+        confidence_level : float, optional
+            Confidence level for uncertainty envelope (0.68 or 0.95). Default: 0.95
+        plot_results : bool, optional
+            Whether to plot the results. Default: True
+        figsize : tuple, optional
+            Figure size. Default: (10, 6)
+        show_best_fit : bool, optional
+            Whether to overlay the best-fit structure. Default: True
+        show_mean : bool, optional
+            Whether to show the mean structure. Default: True
+        show_base : bool, optional
+            Whether to show the base line at y=0. Default: True
+        colors : dict, optional
+            Custom colors for plotting. Keys: 'envelope', 'mean', 'best_fit', 'structure'
+            
+        Returns:
+        --------
+        tuple
+            (center_line, inner_envelope, outer_envelope) arrays for plotting
+        """
+        
+        # Set default colors
+        if colors is None:
+            colors = {
+                'envelope': 'cornflowerblue',
+                'mean': 'red',
+                'best_fit': 'darkgreen',
+                'structure': 'red'  # Same color for base and structure lines
+            }
+        
+        # Extract flattened chains and parameter names
+        flat_chains = mcmc_results['flat_chains']
+        param_names = mcmc_results['param_names']
+        
+        # Limit number of samples for performance
+        total_samples = len(flat_chains)
+        if n_samples > total_samples:
+            n_samples = total_samples
+        
+        # Randomly select samples for diversity
+        sample_indices = np.random.choice(total_samples, n_samples, replace=False)
+        selected_samples = flat_chains[sample_indices]
+        
+        # Store original model parameters
+        original_params = self.model_params.copy()
+        
+        # Initialize arrays for uncertainty calculation
+        xi = np.zeros([n_slices, 2, n_samples])  # [slice, side(left/right), sample]
+        yi = np.zeros([n_slices, 1, n_samples])  # [slice, 1, sample]
+        
+        try:
+            # Process each MCMC sample
+            for pop_number, sample_params in enumerate(selected_samples):
+                # Apply MCMC parameters to model
+                self._apply_mcmc_parameters(sample_params, param_names)
+                
+                # Extract structure information based on geometry
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    trap_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        trap_heights[i + 1] = trap_heights[i] + heights[i]
+                    total_height = trap_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_trapezoid_envelope_sample(
+                        widths, heights, trap_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+                    
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    cyl_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+                    total_height = cyl_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_cylinder_envelope_sample(
+                        radii, heights, cyl_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+            
+            # Calculate statistics across all samples
+            center_line, inner_envelope, outer_envelope = self._calculate_uncertainty_statistics(
+                xi, yi, confidence_level, n_slices
+            )
+            
+            # Plot results if requested
+            if plot_results:
+                self._plot_uncertainty_envelope_enhanced(
+                    center_line, inner_envelope, outer_envelope, figsize, 
+                    show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results
+                )
+            
+            return center_line, inner_envelope, outer_envelope
+            
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+
+    def _extract_structure_for_uncertainty(self):
+        """
+        Extract structure information for uncertainty calculation.
+        
+        Returns:
+        --------
+        tuple
+            (heights, widths_or_radii) arrays
+        """
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            widths = [trap['width'] for trap in structures]
+            heights = [trap['height'] for trap in structures[:-1]]  # Skip last (top)
+            return heights, widths
+        
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+            radii = [cyl['radius'] for cyl in structures]
+            heights = [cyl['height'] for cyl in structures[:-1]]  # Skip last (top)
+            return heights, radii
+        
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+
+    def _calculate_trapezoid_envelope_sample(self, widths, heights, trap_heights, total_height,
+                                        xi, yi, pop_number, n_slices):
+        """
+        Calculate uncertainty envelope for a single trapezoid sample.
+        """
+        # Debug: print array sizes
+        if pop_number == 0:  # Only print for first sample
+            print(f"Debug: widths length: {len(widths)}")
+            print(f"Debug: heights length: {len(heights)}")
+            print(f"Debug: trap_heights length: {len(trap_heights)}")
+            print(f"Debug: trap_heights: {trap_heights}")
+            print(f"Debug: total_height: {total_height}")
+        
+        # Convert to coordinates similar to your SymCoordAssign function
+        coord = np.zeros([len(widths), 2])  # [layer, left/right]
+        
+        for i in range(len(widths)):
+            coord[i, 0] = -widths[i] / 2  # Left side
+            coord[i, 1] = widths[i] / 2   # Right side
+        
+        # Calculate envelope for each height slice
+        for c in range(n_slices):
+            if total_height > 0:
+                disc_height = c * total_height / (n_slices - 1)
+            else:
+                disc_height = 0
+                
+            yi[c, 0, pop_number] = disc_height
+            
+            # Find which trapezoid layer we're in
+            layer_idx = 0
+            for i in range(len(trap_heights) - 1):
+                if disc_height >= trap_heights[i] and disc_height <= trap_heights[i + 1]:
+                    layer_idx = i
+                    break
+            
+            # Ensure we don't go out of bounds
+            layer_idx = min(layer_idx, len(coord) - 2)
+            layer_idx = max(layer_idx, 0)
+            
+            # Get coordinates for this layer
+            if layer_idx < len(coord) - 1 and layer_idx >= 0:
+                x1_left = coord[layer_idx, 0]
+                x2_left = coord[layer_idx + 1, 0]
+                x1_right = coord[layer_idx, 1]
+                x2_right = coord[layer_idx + 1, 1]
+                y1 = trap_heights[layer_idx]
+                y2 = trap_heights[layer_idx + 1]
+                
+                # Linear interpolation to find x positions at disc_height
+                if abs(y2 - y1) > 1e-10:  # Avoid division by zero
+                    # Calculate position fraction within this layer
+                    frac = (disc_height - y1) / (y2 - y1)
+                    frac = max(0, min(1, frac))  # Clamp between 0 and 1
+                    
+                    # Linear interpolation
+                    xi[c, 0, pop_number] = x1_left + frac * (x2_left - x1_left)
+                    xi[c, 1, pop_number] = x1_right + frac * (x2_right - x1_right)
+                else:
+                    xi[c, 0, pop_number] = x1_left
+                    xi[c, 1, pop_number] = x1_right
+            else:
+                # Top of structure or edge case
+                if len(coord) > 0:
+                    xi[c, 0, pop_number] = coord[-1, 0]
+                    xi[c, 1, pop_number] = coord[-1, 1]
+                else:
+                    xi[c, 0, pop_number] = 0
+                    xi[c, 1, pop_number] = 0
+
+    def _calculate_cylinder_envelope_sample(self, radii, heights, cyl_heights, total_height,
+                                        xi, yi, pop_number, n_slices):
+        """
+        Calculate uncertainty envelope for a single cylinder sample.
+        """
+        # Debug: print array sizes for first sample
+        if pop_number == 0:
+            print(f"Debug Cylinder: radii length: {len(radii)}")
+            print(f"Debug Cylinder: heights length: {len(heights)}")
+            print(f"Debug Cylinder: cyl_heights length: {len(cyl_heights)}")
+            print(f"Debug Cylinder: total_height: {total_height}")
+        
+        # For cylinders, we treat them similar to trapezoids but with radius instead of half-width
+        for c in range(n_slices):
+            if total_height > 0:
+                disc_height = c * total_height / (n_slices - 1)
+            else:
+                disc_height = 0
+                
+            yi[c, 0, pop_number] = disc_height
+            
+            # Find which cylinder layer we're in
+            layer_idx = 0
+            for i in range(len(cyl_heights) - 1):
+                if disc_height >= cyl_heights[i] and disc_height <= cyl_heights[i + 1]:
+                    layer_idx = i
+                    break
+            
+            # Ensure we don't go out of bounds
+            layer_idx = min(layer_idx, len(radii) - 2)
+            layer_idx = max(layer_idx, 0)
+            
+            # Linear interpolation between cylinder radii
+            if layer_idx < len(radii) - 1 and layer_idx >= 0:
+                r1 = radii[layer_idx]
+                r2 = radii[layer_idx + 1]
+                y1 = cyl_heights[layer_idx]
+                y2 = cyl_heights[layer_idx + 1]
+                
+                if abs(y2 - y1) > 1e-10:  # Avoid division by zero
+                    # Calculate position fraction within this layer
+                    frac = (disc_height - y1) / (y2 - y1)
+                    frac = max(0, min(1, frac))  # Clamp between 0 and 1
+                    
+                    # Linear interpolation of radius
+                    radius_at_height = r1 + frac * (r2 - r1)
+                else:
+                    radius_at_height = r1
+                
+                xi[c, 0, pop_number] = -radius_at_height  # Left side
+                xi[c, 1, pop_number] = radius_at_height   # Right side
+            else:
+                # Top of structure or edge case
+                if len(radii) > 0:
+                    xi[c, 0, pop_number] = -radii[-1]
+                    xi[c, 1, pop_number] = radii[-1]
+                else:
+                    xi[c, 0, pop_number] = 0
+                    xi[c, 1, pop_number] = 0
+
+    def _calculate_uncertainty_statistics(self, xi, yi, confidence_level, n_slices):
+        """
+        Calculate uncertainty statistics from all samples.
+        """
+        # Calculate confidence interval multiplier
+        if confidence_level == 0.68:
+            z_score = 1.0  # 1 sigma
+        elif confidence_level == 0.95:
+            z_score = 1.96  # 2 sigma
+        else:
+            # Custom confidence level
+            from scipy.stats import norm
+            z_score = norm.ppf(1 - (1 - confidence_level) / 2)
+        
+        # Calculate statistics
+        center_x = np.mean(xi, axis=2)  # Average across samples
+        std_x = np.std(xi, axis=2) * z_score  # Standard deviation with confidence multiplier
+        
+        center_y = np.mean(yi, axis=2)
+        std_y = np.std(yi, axis=2) * z_score
+        
+        # Create envelope arrays
+        outer_edge = center_x.copy()
+        outer_edge[:, 0] = outer_edge[:, 0] - std_x[:, 0]  # Left side outward
+        outer_edge[:, 1] = outer_edge[:, 1] + std_x[:, 1]  # Right side outward
+        
+        inner_edge = center_x.copy()
+        inner_edge[:, 0] = inner_edge[:, 0] + std_x[:, 0]  # Left side inward
+        inner_edge[:, 1] = inner_edge[:, 1] - std_x[:, 1]  # Right side inward
+        
+        y_inner = center_y - std_y
+        y_outer = center_y + std_y
+        
+        # Create plotting arrays (similar to your original LinePlot, InnerPlot, OuterPlot)
+        center_line = np.zeros([2 * n_slices, 2])
+        inner_envelope = np.zeros([2 * n_slices, 2])
+        outer_envelope = np.zeros([2 * n_slices, 2])
+        
+        # Center line
+        center_line[0:n_slices, 0] = center_x[:, 0]  # Left side
+        center_line[n_slices:2*n_slices, 0] = np.flipud(center_x[:, 1])  # Right side (flipped)
+        center_line[0:n_slices, 1] = center_y[:, 0]  # Heights
+        center_line[n_slices:2*n_slices, 1] = np.flipud(center_y[:, 0])  # Heights (flipped)
+        
+        # Inner envelope
+        inner_envelope[0:n_slices, 0] = inner_edge[:, 0]
+        inner_envelope[n_slices:2*n_slices, 0] = np.flipud(inner_edge[:, 1])
+        inner_envelope[0:n_slices, 1] = y_inner[:, 0]
+        inner_envelope[n_slices:2*n_slices, 1] = np.flipud(y_inner[:, 0])
+        
+        # Outer envelope
+        outer_envelope[0:n_slices, 0] = outer_edge[:, 0]
+        outer_envelope[n_slices:2*n_slices, 0] = np.flipud(outer_edge[:, 1])
+        outer_envelope[0:n_slices, 1] = y_outer[:, 0]
+        outer_envelope[n_slices:2*n_slices, 1] = np.flipud(y_outer[:, 0])
+        
+        return center_line, inner_envelope, outer_envelope
+
+    def _plot_uncertainty_envelope_enhanced(self, center_line, inner_envelope, outer_envelope, 
+                                        figsize, show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results):
+        """
+        Enhanced plot of the uncertainty envelope with better visualization.
+        """
+        plt.figure(figsize=figsize)
+        
+        # Convert confidence level to percentage for label
+        conf_percent = int(confidence_level * 100)
+        
+        # Plot outer envelope (filled with semi-transparent color)
+        plt.fill(outer_envelope[:, 0], outer_envelope[:, 1], 
+                alpha=0.4, color=colors['envelope'], 
+                label=f'{conf_percent}% Confidence Interval', 
+                zorder=2)
+        
+        # Plot dashed lines around the outside of the confidence interval
+        plt.plot(outer_envelope[:, 0], outer_envelope[:, 1], 
+                color='steelblue', linewidth=1.5, linestyle='--', 
+                alpha=0.8, zorder=4)
+        
+        # Plot inner envelope (filled with white to create "hole" effect)
+        plt.fill(inner_envelope[:, 0], inner_envelope[:, 1], 
+                alpha=1.0, color='white', zorder=3)
+        
+        # Plot mean structure if requested
+        if show_mean:
+            plt.plot(center_line[:, 0], center_line[:, 1], 
+                    color=colors['mean'], linewidth=1.5, 
+                    label='Mean Structure', zorder=5)
+        
+        # Add base line connecting left and right sides (not spanning whole plot)
+        if show_base:
+            # Get the leftmost and rightmost points at the base (y=0)
+            base_indices = np.where(np.abs(center_line[:, 1]) < 1e-6)[0]  # Find points at y≈0
+            if len(base_indices) >= 2:
+                # Find the leftmost and rightmost base points
+                base_x_coords = center_line[base_indices, 0]
+                base_y_coords = center_line[base_indices, 1]
+                
+                # Connect the extreme points
+                x_left = np.min(base_x_coords)
+                x_right = np.max(base_x_coords)
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)  # Removed label='Base'
+            else:
+                # Fallback: use the width of the structure at the base
+                # Find the first and last points (should be at the base)
+                n_slices = len(center_line) // 2
+                x_left = center_line[0, 0]    # First point (left side at base)
+                x_right = center_line[n_slices, 0]  # Middle point (right side at base)
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)  # Removed label='Base'
+        
+        # Optionally overlay the best-fit structure from MCMC
+        if show_best_fit:
+            try:
+                # Apply best-fit parameters and plot structure
+                best_params = mcmc_results['best_params']
+                param_names = mcmc_results['param_names']
+                
+                # Temporarily apply best parameters
+                original_params = self.model_params.copy()
+                self._apply_mcmc_parameters(best_params, param_names)
+                
+                # Extract best-fit structure
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    self._plot_trapezoid_outline(widths, heights, 
+                                            color=colors['best_fit'], 
+                                            linewidth=1.0, linestyle='-',
+                                            label='Best Fit (MCMC)', zorder=6)
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    self._plot_cylinder_outline(radii, heights,
+                                            color=colors['best_fit'],
+                                            linewidth=1.0, linestyle='-',
+                                            label='Best Fit (MCMC)', zorder=6)
+                
+                # Restore original parameters
+                self.model_params = original_params
+                self.update_traditional_from_model_params()
+                
+            except Exception as e:
+                print(f"Warning: Could not plot best-fit structure: {e}")
+        
+        # Add grid for better readability
+        plt.grid(True, alpha=0.3, zorder=0)
+        
+        # Formatting
+        plt.title(f'Structure Uncertainty from MCMC\n({self.geometry.title()} Model)', 
+                fontsize=14, fontweight='bold')
+        plt.xlabel('Width/Radius (Å)', fontsize=12)
+        plt.ylabel('Height (Å)', fontsize=12)
+        
+        # Improve legend
+        plt.legend(frameon=True, framealpha=0.9, fontsize=11, 
+                fancybox=True, shadow=True, loc='best')
+        
+        # Set equal aspect ratio for better shape visualization
+        plt.axis('equal')
+        
+        # Adjust layout and show
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_trapezoid_outline(self, widths, heights, **kwargs):
+        """
+        Plot trapezoid structure outline.
+        """
+        # Calculate cumulative heights
+        trap_heights = np.zeros(len(heights) + 1)
+        for i in range(len(heights)):
+            trap_heights[i + 1] = trap_heights[i] + heights[i]
+        
+        # Create outline coordinates
+        x_coords = []
+        y_coords = []
+        
+        # Bottom edge
+        x_coords.extend([-widths[0]/2, widths[0]/2])
+        y_coords.extend([0, 0])
+        
+        # Right edge going up
+        for i in range(len(heights)):
+            x_coords.extend([widths[i]/2, widths[i+1]/2])
+            y_coords.extend([trap_heights[i], trap_heights[i+1]])
+        
+        # Top edge
+        x_coords.extend([widths[-1]/2, -widths[-1]/2])
+        y_coords.extend([trap_heights[-1], trap_heights[-1]])
+        
+        # Left edge going down
+        for i in range(len(heights)-1, -1, -1):
+            x_coords.extend([-widths[i+1]/2, -widths[i]/2])
+            y_coords.extend([trap_heights[i+1], trap_heights[i]])
+        
+        # Close the shape
+        x_coords.append(-widths[0]/2)
+        y_coords.append(0)
+        
+        plt.plot(x_coords, y_coords, **kwargs)
+
+    def _plot_cylinder_outline(self, radii, heights, **kwargs):
+        """
+        Plot cylinder structure outline.
+        """
+        # Calculate cumulative heights
+        cyl_heights = np.zeros(len(heights) + 1)
+        for i in range(len(heights)):
+            cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+        
+        # Plot right side
+        for i in range(len(heights)):
+            plt.plot([radii[i], radii[i+1]], [cyl_heights[i], cyl_heights[i+1]], **kwargs)
+            if i == 0:  # Remove label for subsequent lines
+                kwargs.pop('label', None)
+        
+        # Plot left side
+        for i in range(len(heights)):
+            plt.plot([-radii[i], -radii[i+1]], [cyl_heights[i], cyl_heights[i+1]], **kwargs)
+        
+        # Plot horizontal lines
+        for i in range(len(radii)):
+            plt.plot([-radii[i], radii[i]], [cyl_heights[i], cyl_heights[i]], **kwargs)
