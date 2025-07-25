@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import warnings
 
+import numpy as np
+
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.sample import Sample
 import cdsaxs.plotting as plotting
@@ -218,3 +220,53 @@ class Dataset():
         )
 
         return fig
+
+    def save_reduced_slices(self, filename, index=0, q_slice_axis='qsx',
+                            decimals=5):
+        """
+        Returns the slected reduced slices set currently stored in the
+        dataset. The user must specify the index of the set of slices
+        as well as the q_slice_axis. The number of decimal places the
+        slice positions are rounded at can be changed with the
+        decimals keyword argument.
+
+        NOTE: currently only a q_slice_axis of 'qsx' is accepted or
+        formatted appropriately in the output file.
+        TODO: generalize this in the future.
+        """
+
+        reduced_slices = self.reduced_slices[index][q_slice_axis]
+
+        length = 0
+        for key, val in reduced_slices.items():
+            length = np.max((length, val.q.shape[0]))
+
+        datas = []
+
+        for key, val in reduced_slices.items():
+            q = val.q
+            Iq = val.Iq
+
+            select = Iq > 0
+
+            if len(q[select]) < length:
+                new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
+                                   q.astype(str)[select],
+                                   [""]*(length-len(q[select]))))
+            else:
+                new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
+                                   q.astype(str)[select]))
+
+            if len(q[select]) < length:
+                new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
+                                    Iq.astype(str)[select],
+                                    [""]*(length-len(Iq[select]))))
+            else:
+                new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
+                                    Iq.astype(str)[select]))
+
+            datas.append(new_q)
+            datas.append(new_Iq)
+
+        datas = np.array(datas).T
+        np.savetxt(filename, datas, delimiter=',', fmt='%s')
