@@ -180,6 +180,9 @@ class Data2D():
             Default value is 'bicubic'.
         """
         image = np.copy(self.image)
+        image[image < 0] = np.nan
+        image[np.isinf(image)] = np.nan
+        image[np.isneginf(image)] = np.nan
         if box_angle_deg != 0:
             if rotation_sampling_mode == 'nearest':
                 resample = Image.Resampling.NEAREST
@@ -187,9 +190,7 @@ class Data2D():
                 resample = Image.Resampling.BILINEAR
             else:
                 resample = Image.Resampling.BICUBIC
-            image[image<0] = np.nan
-            image[np.isinf(image)] = np.nan
-            image[np.isneginf(image)] = np.nan
+            
             image = Image.fromarray(image)
             image = image.rotate(box_angle_deg, resample=resample,
                                  center=(rotation_center[1], rotation_center[0]),
