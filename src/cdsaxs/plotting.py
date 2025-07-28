@@ -20,20 +20,24 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
            log_scale=True, vmin=None, vmax=None):
     # TODO axis not rendering in vs code notebook - KNOWN ISSUE VSCODE/PLOTLY
 
+    custom_vmin = True if vmin is not None else False
+    custom_vmax = True if vmax is not None else False
     plot_image = np.copy(image)
     if log_scale:
         with np.errstate(divide='ignore', invalid='ignore'):
             plot_image = np.log10(plot_image)
-        vmin = np.nanmin(plot_image[plot_image > -np.inf]) if vmin is None\
-            else vmin
-        vmax = np.nanmax(plot_image) if vmax is None else vmax
+        vmin = np.nanmin(plot_image[plot_image > -np.inf]) - 1 if not\
+            custom_vmin else vmin
+        vmax = np.nanmax(plot_image) if not custom_vmax else vmax
         # set all pixels that were 0 counts to one order of magnitude lower
+        # than the smallest pixel value; this is vmin as -1 was already
+        # performed after the nanmin
         # the pixels that were nan will all show as white
-        plot_image[np.isneginf(plot_image)] = vmin-1
+        plot_image[np.isneginf(plot_image)] = vmin
         plot_image[np.isnan(plot_image)] = None
     else:
-        vmin = 0 if vmin is None else vmin
-        vmax = np.nanmax(plot_image) if vmax is None else vmax
+        vmin = 0 if not custom_vmin else vmin
+        vmax = np.nanmax(plot_image) if not custom_vmax else vmax
 
     fig = px.imshow(plot_image, zmin=vmin, zmax=vmax,
                     color_continuous_scale='viridis', aspect='equal')
@@ -60,6 +64,9 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
         colorbar_ticks = list(np.arange(vmin, np.ceil(vmax), step=1))
         colorbar_labels = [10**x for x in colorbar_ticks]
         colorbar_labels = [f"{x:.{0}e}" for x in colorbar_labels]
+        if not custom_vmin:
+            # state that this color of the colorscale is 0 counts
+            colorbar_labels[0] = "Intensity=0"
         fig.update_layout(
             coloraxis_colorbar={
                 'tickvals': colorbar_ticks,
@@ -284,7 +291,9 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
     Iqs = np.array(Iqs)
 
     if log_scale:
-        vmin = np.nanmin(np.log10(Iqs[Iqs > 0]))
+        # move vmin to one order of magniutde lower which will indicate
+        # pixels with 0 counts
+        vmin = np.nanmin(np.log10(Iqs[Iqs > 0])) - 1
         vmax = np.nanmax(np.log10(Iqs[Iqs > 0]))
     else:
         vmin = np.nanmin(0)
@@ -307,7 +316,7 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
            colors.append((0, 0, 0, 0))
 
     if log_scale:
-        Iqs[Iqs == 0] = 10**(vmin-1)
+        Iqs[Iqs == 0] = 10**(vmin)
 
     colors = np.array(colors)
 
