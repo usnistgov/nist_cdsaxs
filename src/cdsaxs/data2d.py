@@ -180,6 +180,9 @@ class Data2D():
             Default value is 'bicubic'.
         """
         image = np.copy(self.image)
+        image[image < 0] = np.nan
+        image[np.isinf(image)] = np.nan
+        image[np.isneginf(image)] = np.nan
         if box_angle_deg != 0:
             if rotation_sampling_mode == 'nearest':
                 resample = Image.Resampling.NEAREST
@@ -191,7 +194,7 @@ class Data2D():
             image = image.rotate(box_angle_deg, resample=resample,
                                  center=(rotation_center[1], rotation_center[0]),
                                  fillcolor=-50)
-            image = np.array(Image)
+            image = np.array(image)
 
         if mode == 'sum':
             integrated_i = np.nansum(
@@ -215,7 +218,11 @@ class Data2D():
                 'mode': mode,
                 'axis': axis,
                 'limits_axis0': limits_axis0,
-                'limits_axis1': limits_axis1
+                'limits_axis1': limits_axis1,
+                'box_angle_deg': box_angle_deg,
+                'rotation_center': rotation_center,
+                'rotation_sampling_mode': rotation_sampling_mode,
+                'rotated_image': np.copy(image) if box_angle_deg != 0 else None
             }
 
 
@@ -538,6 +545,9 @@ class DataQdyQdx(Data2D):
         axis: str | int,
         show_plot=False,
         log_scale=True,
+        box_angle_deg: float = 0,
+        rotation_sampling_mode: str = 'bicubic',
+        rotation_center_point: list | tuple = None,
         # interactive_plot=True
     ) -> IntegratedQSlice:
         """
@@ -568,6 +578,19 @@ class DataQdyQdx(Data2D):
             on a linear scale. This only applies to the plots and does
             not affect the data operation.
             Default value is True.
+        box_angle_deg : float
+            Rotate the box by the set number of degrees clockwise
+            about the beam center point. Rotating the box will maintain 
+            the size of the box.
+            Units are in degrees.
+            Default value is 0.
+        rotation_sampling_mode : str
+            Set the resampling method used when a box angle is provided.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
         interactive_plot : bool, optional
             If set to True, the plots returned will be interactive plots
             built via Plotly. If set to False, the plots returned will be
@@ -595,7 +618,10 @@ class DataQdyQdx(Data2D):
             limits_axis0=limits_qdy_px,
             limits_axis1=limits_qdx_px,
             mode=mode,
-            axis=axis
+            axis=axis,
+            box_angle_deg=box_angle_deg,
+            rotation_center=self.metadata['center_px'],
+            rotation_sampling_mode=rotation_sampling_mode
         )
 
         # extract scattering vector for this integration
@@ -614,6 +640,10 @@ class DataQdyQdx(Data2D):
             limits_axis1=params["limits_axis1"],
             mode=mode,
             integration_axis=params["axis"],
+            box_angle_deg=params['box_angle_deg'],
+            rotation_sampling_mode=params['rotation_sampling_mode'],
+            rotation_center=params['rotation_center'],
+            rotated_image=params['rotated_image']
         )
 
         if show_plot:
@@ -635,6 +665,8 @@ class DataQdyQdx(Data2D):
             axis: str | int,
             shift_box_qdy_px: int = 0,
             shift_box_qdx_px: int = 0,
+            box_angle_deg: float = 0,
+            rotation_sampling_mode: str = 'bicubic',
             show_plot=False,
             log_scale=True,
     ):
@@ -666,6 +698,19 @@ class DataQdyQdx(Data2D):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
+        box_angle_deg : float
+            Rotate the box by the set number of degrees clockwise
+            about the center point. Rotating the box will maintain the
+            size of the box.
+            Units are in degrees.
+            Default value is 0.
+        rotation_sampling_mode : str
+            Set the resampling method used when a box angle is provided.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
@@ -712,7 +757,9 @@ class DataQdyQdx(Data2D):
             limits_qdy_px=[min0, max0],
             limits_qdx_px=[min1, max1],
             mode=mode,
-            axis=axis
+            axis=axis,
+            box_angle_deg=box_angle_deg,
+            rotation_sampling_mode=rotation_sampling_mode,
         )
 
         if show_plot:
@@ -730,6 +777,8 @@ class DataQdyQdx(Data2D):
             range_qdx: list | tuple,
             mode: str,
             axis: str | int,
+            box_angle_deg: float = 0,
+            rotation_sampling_mode: str = 'bicubic',
             show_plot=False,
             log_scale=True,
     ):
@@ -752,6 +801,19 @@ class DataQdyQdx(Data2D):
             Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
             can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
             axis is set to 'qdy', integration will return I vs. qdx data.
+        box_angle_deg : float
+            Rotate the box by the set number of degrees clockwise
+            about the center point. Rotating the box will maintain the
+            size of the box.
+            Units are in degrees.
+            Default value is 0.
+        rotation_sampling_mode : str
+            Set the resampling method used when a box angle is provided.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
@@ -793,7 +855,9 @@ class DataQdyQdx(Data2D):
             limits_qdy_px=limits_qdy_px,
             limits_qdx_px=limits_qdx_px,
             mode=mode,
-            axis=axis
+            axis=axis,
+            box_angle_deg=box_angle_deg,
+            rotation_sampling_mode=rotation_sampling_mode,
         )
 
         if show_plot:
@@ -930,6 +994,8 @@ class DataQdyQdx(Data2D):
             self,
             show_pixels=False,
             log_scale=True,
+            vmin=None,
+            vmax=None,
             # interactive_plot=True
     ):
         """
@@ -946,6 +1012,12 @@ class DataQdyQdx(Data2D):
             on a log sale. If set to False, the scattering intensity
             will be displayed on a linear scale.
             Default value is True
+        vmin : float
+            Manually set the minimum of the color bar range for
+            plotting intensity.
+        vmax : float
+            Manually set the maximum of the color bar range for
+            plotting intensity.
         interactive_plot : bool
             If set to True, an interactive plot built with Plotly will
             TODO: currently this is disabled and only accepts True.
@@ -967,7 +1039,9 @@ class DataQdyQdx(Data2D):
             axis0=axis0, axis1=axis1,
             axis0_type=axis0_type, axis1_type=axis1_type,
             title=self.name,
-            log_scale=log_scale
+            log_scale=log_scale,
+            vmin=vmin,
+            vmax=vmax
         )
 
         iplot(fig)
@@ -1090,6 +1164,124 @@ class DataQdyQdx(Data2D):
         iplot(fig_slice)
 
         return center_qdy, center_qdx
+
+    def integrate_autorotated_box(
+            self,
+            peak_find_box_mode: str,
+            peak_find_box_params: dict,
+            peak_axis: str,
+            peak_params: dict,
+            box_mode: str,
+            box_params: dict,
+            peak_find_scale: str,
+            show_plot: True,
+    ):
+        """
+        Integrate a 2D qdy vs qdx image with any of the standard
+        integrator methods after performing an automated peak finding
+        function to determine the rotation angle of the box.
+
+        CAUTION: this method assumes that this is only a minor
+        angular offset of the sample about the beam path axis. It
+        functions by rotating the image underneath to align the qsx
+        axis with the qdx axis. This may result in some unexpected
+        behavior at large values of sample_phi_deg.
+        TODO: figure out proper qd to qs operation for this rotation.
+
+        This function requires two boxes:
+        1. A larger box for the auto-peak finding function. This
+           should encompass a series of peaks along a single direction
+           only. See the peak_find1d method for more information.
+        2. The actual box dimensions for integration. After the angle
+           of rotaiton is determined via peak finding, the image will
+           be rotated and the second box applied to extract the 1d
+           slice.
+
+        Parameters
+        ----------
+        peak_find_box_mode : str
+            Type of box to use for the peak finding function. The box
+            is defined the same way as the integrators:
+                'box' : index ranges as in DataQdyQdx.integrate_box
+                'box_size' : box size centered or offset from the beam
+                    center as in DataQdyQdx.integrate_box_of_size
+                'q_range' : scattering vector ranges as in
+                    DataQdyQdx.integrate_box_of_q_range
+        peak_find_box_params : dict
+            Dictionary of keyword arguments for the selected
+            integration method (peak_find_box_mode). See the docstring
+            for the corresponding integration method for more details
+            of available arguments and their definitions.
+        peak_axis : str, int
+            Axis along which the peaks are present, either 'qdy' or 'qdx'.
+            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
+            For example, if peak_axis is set to 'qdx', peaks will be
+            detected along the qdx axis.
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+        box_mode : str
+            Type of box used for the integration step. Same options
+            are available as peak_find_box_mode but the choice does
+            not have to be the same.
+        box_params : dict
+            Dictionary of box keyword arguments for the box_mode
+            chosen.
+        peak_find_scale : str
+            The scale of the intensity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        show_plot : bool
+            If set to True, the first figure will display the
+            scattring image overlaid with the peak finding box and
+            markers on each detected peak. The second figure will show
+            the rotated image and overlaid integration box. The third
+            figure will show the 1D slice extracted from the
+            integration and vertical lines at each peak position.
+
+        Returns
+        -------
+        IntegratedQSlice
+            One-dimensional I vs. q data extracted from the integration.
+        """
+
+        peaks_q, peaks_px, angle, \
+            (slope, intercept), integrated_q_slice_peak = self.find_peaks1D(
+                box_mode=peak_find_box_mode,
+                box_params=peak_find_box_params,
+                peak_params=peak_params,
+                peak_find_scale=peak_find_scale,
+                show_plot=False
+            )
+
+        box_params['box_angle_deg'] = angle
+        if box_mode == 'box':
+            integrated_q_slice = self.integrate_box(**box_params)
+        elif box_mode == 'box_size':
+            integrated_q_slice = self.integrate_box_of_size(**box_params)
+        elif box_mode == 'q_range':
+            integrated_q_slice = self.integrate_box_of_q_range(**box_params)
+        else:
+            raise ValueError(
+                f"The box_mode {box_mode} is not recognized."
+            )
+
+        if show_plot:
+            fig_peak, _ = plotting.plot_QdyQdx_find_peaks(
+                self, integrated_q_slice_peak, np.array(peaks_px))
+            # TODO: look into what is correct here
+            # vmin = np.log10(fig_peak.layout.coloraxis['cmin'])
+            # vmax = np.log10(fig_peak.layout.coloraxis['cmax'])
+            vmin = fig_peak.layout.coloraxis['cmin']
+            vmax = fig_peak.layout.coloraxis['cmax']
+            fig, fig_slice = plotting.plot_QdyQdx_integration(
+                self, integrated_q_slice=integrated_q_slice,
+                log_scale=True, vmin=vmin, vmax=vmax)
+            iplot(fig_peak)
+            iplot(fig)
+            iplot(fig_slice)
+
+        return integrated_q_slice
 
     def _check_metadata(self, metadata):
         """
