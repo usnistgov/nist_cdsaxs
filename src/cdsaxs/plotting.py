@@ -303,6 +303,8 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
                 colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
             else:
                 colors.append(cmap((Iq-vmin)/(vmax-vmin)))
+        else:      # For some reason negative values are not being set to zero. This is a workaround carried over from the testing rotated integration box branch
+           colors.append((0, 0, 0, 0))
 
     if log_scale:
         Iqs[Iqs == 0] = 10**(vmin-1)

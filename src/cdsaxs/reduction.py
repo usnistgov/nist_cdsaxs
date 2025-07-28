@@ -357,8 +357,6 @@ def slice_reduced_dataset(
 
         fig = plotting.plot_reduced_dataset(dataset,
                                             index=reduced_index,
-                                            # q_slice_axis='qsz'
-                                            # if q_axis == 'qsx' else 'qsx',
                                             log_scale=True)
 
         max_qsz = 0
