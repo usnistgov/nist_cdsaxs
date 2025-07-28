@@ -190,7 +190,6 @@ class Data2D():
                 resample = Image.Resampling.BILINEAR
             else:
                 resample = Image.Resampling.BICUBIC
-            
             image = Image.fromarray(image)
             image = image.rotate(box_angle_deg, resample=resample,
                                  center=(rotation_center[1], rotation_center[0]),
