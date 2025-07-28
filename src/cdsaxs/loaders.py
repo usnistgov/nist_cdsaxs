@@ -16,6 +16,7 @@ import tifffile
 
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.dataset import Dataset
+import cdsaxs.metadata
 from cdsaxs.metadata import correct_dtype, METADATA_KEYWORDS
 
 
@@ -129,6 +130,67 @@ def GeneralTIFFLoader(filepath_csv, name=None):
                 f"Using default pixel size of {metadata['pixel_size_um']}")
 
         data = DataQdyQdx(image, metadata=metadata, user_params=params)
+
+        dataset.add_data(data)
+
+    return dataset
+
+
+def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None):
+    """
+    General TIFF loader that pulls metadata from keywords in the
+    filename. The keywords must match the metadata keywords in this
+    library exactly. This loader will assume that all tiff images in the
+    directory provided should be imported. It will ignore other files
+    with a different format.
+
+    The following keywords are required in the filename:
+        sample_phi_deg : sample rotation angle during cd-saxs in degrees
+        energy_ev : source energy in eV (cannot be used with wavelength_nm)
+        wavelength_nm : source wavelength in nm (only if energy_ev unavailable)
+        exposure_time_s : exposture time in s
+
+    All other keywords are optional. This function will search the
+    filename for all the keywords that it recognizes.
+    """
+
+    # create a list of files in the provided directory
+    directory_path = os.path.abspath(directory_path)
+    filenames = [x for x in os.listdir(directory_path) if '.tif' in x]
+    print('Made dataset from ' + directory_path)
+
+    dataset = Dataset(name=name)
+
+    for i, filename in enumerate(filenames):
+        metadata = {}
+        filename_clean = filename[:filename.find('.tif')]
+        for keyword in METADATA_KEYWORDS:
+            keyword_search = f'_{keyword}_'
+            loc = filename_clean.find(keyword_search)
+            if loc != -1:
+                value = filename_clean[loc+len(keyword_search):].split('_')[0]
+                metadata[keyword] = correct_dtype(keyword, value)
+        metadata["data_directory"] = directory_path
+        metadata["filename"] = filename
+        tiff = TiffTools(os.path.join(directory_path, filename))
+        if "exposure_time_s" not in metadata.keys():
+            try:
+                metadata["exposure_time_s"] = tiff.extract_exposure_time()
+            except:
+                pass
+        image = tiff.image
+
+        if 'center_px' not in metadata.keys():
+            # default center pixel at bottom right of image
+            metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
+
+        if 'pixel_size_um' not in metadata.keys():
+            # default pixel size
+            metadata['pixel_size_um'] = 172
+            warnings.warn(
+                f"Using default pixel size of {metadata['pixel_size_um']}")
+
+        data = DataQdyQdx(image, metadata=metadata)
 
         dataset.add_data(data)
 
