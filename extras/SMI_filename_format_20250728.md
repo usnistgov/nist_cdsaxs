@@ -4,7 +4,7 @@ The following code can be incorporated into the Python control scripts
 to create filenames consistent with the metadata keywords and other
 naming conventions used in this Python library.
 
-## Instructions
+## Instructions for using built-in accepted metadata keywords
 1. **Change the base sample name format in the `cd_saxs` function.**
 Within the `cd_saxs` function two lines should be replaced with the
 following code:
@@ -97,6 +97,41 @@ please consider the use of the 'ref' and (i+1) integers from the for
 loop and how best to organize your files. The `name_fmt` that we
 defined above will follow whatever you put here and is the `sample`
 keyword we reference above.
+
+## Instructions for using a string pattern to extract metadata
+If the filenames are saved with a format that deviates from the standard
+above, then a string pattern can be used to extract the metadata
+keywords as well as user parameters with any name. 
+
+For example, we consider a filename of:
+```
+filename = 'test_sample_sdd_520_energy_16.1_sample_phi_deg_060.00_exposure_time_s_0.10_I0_4.200_num0120.tif'
+```
+
+In the above name, some of the keywords do not completely align with
+the format of the standard metadata keywords accepted in nist_cdsaxs.
+Also, some of the units are incorrect for the accepted values in
+nist_cdsaxs, such as 16.1 keV for the energy which should be in eV.
+
+Two optional arguments should be provided in the loader. The first is
+the pattern that will be used to extract variables. The variable names
+contained in the brackets {}
+should match with either the standard accepted metadata keywords or
+whatever you would like the user parameter to be stored as in the data
+object. In this case, we can use:
+```
+pattern = "{sample_name}_sdd_{sdd_cm}_energy_{energy_ev}_sample_phi_deg_{sample_phi_deg}_exposure_time_s_{exposure_time_s}_I0_{I0}_num{num}.tif"
+```
+
+Next, we need to provide a scales dictionary to account for the parameters
+that need a unit conversion. Currently, only simple mulitplicative
+conversions can be performed. 
+```
+scales = {'energy_ev': 1000}
+```
+
+In this example, these parameters and their values will get stored in
+either the metadata or params attributes of the 2D data.
 
 ## Quick formatting guide for styling numbers in the filename string
 The numbers can be formatted using the modulo operator, %. It follows
