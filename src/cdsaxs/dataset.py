@@ -221,7 +221,7 @@ class Dataset():
 
         return fig
 
-    def save_reduced_slices(self, filename, index=0, q_slice_axis='qsx',
+    def save_reduced_slices(self, filepath, index=0, q_slice_axis='qsx',
                             decimals=5):
         """
         Returns the slected reduced slices set currently stored in the
@@ -269,4 +269,4 @@ class Dataset():
             datas.append(new_Iq)
 
         datas = np.array(datas).T
-        np.savetxt(filename, datas, delimiter=',', fmt='%s')
+        np.savetxt(filepath, datas, delimiter=',', fmt='%s')
