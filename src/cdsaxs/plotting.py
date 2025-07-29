@@ -8,6 +8,7 @@ import matplotlib.cm as mpl_cm
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+import plotly.colors
 import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
@@ -26,21 +27,35 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
     if log_scale:
         with np.errstate(divide='ignore', invalid='ignore'):
             plot_image = np.log10(plot_image)
-        vmin = np.nanmin(plot_image[plot_image > -np.inf]) - 1 if not\
+        vmin = np.nanmin(plot_image[plot_image > -np.inf]) if not\
             custom_vmin else vmin
         vmax = np.nanmax(plot_image) if not custom_vmax else vmax
-        # set all pixels that were 0 counts to one order of magnitude lower
-        # than the smallest pixel value; this is vmin as -1 was already
-        # performed after the nanmin
-        # the pixels that were nan will all show as white
-        plot_image[np.isneginf(plot_image)] = vmin
+        # pixels with zero counts will show up as black on the plots
+        # need to set them as a custom value to filter later
+        plot_image[np.isneginf(plot_image)] = -1
         plot_image[np.isnan(plot_image)] = None
     else:
         vmin = 0 if not custom_vmin else vmin
         vmax = np.nanmax(plot_image) if not custom_vmax else vmax
 
-    fig = px.imshow(plot_image, zmin=vmin, zmax=vmax,
-                    color_continuous_scale='viridis', aspect='equal')
+    if log_scale and not custom_vmin and not custom_vmax:
+        viridis_scale = plotly.colors.sample_colorscale(
+            'Viridis', samplepoints=list(np.linspace(0, 1, 101)))
+        custom_colorscale = []
+        custom_colorscale.append([0, 'black'])
+
+        overall_min = vmin-1e-15
+
+        for val, color in zip(np.linspace(0, 1, 101), viridis_scale):
+            scaled_val = vmin + val * (vmax - vmin)
+            normalized_val = (scaled_val - overall_min) / (vmax - overall_min)
+            custom_colorscale.append([normalized_val, color])
+    else:
+        custom_colorscale = 'viridis'
+        overall_min = vmin
+
+    fig = px.imshow(plot_image, zmin=overall_min, zmax=vmax,
+                    color_continuous_scale=custom_colorscale, aspect='equal')
 
     fig.update_yaxes(
         title=plotting_tools.generate_axis_label_units(axis0_type)
@@ -61,12 +76,10 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
         fig.update_xaxes(tickvals=ticks, ticktext=labels)
 
     if log_scale:
-        colorbar_ticks = list(np.arange(vmin, np.ceil(vmax), step=1))
+        colorbar_ticks = list(np.arange(
+            vmin, np.ceil(vmax) if vmax%1>0 else np.ceil(vmax)+1, step=1))
         colorbar_labels = [10**x for x in colorbar_ticks]
         colorbar_labels = [f"{x:.{0}e}" for x in colorbar_labels]
-        if not custom_vmin:
-            # state that this color of the colorscale is 0 counts
-            colorbar_labels[0] = "Intensity=0"
         fig.update_layout(
             coloraxis_colorbar={
                 'tickvals': colorbar_ticks,
@@ -293,7 +306,7 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
     if log_scale:
         # move vmin to one order of magniutde lower which will indicate
         # pixels with 0 counts
-        vmin = np.nanmin(np.log10(Iqs[Iqs > 0])) - 1
+        vmin = np.nanmin(np.log10(Iqs[Iqs > 0]))
         vmax = np.nanmax(np.log10(Iqs[Iqs > 0]))
     else:
         vmin = np.nanmin(0)
@@ -303,20 +316,24 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
     cmap = mpl.colormaps['viridis']
 
     for Iq in Iqs:
-        if Iq == -50:
+        # negative pixel values are shown as white
+        if Iq < 0:
             colors.append((0, 0, 0, 0))
+        # zero counts are shown as black on log scale or if the
+        # linear color scale does not go down to 0
         elif Iq == 0:
-            colors.append(cmap(0))
+            if not log_scale and vmin == 0:
+                colors.append(cmap(0))
+            else:
+                colors.append((1, 1, 1, 1))
         elif Iq > 0:
             if log_scale:
                 colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
             else:
                 colors.append(cmap((Iq-vmin)/(vmax-vmin)))
-        else:      # For some reason negative values are not being set to zero. This is a workaround carried over from the testing rotated integration box branch
-           colors.append((0, 0, 0, 0))
-
-    if log_scale:
-        Iqs[Iqs == 0] = 10**(vmin)
+        # all other pixels shown as white
+        else:
+            colors.append((0, 0, 0, 0))
 
     colors = np.array(colors)
 
