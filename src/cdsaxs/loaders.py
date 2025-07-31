@@ -7,6 +7,7 @@ dataset.
 
 from __future__ import annotations
 import os
+import re
 import warnings
 
 import numpy as np
@@ -16,6 +17,7 @@ import tifffile
 
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.dataset import Dataset
+import cdsaxs.metadata
 from cdsaxs.metadata import correct_dtype, METADATA_KEYWORDS
 
 
@@ -131,5 +133,136 @@ def GeneralTIFFLoader(filepath_csv, name=None):
         data = DataQdyQdx(image, metadata=metadata, user_params=params)
 
         dataset.add_data(data)
+
+    return dataset
+
+
+def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
+                                       pattern=None, scales=None,
+                                       filter_files=None):
+    """
+    General TIFF loader that pulls metadata from keywords in the
+    filename. The keywords must match the metadata keywords in this
+    library exactly. This loader will assume that all tiff images in the
+    directory provided should be imported. It will ignore other files
+    with a different format.
+
+    The following keywords are required in the filename:
+        sample_phi_deg : sample rotation angle during cd-saxs in degrees
+        energy_ev : source energy in eV (cannot be used with wavelength_nm)
+        wavelength_nm : source wavelength in nm (only if energy_ev unavailable)
+        exposure_time_s : exposture time in s
+
+    All other keywords are optional. This function will search the
+    filename for all the keywords that it recognizes.
+
+    Alternatively, regular expressions can be used to assign sections
+    of the filename to different metadata keywords and user parameters.
+    In this case, the variable names should match the accepted metadata
+    keywords, otherwise they will be stored in the user params
+    dictionary of the 2D data. Please see the markdown file in
+    nist_cdsaxs/extras/SMI_filename_format_20250728.md for more info.
+
+    An example of this is:
+
+    filename = 'test_sample_sdd_cm_520_energy_ev_16100.tif
+    pattern = "{name}_sdd_cm_{sdd_cm}_energy_ev_{energy_ev}.tif"
+
+    The following will get stored in data.metadata:
+        'name' = 'test_sample'
+        'sdd_cm' = 520
+        'energy_ev' = 161000
+
+    Scaling values for any of the extracted key: value pairs can also
+    be provided as a dictionary of keyword: scale pairs. This enables
+    the user to control unit conversions as needed.
+
+    For example, if the energy_ev was provided as 16.1 (units keV), the
+    following dictionary can be passed for the scales argument:
+    {'energy_ev': 1000} so that 'energy_ev':16100 will be stored in the
+    metadata dictionary with correct units.
+    TODO: implement unit handling for metadata in the future
+
+    The files can also be filtered so that this function does not load
+    in all the images at once. A string or list of strings that should
+    be contained in the filename can be provided as filter_files.
+
+    """
+
+    # create a list of files in the provided directory
+    directory_path = os.path.abspath(directory_path)
+    filenames = [x for x in os.listdir(directory_path) if '.tif' in x]
+    if filter_files is not None:
+        if filter_files is str:
+            filter_files = [filter_files]
+        for string in filter_files:
+            filenames = [x for x in filenames if string in x]
+
+    dataset = Dataset(name=name)
+
+    for i, filename in enumerate(filenames):
+        metadata = {}
+        params = {}
+
+        # if a pattern is provided use that to interpret filename
+        if pattern is not None:
+            regex = re.sub(r'{(.+?)}', r'(?P<\1>.+)', pattern)
+            values = list(re.search(regex, filename).groups())
+            keys = re.findall(r'{(.+?)}', pattern)
+            for key, value in zip(keys, values):
+                if key in METADATA_KEYWORDS:
+                    metadata[key] = correct_dtype(key, value)
+                else:
+                    params[key] = value
+
+        # otherwise use the standard accepted keyword filename format
+        else:
+            filename_clean = filename[:filename.find('.tif')]
+            for keyword in METADATA_KEYWORDS:
+                keyword_search = f'_{keyword}_'
+                loc = filename_clean.find(keyword_search)
+                if loc != -1:
+                    value = filename_clean[loc+len(keyword_search):].split('_')[0]
+                    metadata[keyword] = correct_dtype(keyword, value)
+
+        # apply any scaling parameters
+        for key, value in scales.items():
+            if key in metadata.keys():
+                metadata[key] = metadata[key]*value
+            elif key in params.keys():
+                params[key] = float(params[key])*value
+            else:
+                print(f"WARNING: the scale for {key} was not applied"
+                      "as the keyword could not be found in metadata or"
+                      "user params.")
+
+        # add in data directory and filename as metadata always
+        metadata["data_directory"] = directory_path
+        metadata["filename"] = filename
+
+        # load the image and try to extract info
+        tiff = TiffTools(os.path.join(directory_path, filename))
+        if "exposure_time_s" not in metadata.keys():
+            try:
+                metadata["exposure_time_s"] = tiff.extract_exposure_time()
+            except:
+                pass
+        image = tiff.image
+
+        if 'center_px' not in metadata.keys():
+            # default center pixel at bottom right of image
+            metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
+
+        if 'pixel_size_um' not in metadata.keys():
+            # default pixel size
+            metadata['pixel_size_um'] = 172
+            warnings.warn(
+                f"Using default pixel size of {metadata['pixel_size_um']}")
+
+        data = DataQdyQdx(image, metadata=metadata, user_params=params)
+
+        dataset.add_data(data)
+
+    print('Made dataset from ' + directory_path)
 
     return dataset
