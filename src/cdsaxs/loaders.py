@@ -195,10 +195,8 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
     if filter_files is not None:
         if filter_files is str:
             filter_files = [filter_files]
-        filenames_filtered = []
         for string in filter_files:
-            filenames_filtered.extend([x for x in filenames if string in x])
-        filenames = list(set(filenames_filtered))
+            filenames = [x for x in filenames if string in x]
 
     dataset = Dataset(name=name)
 
