@@ -213,7 +213,7 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
             keys = re.findall(r'{(.+?)}', pattern)
             for key, value in zip(keys, values):
                 if key in METADATA_KEYWORDS:
-                    metadata[key] = correct_dtype(keyword, value)
+                    metadata[key] = correct_dtype(key, value)
                 else:
                     params[key] = value
 
