@@ -226,15 +226,16 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
                     metadata[keyword] = correct_dtype(keyword, value)
 
         # apply any scaling parameters
-        for key, value in scales.items():
-            if key in metadata.keys():
-                metadata[key] = metadata[key]*value
-            elif key in params.keys():
-                params[key] = float(params[key])*value
-            else:
-                print(f"WARNING: the scale for {key} was not applied"
-                      "as the keyword could not be found in metadata or"
-                      "user params.")
+        if scales is not None:
+            for key, value in scales.items():
+                if key in metadata.keys():
+                    metadata[key] = metadata[key]*value
+                elif key in params.keys():
+                    params[key] = float(params[key])*value
+                else:
+                    print(f"WARNING: the scale for {key} was not applied"
+                            "as the keyword could not be found in metadata or"
+                            "user params.")
 
         # add in data directory and filename as metadata always
         metadata["data_directory"] = directory_path
