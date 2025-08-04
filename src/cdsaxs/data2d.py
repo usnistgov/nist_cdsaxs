@@ -1256,17 +1256,27 @@ class DataQdyQdx(Data2D):
             )
 
         peaks = np.array(peaks_px)[:, peak_axis]
-        low_peaks = peaks[peaks < self.metadata['center_px'][peak_axis]]
-        high_peaks = peaks[peaks > self.metadata['center_px'][peak_axis]]
+        peaks_pair = np.array(peaks_px)[:, 1 - peak_axis]
+        low_peaks = peaks[peaks < self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][peak_axis]
+        low_peaks_pair = peaks_pair[peaks < self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][1-peak_axis]
+        high_peaks = peaks[peaks > self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][peak_axis]
+        high_peaks_pair = peaks_pair[peaks > self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][1-peak_axis]
+        
         sdds = []
-        n = 1
-        for low, high in zip(np.flip(low_peaks), high_peaks):
+        n = 1     
+        for low, high , low_pair, high_pair in zip(np.flip(low_peaks), high_peaks, np.flip(low_peaks_pair), high_peaks_pair):
             sin_theta = n*self.metadata['wavelength_nm'] / expected_srm_pitch
             theta = np.arcsin(sin_theta)
             #theta = np.arcsin((n*self.sample_metadata['wavelength'])/(2*expected_srm_pitch))
             
-            r_low = low * self.metadata["pixel_size_um"]/1000
-            r_high = high * self.metadata["pixel_size_um"]/1000
+            r_low =  np.abs(low)* self.metadata["pixel_size_um"]/1000
+            r_low_pair = np.abs(low_pair) * self.metadata["pixel_size_um"]/1000
+            r_high = np.abs(high) * self.metadata["pixel_size_um"]/1000
+            r_high_pair = np.abs(high_pair) * self.metadata["pixel_size_um"]/1000
+            
+            #calculate magnitude of vector from beam center to peak
+            r_low = np.sqrt(r_low**2 + r_low_pair**2)
+            r_high = np.sqrt(r_high**2 + r_high_pair**2)
             
             sdd_low = r_low/np.tan(theta)
             sdd_high = r_high/np.tan(theta)
@@ -1274,7 +1284,8 @@ class DataQdyQdx(Data2D):
             sdds.append(sdd_low)
             sdds.append(sdd_high)
             n += 1
-            
+        
+        #calculate average SDD from all peaks
         average_sdd = np.mean(sdds)/10  # convert to cm
 
         fig, fig_slice = plotting.plot_find_beam_center(
