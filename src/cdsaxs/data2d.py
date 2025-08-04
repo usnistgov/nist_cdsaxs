@@ -1165,6 +1165,128 @@ class DataQdyQdx(Data2D):
 
         return center_qdy, center_qdx
 
+    def find_sdd_from_peaks(
+            self,
+            expected_srm_pitch,
+            size_qdy_px,
+            size_qdx_px,
+            peak_axis,
+            peak_params: dict,
+            peak_find_scale='linear'):
+        """
+        Calculate the sample to detector distance (SDD) from the
+        known pitch of a SRM (standard reference material) sample
+        using simple 1D peak finding. See DataQdyQdx.find_peaks1D
+        for a more detailed description of the peak finding process.
+        For this method, only an integration box of size can be used
+        and it must be centered on the beam center as determined by 
+        the user or the find_beam_center_from_peaks method. 
+        
+        Only the 1st order peaks will be compared to the expected pitch of
+        the SRM sample to determine the SDD.
+        TODO: consider using higher order peaks for more accurate calculation
+        TODO: implement error handling when determining the SDD
+        
+        In many cases the beam center position is likely to fall on
+        an integer pixel value. This is because the peak finding
+        algorithm only returns the pixel on which the peak is and does
+        not perform any additional fit of the local intensity to determine
+        a float pixel location of the peak.
+        TODO: implement local gaussian fits for more accurate positions
+
+
+        Parameters
+        ----------
+        expected_srm_pitch : float
+            Expected pitch of the SRM sample in the units of Angstroms.
+        size_qdy_px : int
+            Box size in pixels along the qdy axis.
+        size_qdx_px : int
+            Box size in pixels along the qdx axis.
+        peak_axis : str, int
+            Axis along which the peaks are present, either 'qdy' or 'qdx'.
+            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
+            For example, if peak_axis is set to 'qdx', peaks will be
+            detected along the qdx axis.
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+        peak_find_scale = 'linear'
+            The scale of the intesity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        show_plot : bool
+            If set to True, a first figure will display the scattering
+            image overlaid with the integration box and markers on each
+            detected peak while a second figure will show the 1D slice
+            extracted from the integration and vertical lines at each
+            peak position. The determiend beam center will be shown
+            with dashed red lines.
+
+        Returns
+        -------
+        calculated_sdd : float
+            Sample detector distance (SDD) in the units of cm.
+        """
+
+        if isinstance(peak_axis, str):
+            if peak_axis == 'qdy':
+                peak_axis = 0
+            elif peak_axis == 'qdx':
+                peak_axis = 1
+            else:
+                raise ValueError(
+                    f"Invalid integration peak axis of {peak_axis}.")
+
+        box_params = {
+            "size_qdy_px": size_qdy_px,
+            "size_qdx_px": size_qdx_px,
+            "axis": 1 - peak_axis,
+            "mode": 'sum',
+        }
+        
+        #Find peaks in the 1D slice
+        peaks_q, peaks_px, angle, (slope, intercept), integrated_q_slice =\
+            self.find_peaks1D(
+                box_mode='box_size',
+                box_params=box_params,
+                peak_params=peak_params,
+                peak_find_scale=peak_find_scale,
+                show_plot=False
+            )
+
+        peaks = np.array(peaks_px)[:, peak_axis]
+        low_peaks = peaks[peaks < self.metadata['center_px'][peak_axis]]
+        high_peaks = peaks[peaks > self.metadata['center_px'][peak_axis]]
+        sdds = []
+        n = 1
+        for low, high in zip(np.flip(low_peaks), high_peaks):
+            sin_theta = n*self.metadata['wavelength_nm'] / expected_srm_pitch
+            theta = np.arcsin(sin_theta)
+            #theta = np.arcsin((n*self.sample_metadata['wavelength'])/(2*expected_srm_pitch))
+            
+            r_low = low * self.metadata["pixel_size_um"]/1000
+            r_high = high * self.metadata["pixel_size_um"]/1000
+            
+            sdd_low = r_low/np.tan(theta)
+            sdd_high = r_high/np.tan(theta)
+            
+            sdds.append(sdd_low)
+            sdds.append(sdd_high)
+            n += 1
+            
+        average_sdd = np.mean(sdds)/10  # convert to cm
+
+        fig, fig_slice = plotting.plot_find_beam_center(
+            self, integrated_q_slice, np.array(peaks_px),
+            self.metadata['center_px'])
+        iplot(fig)
+        iplot(fig_slice)
+
+        return average_sdd
+
+
+
     def integrate_autorotated_box(
             self,
             peak_find_box_mode: str,
