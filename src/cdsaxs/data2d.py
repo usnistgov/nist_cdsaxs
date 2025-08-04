@@ -1184,7 +1184,6 @@ class DataQdyQdx(Data2D):
         
         Only the 1st order peaks will be compared to the expected pitch of
         the SRM sample to determine the SDD.
-        TODO: consider using higher order peaks for more accurate calculation
         TODO: implement error handling when determining the SDD
         
         In many cases the beam center position is likely to fall on
