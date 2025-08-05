@@ -332,6 +332,9 @@ class DataQdyQdx(Data2D):
             metadata['name'] if 'name' in metadata.keys() else\
             metadata['filename'] if 'filename' in metadata.keys() else 'name'
 
+        # set default metadata values not required by user
+        self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
+
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
         Add accepted metadata to the class instance. Existing metadata
@@ -1161,7 +1164,7 @@ class DataQdyQdx(Data2D):
             if np.isnan(slope):
                 # this means the peaks form perfectly vertical line
                 center_qdx = np.array(peaks_px)[0, 0]
-            else:
+            else: 
                 center_qdx = (center_qdy-intercept)/slope
 
         fig, fig_slice = plotting.plot_find_beam_center(

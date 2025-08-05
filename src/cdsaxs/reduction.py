@@ -238,7 +238,7 @@ def integrate_dataset_box_of_q_range(
 
 def create_reduced_QszQsx(
         dataset: Dataset,
-        integrated_index: int = 0,
+        integrated_index: int = 0 ,
         in_place: bool = True):
     """
     For each integrated q slice of each data image, a reduced dataset
@@ -284,7 +284,7 @@ def create_reduced_QszQsx(
                 np.zeros(shape=integrated_q_slice.q.shape, dtype=np.float64),
                 data.metadata['wavelength_nm'],
                 data.metadata['sample_phi_deg'],
-                samplethetaoffset=0
+                samplethetaoffset=data.metadata['sample_phi_offset_deg']
             )
 
             reduced_dataset[key] = ReducedData(
