@@ -323,7 +323,10 @@ class DataQdyQdx(Data2D):
         self.qdx = None
 
         # calculate the q vectors if all required metadata is present
-        self.calculate_q(suppress_errors=False)
+        try:
+            self.calculate_q(suppress_errors=False)
+        except ValueError as e:
+            print(f"WARNING: insufficient metadata for q calculation:\n{e}")
 
         self.name = name if name is not None else\
             metadata['name'] if 'name' in metadata.keys() else\
@@ -360,7 +363,10 @@ class DataQdyQdx(Data2D):
                         self.metadata['wavelength_nm'] =\
                             calculators.energy_to_wavelength(value)
             if len([x for x in metadata.keys() if x in UPDATE_Q_TRIGGERS]) > 0:
-                self.calculate_q(suppress_errors=True)
+                try:
+                    self.calculate_q(suppress_errors=False)
+                except ValueError as e:
+                    print(f"WARNING: insufficient metadata for q calculation:\n{e}")
 
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
@@ -385,7 +391,8 @@ class DataQdyQdx(Data2D):
             else:
                 self.user_params[key] = value
 
-    def calculate_q(self, suppress_errors: bool = False):
+    def calculate_q(self,
+                    suppress_errors: bool = False):
         """
         Calculate the qdy and qdx vectors along the image axes if
         all required metadata is available.
