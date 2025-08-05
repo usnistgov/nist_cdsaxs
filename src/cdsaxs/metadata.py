@@ -22,7 +22,7 @@ ACCEPTED_Q_AXES = [
 FLOATS = [
     "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
     "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
-    "scaling_factor", "I0", "beam_current"
+    "scaling_factor", "I0", "beam_current", 'sample_phi_offset_deg'
 ]
 
 INTEGERS = [
