@@ -323,7 +323,7 @@ class DataQdyQdx(Data2D):
         self.qdx = None
 
         # calculate the q vectors if all required metadata is present
-        self.calculate_q(suppress_errors=True)
+        self.calculate_q(suppress_errors=False)
 
         self.name = name if name is not None else\
             metadata['name'] if 'name' in metadata.keys() else\
