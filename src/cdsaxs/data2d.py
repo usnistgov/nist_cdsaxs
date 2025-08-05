@@ -1254,28 +1254,29 @@ class DataQdyQdx(Data2D):
                 show_plot=False
             )
 
-        peaks = np.array(peaks_px)[:, peak_axis]
-        peaks_pair = np.array(peaks_px)[:, 1 - peak_axis]
-        low_peaks = peaks[peaks < self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][peak_axis]
-        low_peaks_pair = peaks_pair[peaks < self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][1-peak_axis]
-        high_peaks = peaks[peaks > self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][peak_axis]
-        high_peaks_pair = peaks_pair[peaks > self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][1-peak_axis]
+        #x and y used symbolically to represent the primary and secondary axis
+        peaks_x = np.array(peaks_px)[:, peak_axis]
+        peaks_y = np.array(peaks_px)[:, 1 - peak_axis]
+        low_peaks_x = peaks_x[peaks_x < self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][peak_axis]
+        low_peaks_y = peaks_y[peaks_x < self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][1-peak_axis]
+        high_peaks_x = peaks_x[peaks_x > self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][peak_axis]
+        high_peaks_y = peaks_y[peaks_x > self.metadata['center_px'][peak_axis]] - self.metadata['center_px'][1-peak_axis]
         
         sdds = []
         n = 1     
-        for low, high , low_pair, high_pair in zip(np.flip(low_peaks), high_peaks, np.flip(low_peaks_pair), high_peaks_pair):
+        for low_x, high_x , low_y, high_y in zip(np.flip(low_peaks_x), high_peaks_x, np.flip(low_peaks_y), high_peaks_y):
             sin_theta = n*self.metadata['wavelength_nm'] / expected_srm_pitch
             theta = np.arcsin(sin_theta)
             #theta = np.arcsin((n*self.sample_metadata['wavelength'])/(2*expected_srm_pitch))
             
-            r_low =  np.abs(low)* self.metadata["pixel_size_um"]/1000
-            r_low_pair = np.abs(low_pair) * self.metadata["pixel_size_um"]/1000
-            r_high = np.abs(high) * self.metadata["pixel_size_um"]/1000
-            r_high_pair = np.abs(high_pair) * self.metadata["pixel_size_um"]/1000
+            r_low_x =  np.abs(low_x)* self.metadata["pixel_size_um"]/1000
+            r_low_y = np.abs(low_y) * self.metadata["pixel_size_um"]/1000
+            r_high_x = np.abs(high_x) * self.metadata["pixel_size_um"]/1000
+            r_high_y = np.abs(high_y) * self.metadata["pixel_size_um"]/1000
             
             #calculate magnitude of vector from beam center to peak
-            r_low = np.sqrt(r_low**2 + r_low_pair**2)
-            r_high = np.sqrt(r_high**2 + r_high_pair**2)
+            r_low = np.sqrt(r_low_x**2 + r_low_y**2)
+            r_high = np.sqrt(r_high_x**2 + r_high_y**2)
             
             sdd_low = r_low/np.tan(theta)
             sdd_high = r_high/np.tan(theta)
