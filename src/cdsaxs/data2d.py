@@ -1243,7 +1243,8 @@ class DataQdyQdx(Data2D):
             Angle in degrees of how much to rotate the scattering image 
             when running integrations.
         """
-        peaks_q, peaks_px, angle, \
+        #find peaks
+        _, peaks_px, angle, \
             (slope, intercept), integrated_q_slice_peak = self.find_peaks1D(
                 box_mode=peak_find_box_mode,
                 box_params=peak_find_box_params,
@@ -1252,12 +1253,26 @@ class DataQdyQdx(Data2D):
                 show_plot=False
             )
         
+        #Find rotation based on peaks
+        peaks_array = np.array(peaks_px)
+        try:
+            fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
+            angle = np.rad2deg(np.arctan(fit.slope))
+            slope, intercept = (fit.slope, fit.intercept)
+        except ValueError:
+            # vertical line
+            angle = 90
+            slope = np.nan
+            intercept = np.nan
+        
+        #Plot peaks and box for visualization
+        #TODO plot rotated image in addition to the find peaks image
         if show_plot:
             fig_peak, _ = plotting.plot_QdyQdx_find_peaks(
                 self, integrated_q_slice_peak, np.array(peaks_px))
             iplot(fig_peak)
-        
-        return angle
+            
+        return angle #, (slope,intercept)
         
         
     def integrate_autorotated_box(
