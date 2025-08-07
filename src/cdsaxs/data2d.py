@@ -1175,6 +1175,91 @@ class DataQdyQdx(Data2D):
 
         return center_qdy, center_qdx
 
+    def find_box_rotation_from_peaks(
+        self,
+        peak_find_box_mode: str,
+        peak_find_box_params: dict,
+        peak_axis: str,
+        peak_params: dict,
+        peak_find_scale: str,
+        show_plot=True,
+    ):
+        """
+        Determine how much to rotate the image when performing an 
+        integration. This value can then be fed into any of the 
+        standard integrator methods. This function uses an automated
+        peak finding function based on scipy's find_peaks function.
+        
+        CAUTION: this method assumes that this is only a minor
+        angular offset of the sample about the beam path axis. It
+        functions by rotating the image underneath to align the qsx
+        axis with the qdx axis. This may result in some unexpected
+        behavior at large values of sample_phi_deg.
+        TODO: figure out proper qd to qs operation for this rotation.
+
+        This function requires one box:
+        1. A larger box for the auto-peak finding function. This
+           should encompass a series of peaks along a single direction
+           only. See the peak_find1d method for more information.
+
+         Parameters
+        ----------
+        peak_find_box_mode : str
+            Type of box to use for the peak finding function. The box
+            is defined the same way as the integrators:
+                'box' : index ranges as in DataQdyQdx.integrate_box
+                'box_size' : box size centered or offset from the beam
+                    center as in DataQdyQdx.integrate_box_of_size
+                'q_range' : scattering vector ranges as in
+                    DataQdyQdx.integrate_box_of_q_range
+        peak_find_box_params : dict
+            Dictionary of keyword arguments for the selected
+            integration method (peak_find_box_mode). See the docstring
+            for the corresponding integration method for more details
+            of available arguments and their definitions.
+        peak_axis : str, int
+            Axis along which the peaks are present, either 'qdy' or 'qdx'.
+            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
+            For example, if peak_axis is set to 'qdx', peaks will be
+            detected along the qdx axis.
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+        peak_find_scale : str
+            The scale of the intensity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        show_plot : bool
+            If set to True, the first figure will display the
+            scattring image overlaid with the peak finding box and
+            markers on each detected peak. The second figure will show
+            the rotated image and overlaid integration box. The third
+            figure will show the 1D slice extracted from the
+            integration and vertical lines at each peak position.
+
+        Returns
+        -------
+        angle : float
+            Angle in degrees of how much to rotate the scattering image 
+            when running integrations.
+        """
+        peaks_q, peaks_px, angle, \
+            (slope, intercept), integrated_q_slice_peak = self.find_peaks1D(
+                box_mode=peak_find_box_mode,
+                box_params=peak_find_box_params,
+                peak_params=peak_params,
+                peak_find_scale=peak_find_scale,
+                show_plot=False
+            )
+        
+        if show_plot:
+            fig_peak, _ = plotting.plot_QdyQdx_find_peaks(
+                self, integrated_q_slice_peak, np.array(peaks_px))
+            iplot(fig_peak)
+        
+        return angle
+        
+        
     def integrate_autorotated_box(
             self,
             peak_find_box_mode: str,
@@ -1184,7 +1269,7 @@ class DataQdyQdx(Data2D):
             box_mode: str,
             box_params: dict,
             peak_find_scale: str,
-            show_plot: True,
+            show_plot=True,
     ):
         """
         Integrate a 2D qdy vs qdx image with any of the standard
