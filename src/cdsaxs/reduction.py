@@ -78,8 +78,7 @@ def integrate_dataset(
             limits_qdx_px=limits_qdx_px,
             mode=mode,
             axis=axis,
-            box_angle_deg=box_angle_deg[key] if box_angle_deg is dict
-            else box_angle_deg,
+            box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
         )
         if key != integrated_q_slice.name:
@@ -175,7 +174,6 @@ def integrate_dataset_box_of_size(
     integrated_datas = {}
     i = 0
     for key, data in dataset.datas.items():
-
         integrated_q_slice = data.integrate_box_of_size(
                 size_qdy_px=size_qdy_px,
                 size_qdx_px=size_qdx_px,
@@ -184,8 +182,7 @@ def integrate_dataset_box_of_size(
                 shift_box_qdy_px=shift_box_qdy_px,
                 shift_box_qdx_px=shift_box_qdx_px,
                 show_plot=False,
-                box_angle_deg=box_angle_deg[key] if box_angle_deg is dict
-                else box_angle_deg,
+                box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
                 rotation_sampling_mode=rotation_sampling_mode,
             )
 
@@ -277,8 +274,7 @@ def integrate_dataset_box_of_q_range(
             range_qdx=range_qdx,
             mode=mode,
             axis=axis,
-            box_angle_deg=box_angle_deg[key] if box_angle_deg is dict
-            else box_angle_deg,
+            box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
         )
         if key != integrated_q_slice.name:
