@@ -982,13 +982,19 @@ class DataQdyQdx(Data2D):
             (self.qdy[y], self.qdx[x]) for y, x in peaks_px]
 
         peaks_array = np.array(peaks_px)
-        try:
-            fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
-            angle = np.rad2deg(np.arctan(fit.slope))
-            slope, intercept = (fit.slope, fit.intercept)
-        except ValueError:
-            # vertical line
-            angle = 90
+        if len(peaks_array) > 1:
+            try:
+                fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
+                angle = np.rad2deg(np.arctan(fit.slope))
+                slope, intercept = (fit.slope, fit.intercept)
+            except ValueError:
+                # vertical line
+                angle = 90
+                slope = np.nan
+                intercept = np.nan
+        else:
+            warnings.warn("WARNING: Only one peak found for:\n" + str(self.metadata["filename"]) + "\n Setting angle to 0, slope to nan, and intercept to nan.")        
+            angle = 0
             slope = np.nan
             intercept = np.nan
 
@@ -1179,29 +1185,16 @@ class DataQdyQdx(Data2D):
         self,
         peak_find_box_mode: str,
         peak_find_box_params: dict,
-        peak_axis: str,
         peak_params: dict,
         peak_find_scale: str,
         show_plot=True,
     ):
         """
-        Determine how much to rotate the image when performing an 
-        integration. This value can then be fed into any of the 
-        standard integrator methods. This function uses an automated
-        peak finding function based on scipy's find_peaks function.
+        Wrapper function that just pulls the rotation from the find_peaks1D 
+        function. This function is designed to make the more complicated 
+        find_peaks1D function accesible to users when performing a rotation
+        correction during the integration step. 
         
-        CAUTION: this method assumes that this is only a minor
-        angular offset of the sample about the beam path axis. It
-        functions by rotating the image underneath to align the qsx
-        axis with the qdx axis. This may result in some unexpected
-        behavior at large values of sample_phi_deg.
-        TODO: figure out proper qd to qs operation for this rotation.
-
-        This function requires one box:
-        1. A larger box for the auto-peak finding function. This
-           should encompass a series of peaks along a single direction
-           only. See the peak_find1d method for more information.
-
          Parameters
         ----------
         peak_find_box_mode : str
@@ -1217,11 +1210,6 @@ class DataQdyQdx(Data2D):
             integration method (peak_find_box_mode). See the docstring
             for the corresponding integration method for more details
             of available arguments and their definitions.
-        peak_axis : str, int
-            Axis along which the peaks are present, either 'qdy' or 'qdx'.
-            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
-            For example, if peak_axis is set to 'qdx', peaks will be
-            detected along the qdx axis.
         peak_params : dict
             Dictionary of keyword arguments for the scipy.find_peaks
             algorithm; see scipy documentation for more information.
@@ -1250,29 +1238,10 @@ class DataQdyQdx(Data2D):
                 box_params=peak_find_box_params,
                 peak_params=peak_params,
                 peak_find_scale=peak_find_scale,
-                show_plot=False
+                show_plot=show_plot
             )
-        
-        #Find rotation based on peaks
-        peaks_array = np.array(peaks_px)
-        try:
-            fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
-            angle = np.rad2deg(np.arctan(fit.slope))
-            slope, intercept = (fit.slope, fit.intercept)
-        except ValueError:
-            # vertical line
-            angle = 90
-            slope = np.nan
-            intercept = np.nan
-        
-        #Plot peaks and box for visualization
-        #TODO plot rotated image in addition to the find peaks image
-        if show_plot:
-            fig_peak, _ = plotting.plot_QdyQdx_find_peaks(
-                self, integrated_q_slice_peak, np.array(peaks_px))
-            iplot(fig_peak)
             
-        return angle #, (slope,intercept)
+        return angle
         
         
     def integrate_autorotated_box(
