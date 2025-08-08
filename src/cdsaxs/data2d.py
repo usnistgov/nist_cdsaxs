@@ -323,11 +323,17 @@ class DataQdyQdx(Data2D):
         self.qdx = None
 
         # calculate the q vectors if all required metadata is present
-        self.calculate_q(suppress_errors=True)
+        try:
+            self.calculate_q(suppress_errors=False)
+        except ValueError as e:
+            print(f"WARNING: insufficient metadata for q calculation:\n{e}")
 
         self.name = name if name is not None else\
             metadata['name'] if 'name' in metadata.keys() else\
             metadata['filename'] if 'filename' in metadata.keys() else 'name'
+
+        # set default metadata values not required by user
+        self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
 
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
@@ -360,7 +366,10 @@ class DataQdyQdx(Data2D):
                         self.metadata['wavelength_nm'] =\
                             calculators.energy_to_wavelength(value)
             if len([x for x in metadata.keys() if x in UPDATE_Q_TRIGGERS]) > 0:
-                self.calculate_q(suppress_errors=True)
+                try:
+                    self.calculate_q(suppress_errors=False)
+                except ValueError as e:
+                    print(f"WARNING: insufficient metadata for q calculation:\n{e}")
 
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
@@ -385,7 +394,8 @@ class DataQdyQdx(Data2D):
             else:
                 self.user_params[key] = value
 
-    def calculate_q(self, suppress_errors: bool = False):
+    def calculate_q(self,
+                    suppress_errors: bool = False):
         """
         Calculate the qdy and qdx vectors along the image axes if
         all required metadata is available.
@@ -972,13 +982,19 @@ class DataQdyQdx(Data2D):
             (self.qdy[y], self.qdx[x]) for y, x in peaks_px]
 
         peaks_array = np.array(peaks_px)
-        try:
-            fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
-            angle = np.rad2deg(np.arctan(fit.slope))
-            slope, intercept = (fit.slope, fit.intercept)
-        except ValueError:
-            # vertical line
-            angle = 90
+        if len(peaks_array) > 1:
+            try:
+                fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
+                angle = np.rad2deg(np.arctan(fit.slope))
+                slope, intercept = (fit.slope, fit.intercept)
+            except ValueError:
+                # vertical line
+                angle = 90
+                slope = np.nan
+                intercept = np.nan
+        else:
+            warnings.warn("WARNING: Only one peak found for:\n" + str(self.metadata["filename"]) + "\n Setting angle to 0, slope to nan, and intercept to nan.")        
+            angle = 0
             slope = np.nan
             intercept = np.nan
 
@@ -1161,7 +1177,7 @@ class DataQdyQdx(Data2D):
             if np.isnan(slope):
                 # this means the peaks form perfectly vertical line
                 center_qdx = np.array(peaks_px)[0, 0]
-            else:
+            else: 
                 center_qdx = (center_qdy-intercept)/slope
 
         if show_plot:
@@ -1310,6 +1326,68 @@ class DataQdyQdx(Data2D):
 
         return average_sdd
 
+    def find_box_rotation_from_peaks(
+        self,
+        peak_find_box_mode: str,
+        peak_find_box_params: dict,
+        peak_params: dict,
+        peak_find_scale: str,
+        show_plot=True,
+    ):
+        """
+        Wrapper function that just pulls the rotation from the find_peaks1D 
+        function. This function is designed to make the more complicated 
+        find_peaks1D function accesible to users when performing a rotation
+        correction during the integration step. 
+        
+         Parameters
+        ----------
+        peak_find_box_mode : str
+            Type of box to use for the peak finding function. The box
+            is defined the same way as the integrators:
+                'box' : index ranges as in DataQdyQdx.integrate_box
+                'box_size' : box size centered or offset from the beam
+                    center as in DataQdyQdx.integrate_box_of_size
+                'q_range' : scattering vector ranges as in
+                    DataQdyQdx.integrate_box_of_q_range
+        peak_find_box_params : dict
+            Dictionary of keyword arguments for the selected
+            integration method (peak_find_box_mode). See the docstring
+            for the corresponding integration method for more details
+            of available arguments and their definitions.
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+        peak_find_scale : str
+            The scale of the intensity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        show_plot : bool
+            If set to True, the first figure will display the
+            scattring image overlaid with the peak finding box and
+            markers on each detected peak. The second figure will show
+            the rotated image and overlaid integration box. The third
+            figure will show the 1D slice extracted from the
+            integration and vertical lines at each peak position.
+
+        Returns
+        -------
+        angle : float
+            Angle in degrees of how much to rotate the scattering image 
+            when running integrations.
+        """
+        #find peaks
+        _, peaks_px, angle, \
+            (slope, intercept), integrated_q_slice_peak = self.find_peaks1D(
+                box_mode=peak_find_box_mode,
+                box_params=peak_find_box_params,
+                peak_params=peak_params,
+                peak_find_scale=peak_find_scale,
+                show_plot=show_plot
+            )
+            
+        return angle
+ 
     def integrate_autorotated_box(
             self,
             peak_find_box_mode: str,
@@ -1319,7 +1397,7 @@ class DataQdyQdx(Data2D):
             box_mode: str,
             box_params: dict,
             peak_find_scale: str,
-            show_plot: True,
+            show_plot=True,
     ):
         """
         Integrate a 2D qdy vs qdx image with any of the standard
