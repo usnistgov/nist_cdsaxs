@@ -142,7 +142,9 @@ class Data2D():
             axis,
             box_angle_deg=0,
             rotation_center=[0, 0],
-            rotation_sampling_mode='bicubic'
+            rotation_sampling_mode='bicubic',
+            subtract_background=False,
+            subtraction_offset=5
     ):
         """
         Simple integration in a box defined by the [min, max) limits
@@ -178,6 +180,15 @@ class Data2D():
             image intensities can be performed with the 'nearest',
             'bilinear', or 'bicubic' methods in the PILLOW package.
             Default value is 'bicubic'.
+        subtract_background : bool, optional
+            If set to true, will run a background subtraction on the integrated
+            data based on the supplied integration box offset by a set number 
+            of pixels.
+            TODO: decide how to best approach this subtraction past this 
+            initial implementation.
+        subtraction_offset: int, optional
+            The number of pixels to offset the integration box for calculating 
+            the background intensity by. 
         """
         image = np.copy(self.image)
         image[image < 0] = np.nan
@@ -198,17 +209,46 @@ class Data2D():
                       limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
+            
+            if subtract_background:
+                integrated_i_bkg_above = np.nansum(
+                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+                          limits_axis1[0]:limits_axis1[1]]
+                )
+                integrated_i_bkg_below =np.nansum(
+                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+                          limits_axis1[0]:limits_axis1[1]]
+                )
+                integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
+                integrated_i = integrated_i-integrated_i_bkg_mean
+    
         elif mode == 'mean':
             integrated_i = np.nanmean(
                 image[limits_axis0[0]:limits_axis0[1],
                       limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
+            
+            if subtract_background:
+                integrated_i_bkg_above = np.nanmean(
+                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+                          limits_axis1[0]:limits_axis1[1]]
+                )
+                integrated_i_bkg_below =np.nanmean(
+                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+                          limits_axis1[0]:limits_axis1[1]]
+                )
+                integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
+                integrated_i = integrated_i-integrated_i_bkg_mean
+            
         else:
             raise ValueError(
                 f"Integration mode of {mode} is not recognized. Accepted modes"
                 " include 'sum' and 'mean'."
             )
+
+        if subtract_background:
+            
 
         return integrated_i.reshape(-1), {
                 'mode': mode,
@@ -554,6 +594,8 @@ class DataQdyQdx(Data2D):
         box_angle_deg: float = 0,
         rotation_sampling_mode: str = 'bicubic',
         rotation_center_point: list | tuple = None,
+        subtract_background=False,
+        subtraction_offset=5,        
         # interactive_plot=True
     ) -> IntegratedQSlice:
         """
@@ -597,6 +639,15 @@ class DataQdyQdx(Data2D):
             image intensities can be performed with the 'nearest',
             'bilinear', or 'bicubic' methods in the PILLOW package.
             Default value is 'bicubic'.
+        subtract_background : bool, optional
+            If set to true, will run a background subtraction on the integrated
+            data based on the supplied integration box offset by a set number 
+            of pixels.
+            TODO: decide how to best approach this subtraction past this 
+            initial implementation.
+        subtraction_offset: int
+            The number of pixels to offset the integration box for calculating 
+            the background intensity by.
         interactive_plot : bool, optional
             If set to True, the plots returned will be interactive plots
             built via Plotly. If set to False, the plots returned will be
@@ -627,7 +678,9 @@ class DataQdyQdx(Data2D):
             axis=axis,
             box_angle_deg=box_angle_deg,
             rotation_center=self.metadata['center_px'],
-            rotation_sampling_mode=rotation_sampling_mode
+            rotation_sampling_mode=rotation_sampling_mode,
+            subtract_background=subtract_background,
+            subtraction_offset=subtraction_offset
         )
 
         # extract scattering vector for this integration
@@ -673,6 +726,8 @@ class DataQdyQdx(Data2D):
             shift_box_qdx_px: int = 0,
             box_angle_deg: float = 0,
             rotation_sampling_mode: str = 'bicubic',
+            subtract_background=False,
+            subtraction_offset = 5,           
             show_plot=False,
             log_scale=True,
     ):
@@ -717,6 +772,13 @@ class DataQdyQdx(Data2D):
             image intensities can be performed with the 'nearest',
             'bilinear', or 'bicubic' methods in the PILLOW package.
             Default value is 'bicubic'.
+        subtract_background : bool, optional
+            If set to true, will run a background subtraction on the integrated
+            data based on the supplied integration box offset by a set number 
+            of pixels.
+            TODO: decide how to best approach this subtraction past this 
+            initial implementation.
+            
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
@@ -766,8 +828,31 @@ class DataQdyQdx(Data2D):
             axis=axis,
             box_angle_deg=box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
+            subtract_background = subtract_background
         )
 
+        # if subtract_background:
+        #     if axis == 0:
+        #         background_q_slice_above = self.integrate_box(
+        #             limits_qdy_px=[min0 + subtraction_offset, max0 + subtraction_offset],
+        #             limits_qdx_px=[min1, max1],
+        #             mode=mode,
+        #             axis=axis,
+        #             box_angle_deg=box_angle_deg,
+        #             rotation_sampling_mode=rotation_sampling_mode,
+        #         )
+        #         background_q_slice_below = self.integrate_box(
+        #             limits_qdy_px=[min0 - subtraction_offset, max0 - subtraction_offset],
+        #             limits_qdx_px=[min1, max1],
+        #             mode=mode,
+        #             axis=axis,
+        #             box_angle_deg=box_angle_deg,
+        #             rotation_sampling_mode=rotation_sampling_mode,
+        #         )
+        #     elif axis == 1:
+                
+            
+            
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self, integrated_q_slice=integrated_q_slice,
@@ -785,6 +870,8 @@ class DataQdyQdx(Data2D):
             axis: str | int,
             box_angle_deg: float = 0,
             rotation_sampling_mode: str = 'bicubic',
+            subtract_background=False,
+            subtraction_offset = 10,
             show_plot=False,
             log_scale=True,
     ):
@@ -820,6 +907,12 @@ class DataQdyQdx(Data2D):
             image intensities can be performed with the 'nearest',
             'bilinear', or 'bicubic' methods in the PILLOW package.
             Default value is 'bicubic'.
+        subtract_background : bool, optional
+            If set to true, will run a background subtraction on the integrated
+            data based on the supplied integration box offset by a set number 
+            of pixels.
+            TODO: decide how to best approach this subtraction past this 
+            initial implementation.
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
