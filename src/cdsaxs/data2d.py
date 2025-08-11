@@ -212,12 +212,14 @@ class Data2D():
             
             if subtract_background:
                 integrated_i_bkg_above = np.nansum(
-                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-                          limits_axis1[0]:limits_axis1[1]]
+                    image[limits_axis0[0]:limits_axis0[1],
+                          limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
+                    axis=axis
                 )
                 integrated_i_bkg_below =np.nansum(
-                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-                          limits_axis1[0]:limits_axis1[1]]
+                    image[limits_axis0[0]:limits_axis0[1],
+                          limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
+                    axis=axis
                 )
                 integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
                 integrated_i = integrated_i-integrated_i_bkg_mean
@@ -231,21 +233,25 @@ class Data2D():
             
             if subtract_background:
                 integrated_i_bkg_above = np.nanmean(
-                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-                          limits_axis1[0]:limits_axis1[1]]
+                    image[limits_axis0[0]:limits_axis0[1],
+                          limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
+                    axis=axis
                 )
                 integrated_i_bkg_below =np.nanmean(
-                    image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-                          limits_axis1[0]:limits_axis1[1]]
+                    image[limits_axis0[0]:limits_axis0[1]+subtraction_offset,
+                          limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
+                    axis=axis
                 )
                 integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
                 integrated_i = integrated_i-integrated_i_bkg_mean
-            
+        
         else:
             raise ValueError(
                 f"Integration mode of {mode} is not recognized. Accepted modes"
                 " include 'sum' and 'mean'."
             )
+
+        integrated_i[integrated_i < 0] = 0
 
         return integrated_i.reshape(-1), {
                 'mode': mode,
