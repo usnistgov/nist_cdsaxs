@@ -29,7 +29,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(90)
+        self.data2d.rotate_image_step90(90)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -53,7 +53,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(180)
+        self.data2d.rotate_image_step90(180)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -74,7 +74,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(270)
+        self.data2d.rotate_image_step90(270)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -95,7 +95,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(-90)
+        self.data2d.rotate_image_step90(-90)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -116,7 +116,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(90, direction='cw')
+        self.data2d.rotate_image_step90(90, direction='cw')
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -140,7 +140,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(180, direction='cw')
+        self.data2d.rotate_image_step90(180, direction='cw')
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -161,7 +161,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(270, direction='cw')
+        self.data2d.rotate_image_step90(270, direction='cw')
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -182,7 +182,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image(630, direction='cw')
+        self.data2d.rotate_image_step90(630, direction='cw')
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -244,16 +244,16 @@ class TestData2D(unittest.TestCase):
 
         self.data2d.reset_image_orientation()
 
-        self.data2d.rotate_image(90)
-        self.data2d.rotate_image(90)
+        self.data2d.rotate_image_step90(90)
+        self.data2d.rotate_image_step90(90)
         self.data2d.flip_horizontally()
-        self.data2d.rotate_image(-180)
+        self.data2d.rotate_image_step90(-180)
         self.data2d.flip_vertically()
-        self.data2d.rotate_image(270)
-        self.data2d.rotate_image(270)
+        self.data2d.rotate_image_step90(270)
+        self.data2d.rotate_image_step90(270)
         self.data2d.flip_horizontally()
         self.data2d.flip_vertically()
-        self.data2d.rotate_image(90, direction='cw')
+        self.data2d.rotate_image_step90(90, direction='cw')
 
         self.data2d.reset_image_orientation()
         np.testing.assert_array_equal(
@@ -410,7 +410,7 @@ class TestDataQdyQdx(unittest.TestCase):
         expected_center_px = [1, 4]
 
         self.dataqdyqdx.reset_image_orientation()
-        self.dataqdyqdx.rotate_image(90)
+        self.dataqdyqdx.rotate_image_step90(90)
 
         np.testing.assert_array_equal(
             self.dataqdyqdx.image, expected_img,
@@ -456,7 +456,7 @@ class TestDataQdyQdx(unittest.TestCase):
         expected_center_px = [2, 1]
 
         self.dataqdyqdx.reset_image_orientation()
-        self.dataqdyqdx.rotate_image(180)
+        self.dataqdyqdx.rotate_image_step90(180)
 
         np.testing.assert_array_equal(
             self.dataqdyqdx.image, expected_img,
@@ -498,7 +498,7 @@ class TestDataQdyQdx(unittest.TestCase):
         expected_center_px = [2, 2]
 
         self.dataqdyqdx.reset_image_orientation()
-        self.dataqdyqdx.rotate_image(270)
+        self.dataqdyqdx.rotate_image_step90(270)
 
         np.testing.assert_array_equal(
             self.dataqdyqdx.image, expected_img,
@@ -540,7 +540,7 @@ class TestDataQdyQdx(unittest.TestCase):
         expected_center_px = [2, 2]
 
         self.dataqdyqdx.reset_image_orientation()
-        self.dataqdyqdx.rotate_image(-90)
+        self.dataqdyqdx.rotate_image_step90(-90)
 
         np.testing.assert_array_equal(
             self.dataqdyqdx.image, expected_img,
@@ -581,7 +581,7 @@ class TestDataQdyQdx(unittest.TestCase):
         expected_center_px = [2, 2]
 
         self.dataqdyqdx.reset_image_orientation()
-        self.dataqdyqdx.rotate_image(90, direction='cw')
+        self.dataqdyqdx.rotate_image_step90(90, direction='cw')
 
         np.testing.assert_array_equal(
             self.dataqdyqdx.image, expected_img,
@@ -698,16 +698,16 @@ class TestDataQdyQdx(unittest.TestCase):
         self.dataqdyqdx.reset_image_orientation()
 
     def test_dataqdyqdx_reset_image_orientation(self):
-        self.dataqdyqdx.rotate_image(90)
+        self.dataqdyqdx.rotate_image_step90(90)
         self.dataqdyqdx.flip_vertically()
-        self.dataqdyqdx.rotate_image(90)
+        self.dataqdyqdx.rotate_image_step90(90)
         self.dataqdyqdx.flip_vertically()
         self.dataqdyqdx.flip_horizontally()
-        self.dataqdyqdx.rotate_image(-180)
-        self.dataqdyqdx.rotate_image(270)
+        self.dataqdyqdx.rotate_image_step90(-180)
+        self.dataqdyqdx.rotate_image_step90(270)
         self.dataqdyqdx.flip_horizontally()
-        self.dataqdyqdx.rotate_image(270)
-        self.dataqdyqdx.rotate_image(90, direction='cw')
+        self.dataqdyqdx.rotate_image_step90(270)
+        self.dataqdyqdx.rotate_image_step90(90, direction='cw')
         self.dataqdyqdx.reset_image_orientation()
 
         np.testing.assert_array_equal(

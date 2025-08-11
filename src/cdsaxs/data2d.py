@@ -63,7 +63,7 @@ class Data2D():
 
         self.image = image
 
-    def rotate_image(self, degrees, direction='ccw'):
+    def rotate_image_step90(self, degrees, direction='ccw'):
         """
         Rotate the image by a specified numer of degrees in the
         direction specified.
@@ -130,7 +130,7 @@ class Data2D():
                 self.flip_horizontally()
             else:
                 k = int(tf[1:])
-                self.rotate_image(degrees=90*k, direction="cw")
+                self.rotate_image_step90(degrees=90*k, direction="cw")
 
         self._image_transformations = []
 
@@ -443,7 +443,7 @@ class DataQdyQdx(Data2D):
             self.qdy = qdy
             self.qdx = qdx
 
-    def rotate_image(self, degrees, direction='ccw'):
+    def rotate_image_step90(self, degrees, direction='ccw'):
         """
         Rotate the scattering image by a specified numer of degrees in
         the direction specified. The scattering vectors qdy and qdx as
@@ -474,7 +474,7 @@ class DataQdyQdx(Data2D):
             center_px = None
 
         # do the rotation and store original image information if needed
-        super().rotate_image(degrees, direction=direction)
+        super().rotate_image_step90(degrees, direction=direction)
         k = int(self._image_transformations[-1][1:])
 
         if k == 1:
@@ -543,7 +543,7 @@ class DataQdyQdx(Data2D):
                 self.flip_horizontally()
             else:
                 k = int(tf[1:])
-                self.rotate_image(degrees=90*k, direction="cw")
+                self.rotate_image_step90(degrees=90*k, direction="cw")
 
         self._image_transformations = []
 
