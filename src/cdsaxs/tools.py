@@ -1,5 +1,7 @@
 """General tools for the code."""
 
+import warnings
+
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
@@ -51,6 +53,14 @@ def line_fit(x, y):
     The angle is defined counterclockwise from the x-axis.
     In the case of a vertical line, slope and intercept are returned as nan.
     """
+    x = np.array(x).reshape(-1)
+    y = np.array(x).reshape(-1)
+
+    if len(x) == 1:
+        warnings.warn(
+            "Only one point was provided for a line fit. Two or more" \
+            "are required. Assuming a horizontal line."
+        )
     try:
         fit = linregress(x, y)
         angle = np.rad2deg(np.arctan(fit.slope))
