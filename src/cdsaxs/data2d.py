@@ -211,16 +211,29 @@ class Data2D():
             )
             
             if subtract_background:
-                integrated_i_bkg_above = np.nansum(
-                    image[limits_axis0[0]:limits_axis0[1],
-                          limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
-                    axis=axis
-                )
-                integrated_i_bkg_below =np.nansum(
-                    image[limits_axis0[0]:limits_axis0[1],
-                          limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
-                    axis=axis
-                )
+                if axis == 0:
+                    integrated_i_bkg_above = np.nansum(
+                        image[limits_axis0[0]:limits_axis0[1],
+                            limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
+                        axis=axis
+                    )
+                    integrated_i_bkg_below =np.nansum(
+                        image[limits_axis0[0]:limits_axis0[1],
+                            limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
+                        axis=axis
+                    )
+                elif axis == 1:
+                    integrated_i_bkg_above = np.nansum(
+                        image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+                              limits_axis1[0]:limits_axis1[1]],
+                        axis=axis
+                    )
+                    integrated_i_bkg_below =np.nansum(
+                        image[limits_axis0[0]-subtraction_offset:limits_axis0[1]-subtraction_offset,
+                            limits_axis1[0]:limits_axis1[1]],
+                        axis=axis
+                    )
+                    
                 integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
                 integrated_i = integrated_i-integrated_i_bkg_mean
     
@@ -232,16 +245,30 @@ class Data2D():
             )
             
             if subtract_background:
-                integrated_i_bkg_above = np.nanmean(
-                    image[limits_axis0[0]:limits_axis0[1],
-                          limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
-                    axis=axis
-                )
-                integrated_i_bkg_below =np.nanmean(
-                    image[limits_axis0[0]:limits_axis0[1]+subtraction_offset,
-                          limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
-                    axis=axis
-                )
+                if axis == 0:
+                    integrated_i_bkg_above = np.nanmean(
+                        image[limits_axis0[0]:limits_axis0[1],
+                            limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
+                        axis=axis
+                    )
+                    integrated_i_bkg_below =np.nanmean(
+                        image[limits_axis0[0]:limits_axis0[1],
+                            limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
+                        axis=axis
+                    )
+                elif axis == 1:
+                    integrated_i_bkg_above = np.nanmean(
+                        image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+                              limits_axis1[0]:limits_axis1[1]],
+                        axis=axis
+                    )
+                    integrated_i_bkg_below =np.nanmean(
+                        image[limits_axis0[0]-subtraction_offset:limits_axis0[1]-subtraction_offset,
+                            limits_axis1[0]:limits_axis1[1]],
+                        axis=axis
+                    )
+                    
+                
                 integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
                 integrated_i = integrated_i-integrated_i_bkg_mean
         
