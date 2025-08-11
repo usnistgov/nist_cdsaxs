@@ -20,7 +20,7 @@ import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS
 import cdsaxs.plotting as plotting
-from cdsaxs.tools import line_fit, gaussian_find_peaks_2D
+from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
 from cdsaxs_gui_legacy import diffraction
 
 UPDATE_Q_TRIGGERS = [
@@ -61,7 +61,7 @@ class Data2D():
             to right.
         """
 
-        self.image = image
+        self.image = image   
 
     def rotate_image_step90(self, degrees, direction='ccw'):
         """
@@ -183,18 +183,14 @@ class Data2D():
         image[image < 0] = np.nan
         image[np.isinf(image)] = np.nan
         image[np.isneginf(image)] = np.nan
+
         if box_angle_deg != 0:
-            if rotation_sampling_mode == 'nearest':
-                resample = Image.Resampling.NEAREST
-            elif rotation_sampling_mode == 'bilinear':
-                resample = Image.Resampling.BILINEAR
-            else:
-                resample = Image.Resampling.BICUBIC
-            image = Image.fromarray(image)
-            image = image.rotate(box_angle_deg, resample=resample,
-                                 center=(rotation_center[1], rotation_center[0]),
-                                 fillcolor=-50)
-            image = np.array(image)
+            image = rotate_image(
+                image,
+                box_angle_deg,
+                rotation_center,
+                resampling_mode=rotation_sampling_mode,
+            )
 
         if mode == 'sum':
             integrated_i = np.nansum(
@@ -970,6 +966,7 @@ class DataQdyQdx(Data2D):
             int(np.round(y+min0, 0)),
             int(np.round(x+min1, 0))) for (y, x) in peaks_px]
 
+        # linear interpolation to find the q value of peaks at partial pixel
         peaks_q = [(
                 self.qdy[int(y)]+(y-np.floor(y))*(self.qdy[int(y)+1]-self.qdy[int(y)]),
                 self.qdx[int(x)]+(x-np.floor(x))*(self.qdx[int(x)+1]-self.qdx[int(x)])
@@ -977,7 +974,7 @@ class DataQdyQdx(Data2D):
 
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_find_peaks(
-                self, integrated_q_slice, np.array(peaks_px_int))
+                self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q))
             iplot(fig)
             iplot(fig_slice)
 
@@ -1155,9 +1152,11 @@ class DataQdyQdx(Data2D):
         # side of the guessed beam center position
         low_peaks = peaks[peaks < beam_center_guess[peak_axis]]
         high_peaks = peaks[peaks > beam_center_guess[peak_axis]]
-        if len(low_peaks) != len(high_peaks):
-            raise ValueError(
-                "Found peaks were not symmetric about the beam center.")
+        # if no peaks were found then we will use the beam center guess
+        if len(low_peaks) == 0 and len(high_peaks) == 0:
+            warnings.warn("No peaks found, using the beam center guess.")
+            center = beam_center_guess
+
         center = np.average(peaks)
 
         if peak_axis == 1:
@@ -1173,20 +1172,26 @@ class DataQdyQdx(Data2D):
 
         if show_plot:
             fig, fig_slice = plotting.plot_find_beam_center(
-                self, integrated_q_slice, np.array(peaks_px),
+                self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q),
                 [center_qdy, center_qdx])
             iplot(fig)
             iplot(fig_slice)
 
+        # move this check to after the plots so even if we didn't find
+        # the right peaks we can see the visualization
+        if len(low_peaks) != len(high_peaks):
+            raise ValueError(
+                "Found peaks were not symmetric about the beam center.")
+
         return center_qdy, center_qdx
 
-    def find_sdd_from_peaks(
+    def find_sdd_from_reference_peaks(
             self,
             pitch,
             size_qdy_px,
             size_qdx_px,
             peak_axis,
-            peak_params: dict,
+            peak_params: dict = {},
             peak_find_scale='linear',
             peak_orders: list = None,
             show_plot=True):
@@ -1202,6 +1207,8 @@ class DataQdyQdx(Data2D):
         Only the 1st order peaks will be compared to the expected pitch of
         the SRM sample to determine the SDD.
         TODO: implement error handling when determining the SDD
+        TODO: use provided error to filter out non-reference peaks,
+        currently this is set to a 5% window as the accepted range
 
         In many cases the beam center position is likely to fall on
         an integer pixel value. This is because the peak finding
@@ -1209,6 +1216,7 @@ class DataQdyQdx(Data2D):
         not perform any additional fit of the local intensity to determine
         a float pixel location of the peak.
         TODO: implement local gaussian fits for more accurate positions
+
 
 
         Parameters
@@ -1278,6 +1286,12 @@ class DataQdyQdx(Data2D):
         # convert to pixel distances relative to beam center
         peaks = np.array(peaks_px)
         peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
+        ref_q = 2*np.pi / (pitch*10)
+        peaks = peaks[
+            np.abs((peaks[:, peak_axis] % ref_q) / ref_q) <= 0.025, :
+        ]
+
+
         low_peaks = peaks[
             peaks[:, peak_axis] < self.metadata['center_px'][peak_axis]
             ] - self.metadata['center_px']

@@ -177,7 +177,7 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
 
 
 def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
-                           log_scale=True):
+                           peak_coords_q, log_scale=True):
 
     fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
                  axis0_type='qdy', axis1_type='qdx', log_scale=log_scale)
@@ -205,21 +205,20 @@ def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
     fig_slice = go.Figure()
 
     if integrated_q_slice.q_axis == 'qdy':
-        for x in peak_coords_array[:, 0]:
+        for x in peak_coords_q[:, 0]:
             fig_slice.add_trace(go.Scatter(
-                x=[data.qdx[x], data.qdx[x]],
-                y=[integrated_q_slice.Iq[data.qdx[x]]
-                   - integrated_q_slice.limits_axis1[0],
+                x=[x, x],
+                y=[np.nanmin(integrated_q_slice.Iq),
                    np.nanmax(integrated_q_slice.Iq)*1.1],
                 mode='lines',
                 line={'color': 'red'},
                 showlegend=False
             ))
     else:
-        for x in peak_coords_array[:, 1]:
+        for x in peak_coords_q[:, 1]:
             fig_slice.add_trace(go.Scatter(
-                x=[data.qdx[x], data.qdx[x]],
-                y=[integrated_q_slice.Iq[x-integrated_q_slice.limits_axis1[0]],
+                x=[x, x],
+                y=[np.nanmin(integrated_q_slice.Iq),
                    np.nanmax(integrated_q_slice.Iq)*1.1],
                 mode='lines',
                 line={'color': 'red'},
@@ -270,11 +269,13 @@ def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
 
 
 def plot_find_beam_center(data, integrated_q_slice, peak_coords_array,
+                          peaks_q_array,
                           beam_center,
                           log_scale=True):
 
     fig, fig_slice = plot_QdyQdx_find_peaks(
-        data, integrated_q_slice, peak_coords_array, log_scale=log_scale
+        data, integrated_q_slice, peak_coords_array, peaks_q_array, 
+        log_scale=log_scale
     )
 
     fig.add_vline(beam_center[1], line={'color': 'red', 'dash': 'dot'})

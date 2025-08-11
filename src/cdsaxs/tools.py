@@ -3,6 +3,7 @@
 import warnings
 
 import numpy as np
+from PIL import Image
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from scipy.stats import linregress
@@ -54,7 +55,7 @@ def line_fit(x, y):
     In the case of a vertical line, slope and intercept are returned as nan.
     """
     x = np.array(x).reshape(-1)
-    y = np.array(x).reshape(-1)
+    y = np.array(y).reshape(-1)
 
     if len(x) == 1:
         warnings.warn(
@@ -80,6 +81,10 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
     """
     Performs a 2-dimensional peak finding algorithm that is optimized
     with gaussian fits along both dimensions of the image.
+
+    If a gaussian fit fails to the data, try increasing the optimization
+    box width. Otherwise, the function will assume the peak location is
+    at the maximum value pixel.
 
     Returns list of peak coordinates.
     """
@@ -114,13 +119,68 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
         if peak_find_scale == 'log':
             image_box = np.log10(image_box)
 
-        a_opt, _, _ = find_gaussian_peakloc(
-            np.arange(a_min, a_max),
-            np.sum(image_box, axis=1))
-        b_opt, _, _ = find_gaussian_peakloc(
-            np.arange(b_min, b_max),
-            np.sum(image_box, axis=0))
+        try:
+            a_opt, _, _ = find_gaussian_peakloc(
+                np.arange(a_min, a_max),
+                np.sum(image_box, axis=1))
+
+            b_opt, _, _ = find_gaussian_peakloc(
+                np.arange(b_min, b_max),
+                np.sum(image_box, axis=0))
+        except:
+            warnings.warn(
+                "Could not fit Gaussian to the peak location;"
+                "assuming peak is at the pixel with the highest value.")
+            a_obt, b_opt = np.unravel_index(np.nanargmax(image_box),
+                                            image_box.shape)
 
         peaks_px_opt.append((a_opt, b_opt))
 
     return peaks_px_opt
+
+
+def rotate_image(image, degrees, rotation_center, resampling_mode="bicubic"):
+    """
+
+    Rotates an image by a specified number of degrees counterclockwise
+    about the rotation center.
+
+    Parameters
+    ----------
+    image : ndarray
+        Two-dimensional image for rotation.
+    rotation_center : list
+        Center of rotation. Indices should be provided as [row, column]
+        keeping in mind that numpy index orders rows from top to
+        bottom and columns from left to right.
+    rotation_sampling_mode : str
+        Set the resampling method used during the rotation.
+        The box rotation works by rotating the image underneath then
+        extracting the box for integration. Resampling of the
+        image intensities can be performed with the 'nearest',
+        'bilinear', or 'bicubic' methods in the PILLOW package.
+        Default value is 'bicubic'.
+
+    Returns
+    -------
+    ndarray
+        Two-dimensional rotated image of same dimensions as 'image'.
+    """
+
+    if resampling_mode == 'nearest':
+        resample = Image.Resampling.NEAREST
+    elif resampling_mode == 'bilinear':
+        resample = Image.Resampling.BILINEAR
+    else:
+        resample = Image.Resampling.BICUBIC
+
+    # convert to PILLOW Image for the rotation
+    image = Image.fromarray(image)
+    image = image.rotate(
+        degrees,
+        resample=resample,
+        # pillow calls for (x, y) of beam center
+        center=(rotation_center[1], rotation_center[0]))
+    image = np.array(image)
+
+    return image
