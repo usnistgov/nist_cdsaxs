@@ -1316,6 +1316,14 @@ class DataQdyQdx(Data2D):
         # calculate average SDD from all peaks
         average_sdd = np.mean(np.concatenate((sdd_low, sdd_high)))
 
+        if show_plot:
+            fig, fig_slice = plotting.plot_find_beam_center(
+                self, integrated_q_slice, np.array(peaks_px),
+                np.array(peaks_q),
+                self.metadata['center_px'])
+            iplot(fig)
+            iplot(fig_slice)
+
         return average_sdd
 
     def find_detector_rotation_correction_from_peaks(
