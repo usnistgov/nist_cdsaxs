@@ -1286,29 +1286,35 @@ class DataQdyQdx(Data2D):
         # convert to pixel distances relative to beam center
         peaks = np.array(peaks_px)
         peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
-        # filter out peaks that are not on the pitch spacing
-        ref_q = 2*np.pi / (pitch*10)
-        filter_peaks = peaks_q[:, peak_axis] % ref_q <= 0.025
-        peaks = peaks[filter_peaks, :]
-        peak_orders = peaks_q[filter_peaks, peak_axis] / ref_q
+        low_peaks = peaks[
+            peaks[:, peak_axis] < self.metadata['center_px'][peak_axis]
+            ] - self.metadata['center_px']
+        high_peaks = peaks[
+            peaks[:, peak_axis] > self.metadata['center_px'][peak_axis]
+            ] - self.metadata['center_px']
+        if len(low_peaks[:, 0]) != len(high_peaks[:, 0]):
+            raise ValueError(
+                "Found peaks were not symmetric about the beam center.")
+
+        # assume peak orders start at 1 unless told otherwise
+        if peak_orders is None:
+            peak_orders = np.arange(0, len(low_peaks[:, 0])) + 1
 
         sin_theta = peak_orders * self.metadata['wavelength_nm'] / (2 * pitch)
         theta = np.arcsin(sin_theta)
 
         # calculate magnitude of vector from beam center to peak in cm
-        r_px = np.sqrt(peaks[:, 0]**2 + peaks[:, 1]**2)
-        r = r_px * self.metadata["pixel_size_um"]/10000
+        r_low_px = np.sqrt(low_peaks[:, 0]**2 + low_peaks[:, 1]**2)
+        r_low = r_low_px * self.metadata["pixel_size_um"]/10000
+        r_low = np.flip(r_low)  # flip to match order of peak orders
+        r_high_px = np.sqrt(high_peaks[:, 0]**2 + high_peaks[:, 1]**2)
+        r_high = r_high_px * self.metadata["pixel_size_um"]/10000
+
+        sdd_low = r_low/np.tan(2*theta)
+        sdd_high = r_high/np.tan(2*theta)
 
         # calculate average SDD from all peaks
-        sdd = r/np.tan(2*theta)
-        average_sdd = np.mean(np.concatenate((sdd)))
-
-        if show_plot:
-            fig, fig_slice = plotting.plot_find_beam_center(
-                self, integrated_q_slice, np.array(peaks_px[filter_peaks]),
-                self.metadata['center_px'])
-            iplot(fig)
-            iplot(fig_slice)
+        average_sdd = np.mean(np.concatenate((sdd_low, sdd_high)))
 
         return average_sdd
 

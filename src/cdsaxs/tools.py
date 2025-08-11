@@ -10,6 +10,8 @@ from scipy.stats import linregress
 
 from cdsaxs.calculators import gaussian
 
+import matplotlib.pyplot as plt
+
 
 def find_gaussian_peakloc(x, y, p0=None):
     """
@@ -34,12 +36,11 @@ def find_gaussian_peakloc(x, y, p0=None):
         Optimized parameters mean, std_dev, scale, and offset from the
         Gaussian fit.
     """
-
     popt, _ = curve_fit(
         gaussian,
         x, y,
         p0=p0 if p0 is not None else [
-            x[y == np.max(y)][0], 1, np.max(y), 0
+            x[np.nanargmax(y)], 1, np.max(y), 0
         ]
     )
     peak_x = popt[0]
@@ -77,7 +78,7 @@ def line_fit(x, y):
 
 def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
                            peak_params, peak_find_scale='linear',
-                           opt_width=(5, 5)):
+                           opt_width=(7, 7)):
     """
     Performs a 2-dimensional peak finding algorithm that is optimized
     with gaussian fits along both dimensions of the image.
