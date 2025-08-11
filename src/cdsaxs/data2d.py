@@ -247,9 +247,6 @@ class Data2D():
                 " include 'sum' and 'mean'."
             )
 
-        if subtract_background:
-            
-
         return integrated_i.reshape(-1), {
                 'mode': mode,
                 'axis': axis,
