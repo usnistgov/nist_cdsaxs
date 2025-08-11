@@ -112,6 +112,5 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
             np.sum(image_box, axis=0))
 
         peaks_px_opt.append((a_opt, b_opt))
-        print((a, b), (a_opt, b_opt))
 
     return peaks_px_opt
