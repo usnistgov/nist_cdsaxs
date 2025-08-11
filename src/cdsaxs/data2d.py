@@ -1317,7 +1317,7 @@ class DataQdyQdx(Data2D):
 
         return average_sdd
 
-    def find_kappa_from_peaks(
+    def find_detector_rotation_correction_from_peaks(
         self,
         peak_find_box_mode: str,
         peak_find_box_params: dict,
