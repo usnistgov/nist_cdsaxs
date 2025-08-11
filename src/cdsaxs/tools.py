@@ -131,8 +131,10 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
             warnings.warn(
                 "Could not fit Gaussian to the peak location;"
                 "assuming peak is at the pixel with the highest value.")
-            a_obt, b_opt = np.unravel_index(np.nanargmax(image_box),
+            a_opt, b_opt = np.unravel_index(np.nanargmax(image_box),
                                             image_box.shape)
+            a_opt += a_min
+            b_opt += b_min
 
         peaks_px_opt.append((a_opt, b_opt))
 
