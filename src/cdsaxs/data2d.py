@@ -402,7 +402,8 @@ class DataQdyQdx(Data2D):
         self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
 
         self.normalization_factor = 1
-        self.scale_value = 1
+        self.normalization_keys = []
+        self.scale_factor = 1
 
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
@@ -512,19 +513,30 @@ class DataQdyQdx(Data2D):
             self.qdy = qdy
             self.qdx = qdx
 
-    def normalize(self, normalize_by):
+    def normalize_data(self, normalize_by, reset_first=False):
         """
         Normalize the image by the selected metadata or user parameters.
         This will not reset any previous normalization. If a new
         series or normalizations is desired, please run reset normalization
-        first!
+        first or change reset_first to True.
 
         Parameters
         ----------
         normalize_by : list
             List of accepted metadata keywords or user parameter keys
             that should be used to normalize the data.
+        reset_first : boolean
+            If set to True, any previous normalizations will be rest
+            before applying the new requested normalization series.
+            If left as False, the new parameters will be factored into
+            the existing normalization factor.
         """
+
+        if reset_first:
+            self.image *= self.normalization_factor
+            self.normalization_factor = 1
+            self.normalization_keys = []
+
         norm_factor = 1
         for key in normalize_by:
             if key in METADATA_KEYWORDS:
@@ -535,25 +547,30 @@ class DataQdyQdx(Data2D):
                 warnings.warn(f"Did not recognize {key} as an available"
                               "parameter in either metadata or user_params.")
         self.normalization_factor *= norm_factor
+        self.normalization_keys.extend(normalize_by)
         self.image /= norm_factor
 
     def reset_normalization(self):
         self.image *= self.normalization_factor
         self.normalization_factor = 1
+        self.normalization_keys = []
 
-    def scale_data(self, value):
+    def scale_data(self, value, reset_first=False):
         """
         Scale the image by the desired value.
-        This does not undo any previous scalings unless reset_scale_data
-        is used.
+        This does not undo any previous scalings unless reset_scale is
+        called first or reset_first is set to True.
         """
-        self.scale_data *= value
-        self.image *= value
+        if reset_first:
+            self.image /= self.scale_data
+            self.scale_factor = 1
 
-    def reset_scale_data(self):
-        self.image /= self.scale_data
-        self.scale_data = 1
+        self.scale_factor *= float(value)
+        self.image *= float(value)
 
+    def reset_scale(self):
+        self.image /= self.scale_factor
+        self.scale_factor = 1
 
     def rotate_image_step90(self, degrees, direction='ccw'):
         """
