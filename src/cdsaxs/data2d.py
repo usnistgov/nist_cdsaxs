@@ -401,6 +401,9 @@ class DataQdyQdx(Data2D):
         # set default metadata values not required by user
         self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
 
+        self.normalization_factor = 1
+        self.scale_value = 1
+
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
         Add accepted metadata to the class instance. Existing metadata
@@ -508,6 +511,49 @@ class DataQdyQdx(Data2D):
             )
             self.qdy = qdy
             self.qdx = qdx
+
+    def normalize(self, normalize_by):
+        """
+        Normalize the image by the selected metadata or user parameters.
+        This will not reset any previous normalization. If a new
+        series or normalizations is desired, please run reset normalization
+        first!
+
+        Parameters
+        ----------
+        normalize_by : list
+            List of accepted metadata keywords or user parameter keys
+            that should be used to normalize the data.
+        """
+        norm_factor = 1
+        for key in normalize_by:
+            if key in METADATA_KEYWORDS:
+                norm_factor *= self.metadata[key]
+            elif key in self.user_params.keys():
+                norm_factor *= float(self.user_params[key])
+            else:
+                warnings.warn(f"Did not recognize {key} as an available"
+                              "parameter in either metadata or user_params.")
+        self.normalization_factor *= norm_factor
+        self.image /= norm_factor
+
+    def reset_normalization(self):
+        self.image *= self.normalization_factor
+        self.normalization_factor = 1
+
+    def scale_data(self, value):
+        """
+        Scale the image by the desired value.
+        This does not undo any previous scalings unless reset_scale_data
+        is used.
+        """
+        self.scale_data *= value
+        self.image *= value
+
+    def reset_scale_data(self):
+        self.image /= self.scale_data
+        self.scale_data = 1
+
 
     def rotate_image_step90(self, degrees, direction='ccw'):
         """
