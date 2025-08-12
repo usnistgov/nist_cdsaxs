@@ -111,6 +111,8 @@ def integrate_dataset_box_of_size(
     in_place=True,
     box_angle_deg: float | dict = 0.0,
     rotation_sampling_mode: str = 'bicubic',
+    subtract_background=False,
+    subtraction_offset=5
 ) -> None | dict:
     """
     Integrate a box of a specific size. By default this box is
@@ -163,6 +165,15 @@ def integrate_dataset_box_of_size(
         image intensities can be performed with the 'nearest',
         'bilinear', or 'bicubic' methods in the PILLOW package.
         Default value is 'bicubic'.
+    subtract_background : bool, optional
+        If set to true, will run a background subtraction on the integrated
+        data based on the supplied integration box offset by a set number 
+        of pixels.
+        TODO: decide how to best approach this subtraction past this 
+        initial implementation.
+    subtraction_offset: int, optional
+        The number of pixels to offset the integration box for calculating 
+        the background intensity by. 
 
     Returns
     -------
@@ -184,6 +195,8 @@ def integrate_dataset_box_of_size(
                 show_plot=False,
                 box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
                 rotation_sampling_mode=rotation_sampling_mode,
+                subtract_background=subtract_background,
+                subtraction_offset=subtraction_offset,
             )
 
         if key != integrated_q_slice.name:
@@ -215,6 +228,8 @@ def integrate_dataset_box_of_q_range(
         in_place=True,
         box_angle_deg: float | dict = 0.0,
         rotation_sampling_mode: str = 'bicubic',
+        subtract_background=False,
+        subtraction_offset=5
 ):
     """
     Integrate a box defined by scattering vector limits.
@@ -258,6 +273,15 @@ def integrate_dataset_box_of_q_range(
         image intensities can be performed with the 'nearest',
         'bilinear', or 'bicubic' methods in the PILLOW package.
         Default value is 'bicubic'.
+    subtract_background : bool, optional
+        If set to true, will run a background subtraction on the integrated
+        data based on the supplied integration box offset by a set number 
+        of pixels.
+        TODO: decide how to best approach this subtraction past this 
+        initial implementation.
+    subtraction_offset: int, optional
+        The number of pixels to offset the integration box for calculating 
+        the background intensity by. 
 
     Returns
     -------
@@ -276,6 +300,8 @@ def integrate_dataset_box_of_q_range(
             axis=axis,
             box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
+            subtract_background=subtract_background,
+            subtraction_offset=subtraction_offset
         )
         if key != integrated_q_slice.name:
             raise KeyError(
