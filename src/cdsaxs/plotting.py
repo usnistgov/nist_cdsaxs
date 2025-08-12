@@ -106,13 +106,7 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
 
     image = np.copy(data.image)
     if integrated_q_slice.box_angle_deg != 0:
-        image = rotate_image(
-            image,
-            degrees=integrated_q_slice.box_angle_deg,
-            rotation_center=[integrated_q_slice.rotation_center[1],
-                             integrated_q_slice.rotation_center[0]],
-            resampling_mode=integrated_q_slice.rotation_sampling_mode,
-        )
+        image = integrated_q_slice.rotated_image
     fig = plot2D(image, axis0=data.qdy, axis1=data.qdx,
                  axis0_type='qdy', axis1_type='qdx', log_scale=log_scale,
                  vmin=vmin, vmax=vmax)
