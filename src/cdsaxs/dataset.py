@@ -209,7 +209,7 @@ class Dataset():
             data = self.datas[key]
             data.reset_normalization()
 
-    def scale_data(self, value, reset_first=False, keys=None):
+    def scale_datas(self, value, reset_first=False, keys=None):
         """
         Scale the image by the desired value.
         This does not undo any previous scalings unless reset_scale is
