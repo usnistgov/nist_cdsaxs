@@ -314,8 +314,8 @@ class Dataset():
             index=index,
             q_slice_axis=q_slice_axis,
             log_scale=True,
-            offset_order=0,
-            offset_value=0,
+            offset_order=offset_order,
+            offset_value=offset_value,
         )
 
         return fig
