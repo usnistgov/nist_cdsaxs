@@ -33,8 +33,9 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
         # pixels with less than 'vmin' count will show up as black on the plots
         # need to set them as a custom value to filter later
         plot_image[image <= 0] = -10
-        plot_image[(plot_image < vmin) & (image > 0)] = vmin
         plot_image[np.isnan(image)] = None
+        plot_image[(plot_image < vmin) & (image > 0)] = vmin
+
     else:
         vmin = 0 if not custom_vmin else vmin
         vmax = np.nanmax(plot_image) if not custom_vmax else vmax
