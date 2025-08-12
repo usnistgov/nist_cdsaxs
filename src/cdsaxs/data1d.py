@@ -183,6 +183,12 @@ class IntegratedQSlice(Data1D):
         self.q = self.q[sort_arrays]
         self.Iq = self.Iq[sort_arrays]
 
+    def reset_mirrored_q(self):
+        self.q = np.copy(self.q_before_mirror)
+        self.Iq = np.copy(self.Iq_before_mirror)
+        self.q_before_mirror = None
+        self.Iq_before_mirror = None
+
 
 
 class ReducedData():
