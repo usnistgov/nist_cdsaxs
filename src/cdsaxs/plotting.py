@@ -27,12 +27,13 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
     if log_scale:
         with np.errstate(divide='ignore', invalid='ignore'):
             plot_image = np.log10(plot_image)
-        vmin = np.max([np.nanmin(plot_image[plot_image > -np.inf]),0.5]) if not\
+        vmin = np.max([np.nanmin(plot_image[plot_image > -np.inf]), 0.1]) if not\
             custom_vmin else vmin
         vmax = np.nanmax(plot_image) if not custom_vmax else vmax
-        # pixels with zero counts will show up as black on the plots
+        # pixels with less than 'vmin' count will show up as black on the plots
         # need to set them as a custom value to filter later
         plot_image[np.isneginf(plot_image)] = -1
+        plot_image[plot_image < vmin] = -1
         plot_image[np.isnan(plot_image)] = None
     else:
         vmin = 0 if not custom_vmin else vmin
