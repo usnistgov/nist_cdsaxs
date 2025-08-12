@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 from PIL import Image
 
 import cdsaxs._plotting_tools as plotting_tools
+from cdsaxs.tools import rotate_image
 
 
 def plot2D(image: NDArray, axis0=None, axis1=None,
@@ -105,19 +106,13 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
 
     image = np.copy(data.image)
     if integrated_q_slice.box_angle_deg != 0:
-        if integrated_q_slice.rotation_sampling_mode == 'nearest':
-            resample = Image.Resampling.NEAREST
-        elif integrated_q_slice.rotation_sampling_mode == 'bilinear':
-            resample = Image.Resampling.BILINEAR
-        else:
-            resample = Image.Resampling.BICUBIC
-        image = Image.fromarray(image)
-        image = image.rotate(integrated_q_slice.box_angle_deg,
-                             resample=resample,
-                             center=(integrated_q_slice.rotation_center[1],
-                                     integrated_q_slice.rotation_center[0]),
-                             fillcolor=-50)
-        image = np.array(image)
+        image = rotate_image(
+            image,
+            degrees=integrated_q_slice.box_angle_deg,
+            rotation_center=[integrated_q_slice.rotation_center[1],
+                             integrated_q_slice.rotation_center[0]],
+            resampling_mode=integrated_q_slice.rotation_sampling_mode,
+        )
     fig = plot2D(image, axis0=data.qdy, axis1=data.qdx,
                  axis0_type='qdy', axis1_type='qdx', log_scale=log_scale,
                  vmin=vmin, vmax=vmax)
