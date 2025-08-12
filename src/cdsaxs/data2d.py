@@ -13,7 +13,6 @@ import warnings
 import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
-from scipy.stats import linregress
 from plotly.offline import iplot
 from PIL import Image
 
@@ -21,6 +20,7 @@ import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS
 import cdsaxs.plotting as plotting
+from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
 from cdsaxs_gui_legacy import diffraction
 
 UPDATE_Q_TRIGGERS = [
@@ -61,9 +61,9 @@ class Data2D():
             to right.
         """
 
-        self.image = image
+        self.image = image   
 
-    def rotate_image(self, degrees, direction='ccw'):
+    def rotate_image_step90(self, degrees, direction='ccw'):
         """
         Rotate the image by a specified numer of degrees in the
         direction specified.
@@ -130,7 +130,7 @@ class Data2D():
                 self.flip_horizontally()
             else:
                 k = int(tf[1:])
-                self.rotate_image(degrees=90*k, direction="cw")
+                self.rotate_image_step90(degrees=90*k, direction="cw")
 
         self._image_transformations = []
 
@@ -183,18 +183,14 @@ class Data2D():
         image[image < 0] = np.nan
         image[np.isinf(image)] = np.nan
         image[np.isneginf(image)] = np.nan
+
         if box_angle_deg != 0:
-            if rotation_sampling_mode == 'nearest':
-                resample = Image.Resampling.NEAREST
-            elif rotation_sampling_mode == 'bilinear':
-                resample = Image.Resampling.BILINEAR
-            else:
-                resample = Image.Resampling.BICUBIC
-            image = Image.fromarray(image)
-            image = image.rotate(box_angle_deg, resample=resample,
-                                 center=(rotation_center[1], rotation_center[0]),
-                                 fillcolor=-50)
-            image = np.array(image)
+            image = rotate_image(
+                image,
+                box_angle_deg,
+                rotation_center,
+                resampling_mode=rotation_sampling_mode,
+            )
 
         if mode == 'sum':
             integrated_i = np.nansum(
@@ -443,7 +439,7 @@ class DataQdyQdx(Data2D):
             self.qdy = qdy
             self.qdx = qdx
 
-    def rotate_image(self, degrees, direction='ccw'):
+    def rotate_image_step90(self, degrees, direction='ccw'):
         """
         Rotate the scattering image by a specified numer of degrees in
         the direction specified. The scattering vectors qdy and qdx as
@@ -474,7 +470,7 @@ class DataQdyQdx(Data2D):
             center_px = None
 
         # do the rotation and store original image information if needed
-        super().rotate_image(degrees, direction=direction)
+        super().rotate_image_step90(degrees, direction=direction)
         k = int(self._image_transformations[-1][1:])
 
         if k == 1:
@@ -543,7 +539,7 @@ class DataQdyQdx(Data2D):
                 self.flip_horizontally()
             else:
                 k = int(tf[1:])
-                self.rotate_image(degrees=90*k, direction="cw")
+                self.rotate_image_step90(degrees=90*k, direction="cw")
 
         self._image_transformations = []
 
@@ -927,8 +923,10 @@ class DataQdyQdx(Data2D):
         -------
         list[tuple[float, float]]
             List of peak positions in (qdy, qdx) scattering vector coordiantes.
-        list[tuple[int, int]]
+        list[tuple[float, float]]
             List of peak positions in (px_dy, px_dx) pixel coordinates.
+        list[tuple[int, int]]
+            List of peak positions in (px_dy, px_dx) integer pixel coordinates.
         float
             Angle of rotation of best line fit to the peaks clockwise
             from a line parallel to the qdx axis.
@@ -954,51 +952,33 @@ class DataQdyQdx(Data2D):
                 f"The box_mode {box_mode} is not recognized."
             )
 
-        # find peaks along the integrated I vs. q spectra
-        if peak_find_scale == 'linear':
-            peaks, _ = find_peaks(integrated_q_slice.Iq, **peak_params)
-        elif peak_find_scale == 'log':
-            peaks, _ = find_peaks(
-                np.log10(integrated_q_slice.Iq), **peak_params)
-        else:
-            raise ValueError(
-                f"The peak_find_scale {peak_find_scale} is not recognized."
-            )
-
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
-        image_box = self.image[min0:max0, min1:max1]
+        peaks_px = gaussian_find_peaks_2D(
+            self.image[min0:max0, min1:max1],
+            integrated_q_slice.Iq,
+            integrated_q_slice.integration_axis,
+            peak_params,
+            peak_find_scale=peak_find_scale,
+        )
+        peaks_px = [(y+min0, x+min1) for (y, x) in peaks_px]
+        peaks_px_int = [(
+            int(np.round(y+min0, 0)),
+            int(np.round(x+min1, 0))) for (y, x) in peaks_px]
 
-        if box_params['axis'] == 0 or box_params['axis'] == 'qdy':
-            peaks_other = np.argmax(image_box[:, peaks], axis=0)
-            peaks_px = [
-                (y+min0, x+min1) for x, y in zip(peaks, peaks_other)]
-        else:
-            peaks_other = np.argmax(image_box[peaks, :], axis=1)
-            peaks_px = [
-                (y+min0, x+min1) for y, x in zip(peaks, peaks_other)]
-
-        peaks_q = [
-            (self.qdy[y], self.qdx[x]) for y, x in peaks_px]
-
-        peaks_array = np.array(peaks_px)
-        try:
-            fit = linregress(peaks_array[:, 1], peaks_array[:, 0])
-            angle = np.rad2deg(np.arctan(fit.slope))
-            slope, intercept = (fit.slope, fit.intercept)
-        except ValueError:
-            # vertical line
-            angle = 90
-            slope = np.nan
-            intercept = np.nan
+        # linear interpolation to find the q value of peaks at partial pixel
+        peaks_q = [(
+                self.qdy[int(y)]+(y-np.floor(y))*(self.qdy[int(y)+1]-self.qdy[int(y)]),
+                self.qdx[int(x)]+(x-np.floor(x))*(self.qdx[int(x)+1]-self.qdx[int(x)])
+            ) for y, x in peaks_px]
 
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_find_peaks(
-                self, integrated_q_slice, peaks_array)
+                self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q))
             iplot(fig)
             iplot(fig_slice)
 
-        return peaks_q, peaks_px, angle, (slope, intercept), integrated_q_slice
+        return (peaks_q, peaks_px, peaks_px_int, integrated_q_slice)
 
     def plot_data(
             self,
@@ -1063,14 +1043,17 @@ class DataQdyQdx(Data2D):
             size_qdx_px,
             peak_axis,
             peak_params: dict,
-            peak_find_scale='linear'):
+            peak_find_scale='linear',
+            show_plot=True):
         """
         Attempt to locate the beam center position using simple
         1D peak finding. See DataQdyQdx.find_peaks1D for a more
         detailed description of the peak finding process. For this
         method, only an integration box of size can be used and it
         must be centered on the beam center guess so that you have
-        equal number of peaks on each side of the beam (ideally).
+        equal number of peaks on each side of the beam. Having mirrored
+        peaks on either side of the beam center position detected is
+        critical to this function.
 
         In many cases the beam center position is likely to fall on
         an integer pixel value. This is because the peak finding
@@ -1119,9 +1102,9 @@ class DataQdyQdx(Data2D):
         """
 
         if isinstance(peak_axis, str):
-            if peak_axis == 'qdy':
+            if peak_axis == 'qdy' or peak_axis == 0:
                 peak_axis = 0
-            elif peak_axis == 'qdx':
+            elif peak_axis == 'qdx' or peak_axis == 1:
                 peak_axis = 1
             else:
                 raise ValueError(
@@ -1140,7 +1123,7 @@ class DataQdyQdx(Data2D):
         box_params["shift_box_qdx_px"] = int(
             np.round(self.metadata['center_px'][1], 0) - beam_center_guess[1])
 
-        peaks_q, peaks_px, angle, (slope, intercept), integrated_q_slice =\
+        peaks_q, peaks_px, peaks_px_int, integrated_q_slice =\
             self.find_peaks1D(
                 box_mode='box_size',
                 box_params=box_params,
@@ -1149,63 +1132,216 @@ class DataQdyQdx(Data2D):
                 show_plot=False
             )
 
-        peaks = np.array(peaks_px)[:, peak_axis]
+        # fit a line to the peaks
+        peaks_array = np.array(peaks_px)
+        if peaks_array.shape[0] > 1:
+            _, slope, intercept = line_fit(peaks_array[:, 1], peaks_array[:, 0])
+        else:
+            warnings.warn(
+                "WARNING: Only one peak found for:\n"
+                + f"{self.metadata['filename']}"
+                + "\n Setting angle, slope, and intercept to nan."
+                )
+            _ = np.nan
+            slope = np.nan
+            intercept = np.nan
+
+        peaks = peaks_array[:, peak_axis]
+        peaks = peaks[np.argsort(peaks)]
+        # check to make sure we found equal number of peaks on either
+        # side of the guessed beam center position
         low_peaks = peaks[peaks < beam_center_guess[peak_axis]]
         high_peaks = peaks[peaks > beam_center_guess[peak_axis]]
-        centers = []
-        for low, high in zip(np.flip(low_peaks), high_peaks):
-            centers.append(np.mean([low, high]))
+        # if no peaks were found then we will use the beam center guess
+        if len(low_peaks) == 0 and len(high_peaks) == 0:
+            warnings.warn("No peaks found, using the beam center guess.")
+            center = beam_center_guess
+
+        center = np.average(peaks)
 
         if peak_axis == 1:
-            center_qdx = np.mean(centers)
+            center_qdx = center
             center_qdy = slope*center_qdx + intercept
         elif peak_axis == 0:
-            center_qdy = np.mean(centers)
+            center_qdy = center
             if np.isnan(slope):
                 # this means the peaks form perfectly vertical line
                 center_qdx = np.array(peaks_px)[0, 0]
-            else: 
+            else:
                 center_qdx = (center_qdy-intercept)/slope
 
-        fig, fig_slice = plotting.plot_find_beam_center(
-            self, integrated_q_slice, np.array(peaks_px),
-            [center_qdy, center_qdx])
-        iplot(fig)
-        iplot(fig_slice)
+        if show_plot:
+            fig, fig_slice = plotting.plot_find_beam_center(
+                self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q),
+                [center_qdy, center_qdx])
+            iplot(fig)
+            iplot(fig_slice)
+
+        # move this check to after the plots so even if we didn't find
+        # the right peaks we can see the visualization
+        if len(low_peaks) != len(high_peaks):
+            raise ValueError(
+                "Found peaks were not symmetric about the beam center.")
 
         return center_qdy, center_qdx
 
-    def integrate_autorotated_box(
+    def find_sdd_from_reference_peaks(
             self,
-            peak_find_box_mode: str,
-            peak_find_box_params: dict,
-            peak_axis: str,
-            peak_params: dict,
-            box_mode: str,
-            box_params: dict,
-            peak_find_scale: str,
-            show_plot: True,
+            pitch,
+            size_qdy_px,
+            size_qdx_px,
+            peak_axis,
+            peak_params: dict = {},
+            peak_find_scale='linear',
+            peak_orders: list = None,
+            show_plot=True):
+        """
+        Calculate the sample to detector distance (SDD) from the
+        known pitch of reference sample using simple 1D peak finding.
+        See DataQdyQdx.find_peaks1D for a more detailed description of
+        the peak finding process.
+        For this method, only an integration box of size can be used
+        and it must be centered on the beam center as determined by
+        the user or the find_beam_center_from_peaks method.
+
+        Only the 1st order peaks will be compared to the expected pitch of
+        the SRM sample to determine the SDD.
+        TODO: implement error handling when determining the SDD
+        TODO: use provided error to filter out non-reference peaks,
+        currently this is set to a 5% window as the accepted range
+
+        In many cases the beam center position is likely to fall on
+        an integer pixel value. This is because the peak finding
+        algorithm only returns the pixel on which the peak is and does
+        not perform any additional fit of the local intensity to determine
+        a float pixel location of the peak.
+        TODO: implement local gaussian fits for more accurate positions
+
+
+
+        Parameters
+        ----------
+        pitch : float
+            Known pitch of a reference sample in nanometers.
+        size_qdy_px : int
+            Box size in pixels along the qdy axis.
+        size_qdx_px : int
+            Box size in pixels along the qdx axis.
+        peak_axis : str, int
+            Axis along which the peaks are present, either 'qdy' or 'qdx'.
+            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
+            For example, if peak_axis is set to 'qdx', peaks will be
+            detected along the qdx axis.
+        peak_params : dict
+            Dictionary of keyword arguments for the scipy.find_peaks
+            algorithm; see scipy documentation for more information.
+        peak_find_scale = 'linear'
+            The scale of the intesity data to use for peak finding.
+            Can be set to 'linear' or 'log'.
+            Default value is 'linear'.
+        peak_orders : list
+            A list of integers that specfies the peak orders found.
+            Default behavior is orders will start at n=1 and increase
+            by one order for every peak found.
+        show_plot : bool
+            If set to True, a first figure will display the scattering
+            image overlaid with the integration box and markers on each
+            detected peak while a second figure will show the 1D slice
+            extracted from the integration and vertical lines at each
+            peak position. The determiend beam center will be shown
+            with dashed red lines.
+
+        Returns
+        -------
+        calculated_sdd : float
+            Sample detector distance (SDD) in the units of cm.
+        """
+
+        if isinstance(peak_axis, str):
+            if peak_axis == 'qdy' or peak_axis == 0:
+                peak_axis = 0
+            elif peak_axis == 'qdx' or peak_axis == 1:
+                peak_axis = 1
+            else:
+                raise ValueError(
+                    f"Invalid integration peak axis of {peak_axis}.")
+
+        box_params = {
+            "size_qdy_px": size_qdy_px,
+            "size_qdx_px": size_qdx_px,
+            "axis": 1 - peak_axis,
+            "mode": 'sum',
+        }
+
+        # Find peaks in the 1D slice
+        peaks_q, peaks_px, peaks_px_int, integrated_q_slice =\
+            self.find_peaks1D(
+                box_mode='box_size',
+                box_params=box_params,
+                peak_params=peak_params,
+                peak_find_scale=peak_find_scale,
+                show_plot=False
+            )
+
+        # convert to pixel distances relative to beam center
+        peaks = np.array(peaks_px)
+        peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
+        low_peaks = peaks[
+            peaks[:, peak_axis] < self.metadata['center_px'][peak_axis]
+            ] - self.metadata['center_px']
+        high_peaks = peaks[
+            peaks[:, peak_axis] > self.metadata['center_px'][peak_axis]
+            ] - self.metadata['center_px']
+        if len(low_peaks[:, 0]) != len(high_peaks[:, 0]):
+            raise ValueError(
+                "Found peaks were not symmetric about the beam center.")
+
+        # assume peak orders start at 1 unless told otherwise
+        if peak_orders is None:
+            peak_orders = np.arange(0, len(low_peaks[:, 0])) + 1
+
+        sin_theta = peak_orders * self.metadata['wavelength_nm'] / (2 * pitch)
+        theta = np.arcsin(sin_theta)
+
+        # calculate magnitude of vector from beam center to peak in cm
+        r_low_px = np.sqrt(low_peaks[:, 0]**2 + low_peaks[:, 1]**2)
+        r_low = r_low_px * self.metadata["pixel_size_um"]/10000
+        r_low = np.flip(r_low)  # flip to match order of peak orders
+        r_high_px = np.sqrt(high_peaks[:, 0]**2 + high_peaks[:, 1]**2)
+        r_high = r_high_px * self.metadata["pixel_size_um"]/10000
+
+        sdd_low = r_low/np.tan(2*theta)
+        sdd_high = r_high/np.tan(2*theta)
+
+        # calculate average SDD from all peaks
+        average_sdd = np.mean(np.concatenate((sdd_low, sdd_high)))
+
+        if show_plot:
+            fig, fig_slice = plotting.plot_find_beam_center(
+                self, integrated_q_slice, np.array(peaks_px),
+                np.array(peaks_q),
+                self.metadata['center_px'])
+            iplot(fig)
+            iplot(fig_slice)
+
+        return average_sdd
+
+    def find_detector_rotation_correction_from_peaks(
+        self,
+        peak_find_box_mode: str,
+        peak_find_box_params: dict,
+        peak_params: dict,
+        peak_find_scale: str,
+        show_plot=True,
     ):
         """
-        Integrate a 2D qdy vs qdx image with any of the standard
-        integrator methods after performing an automated peak finding
-        function to determine the rotation angle of the box.
-
-        CAUTION: this method assumes that this is only a minor
-        angular offset of the sample about the beam path axis. It
-        functions by rotating the image underneath to align the qsx
-        axis with the qdx axis. This may result in some unexpected
-        behavior at large values of sample_phi_deg.
-        TODO: figure out proper qd to qs operation for this rotation.
-
-        This function requires two boxes:
-        1. A larger box for the auto-peak finding function. This
-           should encompass a series of peaks along a single direction
-           only. See the peak_find1d method for more information.
-        2. The actual box dimensions for integration. After the angle
-           of rotaiton is determined via peak finding, the image will
-           be rotated and the second box applied to extract the 1d
-           slice.
+        Wrapper function that just pulls the rotation from the find_peaks1D
+        function. This function is designed to make the more complicated
+        find_peaks1D function accesible to users when performing a rotation
+        correction during the integration step.
+        TODO: this assumes there is no rotation of the detector with
+        respect to the beam coordinate system. Update in the future
+        to include a different position of the detector.
 
         Parameters
         ----------
@@ -1222,21 +1358,9 @@ class DataQdyQdx(Data2D):
             integration method (peak_find_box_mode). See the docstring
             for the corresponding integration method for more details
             of available arguments and their definitions.
-        peak_axis : str, int
-            Axis along which the peaks are present, either 'qdy' or 'qdx'.
-            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
-            For example, if peak_axis is set to 'qdx', peaks will be
-            detected along the qdx axis.
         peak_params : dict
             Dictionary of keyword arguments for the scipy.find_peaks
             algorithm; see scipy documentation for more information.
-        box_mode : str
-            Type of box used for the integration step. Same options
-            are available as peak_find_box_mode but the choice does
-            not have to be the same.
-        box_params : dict
-            Dictionary of box keyword arguments for the box_mode
-            chosen.
         peak_find_scale : str
             The scale of the intensity data to use for peak finding.
             Can be set to 'linear' or 'log'.
@@ -1251,47 +1375,33 @@ class DataQdyQdx(Data2D):
 
         Returns
         -------
-        IntegratedQSlice
-            One-dimensional I vs. q data extracted from the integration.
+        float
+            Angle kappa in degrees. This angle is a counterclockwise rotation
+            about the primary beam path (qbz). It can be used to align the
+            detector x and y coordinates with the sample x and y coordinates.
         """
 
-        peaks_q, peaks_px, angle, \
-            (slope, intercept), integrated_q_slice_peak = self.find_peaks1D(
-                box_mode=peak_find_box_mode,
-                box_params=peak_find_box_params,
-                peak_params=peak_params,
-                peak_find_scale=peak_find_scale,
-                show_plot=False
-            )
+        _, peaks_px, _, _ = self.find_peaks1D(
+            box_mode=peak_find_box_mode,
+            box_params=peak_find_box_params,
+            peak_params=peak_params,
+            peak_find_scale=peak_find_scale,
+            show_plot=show_plot
+        )
 
-        box_params['box_angle_deg'] = angle
-        if box_mode == 'box':
-            integrated_q_slice = self.integrate_box(**box_params)
-        elif box_mode == 'box_size':
-            integrated_q_slice = self.integrate_box_of_size(**box_params)
-        elif box_mode == 'q_range':
-            integrated_q_slice = self.integrate_box_of_q_range(**box_params)
+        # fit a line to the peaks
+        peaks_array = np.array(peaks_px)
+        if peaks_array.shape[0] > 1:
+            angle, _, _ = line_fit(peaks_array[:, 1], peaks_array[:, 0])
         else:
-            raise ValueError(
-                f"The box_mode {box_mode} is not recognized."
-            )
+            warnings.warn(
+                "WARNING: Only one peak found for:\n"
+                + f"{self.metadata['filename']}"
+                + "\n Setting angle, slope, and intercept to nan."
+                )
+            angle = np.nan
 
-        if show_plot:
-            fig_peak, _ = plotting.plot_QdyQdx_find_peaks(
-                self, integrated_q_slice_peak, np.array(peaks_px))
-            # TODO: look into what is correct here
-            # vmin = np.log10(fig_peak.layout.coloraxis['cmin'])
-            # vmax = np.log10(fig_peak.layout.coloraxis['cmax'])
-            vmin = fig_peak.layout.coloraxis['cmin']
-            vmax = fig_peak.layout.coloraxis['cmax']
-            fig, fig_slice = plotting.plot_QdyQdx_integration(
-                self, integrated_q_slice=integrated_q_slice,
-                log_scale=True, vmin=vmin, vmax=vmax)
-            iplot(fig_peak)
-            iplot(fig)
-            iplot(fig_slice)
-
-        return integrated_q_slice
+        return angle
 
     def _check_metadata(self, metadata):
         """

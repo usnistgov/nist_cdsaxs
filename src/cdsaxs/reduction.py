@@ -18,6 +18,8 @@ def integrate_dataset(
         mode: str,
         axis: str | int,
         in_place: bool = True,
+        box_angle_deg: float | dict = 0.0,
+        rotation_sampling_mode: str = 'bicubic',
 ) -> None | dict:
     """
     Integrate a box defined by indexing limits for each data in
@@ -44,6 +46,22 @@ def integrate_dataset(
         added to the dataset.integrated_datasets attribute. If set to
         False, the dictionary will be returned.
         Default value is True.
+    box_angle_deg : float, dict
+        Rotate the box by the set number of degrees clockwise
+        about the center point. Rotating the box will maintain the
+        size of the box.
+        Providing a float value applies the same angle to all data
+        images. Providing a dictionary using the same data keywords
+        can be used to rotate each image at a unique angle.
+        Units are in degrees.
+        Default value is 0.
+    rotation_sampling_mode : str
+        Set the resampling method used when a box angle is provided.
+        The box rotation works by rotating the image underneath then
+        extracting the box for integration. Resampling of the
+        image intensities can be performed with the 'nearest',
+        'bilinear', or 'bicubic' methods in the PILLOW package.
+        Default value is 'bicubic'.
 
     Returns
     -------
@@ -60,6 +78,8 @@ def integrate_dataset(
             limits_qdx_px=limits_qdx_px,
             mode=mode,
             axis=axis,
+            box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
+            rotation_sampling_mode=rotation_sampling_mode,
         )
         if key != integrated_q_slice.name:
             raise KeyError(
@@ -89,6 +109,8 @@ def integrate_dataset_box_of_size(
     shift_box_qdy_px: int = 0,
     shift_box_qdx_px: int = 0,
     in_place=True,
+    box_angle_deg: float | dict = 0.0,
+    rotation_sampling_mode: str = 'bicubic',
 ) -> None | dict:
     """
     Integrate a box of a specific size. By default this box is
@@ -125,6 +147,22 @@ def integrate_dataset_box_of_size(
         added to the dataset.integrated_datasets attribute. If set to
         False, the dictionary will be returned.
         Default value is True.
+    box_angle_deg : float, dict
+        Rotate the box by the set number of degrees clockwise
+        about the center point. Rotating the box will maintain the
+        size of the box.
+        Providing a float value applies the same angle to all data
+        images. Providing a dictionary using the same data keywords
+        can be used to rotate each image at a unique angle.
+        Units are in degrees.
+        Default value is 0.
+    rotation_sampling_mode : str
+        Set the resampling method used when a box angle is provided.
+        The box rotation works by rotating the image underneath then
+        extracting the box for integration. Resampling of the
+        image intensities can be performed with the 'nearest',
+        'bilinear', or 'bicubic' methods in the PILLOW package.
+        Default value is 'bicubic'.
 
     Returns
     -------
@@ -136,7 +174,6 @@ def integrate_dataset_box_of_size(
     integrated_datas = {}
     i = 0
     for key, data in dataset.datas.items():
-
         integrated_q_slice = data.integrate_box_of_size(
                 size_qdy_px=size_qdy_px,
                 size_qdx_px=size_qdx_px,
@@ -144,7 +181,9 @@ def integrate_dataset_box_of_size(
                 axis=axis,
                 shift_box_qdy_px=shift_box_qdy_px,
                 shift_box_qdx_px=shift_box_qdx_px,
-                show_plot=False
+                show_plot=False,
+                box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
+                rotation_sampling_mode=rotation_sampling_mode,
             )
 
         if key != integrated_q_slice.name:
@@ -173,7 +212,9 @@ def integrate_dataset_box_of_q_range(
         range_qdx: list | tuple,
         mode: str,
         axis: str | int,
-        in_place=True
+        in_place=True,
+        box_angle_deg: float | dict = 0.0,
+        rotation_sampling_mode: str = 'bicubic',
 ):
     """
     Integrate a box defined by scattering vector limits.
@@ -201,6 +242,22 @@ def integrate_dataset_box_of_q_range(
         added to the dataset.integrated_datasets attribute. If set to
         False, the dictionary will be returned.
         Default value is True.
+    box_angle_deg : float, dict
+        Rotate the box by the set number of degrees clockwise
+        about the center point. Rotating the box will maintain the
+        size of the box.
+        Providing a float value applies the same angle to all data
+        images. Providing a dictionary using the same data keywords
+        can be used to rotate each image at a unique angle.
+        Units are in degrees.
+        Default value is 0.
+    rotation_sampling_mode : str
+        Set the resampling method used when a box angle is provided.
+        The box rotation works by rotating the image underneath then
+        extracting the box for integration. Resampling of the
+        image intensities can be performed with the 'nearest',
+        'bilinear', or 'bicubic' methods in the PILLOW package.
+        Default value is 'bicubic'.
 
     Returns
     -------
@@ -217,6 +274,8 @@ def integrate_dataset_box_of_q_range(
             range_qdx=range_qdx,
             mode=mode,
             axis=axis,
+            box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
+            rotation_sampling_mode=rotation_sampling_mode,
         )
         if key != integrated_q_slice.name:
             raise KeyError(
