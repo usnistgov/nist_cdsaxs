@@ -453,8 +453,6 @@ def plot_reduced_slices(dataset, index=0, q_slice_axis='qsx', log_scale=True,
     reduced_slices = dataset.reduced_slices[index][q_slice_axis]
 
     fig, ax = plt.subplots()
-    offset_order = 2
-    offset_value = 0
 
     slices = np.sort([x for x in reduced_slices.keys()])
     for i, qsx in enumerate(slices):
