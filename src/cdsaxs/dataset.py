@@ -185,6 +185,13 @@ class Dataset():
 
         return fig
 
+    def mirror_integrated_dataset(
+        self,
+        index=0,
+    ):
+        for int_q_slice in self.integrated_datasets[index].values():
+            int_q_slice.mirror_q()
+
     def plot_reduced_dataset(
             self,
             index=0,

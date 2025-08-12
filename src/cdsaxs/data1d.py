@@ -141,21 +141,22 @@ class IntegratedQSlice(Data1D):
     integration_axis : Axis over which integration was performed, 0 or 1.
     """
 
-    def __init__(self,
-                 q: NDArray,
-                 Iq: NDArray,
-                 q_axis: NDArray,
-                 name: str,
-                 limits_axis0: tuple[int, int],
-                 limits_axis1: tuple[int, int],
-                 mode: str,
-                 integration_axis: int,
-                 dIq: NDArray = None,
-                 dq: NDArray = None,
-                 box_angle_deg: float = 0,
-                 rotation_center: list = [0, 0],
-                 rotation_sampling_mode: str = 'bicubic',
-                 rotated_image: NDArray = None
+    def __init__(
+            self,
+            q: NDArray,
+            Iq: NDArray,
+            q_axis: NDArray,
+            name: str,
+            limits_axis0: tuple[int, int],
+            limits_axis1: tuple[int, int],
+            mode: str,
+            integration_axis: int,
+            dIq: NDArray = None,
+            dq: NDArray = None,
+            box_angle_deg: float = 0,
+            rotation_center: list = [0, 0],
+            rotation_sampling_mode: str = 'bicubic',
+            rotated_image: NDArray = None
     ):
 
         # Base class init
@@ -170,6 +171,18 @@ class IntegratedQSlice(Data1D):
         self.rotation_center = rotation_center
         self.rotation_sampling_mode = rotation_sampling_mode
         self.rotated_image = rotated_image
+
+        self.q_before_mirror = None
+        self.Iq_before_mirror = None
+
+    def mirror_q(self):
+        self.q_before_mirror = np.copy(self.q)
+        self.Iq_before_mirror = np.copy(self.Iq)
+        self.q = np.abs(self.q)
+        sort_arrays = np.argsort(self.q)
+        self.q = self.q[sort_arrays]
+        self.Iq = self.Iq[sort_arrays]
+
 
 
 class ReducedData():
