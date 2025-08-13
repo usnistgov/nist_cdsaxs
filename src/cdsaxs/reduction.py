@@ -366,7 +366,7 @@ def create_reduced_QszQsx(
         integrated_q_slice = integrated_dataset[key]
 
         if integrated_q_slice.q_axis == 'qdx':
-            qsz, qsx, _, _ = diffraction.qxz_to_qz_qx(
+            qsz, qsx, _, sample_phi_rad_corr = diffraction.qxz_to_qz_qx(
                 integrated_q_slice.q,
                 np.zeros(shape=integrated_q_slice.q.shape, dtype=np.float64),
                 data.metadata['wavelength_nm'],
@@ -378,6 +378,8 @@ def create_reduced_QszQsx(
                 Iq=np.copy(integrated_q_slice.Iq),
                 qsx=qsx,
                 qsz=qsz,
+                sample_phi_deg_corr=np.rad2deg(sample_phi_rad_corr),
+                wavelength_nm=data.metadata['wavelength_nm']
             )
 
         elif integrated_q_slice.q_axis == 'qdy':
@@ -406,7 +408,9 @@ def slice_reduced_dataset(
     find_peaks=False,
     peak_params={},
     in_place: bool = True,
-    show_plot=True
+    show_plot=True,
+    interpolated_image=True,
+    plot_marker_size=5,
 ):
 
     """
@@ -447,7 +451,9 @@ def slice_reduced_dataset(
 
         fig = plotting.plot_reduced_dataset(dataset,
                                             index=reduced_index,
-                                            log_scale=True)
+                                            log_scale=True,
+                                            interpolated_image=interpolated_image,
+                                            plot_marker_size=plot_marker_size)
 
         max_qsz = 0
         min_qsz = 0

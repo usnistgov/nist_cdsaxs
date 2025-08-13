@@ -190,7 +190,6 @@ class IntegratedQSlice(Data1D):
         self.Iq_before_mirror = None
 
 
-
 class ReducedData():
     """
     Reduced data in the sample frame that includes the axes:
@@ -205,7 +204,8 @@ class ReducedData():
     Iq : NDArray
     """
 
-    def __init__(self, Iq, qsx=None, qsy=None, qsz=None):
+    def __init__(self, Iq, qsx=None, qsy=None, qsz=None,
+                 sample_phi_deg_corr=None, wavelength_nm=None):
 
         self.Iq = np.array(Iq)
         if qsx is not None:
@@ -214,3 +214,7 @@ class ReducedData():
             self.qsy = np.array(qsy)
         if qsz is not None:
             self.qsz = np.array(qsz)
+        if sample_phi_deg_corr is not None:
+            self.sample_phi_deg_corr = sample_phi_deg_corr
+        if wavelength_nm is not None:
+            self.wavelength_nm = wavelength_nm
