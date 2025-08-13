@@ -141,7 +141,7 @@ def GeneralTIFFLoader(filepath_csv, name=None):
 
 def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
                                        pattern=None, scales=None,
-                                       filter_by_keywords=None,
+                                       filter_by_substrings=None,
                                        filter_by_names=None):
     """
     General TIFF loader that pulls metadata from keywords in the
@@ -209,16 +209,16 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
     directory_path = os.path.abspath(directory_path)
     filenames = [x for x in os.listdir(directory_path) if '.tif' in x]
 
-    if filter_by_keywords is not None and filter_by_names is not None:
+    if filter_by_substrings is not None and filter_by_names is not None:
         raise ValueError(
-            "You cannot define both filter_by_keywords"
+            "You cannot define both filter_by_substrings"
             "and filter_by_names. Please choose one or the"
             "other to select which files to load.")
-    elif filter_by_keywords is not None:
+    elif filter_by_substrings is not None:
         filtered_filenames = []
-        if type(filter_by_keywords) is str:
-            filter_by_keywords = [filter_by_keywords]
-        for string in filter_by_keywords:
+        if type(filter_by_substrings) is str:
+            filter_by_substrings = [filter_by_substrings]
+        for string in filter_by_substrings:
             if type(string) is str:
                 filtered_filenames.extend([
                     x for x in filenames if string in x])
