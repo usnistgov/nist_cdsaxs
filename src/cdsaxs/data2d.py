@@ -234,7 +234,7 @@ class Data2D():
                         axis=axis
                     )
                     
-                integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
+                integrated_i_bkg_mean = np.nansum([integrated_i_bkg_above,integrated_i_bkg_below])/2
                 integrated_i = integrated_i-integrated_i_bkg_mean
     
         elif mode == 'mean':
@@ -269,7 +269,7 @@ class Data2D():
                     )
                     
                 
-                integrated_i_bkg_mean = (integrated_i_bkg_above + integrated_i_bkg_below)/2
+                integrated_i_bkg_mean = np.nansum([integrated_i_bkg_above,integrated_i_bkg_below])/2
                 integrated_i = integrated_i-integrated_i_bkg_mean
         
         else:
