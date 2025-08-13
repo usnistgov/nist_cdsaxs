@@ -252,7 +252,7 @@ class Dataset():
 
     def plot_integrated_dataset(
             self,
-            index=0,
+            index=None,
             q_axis=None,
             order_by='sample_phi_deg',
             log_scale=True):
@@ -272,21 +272,27 @@ class Dataset():
 
     def mirror_integrated_dataset(
         self,
-        index=0,
+        index=None,
     ):
+        if index is None:
+            index = max(self.integrated_datasets.keys())
+
         for int_q_slice in self.integrated_datasets[index].values():
             int_q_slice.mirror_q()
 
     def reset_mirrored_integrated_dataset(
             self,
-            index=0,
+            index=None,
     ):
+        if index is None:
+            index = max(self.integrated_datasets.keys())
+
         for int_q_slice in self.integrated_datasets[index].values():
             int_q_slice.reset_mirrored_q()
 
     def plot_reduced_dataset(
             self,
-            index=0,
+            index=None,
             log_scale=True
     ):
         """
@@ -302,7 +308,7 @@ class Dataset():
 
     def plot_reduced_slices(
             self,
-            index=0,
+            index=None,
             q_slice_axis='qsx',
             log_scale=True,
             offset_order=0,
@@ -320,7 +326,7 @@ class Dataset():
 
         return fig
 
-    def save_reduced_slices(self, filepath, index=0, q_slice_axis='qsx',
+    def save_reduced_slices(self, filepath, index=None, q_slice_axis='qsx',
                             decimals=5):
         """
         Returns the slected reduced slices set currently stored in the
@@ -334,6 +340,8 @@ class Dataset():
         TODO: generalize this in the future.
         """
 
+        if index is None:
+            index = max(self.reduced_slices.keys())
         reduced_slices = self.reduced_slices[index][q_slice_axis]
 
         length = 0

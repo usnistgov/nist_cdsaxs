@@ -323,7 +323,7 @@ def integrate_dataset_box_of_q_range(
 
 def create_reduced_QszQsx(
         dataset: Dataset,
-        integrated_index: int = 0 ,
+        integrated_index: int = None,
         in_place: bool = True):
     """
     For each integrated q slice of each data image, a reduced dataset
@@ -357,6 +357,8 @@ def create_reduced_QszQsx(
         raise ValueError(
             "No integrated datasets to work with."
         )
+    if integrated_index is None:
+        integrated_index = max(dataset.integrated_datasets.keys())
     integrated_dataset = dataset.integrated_datasets[integrated_index]
     reduced_dataset = {}
 
@@ -397,7 +399,7 @@ def create_reduced_QszQsx(
 
 def slice_reduced_dataset(
     dataset: Dataset,
-    reduced_index=0,
+    reduced_index=None,
     q_values=[],
     q_widths=0.001,
     q_axis='qsx',
@@ -419,6 +421,9 @@ def slice_reduced_dataset(
             raise ValueError(
                 "q_widths must be float or list with same length as q_values."
             )
+
+    if reduced_index is None:
+        reduced_index = max(dataset.reduced_datasets.keys())
 
     q_ranges = [
         (val-width/2, val+width/2) for val, width in zip(q_values, q_widths)]

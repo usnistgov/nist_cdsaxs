@@ -275,8 +275,10 @@ def plot_find_beam_center(data, integrated_q_slice, peak_coords_array,
     return fig, fig_slice
 
 
-def plot_reduced_dataset(dataset, index=0, log_scale=True):
+def plot_reduced_dataset(dataset, index=None, log_scale=True):
 
+    if index is None:
+        index = max(dataset.reduced_datasets.keys())
     reduced_dataset = dataset.reduced_datasets[index]
 
     qszs = []
@@ -355,11 +357,14 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
 
 def plot_integrated_dataset(
         dataset,
-        index=0,
+        index=None,
         q_axis=None,
         order_by='sample_phi_deg',
         log_scale=True,
         ):
+
+    if index is None:
+        index = max(dataset.integrated_datasets.keys())
 
     if q_axis is None:
         # if the q_axis is not provided, pick the first one from the list
@@ -436,9 +441,11 @@ def plot_integrated_dataset(
     return fig
 
 
-def plot_reduced_slices(dataset, index=0, q_slice_axis='qsx', log_scale=True,
+def plot_reduced_slices(dataset, index=None, q_slice_axis='qsx', log_scale=True,
                         offset_order=0, offset_value=0):
 
+    if index is None:
+        index = max(dataset.reduced_slices.keys())
     reduced_slices = dataset.reduced_slices[index][q_slice_axis]
 
     fig, ax = plt.subplots()
