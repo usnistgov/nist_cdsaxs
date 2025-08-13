@@ -141,7 +141,8 @@ def GeneralTIFFLoader(filepath_csv, name=None):
 
 def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
                                        pattern=None, scales=None,
-                                       filter_files=None):
+                                       filter_by_keywords=None,
+                                       filter_by_names=None):
     """
     General TIFF loader that pulls metadata from keywords in the
     filename. The keywords must match the metadata keywords in this
@@ -186,19 +187,49 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
     TODO: implement unit handling for metadata in the future
 
     The files can also be filtered so that this function does not load
-    in all the images at once. A string or list of strings that should
-    be contained in the filename can be provided as filter_files.
+    in all the images at once. A string or list of strings can be
+    provided and this loader will read any files that include any one
+    or more of these keywords. If you would like to ensure that two
+    or more keywords are included in the same filename, please nest
+    them in another list. For example:
+
+    [['red', 'apple'], 'orange', 'strawberry']
+
+    If filtering by the keyword list above, any files that contain the
+    word orange or strawberry or BOTH red and apple will be loaded. Files
+    that include all of these words will also be loaded.
+
+    If you would like more control over which files are loaded, you
+    can feed a list of the filenames directly as the 'filenames' keyword
+    argument to this laoder.
 
     """
 
     # create a list of files in the provided directory
     directory_path = os.path.abspath(directory_path)
     filenames = [x for x in os.listdir(directory_path) if '.tif' in x]
-    if filter_files is not None:
-        if filter_files is str:
-            filter_files = [filter_files]
-        for string in filter_files:
-            filenames = [x for x in filenames if string in x]
+
+    if filter_by_keywords is not None and filter_by_names is not None:
+        raise ValueError(
+            "You cannot define both filter_by_keywords"
+            "and filter_by_names. Please choose one or the"
+            "other to select which files to load.")
+    elif filter_by_keywords is not None:
+        filtered_filenames = []
+        if type(filter_by_keywords) is str:
+            filter_by_keywords = [filter_by_keywords]
+        for string in filter_by_keywords:
+            if type(string) is str:
+                filtered_filenames.extend([
+                    x for x in filenames if string in x])
+            else:
+                temp_filtered = filenames.copy()
+                for string_i in string:
+                    temp_filtered = [x for x in temp_filtered if string_i in x]
+                filtered_filenames.extend(temp_filtered)
+        filenames = list(set(filtered_filenames))
+    elif filter_by_names is not None:
+        filenames = filter_by_names
 
     dataset = Dataset(name=name)
 
