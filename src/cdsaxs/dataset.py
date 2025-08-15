@@ -349,10 +349,15 @@ class Dataset():
             length = np.max((length, val.q.shape[0]))
 
         datas = []
-
+        
         for key, val in reduced_slices.items():
             q = val.q
             Iq = val.Iq
+            
+            #sort by q
+            sorted_indexes = np.argsort(q)
+            q = q[sorted_indexes]
+            Iq = Iq[sorted_indexes]
 
             select = Iq > 0
 
