@@ -626,7 +626,7 @@ class DataQdyQdx(Data2D):
         for key in normalize_by:
             if type(key) is float or type(key) is int:
                 value = float(key)
-            if key in METADATA_KEYWORDS:
+            elif key in METADATA_KEYWORDS:
                 value = self.metadata[key]
             elif key in self.user_params.keys():
                 value = float(self.user_params[key])
