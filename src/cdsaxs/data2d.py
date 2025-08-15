@@ -285,7 +285,7 @@ class Data2D():
                     "Size of the provided array does not"
                     "match the size of the image data.")
 
-        self.scale_data(value)
+        self.scale_data(value_r)
         self._data_transformations.append(("normalize", value))
 
     def subtract_from_data(self, value):
