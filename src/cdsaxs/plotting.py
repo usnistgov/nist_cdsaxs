@@ -105,7 +105,8 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
 
 
 def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
-                            vmin=None, vmax=None):
+                            vmin=None, vmax=None,
+                            background_subtractions=None):
 
     image = np.copy(data.image)
     if integrated_q_slice.box_angle_deg != 0:
@@ -127,6 +128,35 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
     fig.add_trace(go.Scatter(
         x=x, y=y, mode='lines', line=dict(color='red')
     ))
+
+    if background_subtractions is not None:
+        # box limits, lines get drawn in the middle of pixels so offset
+        # half open range by 0.5 pixels
+        xmin, xmax = background_subtractions[2]
+        xmin -= 0.5
+        xmax -= 0.5
+        ymin, ymax = background_subtractions[1]
+        ymin -= 0.5
+        ymax -= 0.5
+        x = [xmin, xmin, xmax, xmax, xmin]
+        y = [ymin, ymax, ymax, ymin, ymin]
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode='lines', line=dict(color='red')
+        ))
+
+        # box limits, lines get drawn in the middle of pixels so offset
+        # half open range by 0.5 pixels
+        xmin, xmax = background_subtractions[4]
+        xmin -= 0.5
+        xmax -= 0.5
+        ymin, ymax = background_subtractions[3]
+        ymin -= 0.5
+        ymax -= 0.5
+        x = [xmin, xmin, xmax, xmax, xmin]
+        y = [ymin, ymax, ymax, ymin, ymin]
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode='lines', line=dict(color='red')
+        ))
 
     # integrated 1D data
     fig_slice = go.Figure(data=go.Scatter(

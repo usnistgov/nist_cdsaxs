@@ -72,6 +72,8 @@ class Data1D():
             )
         self.dq = np.array(dq)
 
+        self._data_transformations = []
+
     def interpolate(self,
                     interpolated_q,
                     mode='log'):
@@ -125,6 +127,86 @@ class Data1D():
             interpolated_Iq = np.power(10, interpolated_Iq)
 
         return interpolated_q, interpolated_Iq
+
+    def scale_data(self, value):
+        """
+        Scale the data by the specified value or array of values that
+        match the dimensions of Iq.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+
+        self.Iq *= value
+        self._data_transformations.append(("scale", value))
+
+    def normalize_data(self, value):
+        """
+        Scale the data by the reciprocal of the specified value or array
+        of values that match the dimensions of Iq.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+            value_r = 1/value
+        else:
+            value_r = np.reciprocal(value)
+            if value_r.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+
+        self.scale_data(value_r)
+        self._data_transformations.append(("normalize", value))
+
+    def subtract_from_data(self, value):
+        """
+        Subtract a specified single value or an array of values that
+        matches the dimensions of Iq from the Iq data.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+        self.Iq -= value
+        self._data_transformations.append(("subtract", value))
+
+    def add_to_data(self, value):
+        """
+        Add a specified single value or an array of values that
+        matches the dimensions of Iq to the Iq data.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+        self.Iq += value
+        self._data_transformations.append(("add", value))
+
+    def reset_data_transformations(self):
+        """
+        Resets any normailzation, scaling, added or subtracted values
+        applied to the Iq data.
+        """
+        for transform, value in reversed(self._data_transformations):
+            if transform == "add":
+                self.subtract_from_data(value)
+            elif transform == "subtract":
+                self.add_to_data(value)
+            elif transform == "normalize":
+                self.scale_data(value)
+            elif transform == "scale":
+                self.normalize_data(value)
+        self._data_transformations = []
 
 
 class IntegratedQSlice(Data1D):

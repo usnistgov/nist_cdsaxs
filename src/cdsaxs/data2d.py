@@ -49,6 +49,7 @@ class Data2D():
     # VF indicates a vertical flip
     # HF indicates a horizontal flip
     _image_transformations = []
+    _data_transformations = []
 
     def __init__(self, image: NDArray[np.floating]):
         """
@@ -61,7 +62,7 @@ class Data2D():
             to right.
         """
 
-        self.image = image   
+        self.image = image
 
     def rotate_image_step90(self, degrees, direction='ccw'):
         """
@@ -180,15 +181,6 @@ class Data2D():
             image intensities can be performed with the 'nearest',
             'bilinear', or 'bicubic' methods in the PILLOW package.
             Default value is 'bicubic'.
-        subtract_background : bool, optional
-            If set to true, will run a background subtraction on the integrated
-            data based on the supplied integration box offset by a set number 
-            of pixels.
-            TODO: decide how to best approach this subtraction past this 
-            initial implementation.
-        subtraction_offset: int, optional
-            The number of pixels to offset the integration box for calculating 
-            the background intensity by. 
         """
         image = np.copy(self.image)
         image[image < 0] = np.nan
@@ -243,34 +235,6 @@ class Data2D():
                       limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
-            
-            if subtract_background:
-                if axis == 0:
-                    integrated_i_bkg_above = np.nanmean(
-                        image[limits_axis0[0]:limits_axis0[1],
-                            limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
-                        axis=axis
-                    )
-                    integrated_i_bkg_below =np.nanmean(
-                        image[limits_axis0[0]:limits_axis0[1],
-                            limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
-                        axis=axis
-                    )
-                elif axis == 1:
-                    integrated_i_bkg_above = np.nanmean(
-                        image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-                              limits_axis1[0]:limits_axis1[1]],
-                        axis=axis
-                    )
-                    integrated_i_bkg_below =np.nanmean(
-                        image[limits_axis0[0]-subtraction_offset:limits_axis0[1]-subtraction_offset,
-                            limits_axis1[0]:limits_axis1[1]],
-                        axis=axis
-                    )
-                    
-                
-                integrated_i_bkg_mean = (integrated_i_bkg_above+integrated_i_bkg_below)/2
-                integrated_i = integrated_i-integrated_i_bkg_mean
         
         else:
             raise ValueError(
@@ -290,6 +254,87 @@ class Data2D():
                 'rotation_sampling_mode': rotation_sampling_mode,
                 'rotated_image': np.copy(image) if box_angle_deg != 0 else None
             }
+    
+    def scale_data(self, value):
+        """
+        Scale the data by the specified value or array of values
+        that match the dimensions of the data image.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.image.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+
+        self.image *= value
+        self._data_transformations.append(("scale", value))
+
+    def normalize_data(self, value):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+
+        if type(value) is float or type(value) is int:
+            value = float(value)
+            value_r = 1/value
+        else:
+            value_r = np.reciprocal(value)
+            if value_r.shape != self.image.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+
+        self.scale_data(value)
+        self._data_transformations.append(("normalize", value))
+
+    def subtract_from_data(self, value):
+        """
+        Subtract a specified single value or an array of values that
+        matches the image dimensions from the image data.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.image.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+        self.image -= value
+        self._data_transformations.append(("subtract", value))
+
+    def add_to_data(self, value):
+        """
+        Add a specified single value or an array of values that
+        matches the image dimensions to the image data.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.image.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+        self.image += value
+        self._data_transformations.append(("add", value))
+
+    def reset_data_transformations(self):
+        """
+        Resets any normailzation, scaling, added or subtracted values
+        applied to the image data.
+        """
+        for transform, value in reversed(self._data_transformations):
+            if transform == "add":
+                self.subtract_from_data(value)
+            elif transform == "subtract":
+                self.add_to_data(value)
+            elif transform == "normalize":
+                self.scale_data(value)
+            elif transform == "scale":
+                self.normalize_data(value)
+        self._data_transformations = []
 
 
 class DataQdyQdx(Data2D):
@@ -401,9 +446,7 @@ class DataQdyQdx(Data2D):
         # set default metadata values not required by user
         self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
 
-        self.normalization_factor = 1
-        self.normalization_keys = []
-        self.scale_factor = 1
+        self.data_transformations = []
 
     def update_metadata(self, metadata: dict, overwrite: bool = True):
         """
@@ -513,7 +556,52 @@ class DataQdyQdx(Data2D):
             self.qdy = qdy
             self.qdx = qdx
 
-    def normalize_data(self, normalize_by, reset_first=False):
+    def scale_data(self, value, keyword=None):
+        """
+        Scale the data by the specified value or array of values
+        that match the dimensions of the data image.
+        """
+        super().scale_data(value)
+        self.data_transformations.append(
+            ("scale", value if keyword is None else keyword))
+
+    def normalize_data(self, value, keyword=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+
+        super().normalize_data(value)
+        self.data_transformations.append(
+            ("normalize", value if keyword is None else keyword))
+
+    def subtract_from_data(self, value, keyword=None):
+        """
+        Subtract a specified single value or an array of values that
+        matches the image dimensions from the image data.
+        """
+        super().subtract_from_data(value)
+        self.data_transformations.append(
+            ("subtract", value if keyword is None else keyword))
+
+    def add_to_data(self, value, keyword=None):
+        """
+        Add a specified single value or an array of values that
+        matches the image dimensions to the image data.
+        """
+        super().add_to_data(value)
+        self.data_transformations.append(
+            ("add", value if keyword is None else keyword))
+
+    def reset_data_transformations(self):
+        """
+        Resets any normailzation, scaling, added or subtracted values
+        applied to the image data.
+        """
+        super().reset_data_transformations()
+        self.data_transformations = []
+
+    def normalize_by_metadta(self, normalize_by, reset_first=False):
         """
         Normalize the image by the selected metadata or user parameters.
         This will not reset any previous normalization. If a new
@@ -525,6 +613,8 @@ class DataQdyQdx(Data2D):
         normalize_by : list
             List of accepted metadata keywords or user parameter keys
             that should be used to normalize the data.
+            A float or integer value can also be provided in this list
+            to include a standard normalization by the value.
         reset_first : boolean
             If set to True, any previous normalizations will be rest
             before applying the new requested normalization series.
@@ -533,44 +623,75 @@ class DataQdyQdx(Data2D):
         """
 
         if reset_first:
-            self.image *= self.normalization_factor
-            self.normalization_factor = 1
-            self.normalization_keys = []
+            self.reset_data_transformations()
 
-        norm_factor = 1
         for key in normalize_by:
+            if type(key) is float or type(key) is int:
+                value = float(key)
             if key in METADATA_KEYWORDS:
-                norm_factor *= self.metadata[key]
+                value = self.metadata[key]
             elif key in self.user_params.keys():
-                norm_factor *= float(self.user_params[key])
+                value = float(self.user_params[key])
             else:
                 warnings.warn(f"Did not recognize {key} as an available"
                               "parameter in either metadata or user_params.")
-        self.normalization_factor *= norm_factor
-        self.normalization_keys.extend(normalize_by)
-        self.image /= norm_factor
+                value = None
+            if type(key) is str:
+                for transform, value in self.data_transformations:
+                    if value == key and transform == "normalize":
+                        warnings.warn(
+                            f"{key} was already used in a normalization"
+                            "data transformation. Skipping for now."1
+                        )
+                    value = None
+            if value is not None:
+                self.normalize_data(value, keyword=key)
 
-    def reset_normalization(self):
-        self.image *= self.normalization_factor
-        self.normalization_factor = 1
-        self.normalization_keys = []
+    def scale_by_metadta(self, scale_by, reset_first=False):
+        """
+        Scale the image by the selected metadata or user parameters.
+        This will not reset any previous transformations. If a new
+        series of transformations is desired, please run reset normalization
+        first or change reset_first to True.
 
-    def scale_data(self, value, reset_first=False):
+        Parameters
+        ----------
+        scale_by : list
+            List of accepted metadata keywords or user parameter keys
+            that should be used to scale the data.
+            A float or integer value can also be provided in this list
+            to include a standard normalization by the value.
+        reset_first : boolean
+            If set to True, any previous transformations will be rest
+            before applying the new requested normalization series.
+            If left as False, the new parameters will be factored into
+            the existing normalization factor.
         """
-        Scale the image by the desired value.
-        This does not undo any previous scalings unless reset_scale is
-        called first or reset_first is set to True.
-        """
+
         if reset_first:
-            self.image /= self.scale_data
-            self.scale_factor = 1
+            self.reset_data_transformations()
 
-        self.scale_factor *= float(value)
-        self.image *= float(value)
-
-    def reset_scale(self):
-        self.image /= self.scale_factor
-        self.scale_factor = 1
+        for key in scale_by:
+            if type(key) is float or type(key) is int:
+                value = float(key)
+            if key in METADATA_KEYWORDS:
+                value = self.metadata[key]
+            elif key in self.user_params.keys():
+                value = float(self.user_params[key])
+            else:
+                warnings.warn(f"Did not recognize {key} as an available"
+                              "parameter in either metadata or user_params.")
+                value = None
+            if type(key) is str:
+                for transform, value in self.data_transformations:
+                    if value == key and transform == "scale":
+                        warnings.warn(
+                            f"{key} was already used in a scaling"
+                            "data transformation. Skipping for now."1
+                        )
+                    value = None
+            if value is not None:
+                self.scale_data(value, keyword=key)
 
     def rotate_image_step90(self, degrees, direction='ccw'):
         """
@@ -688,7 +809,7 @@ class DataQdyQdx(Data2D):
         rotation_sampling_mode: str = 'bicubic',
         rotation_center_point: list | tuple = None,
         subtract_background=False,
-        subtraction_offset=5,        
+        subtraction_offset=None,        
         # interactive_plot=True
     ) -> IntegratedQSlice:
         """
@@ -740,7 +861,9 @@ class DataQdyQdx(Data2D):
             initial implementation.
         subtraction_offset: int, optional
             The number of pixels to offset the integration box for calculating 
-            the background intensity by. 
+            the background intensity by. The default offset will be
+            the same width as the integration box along the integration
+            axis.
         interactive_plot : bool, optional
             If set to True, the plots returned will be interactive plots
             built via Plotly. If set to False, the plots returned will be
@@ -762,7 +885,7 @@ class DataQdyQdx(Data2D):
                 axis = 1
             else:
                 raise ValueError(f"Invalid integration axis of {axis}.")
-
+        
         # access parent method of box integration
         integrated_i, params = super().integrate_box(
             limits_axis0=limits_qdy_px,
@@ -770,7 +893,8 @@ class DataQdyQdx(Data2D):
             mode=mode,
             axis=axis,
             box_angle_deg=box_angle_deg,
-            rotation_center=self.metadata['center_px'],
+            rotation_center=self.metadata['center_px'] \
+                if rotation_center_point is None else rotation_center_point,
             rotation_sampling_mode=rotation_sampling_mode,
             subtract_background=subtract_background,
             subtraction_offset=subtraction_offset
@@ -797,12 +921,63 @@ class DataQdyQdx(Data2D):
             rotation_center=params['rotation_center'],
             rotated_image=params['rotated_image']
         )
+        
+        if subtract_background:
+            if axis == 0:
+                background_limits_axis0_high = limits_qdy_px + subtraction_offset
+                background_limits_axis1_high = limits_qdx_px
+            elif axis == 1:
+                background_limits_axis0_high = limits_qdy_px
+                background_limits_axis1_high = limits_qdx_px + subtraction_offset
+
+            integrated_background_high, _ = super().integrate_box(
+                limits_axis0=background_limits_axis0_high,
+                limits_axis1=background_limits_axis1_high,
+                mode=mode,
+                axis=axis,
+                box_angle_deg=box_angle_deg,
+                rotation_center=self.metadata['center_px'] \
+                    if rotation_center_point is None else rotation_center_point,
+                rotation_sampling_mode=rotation_sampling_mode,
+                subtract_background=subtract_background,
+                subtraction_offset=subtraction_offset
+            )
+            
+            if axis == 0:
+                background_limits_axis0_low = limits_qdy_px - subtraction_offset
+                background_limits_axis1_low = limits_qdx_px
+            elif axis == 1:
+                background_limits_axis0_low = limits_qdy_px
+                background_limits_axis1_low = limits_qdx_px - subtraction_offset
+
+            integrated_background_low, _ = super().integrate_box(
+                limits_axis0=background_limits_axis0_low,
+                limits_axis1=background_limits_axis1_low,
+                mode=mode,
+                axis=axis,
+                box_angle_deg=box_angle_deg,
+                rotation_center=self.metadata['center_px'] \
+                    if rotation_center_point is None else rotation_center_point,
+                rotation_sampling_mode=rotation_sampling_mode,
+                subtract_background=subtract_background,
+                subtraction_offset=subtraction_offset
+            )
+     
+            integrated_i_bkg_mean = np.nanmean(
+                np.array([integrated_background_high,
+                          integrated_background_low]), axis=0)
+            
+            integrated_q_slice.subtract_from_data(integrated_i_bkg_mean)
 
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self,
                 integrated_q_slice=integrated_q_slice,
-                log_scale=log_scale
+                log_scale=log_scale,
+                background_subtractions = [
+                    integrated_i_bkg_mean,
+                    background_limits_axis0_high, background_limits_axis1_high,
+                    background_limits_axis0_low, background_limits_axis1_low]
             )
             iplot(fig)
             iplot(fig_slice)

@@ -294,7 +294,8 @@ class Dataset():
             self,
             index=None,
             log_scale=True,
-            interpolated_image=True
+            interpolated_image=True,
+            plot_marker_size=5
     ):
         """
         Plot the Qsz vs. Qsx reduced dataset after integration.
@@ -303,6 +304,7 @@ class Dataset():
             self,
             index=index,
             log_scale=log_scale,
+            plot_marker_size=plot_marker_size,
             interpolated_image=interpolated_image
         )
 
