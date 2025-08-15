@@ -599,7 +599,7 @@ class DataQdyQdx(Data2D):
         super().reset_data_transformations()
         self.data_transformations = []
 
-    def normalize_by_metadta(self, normalize_by, reset_first=False):
+    def normalize_by_metadata(self, normalize_by, reset_first=False):
         """
         Normalize the image by the selected metadata or user parameters.
         This will not reset any previous normalization. If a new
@@ -642,7 +642,7 @@ class DataQdyQdx(Data2D):
             if value is not None:
                 self.normalize_data(value, keyword=key)
 
-    def scale_by_metadta(self, scale_by, reset_first=False):
+    def scale_by_metadata(self, scale_by, reset_first=False):
         """
         Scale the image by the selected metadata or user parameters.
         This will not reset any previous transformations. If a new

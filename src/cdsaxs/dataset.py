@@ -165,7 +165,8 @@ class Dataset():
 
         return figs
 
-    def normalize_datas(self, normalize_by, reset_first=False, keys=None):
+    def normalize_datas_by_metadata(
+            self, normalize_by, reset_first=False, keys=None):
         """
         Normalize all data by the selected metadata or user parameters.
         This will not reset any previous normalization. If a new
@@ -191,25 +192,10 @@ class Dataset():
 
         for key in keys:
             data = self.datas[key]
-            data.normalize_data(normalize_by, reset_first=reset_first)
+            data.normalize_by_metadata(normalize_by, reset_first=reset_first)
 
-    def reset_normalization(self, keys=None):
-        """
-        Reset all normalizations performed on all data.
-
-        keys : list
-            A list of datas keys can be used to only apply the normalization
-            reset to a subset of the data in datas.
-        """
-
-        if keys is None:
-            keys = list(self.datas.keys())
-
-        for key in keys:
-            data = self.datas[key]
-            data.reset_normalization()
-
-    def scale_datas(self, value, reset_first=False, keys=None):
+    def scale_datas_by_metadata(
+            self, scale_by, reset_first=False, keys=None):
         """
         Scale the image by the desired value.
         This does not undo any previous scalings unless reset_scale is
@@ -233,22 +219,66 @@ class Dataset():
 
         for key in keys:
             data = self.datas[key]
-            data.scale_data(value, reset_first=reset_first)
+            data.scale_by_metadata(scale_by, reset_first=reset_first)
 
-    def reset_scale(self, keys=None):
+    def normalize_datas(self, value, keys=None):
         """
-        Reset all scaling performed on all data.
-
-        keys : list
-            A list of datas keys can be used to only apply the scale
-            reset to a subset of the data in datas.
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
         """
         if keys is None:
             keys = list(self.datas.keys())
 
         for key in keys:
             data = self.datas[key]
-            data.reset_scale()
+            data.normalize_data(value)
+
+    def scale_datas(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.scale_data(value)
+
+    def add_to_datas(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.add_to_data(value)
+
+    def subtract_from_datas(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.subtract_from_data(value)
+
+    def reset_data_transformations(self, keys=None):
+        """
+        Reset all normalization, scaling, adding and subtracting.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.reset_data_transformations()
 
     def plot_integrated_dataset(
             self,
