@@ -144,8 +144,6 @@ class Data2D():
             box_angle_deg=0,
             rotation_center=[0, 0],
             rotation_sampling_mode='bicubic',
-            subtract_background=False,
-            subtraction_offset=5
     ):
         """
         Simple integration in a box defined by the [min, max) limits
@@ -202,32 +200,32 @@ class Data2D():
                 axis=axis
             )
             
-            if subtract_background:
-                if axis == 0:
-                    integrated_i_bkg_above = np.nansum(
-                        image[limits_axis0[0]:limits_axis0[1],
-                            limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
-                        axis=axis
-                    )
-                    integrated_i_bkg_below =np.nansum(
-                        image[limits_axis0[0]:limits_axis0[1],
-                            limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
-                        axis=axis
-                    )
-                elif axis == 1:
-                    integrated_i_bkg_above = np.nansum(
-                        image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-                              limits_axis1[0]:limits_axis1[1]],
-                        axis=axis
-                    )
-                    integrated_i_bkg_below =np.nansum(
-                        image[limits_axis0[0]-subtraction_offset:limits_axis0[1]-subtraction_offset,
-                            limits_axis1[0]:limits_axis1[1]],
-                        axis=axis
-                    )
+            # if subtract_background:
+            #     if axis == 0:
+            #         integrated_i_bkg_above = np.nansum(
+            #             image[limits_axis0[0]:limits_axis0[1],
+            #                 limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
+            #             axis=axis
+            #         )
+            #         integrated_i_bkg_below =np.nansum(
+            #             image[limits_axis0[0]:limits_axis0[1],
+            #                 limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
+            #             axis=axis
+            #         )
+            #     elif axis == 1:
+            #         integrated_i_bkg_above = np.nansum(
+            #             image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
+            #                   limits_axis1[0]:limits_axis1[1]],
+            #             axis=axis
+            #         )
+            #         integrated_i_bkg_below =np.nansum(
+            #             image[limits_axis0[0]-subtraction_offset:limits_axis0[1]-subtraction_offset,
+            #                 limits_axis1[0]:limits_axis1[1]],
+            #             axis=axis
+            #         )
                     
-                integrated_i_bkg_mean = (integrated_i_bkg_above+integrated_i_bkg_below)/2
-                integrated_i = integrated_i-integrated_i_bkg_mean
+            #     integrated_i_bkg_mean = (integrated_i_bkg_above+integrated_i_bkg_below)/2
+            #     integrated_i = integrated_i-integrated_i_bkg_mean
     
         elif mode == 'mean':
             integrated_i = np.nanmean(
@@ -880,7 +878,7 @@ class DataQdyQdx(Data2D):
                 axis = 1
             else:
                 raise ValueError(f"Invalid integration axis of {axis}.")
-        
+    
         # access parent method of box integration
         integrated_i, params = super().integrate_box(
             limits_axis0=limits_qdy_px,
@@ -891,8 +889,6 @@ class DataQdyQdx(Data2D):
             rotation_center=self.metadata['center_px'] \
                 if rotation_center_point is None else rotation_center_point,
             rotation_sampling_mode=rotation_sampling_mode,
-            subtract_background=subtract_background,
-            subtraction_offset=subtraction_offset
         )
 
         # extract scattering vector for this integration
@@ -918,61 +914,84 @@ class DataQdyQdx(Data2D):
         )
         
         if subtract_background:
+            if subtraction_offset is None:
+                if axis == 0:
+                    subtraction_offset = int(limits_qdy_px[1] - limits_qdy_px[0])
+                elif axis == 1:
+                    subtraction_offset = int(limits_qdx_px[1] - limits_qdx_px[0])
+        
             if axis == 0:
-                background_limits_axis0_high = np.array(limits_qdy_px) + subtraction_offset
-                background_limits_axis1_high = limits_qdx_px
+                background_limits_axis0_high = (
+                    limits_qdy_px[0] + subtraction_offset,
+                    limits_qdy_px[1] + subtraction_offset)
+                background_limits_axis1_high = (
+                    limits_qdx_px[0],
+                    limits_qdx_px[1])
             elif axis == 1:
-                background_limits_axis0_high = limits_qdy_px
-                background_limits_axis1_high = np.array(limits_qdx_px) + subtraction_offset
+                background_limits_axis0_high = (
+                    limits_qdy_px[0],
+                    limits_qdy_px[1])
+                background_limits_axis1_high = (
+                    limits_qdx_px[0] + subtraction_offset,
+                    limits_qdx_px[1] + subtraction_offset)
 
             integrated_background_high, _ = super().integrate_box(
-                limits_axis0=tuple(background_limits_axis0_high),
-                limits_axis1=tuple(background_limits_axis1_high),
+                limits_axis0=background_limits_axis0_high,
+                limits_axis1=background_limits_axis1_high,
                 mode=mode,
                 axis=axis,
                 box_angle_deg=box_angle_deg,
                 rotation_center=self.metadata['center_px'] \
                     if rotation_center_point is None else rotation_center_point,
                 rotation_sampling_mode=rotation_sampling_mode,
-                subtract_background=subtract_background,
-                subtraction_offset=subtraction_offset
             )
-            
+
             if axis == 0:
-                background_limits_axis0_low = np.array(limits_qdy_px) - subtraction_offset
-                background_limits_axis1_low = limits_qdx_px
+                background_limits_axis0_low = (
+                    limits_qdy_px[0] - subtraction_offset,
+                    limits_qdy_px[1] - subtraction_offset)
+                background_limits_axis1_low = (
+                    limits_qdx_px[0],
+                    limits_qdx_px[1])
             elif axis == 1:
-                background_limits_axis0_low = limits_qdy_px
-                background_limits_axis1_low = np.array(limits_qdx_px) - subtraction_offset
+                background_limits_axis0_low = (
+                    limits_qdy_px[0],
+                    limits_qdy_px[1])
+                background_limits_axis1_low = (
+                    limits_qdx_px[0] - subtraction_offset,
+                    limits_qdx_px[1] - subtraction_offset)
 
             integrated_background_low, _ = super().integrate_box(
-                limits_axis0=tuple(background_limits_axis0_low),
-                limits_axis1=tuple(background_limits_axis1_low),
+                limits_axis0=background_limits_axis0_low,
+                limits_axis1=background_limits_axis1_low,
                 mode=mode,
                 axis=axis,
                 box_angle_deg=box_angle_deg,
                 rotation_center=self.metadata['center_px'] \
                     if rotation_center_point is None else rotation_center_point,
                 rotation_sampling_mode=rotation_sampling_mode,
-                subtract_background=subtract_background,
-                subtraction_offset=subtraction_offset
             )
-     
+
             integrated_i_bkg_mean = np.nanmean(
                 np.array([integrated_background_high,
                           integrated_background_low]), axis=0)
-            
+
             integrated_q_slice.subtract_from_data(integrated_i_bkg_mean)
+
+        if subtract_background:
+            background_subtractions = [
+                    integrated_i_bkg_mean, integrated_i,
+                    background_limits_axis0_high, background_limits_axis1_high,
+                    background_limits_axis0_low, background_limits_axis1_low]
+        else:
+            background_subtractions = None
 
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self,
                 integrated_q_slice=integrated_q_slice,
                 log_scale=log_scale,
-                background_subtractions = [
-                    integrated_i_bkg_mean,
-                    background_limits_axis0_high, background_limits_axis1_high,
-                    background_limits_axis0_low, background_limits_axis1_low]
+                background_subtractions=background_subtractions
             )
             iplot(fig)
             iplot(fig_slice)
@@ -990,7 +1009,7 @@ class DataQdyQdx(Data2D):
             box_angle_deg: float = 0,
             rotation_sampling_mode: str = 'bicubic',
             subtract_background=False,
-            subtraction_offset = 5,           
+            subtraction_offset=None,
             show_plot=False,
             log_scale=True,
     ):
@@ -1094,15 +1113,17 @@ class DataQdyQdx(Data2D):
             box_angle_deg=box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
             subtract_background=subtract_background,
-            subtraction_offset=subtraction_offset
+            subtraction_offset=subtraction_offset,
+            show_plot=show_plot,
+            log_scale=log_scale
         )
-            
-        if show_plot:
-            fig, fig_slice = plotting.plot_QdyQdx_integration(
-                self, integrated_q_slice=integrated_q_slice,
-                log_scale=log_scale)
-            iplot(fig)
-            iplot(fig_slice)
+
+        # if show_plot:
+        #     fig, fig_slice = plotting.plot_QdyQdx_integration(
+        #         self, integrated_q_slice=integrated_q_slice,
+        #         log_scale=log_scale)
+        #     iplot(fig)
+        #     iplot(fig_slice)
 
         return integrated_q_slice
 
@@ -1115,7 +1136,7 @@ class DataQdyQdx(Data2D):
             box_angle_deg: float = 0,
             rotation_sampling_mode: str = 'bicubic',
             subtract_background=False,
-            subtraction_offset=5,
+            subtraction_offset=None,
             show_plot=False,
             log_scale=True,
     ):
@@ -1205,15 +1226,17 @@ class DataQdyQdx(Data2D):
             box_angle_deg=box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
             subtract_background=subtract_background,
-            subtraction_offset=subtraction_offset
+            subtraction_offset=subtraction_offset,
+            show_plot=show_plot,
+            log_scale=log_scale
         )
 
-        if show_plot:
-            fig, fig_slice = plotting.plot_QdyQdx_integration(
-                self, integrated_q_slice=integrated_q_slice,
-                log_scale=log_scale)
-            iplot(fig)
-            iplot(fig_slice)
+        # if show_plot:
+        #     fig, fig_slice = plotting.plot_QdyQdx_integration(
+        #         self, integrated_q_slice=integrated_q_slice,
+        #         log_scale=log_scale)
+        #     iplot(fig)
+        #     iplot(fig_slice)
 
         return integrated_q_slice
 

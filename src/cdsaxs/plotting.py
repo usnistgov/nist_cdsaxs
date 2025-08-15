@@ -126,36 +126,36 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
     x = [xmin, xmin, xmax, xmax, xmin]
     y = [ymin, ymax, ymax, ymin, ymin]
     fig.add_trace(go.Scatter(
-        x=x, y=y, mode='lines', line=dict(color='red')
+        x=x, y=y, mode='lines', line=dict(color='red'), name=None, showlegend=False
     ))
 
     if background_subtractions is not None:
         # box limits, lines get drawn in the middle of pixels so offset
         # half open range by 0.5 pixels
-        xmin, xmax = background_subtractions[2]
+        xmin, xmax = background_subtractions[3]
         xmin -= 0.5
         xmax -= 0.5
-        ymin, ymax = background_subtractions[1]
+        ymin, ymax = background_subtractions[2]
         ymin -= 0.5
         ymax -= 0.5
         x = [xmin, xmin, xmax, xmax, xmin]
         y = [ymin, ymax, ymax, ymin, ymin]
         fig.add_trace(go.Scatter(
-            x=x, y=y, mode='lines', line=dict(color='red')
+            x=x, y=y, mode='lines', line=dict(color='orange'), name=None, showlegend=False
         ))
 
         # box limits, lines get drawn in the middle of pixels so offset
         # half open range by 0.5 pixels
-        xmin, xmax = background_subtractions[4]
+        xmin, xmax = background_subtractions[5]
         xmin -= 0.5
         xmax -= 0.5
-        ymin, ymax = background_subtractions[3]
+        ymin, ymax = background_subtractions[4]
         ymin -= 0.5
         ymax -= 0.5
         x = [xmin, xmin, xmax, xmax, xmin]
         y = [ymin, ymax, ymax, ymin, ymin]
         fig.add_trace(go.Scatter(
-            x=x, y=y, mode='lines', line=dict(color='red')
+            x=x, y=y, mode='lines', line=dict(color='orange'), name=None, showlegend=False
         ))
 
     # integrated 1D data
@@ -169,6 +169,20 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
             visible=True
         )
     ))
+
+    # if background_subtractions is not None:
+
+    #     fig_slice.add_trace(go.Scatter(
+    #         x=integrated_q_slice.q,
+    #         y=background_subtractions[1],
+    #         mode='lines+markers',
+    #     ))
+
+    #     fig_slice.add_trace(go.Scatter(
+    #         x=integrated_q_slice.q,
+    #         y=background_subtractions[0],
+    #         mode='lines+markers',
+    #     ))
 
     fig_slice.update_xaxes(
         title=plotting_tools.generate_axis_label_units(
