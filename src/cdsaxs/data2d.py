@@ -639,10 +639,7 @@ class DataQdyQdx(Data2D):
             if type(key) is str:
                 for transform, value in self.data_transformations:
                     if value == key and transform == "normalize":
-                        warnings.warn(
-                            f"{key} was already used in a normalization"
-                            "data transformation. Skipping for now."1
-                        )
+                        warnings.warn(f"{key} was already used in a normalization data transformation. Skipping for now.")
                     value = None
             if value is not None:
                 self.normalize_data(value, keyword=key)
@@ -679,15 +676,13 @@ class DataQdyQdx(Data2D):
             elif key in self.user_params.keys():
                 value = float(self.user_params[key])
             else:
-                warnings.warn(f"Did not recognize {key} as an available"
-                              "parameter in either metadata or user_params.")
+                warnings.warn(f"Did not recognize {key} as an available parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
                 for transform, value in self.data_transformations:
                     if value == key and transform == "scale":
                         warnings.warn(
-                            f"{key} was already used in a scaling"
-                            "data transformation. Skipping for now."1
+                            f"{key} was already used in a scaling data transformation. Skipping for now."
                         )
                     value = None
             if value is not None:
@@ -924,15 +919,15 @@ class DataQdyQdx(Data2D):
         
         if subtract_background:
             if axis == 0:
-                background_limits_axis0_high = limits_qdy_px + subtraction_offset
+                background_limits_axis0_high = np.array(limits_qdy_px) + subtraction_offset
                 background_limits_axis1_high = limits_qdx_px
             elif axis == 1:
                 background_limits_axis0_high = limits_qdy_px
-                background_limits_axis1_high = limits_qdx_px + subtraction_offset
+                background_limits_axis1_high = np.array(limits_qdx_px) + subtraction_offset
 
             integrated_background_high, _ = super().integrate_box(
-                limits_axis0=background_limits_axis0_high,
-                limits_axis1=background_limits_axis1_high,
+                limits_axis0=tuple(background_limits_axis0_high),
+                limits_axis1=tuple(background_limits_axis1_high),
                 mode=mode,
                 axis=axis,
                 box_angle_deg=box_angle_deg,
@@ -944,15 +939,15 @@ class DataQdyQdx(Data2D):
             )
             
             if axis == 0:
-                background_limits_axis0_low = limits_qdy_px - subtraction_offset
+                background_limits_axis0_low = np.array(limits_qdy_px) - subtraction_offset
                 background_limits_axis1_low = limits_qdx_px
             elif axis == 1:
                 background_limits_axis0_low = limits_qdy_px
-                background_limits_axis1_low = limits_qdx_px - subtraction_offset
+                background_limits_axis1_low = np.array(limits_qdx_px) - subtraction_offset
 
             integrated_background_low, _ = super().integrate_box(
-                limits_axis0=background_limits_axis0_low,
-                limits_axis1=background_limits_axis1_low,
+                limits_axis0=tuple(background_limits_axis0_low),
+                limits_axis1=tuple(background_limits_axis1_low),
                 mode=mode,
                 axis=axis,
                 box_angle_deg=box_angle_deg,
