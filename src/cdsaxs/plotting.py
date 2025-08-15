@@ -2,6 +2,8 @@
 Plotting functions for cdsaxs data classes.
 """
 
+import warnings
+
 import matplotlib as mpl
 import matplotlib.colors as mpl_colors
 import matplotlib.cm as mpl_cm
@@ -12,9 +14,10 @@ import plotly.colors
 import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
+from scipy.interpolate import griddata
 
 import cdsaxs._plotting_tools as plotting_tools
-from cdsaxs.tools import rotate_image
+from cdsaxs_gui_legacy import diffraction
 
 
 def plot2D(image: NDArray, axis0=None, axis1=None,
@@ -275,7 +278,9 @@ def plot_find_beam_center(data, integrated_q_slice, peak_coords_array,
     return fig, fig_slice
 
 
-def plot_reduced_dataset(dataset, index=None, log_scale=True):
+def plot_reduced_dataset(dataset, index=None, log_scale=True,
+                         interpolated_image=True,
+                         plot_marker_size=5):
 
     if index is None:
         index = max(dataset.reduced_datasets.keys())
@@ -284,6 +289,8 @@ def plot_reduced_dataset(dataset, index=None, log_scale=True):
     qszs = []
     qsxs = []
     Iqs = []
+    wavelengths = []
+    sample_phi_degs = []
 
     for data in reduced_dataset.values():
         qsz = data.qsz
@@ -292,10 +299,20 @@ def plot_reduced_dataset(dataset, index=None, log_scale=True):
         qszs.extend(list(qsz))
         qsxs.extend(list(qsx))
         Iqs.extend(list(Iq))
+        wavelengths.append(data.wavelength_nm)
+        sample_phi_degs.append(data.sample_phi_deg_corr)
 
     qszs = np.array(qszs)
     qsxs = np.array(qsxs)
     Iqs = np.array(Iqs)
+
+    if len(list(set(wavelengths))) > 1:
+        warnings.warn(
+            "You are using multiple wavelengths in your"
+            "reduction, is that correct?")
+    wavelength_nm = wavelengths[0]
+    max_sample_phi_deg = np.nanmax(sample_phi_degs)
+    min_sample_phi_deg = np.nanmin(sample_phi_degs)
 
     if log_scale:
         # move vmin to one order of magniutde lower which will indicate
@@ -306,38 +323,63 @@ def plot_reduced_dataset(dataset, index=None, log_scale=True):
         vmin = np.nanmin(0)
         vmax = np.nanmax(Iqs)
 
-    colors = []
-    cmap = mpl.colormaps['viridis']
-
-    for Iq in Iqs:
-        # negative pixel values are shown as white
-        if Iq < 0:
-            colors.append((0, 0, 0, 0))
-        # zero counts are shown as black on log scale or if the
-        # linear color scale does not go down to 0
-        elif Iq == 0:
-            if not log_scale and vmin == 0:
-                colors.append(cmap(0))
-            else:
-                colors.append((1, 1, 1, 1))
-        elif Iq > 0:
-            if log_scale:
-                colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
-            else:
-                colors.append(cmap((Iq-vmin)/(vmax-vmin)))
-        # all other pixels shown as white
-        else:
-            colors.append((0, 0, 0, 0))
-
-    colors = np.array(colors)
-
     fig, ax = plt.subplots()
     fig.set_figheight(8)
     fig.set_figwidth(9)
 
-    ax.scatter(qsxs, qszs, s=5, marker='o', color=colors)
-    ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
-    ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
+    if not interpolated_image:
+    
+        colors = []
+        cmap = mpl.colormaps['viridis']
+
+        for Iq in Iqs:
+            # negative pixel values are shown as white
+            if Iq < 0:
+                colors.append((0, 0, 0, 0))
+            # zero counts are shown as black on log scale or if the
+            # linear color scale does not go down to 0
+            elif Iq == 0:
+                if not log_scale and vmin == 0:
+                    colors.append(cmap(0))
+                else:
+                    colors.append((1, 1, 1, 1))
+            elif Iq > 0:
+                if log_scale:
+                    colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
+                else:
+                    colors.append(cmap((Iq-vmin)/(vmax-vmin)))
+            # all other pixels shown as white
+            else:
+                colors.append((0, 0, 0, 0))
+
+        colors = np.array(colors)
+
+        ax.scatter(qsxs, qszs, s=plot_marker_size, marker='o', color=colors)
+        ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
+        ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
+
+    else:
+
+        grid_x, grid_z = np.meshgrid(
+            np.linspace(np.min(qsxs), np.max(qsxs), 1000),
+            np.linspace(np.min(qszs), np.max(qszs), 1000))
+        grid_Iq = griddata((qsxs, qszs), Iqs, (grid_x, grid_z), method='cubic')
+
+        sample_phi_grid = np.array(
+            diffraction.qx_qz_to_sample_theta(wavelength_nm, grid_x, grid_z))
+        sample_phi_grid = np.rad2deg(sample_phi_grid[0, :, :])
+
+        filter_out = (
+            sample_phi_grid > max_sample_phi_deg
+            ) | (
+            sample_phi_grid < min_sample_phi_deg
+            )
+
+        grid_Iq[filter_out] = np.nan
+        plt.contour(grid_x, grid_z, np.log10(grid_Iq), 1000, cmap='viridis',
+                    vmin=vmin, vmax=vmax)
+        ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
+        ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
 
     if log_scale:
         norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)

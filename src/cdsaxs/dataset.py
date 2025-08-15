@@ -293,7 +293,8 @@ class Dataset():
     def plot_reduced_dataset(
             self,
             index=None,
-            log_scale=True
+            log_scale=True,
+            interpolated_image=True
     ):
         """
         Plot the Qsz vs. Qsx reduced dataset after integration.
@@ -301,7 +302,8 @@ class Dataset():
         fig = plotting.plot_reduced_dataset(
             self,
             index=index,
-            log_scale=log_scale
+            log_scale=log_scale,
+            interpolated_image=interpolated_image
         )
 
         return fig
