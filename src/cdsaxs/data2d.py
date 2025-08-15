@@ -274,7 +274,6 @@ class Data2D():
         Scale the data by the recipricol of the specified value.or array
         of values that match the dimensions of the data image.
         """
-
         if type(value) is float or type(value) is int:
             value = float(value)
             value_r = 1/value
@@ -635,10 +634,10 @@ class DataQdyQdx(Data2D):
                               "parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, value in self.data_transformations:
-                    if value == key and transform == "normalize":
+                for transform, val in self.data_transformations:
+                    if val == key and transform == "normalize":
                         warnings.warn(f"{key} was already used in a normalization data transformation. Skipping for now.")
-                    value = None
+                        value = None
             if value is not None:
                 self.normalize_data(value, keyword=key)
 
