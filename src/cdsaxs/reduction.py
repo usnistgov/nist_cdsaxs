@@ -111,6 +111,8 @@ def integrate_dataset_box_of_size(
     in_place=True,
     box_angle_deg: float | dict = 0.0,
     rotation_sampling_mode: str = 'bicubic',
+    subtract_background=False,
+    subtraction_offset=5
 ) -> None | dict:
     """
     Integrate a box of a specific size. By default this box is
@@ -163,6 +165,15 @@ def integrate_dataset_box_of_size(
         image intensities can be performed with the 'nearest',
         'bilinear', or 'bicubic' methods in the PILLOW package.
         Default value is 'bicubic'.
+    subtract_background : bool, optional
+        If set to true, will run a background subtraction on the integrated
+        data based on the supplied integration box offset by a set number 
+        of pixels.
+        TODO: decide how to best approach this subtraction past this 
+        initial implementation.
+    subtraction_offset: int, optional
+        The number of pixels to offset the integration box for calculating 
+        the background intensity by. 
 
     Returns
     -------
@@ -184,6 +195,8 @@ def integrate_dataset_box_of_size(
                 show_plot=False,
                 box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
                 rotation_sampling_mode=rotation_sampling_mode,
+                subtract_background=subtract_background,
+                subtraction_offset=subtraction_offset,
             )
 
         if key != integrated_q_slice.name:
@@ -215,6 +228,8 @@ def integrate_dataset_box_of_q_range(
         in_place=True,
         box_angle_deg: float | dict = 0.0,
         rotation_sampling_mode: str = 'bicubic',
+        subtract_background=False,
+        subtraction_offset=5
 ):
     """
     Integrate a box defined by scattering vector limits.
@@ -258,6 +273,15 @@ def integrate_dataset_box_of_q_range(
         image intensities can be performed with the 'nearest',
         'bilinear', or 'bicubic' methods in the PILLOW package.
         Default value is 'bicubic'.
+    subtract_background : bool, optional
+        If set to true, will run a background subtraction on the integrated
+        data based on the supplied integration box offset by a set number 
+        of pixels.
+        TODO: decide how to best approach this subtraction past this 
+        initial implementation.
+    subtraction_offset: int, optional
+        The number of pixels to offset the integration box for calculating 
+        the background intensity by. 
 
     Returns
     -------
@@ -276,6 +300,8 @@ def integrate_dataset_box_of_q_range(
             axis=axis,
             box_angle_deg=box_angle_deg[key] if type(box_angle_deg) is dict else box_angle_deg,
             rotation_sampling_mode=rotation_sampling_mode,
+            subtract_background=subtract_background,
+            subtraction_offset=subtraction_offset
         )
         if key != integrated_q_slice.name:
             raise KeyError(
@@ -297,7 +323,7 @@ def integrate_dataset_box_of_q_range(
 
 def create_reduced_QszQsx(
         dataset: Dataset,
-        integrated_index: int = 0 ,
+        integrated_index: int = None,
         in_place: bool = True):
     """
     For each integrated q slice of each data image, a reduced dataset
@@ -331,6 +357,8 @@ def create_reduced_QszQsx(
         raise ValueError(
             "No integrated datasets to work with."
         )
+    if integrated_index is None:
+        integrated_index = max(dataset.integrated_datasets.keys())
     integrated_dataset = dataset.integrated_datasets[integrated_index]
     reduced_dataset = {}
 
@@ -338,7 +366,7 @@ def create_reduced_QszQsx(
         integrated_q_slice = integrated_dataset[key]
 
         if integrated_q_slice.q_axis == 'qdx':
-            qsz, qsx, _, _ = diffraction.qxz_to_qz_qx(
+            qsz, qsx, _, sample_phi_rad_corr = diffraction.qxz_to_qz_qx(
                 integrated_q_slice.q,
                 np.zeros(shape=integrated_q_slice.q.shape, dtype=np.float64),
                 data.metadata['wavelength_nm'],
@@ -350,6 +378,8 @@ def create_reduced_QszQsx(
                 Iq=np.copy(integrated_q_slice.Iq),
                 qsx=qsx,
                 qsz=qsz,
+                sample_phi_deg_corr=np.rad2deg(sample_phi_rad_corr),
+                wavelength_nm=data.metadata['wavelength_nm']
             )
 
         elif integrated_q_slice.q_axis == 'qdy':
@@ -371,14 +401,16 @@ def create_reduced_QszQsx(
 
 def slice_reduced_dataset(
     dataset: Dataset,
-    reduced_index=0,
+    reduced_index=None,
     q_values=[],
     q_widths=0.001,
     q_axis='qsx',
     find_peaks=False,
     peak_params={},
     in_place: bool = True,
-    show_plot=True
+    show_plot=True,
+    interpolated_image=True,
+    plot_marker_size=5,
 ):
 
     """
@@ -393,6 +425,9 @@ def slice_reduced_dataset(
             raise ValueError(
                 "q_widths must be float or list with same length as q_values."
             )
+
+    if reduced_index is None:
+        reduced_index = max(dataset.reduced_datasets.keys())
 
     q_ranges = [
         (val-width/2, val+width/2) for val, width in zip(q_values, q_widths)]
@@ -416,7 +451,9 @@ def slice_reduced_dataset(
 
         fig = plotting.plot_reduced_dataset(dataset,
                                             index=reduced_index,
-                                            log_scale=True)
+                                            log_scale=True,
+                                            interpolated_image=interpolated_image,
+                                            plot_marker_size=plot_marker_size)
 
         max_qsz = 0
         min_qsz = 0

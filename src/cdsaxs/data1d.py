@@ -72,6 +72,8 @@ class Data1D():
             )
         self.dq = np.array(dq)
 
+        self._data_transformations = []
+
     def interpolate(self,
                     interpolated_q,
                     mode='log'):
@@ -126,6 +128,86 @@ class Data1D():
 
         return interpolated_q, interpolated_Iq
 
+    def scale_data(self, value):
+        """
+        Scale the data by the specified value or array of values that
+        match the dimensions of Iq.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+
+        self.Iq *= value
+        self._data_transformations.append(("scale", value))
+
+    def normalize_data(self, value):
+        """
+        Scale the data by the reciprocal of the specified value or array
+        of values that match the dimensions of Iq.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+            value_r = 1/value
+        else:
+            value_r = np.reciprocal(value)
+            if value_r.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+
+        self.scale_data(value_r)
+        self._data_transformations.append(("normalize", value))
+
+    def subtract_from_data(self, value):
+        """
+        Subtract a specified single value or an array of values that
+        matches the dimensions of Iq from the Iq data.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+        self.Iq -= value
+        self._data_transformations.append(("subtract", value))
+
+    def add_to_data(self, value):
+        """
+        Add a specified single value or an array of values that
+        matches the dimensions of Iq to the Iq data.
+        """
+        if type(value) is float or type(value) is int:
+            value = float(value)
+        else:
+            if value.shape != self.Iq.shape:
+                raise ValueError(
+                    "Size of the provided array does not"
+                    "match the size of the image data.")
+        self.Iq += value
+        self._data_transformations.append(("add", value))
+
+    def reset_data_transformations(self):
+        """
+        Resets any normailzation, scaling, added or subtracted values
+        applied to the Iq data.
+        """
+        for transform, value in reversed(self._data_transformations):
+            if transform == "add":
+                self.subtract_from_data(value)
+            elif transform == "subtract":
+                self.add_to_data(value)
+            elif transform == "normalize":
+                self.scale_data(value)
+            elif transform == "scale":
+                self.normalize_data(value)
+        self._data_transformations = []
+
 
 class IntegratedQSlice(Data1D):
     """
@@ -141,21 +223,22 @@ class IntegratedQSlice(Data1D):
     integration_axis : Axis over which integration was performed, 0 or 1.
     """
 
-    def __init__(self,
-                 q: NDArray,
-                 Iq: NDArray,
-                 q_axis: NDArray,
-                 name: str,
-                 limits_axis0: tuple[int, int],
-                 limits_axis1: tuple[int, int],
-                 mode: str,
-                 integration_axis: int,
-                 dIq: NDArray = None,
-                 dq: NDArray = None,
-                 box_angle_deg: float = 0,
-                 rotation_center: list = [0, 0],
-                 rotation_sampling_mode: str = 'bicubic',
-                 rotated_image: NDArray = None
+    def __init__(
+            self,
+            q: NDArray,
+            Iq: NDArray,
+            q_axis: NDArray,
+            name: str,
+            limits_axis0: tuple[int, int],
+            limits_axis1: tuple[int, int],
+            mode: str,
+            integration_axis: int,
+            dIq: NDArray = None,
+            dq: NDArray = None,
+            box_angle_deg: float = 0,
+            rotation_center: list = [0, 0],
+            rotation_sampling_mode: str = 'bicubic',
+            rotated_image: NDArray = None
     ):
 
         # Base class init
@@ -170,6 +253,23 @@ class IntegratedQSlice(Data1D):
         self.rotation_center = rotation_center
         self.rotation_sampling_mode = rotation_sampling_mode
         self.rotated_image = rotated_image
+
+        self.q_before_mirror = None
+        self.Iq_before_mirror = None
+
+    def mirror_q(self):
+        self.q_before_mirror = np.copy(self.q)
+        self.Iq_before_mirror = np.copy(self.Iq)
+        self.q = np.abs(self.q)
+        sort_arrays = np.argsort(self.q)
+        self.q = self.q[sort_arrays]
+        self.Iq = self.Iq[sort_arrays]
+
+    def reset_mirrored_q(self):
+        self.q = np.copy(self.q_before_mirror)
+        self.Iq = np.copy(self.Iq_before_mirror)
+        self.q_before_mirror = None
+        self.Iq_before_mirror = None
 
 
 class ReducedData():
@@ -186,7 +286,8 @@ class ReducedData():
     Iq : NDArray
     """
 
-    def __init__(self, Iq, qsx=None, qsy=None, qsz=None):
+    def __init__(self, Iq, qsx=None, qsy=None, qsz=None,
+                 sample_phi_deg_corr=None, wavelength_nm=None):
 
         self.Iq = np.array(Iq)
         if qsx is not None:
@@ -195,3 +296,7 @@ class ReducedData():
             self.qsy = np.array(qsy)
         if qsz is not None:
             self.qsz = np.array(qsz)
+        if sample_phi_deg_corr is not None:
+            self.sample_phi_deg_corr = sample_phi_deg_corr
+        if wavelength_nm is not None:
+            self.wavelength_nm = wavelength_nm

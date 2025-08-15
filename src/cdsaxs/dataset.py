@@ -165,9 +165,94 @@ class Dataset():
 
         return figs
 
+    def normalize_datas(self, normalize_by, reset_first=False, keys=None):
+        """
+        Normalize all data by the selected metadata or user parameters.
+        This will not reset any previous normalization. If a new
+        series or normalizations is desired, please run reset normalization
+        first or change reset_first to True.
+
+        Parameters
+        ----------
+        normalize_by : list
+            List of accepted metadata keywords or user parameter keys
+            that should be used to normalize the data.
+        reset_first : boolean
+            If set to True, any previous normalizations will be rest
+            before applying the new requested normalization series.
+            If left as False, the new parameters will be factored into
+            the existing normalization factor.
+        keys : list
+            A list of datas keys can be used to only apply the normalization
+            to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.normalize_data(normalize_by, reset_first=reset_first)
+
+    def reset_normalization(self, keys=None):
+        """
+        Reset all normalizations performed on all data.
+
+        keys : list
+            A list of datas keys can be used to only apply the normalization
+            reset to a subset of the data in datas.
+        """
+
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.reset_normalization()
+
+    def scale_datas(self, value, reset_first=False, keys=None):
+        """
+        Scale the image by the desired value.
+        This does not undo any previous scalings unless reset_scale is
+        called first or reset_first is set to True.
+
+        Parameters
+        ----------
+        value : float or int
+            Value by which to scale the data.
+        reset_first : boolean
+            If set to True, any previous scaling will be rest
+            before applying the new requested scale.
+            If left as False, the new parameters will be factored into
+            the existing scaling factor.
+        keys : list
+            A list of datas keys can be used to only apply the scaling
+            to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.scale_data(value, reset_first=reset_first)
+
+    def reset_scale(self, keys=None):
+        """
+        Reset all scaling performed on all data.
+
+        keys : list
+            A list of datas keys can be used to only apply the scale
+            reset to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.reset_scale()
+
     def plot_integrated_dataset(
             self,
-            index=0,
+            index=None,
             q_axis=None,
             order_by='sample_phi_deg',
             log_scale=True):
@@ -185,10 +270,32 @@ class Dataset():
 
         return fig
 
+    def mirror_integrated_dataset(
+        self,
+        index=None,
+    ):
+        if index is None:
+            index = max(self.integrated_datasets.keys())
+
+        for int_q_slice in self.integrated_datasets[index].values():
+            int_q_slice.mirror_q()
+
+    def reset_mirrored_integrated_dataset(
+            self,
+            index=None,
+    ):
+        if index is None:
+            index = max(self.integrated_datasets.keys())
+
+        for int_q_slice in self.integrated_datasets[index].values():
+            int_q_slice.reset_mirrored_q()
+
     def plot_reduced_dataset(
             self,
-            index=0,
-            log_scale=True
+            index=None,
+            log_scale=True,
+            interpolated_image=True,
+            plot_marker_size=5
     ):
         """
         Plot the Qsz vs. Qsx reduced dataset after integration.
@@ -196,14 +303,16 @@ class Dataset():
         fig = plotting.plot_reduced_dataset(
             self,
             index=index,
-            log_scale=log_scale
+            log_scale=log_scale,
+            plot_marker_size=plot_marker_size,
+            interpolated_image=interpolated_image
         )
 
         return fig
 
     def plot_reduced_slices(
             self,
-            index=0,
+            index=None,
             q_slice_axis='qsx',
             log_scale=True,
             offset_order=0,
@@ -215,13 +324,13 @@ class Dataset():
             index=index,
             q_slice_axis=q_slice_axis,
             log_scale=True,
-            offset_order=0,
-            offset_value=0,
+            offset_order=offset_order,
+            offset_value=offset_value,
         )
 
         return fig
 
-    def save_reduced_slices(self, filepath, index=0, q_slice_axis='qsx',
+    def save_reduced_slices(self, filepath, index=None, q_slice_axis='qsx',
                             decimals=5):
         """
         Returns the slected reduced slices set currently stored in the
@@ -235,6 +344,8 @@ class Dataset():
         TODO: generalize this in the future.
         """
 
+        if index is None:
+            index = max(self.reduced_slices.keys())
         reduced_slices = self.reduced_slices[index][q_slice_axis]
 
         length = 0
@@ -242,10 +353,15 @@ class Dataset():
             length = np.max((length, val.q.shape[0]))
 
         datas = []
-
+        
         for key, val in reduced_slices.items():
             q = val.q
             Iq = val.Iq
+            
+            #sort by q
+            sorted_indexes = np.argsort(q)
+            q = q[sorted_indexes]
+            Iq = Iq[sorted_indexes]
 
             select = Iq > 0
 

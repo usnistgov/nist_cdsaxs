@@ -12,7 +12,6 @@ from cdsaxs.calculators import gaussian
 
 import matplotlib.pyplot as plt
 
-
 def find_gaussian_peakloc(x, y, p0=None):
     """
     Find the peak location of a one-dimensional spectra using a Gaussian
@@ -112,9 +111,9 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
     peaks_px_opt = []
     for (a, b) in peaks_px:
         a_min = max(0, a - int(opt_width[0]/2))
-        a_max = min(a + (opt_width[0] - int(opt_width[0]/2)), image.shape[0]+1)
+        a_max = min(a + (opt_width[0] - int(opt_width[0]/2)), image.shape[0])
         b_min = max(0, b - int(opt_width[1]/2))
-        b_max = min(b + (opt_width[1] - int(opt_width[1]/2)), image.shape[1]+1)
+        b_max = min(b + (opt_width[1] - int(opt_width[1]/2)), image.shape[1])
 
         image_box = image[a_min:a_max, b_min:b_max]
         if peak_find_scale == 'log':
@@ -128,7 +127,7 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
             b_opt, _, _ = find_gaussian_peakloc(
                 np.arange(b_min, b_max),
                 np.sum(image_box, axis=0))
-        except:
+        except RuntimeError:
             warnings.warn(
                 "Could not fit Gaussian to the peak location;"
                 "assuming peak is at the pixel with the highest value.")

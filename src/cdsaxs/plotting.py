@@ -2,6 +2,8 @@
 Plotting functions for cdsaxs data classes.
 """
 
+import warnings
+
 import matplotlib as mpl
 import matplotlib.colors as mpl_colors
 import matplotlib.cm as mpl_cm
@@ -12,8 +14,10 @@ import plotly.colors
 import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
+from scipy.interpolate import griddata
 
 import cdsaxs._plotting_tools as plotting_tools
+from cdsaxs_gui_legacy import diffraction
 
 
 def plot2D(image: NDArray, axis0=None, axis1=None,
@@ -27,13 +31,15 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
     if log_scale:
         with np.errstate(divide='ignore', invalid='ignore'):
             plot_image = np.log10(plot_image)
-        vmin = np.nanmin(plot_image[plot_image > -np.inf]) if not\
+        vmin = np.max([np.nanmin(plot_image[plot_image > -np.inf]), -1]) if not\
             custom_vmin else vmin
         vmax = np.nanmax(plot_image) if not custom_vmax else vmax
-        # pixels with zero counts will show up as black on the plots
+        # pixels with less than 'vmin' count will show up as black on the plots
         # need to set them as a custom value to filter later
-        plot_image[np.isneginf(plot_image)] = -1
-        plot_image[np.isnan(plot_image)] = None
+        plot_image[image <= 0] = -10
+        plot_image[np.isnan(image)] = None
+        plot_image[(plot_image < vmin) & (image > 0)] = vmin
+
     else:
         vmin = 0 if not custom_vmin else vmin
         vmax = np.nanmax(plot_image) if not custom_vmax else vmax
@@ -99,23 +105,12 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
 
 
 def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
-                            vmin=None, vmax=None):
+                            vmin=None, vmax=None,
+                            background_subtractions=None):
 
     image = np.copy(data.image)
     if integrated_q_slice.box_angle_deg != 0:
-        if integrated_q_slice.rotation_sampling_mode == 'nearest':
-            resample = Image.Resampling.NEAREST
-        elif integrated_q_slice.rotation_sampling_mode == 'bilinear':
-            resample = Image.Resampling.BILINEAR
-        else:
-            resample = Image.Resampling.BICUBIC
-        image = Image.fromarray(image)
-        image = image.rotate(integrated_q_slice.box_angle_deg,
-                             resample=resample,
-                             center=(integrated_q_slice.rotation_center[1],
-                                     integrated_q_slice.rotation_center[0]),
-                             fillcolor=-50)
-        image = np.array(image)
+        image = integrated_q_slice.rotated_image
     fig = plot2D(image, axis0=data.qdy, axis1=data.qdx,
                  axis0_type='qdy', axis1_type='qdx', log_scale=log_scale,
                  vmin=vmin, vmax=vmax)
@@ -131,8 +126,37 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
     x = [xmin, xmin, xmax, xmax, xmin]
     y = [ymin, ymax, ymax, ymin, ymin]
     fig.add_trace(go.Scatter(
-        x=x, y=y, mode='lines', line=dict(color='red')
+        x=x, y=y, mode='lines', line=dict(color='red'), name=None, showlegend=False
     ))
+
+    if background_subtractions is not None:
+        # box limits, lines get drawn in the middle of pixels so offset
+        # half open range by 0.5 pixels
+        xmin, xmax = background_subtractions[3]
+        xmin -= 0.5
+        xmax -= 0.5
+        ymin, ymax = background_subtractions[2]
+        ymin -= 0.5
+        ymax -= 0.5
+        x = [xmin, xmin, xmax, xmax, xmin]
+        y = [ymin, ymax, ymax, ymin, ymin]
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode='lines', line=dict(color='orange'), name=None, showlegend=False
+        ))
+
+        # box limits, lines get drawn in the middle of pixels so offset
+        # half open range by 0.5 pixels
+        xmin, xmax = background_subtractions[5]
+        xmin -= 0.5
+        xmax -= 0.5
+        ymin, ymax = background_subtractions[4]
+        ymin -= 0.5
+        ymax -= 0.5
+        x = [xmin, xmin, xmax, xmax, xmin]
+        y = [ymin, ymax, ymax, ymin, ymin]
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode='lines', line=dict(color='orange'), name=None, showlegend=False
+        ))
 
     # integrated 1D data
     fig_slice = go.Figure(data=go.Scatter(
@@ -145,6 +169,20 @@ def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
             visible=True
         )
     ))
+
+    # if background_subtractions is not None:
+
+    #     fig_slice.add_trace(go.Scatter(
+    #         x=integrated_q_slice.q,
+    #         y=background_subtractions[1],
+    #         mode='lines+markers',
+    #     ))
+
+    #     fig_slice.add_trace(go.Scatter(
+    #         x=integrated_q_slice.q,
+    #         y=background_subtractions[0],
+    #         mode='lines+markers',
+    #     ))
 
     fig_slice.update_xaxes(
         title=plotting_tools.generate_axis_label_units(
@@ -284,13 +322,19 @@ def plot_find_beam_center(data, integrated_q_slice, peak_coords_array,
     return fig, fig_slice
 
 
-def plot_reduced_dataset(dataset, index=0, log_scale=True):
+def plot_reduced_dataset(dataset, index=None, log_scale=True,
+                         interpolated_image=True,
+                         plot_marker_size=5):
 
+    if index is None:
+        index = max(dataset.reduced_datasets.keys())
     reduced_dataset = dataset.reduced_datasets[index]
 
     qszs = []
     qsxs = []
     Iqs = []
+    wavelengths = []
+    sample_phi_degs = []
 
     for data in reduced_dataset.values():
         qsz = data.qsz
@@ -299,10 +343,20 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
         qszs.extend(list(qsz))
         qsxs.extend(list(qsx))
         Iqs.extend(list(Iq))
+        wavelengths.append(data.wavelength_nm)
+        sample_phi_degs.append(data.sample_phi_deg_corr)
 
     qszs = np.array(qszs)
     qsxs = np.array(qsxs)
     Iqs = np.array(Iqs)
+
+    if len(list(set(wavelengths))) > 1:
+        warnings.warn(
+            "You are using multiple wavelengths in your"
+            "reduction, is that correct?")
+    wavelength_nm = wavelengths[0]
+    max_sample_phi_deg = np.nanmax(sample_phi_degs)
+    min_sample_phi_deg = np.nanmin(sample_phi_degs)
 
     if log_scale:
         # move vmin to one order of magniutde lower which will indicate
@@ -313,38 +367,63 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
         vmin = np.nanmin(0)
         vmax = np.nanmax(Iqs)
 
-    colors = []
-    cmap = mpl.colormaps['viridis']
-
-    for Iq in Iqs:
-        # negative pixel values are shown as white
-        if Iq < 0:
-            colors.append((0, 0, 0, 0))
-        # zero counts are shown as black on log scale or if the
-        # linear color scale does not go down to 0
-        elif Iq == 0:
-            if not log_scale and vmin == 0:
-                colors.append(cmap(0))
-            else:
-                colors.append((1, 1, 1, 1))
-        elif Iq > 0:
-            if log_scale:
-                colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
-            else:
-                colors.append(cmap((Iq-vmin)/(vmax-vmin)))
-        # all other pixels shown as white
-        else:
-            colors.append((0, 0, 0, 0))
-
-    colors = np.array(colors)
-
     fig, ax = plt.subplots()
     fig.set_figheight(8)
     fig.set_figwidth(9)
 
-    ax.scatter(qsxs, qszs, s=5, marker='o', color=colors)
-    ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
-    ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
+    if not interpolated_image:
+    
+        colors = []
+        cmap = mpl.colormaps['viridis']
+
+        for Iq in Iqs:
+            # negative pixel values are shown as white
+            if Iq < 0:
+                colors.append((0, 0, 0, 0))
+            # zero counts are shown as black on log scale or if the
+            # linear color scale does not go down to 0
+            elif Iq == 0:
+                if not log_scale and vmin == 0:
+                    colors.append(cmap(0))
+                else:
+                    colors.append((1, 1, 1, 1))
+            elif Iq > 0:
+                if log_scale:
+                    colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
+                else:
+                    colors.append(cmap((Iq-vmin)/(vmax-vmin)))
+            # all other pixels shown as white
+            else:
+                colors.append((0, 0, 0, 0))
+
+        colors = np.array(colors)
+
+        ax.scatter(qsxs, qszs, s=plot_marker_size, marker='o', color=colors)
+        ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
+        ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
+
+    else:
+
+        grid_x, grid_z = np.meshgrid(
+            np.linspace(np.min(qsxs), np.max(qsxs), 1000),
+            np.linspace(np.min(qszs), np.max(qszs), 1000))
+        grid_Iq = griddata((qsxs, qszs), Iqs, (grid_x, grid_z), method='cubic')
+
+        sample_phi_grid = np.array(
+            diffraction.qx_qz_to_sample_theta(wavelength_nm, grid_x, grid_z))
+        sample_phi_grid = np.rad2deg(sample_phi_grid[0, :, :])
+
+        filter_out = (
+            sample_phi_grid > max_sample_phi_deg
+            ) | (
+            sample_phi_grid < min_sample_phi_deg
+            )
+
+        grid_Iq[filter_out] = np.nan
+        plt.contour(grid_x, grid_z, np.log10(grid_Iq), 1000, cmap='viridis',
+                    vmin=vmin, vmax=vmax)
+        ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
+        ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
 
     if log_scale:
         norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)
@@ -364,11 +443,14 @@ def plot_reduced_dataset(dataset, index=0, log_scale=True):
 
 def plot_integrated_dataset(
         dataset,
-        index=0,
+        index=None,
         q_axis=None,
         order_by='sample_phi_deg',
         log_scale=True,
         ):
+
+    if index is None:
+        index = max(dataset.integrated_datasets.keys())
 
     if q_axis is None:
         # if the q_axis is not provided, pick the first one from the list
@@ -445,14 +527,14 @@ def plot_integrated_dataset(
     return fig
 
 
-def plot_reduced_slices(dataset, index=0, q_slice_axis='qsx', log_scale=True,
+def plot_reduced_slices(dataset, index=None, q_slice_axis='qsx', log_scale=True,
                         offset_order=0, offset_value=0):
 
+    if index is None:
+        index = max(dataset.reduced_slices.keys())
     reduced_slices = dataset.reduced_slices[index][q_slice_axis]
 
     fig, ax = plt.subplots()
-    offset_order = 2
-    offset_value = 0
 
     slices = np.sort([x for x in reduced_slices.keys()])
     for i, qsx in enumerate(slices):
