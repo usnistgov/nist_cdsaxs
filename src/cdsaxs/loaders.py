@@ -18,7 +18,7 @@ import tifffile
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.dataset import Dataset
 import cdsaxs.metadata
-from cdsaxs.metadata import correct_dtype, METADATA_KEYWORDS
+from cdsaxs.metadata import correct_metadata_dtype, METADATA_KEYWORDS
 
 
 class TiffTools():
@@ -107,7 +107,7 @@ def GeneralTIFFLoader(filepath_csv, name=None):
         params = {}
         for ii, value in enumerate(row):
             if header[ii] in METADATA_KEYWORDS:
-                metadata[str(header[ii])] = correct_dtype(header[ii], value)
+                metadata[str(header[ii])] = correct_metadata_dtype(header[ii], value)
             else:
                 params[str(header[ii])] = value
         metadata["data_directory"] = folder
@@ -244,7 +244,7 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
             keys = re.findall(r'{(.+?)}', pattern)
             for key, value in zip(keys, values):
                 if key in METADATA_KEYWORDS:
-                    metadata[key] = correct_dtype(key, value)
+                    metadata[key] = correct_metadata_dtype(key, value)
                 else:
                     params[key] = value
 
@@ -256,7 +256,7 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
                 loc = filename_clean.find(keyword_search)
                 if loc != -1:
                     value = filename_clean[loc+len(keyword_search):].split('_')[0]
-                    metadata[keyword] = correct_dtype(keyword, value)
+                    metadata[keyword] = correct_metadata_dtype(keyword, value)
 
         # apply any scaling parameters
         if scales is not None:

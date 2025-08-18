@@ -2,10 +2,15 @@
 Handle accepted metadata.
 """
 
+import warnings
+
 METADATA_KEYWORDS = [
-    "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
-    "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
-    "scaling_factor", "I0", "beam_current", "data_directory", "filename",
+    "sample_phi_deg", "sample_phi_offset_deg",
+    "sample_omega_deg", "sample_chi_deg",
+    "energy_ev", "wavelength_nm",
+    "exposure_time_s", "sdd_cm", "pixel_size_um",
+    "scaling_factor", "I0", "beam_current",
+    "data_directory", "filename",
     "name", "center_px", 'sample_phi_offset_deg'
 ]
 
@@ -16,13 +21,17 @@ SAMPLE_METADATA_KEYWORDS = [
 ]
 
 ACCEPTED_Q_AXES = [
-    "qdy", "qdx", "qd", "qsy", "qsx", "qsz", "qs"
+    "qdy", "qdx", "qdz", "qd",
+    "qsy", "qsx", "qsz", "qs",
+    "qby", "qbx", "qbz", "qb"
 ]
 
 FLOATS = [
-    "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
-    "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
-    "scaling_factor", "I0", "beam_current", 'sample_phi_offset_deg'
+    "sample_phi_deg", "sample_phi_offset_deg",
+    "sample_omega_deg", "sample_chi_deg",
+    "energy_ev", "wavelength_nm",
+    "exposure_time_s", "sdd_cm", "pixel_size_um",
+    "scaling_factor", "I0", "beam_current",
 ]
 
 INTEGERS = [
@@ -33,9 +42,9 @@ STRINGS = [
 ]
 
 
-def correct_dtype(name, value):
+def correct_metadata_dtype(name, value):
     """
-    Correct the units for metadata values.
+    Correct the data type for metadata values.
     """
 
     if name in FLOATS:
@@ -45,6 +54,7 @@ def correct_dtype(name, value):
     elif name in STRINGS:
         return str(value)
     else:
-        raise KeyError(
+        warnings.warn(
             f"No data type known for {name}."
         )
+        return value
