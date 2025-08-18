@@ -12,9 +12,7 @@ import warnings
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.signal import find_peaks
 from plotly.offline import iplot
-from PIL import Image
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
@@ -23,6 +21,7 @@ import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
 from cdsaxs_gui_legacy import diffraction
 
+# any changes to these metadata values should update calculated q values
 UPDATE_Q_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
     "detector_phi_deg", "detector_phi_omega"
@@ -31,77 +30,66 @@ UPDATE_Q_TRIGGERS = [
 
 class Data2D():
     """
-    Generic 2D data class with basic image functionalities. This class
-    is not tied to any diffraction information.
-
-    Attributes
-    ----------
-    image : NDArray
-        Two-dimensional array containing the image as pixel intensities.
-        The first dimension corresponds to image rows from top to bottom
-        and the second dimension corresponds to image columns from left
-        to right.
+    Protected Attributes
+    --------------------
+    _image_transformations : list
+        Will keep track of image rotations and flips.
+        The following are appended to the list at each transformation:
+            RX : indicates X-number of counter-clockwise 90 degree
+                 step rotations. For example, R3 indicates a 270
+                 degree rotation counterclockwise.
+            VF : vertical flip; reversal of y-axis (index 0)
+            HF : horizontal flip; reversal of x-axis (index 1)
+    _data_transformations : list of tuples
+        Will keep track of intensity data transformations, including
+        a normalization, scaling, adding or subtracting by or of a
+        specified value. Each item in the list is a tuple of
+        (transformation, value) where transformation can be:
+            normalize
+            scale
+            add
+            subtract
+        and where value can either be a single float or an array of
+        floats with the same dimensions as the image.
     """
-
-    # Will keep track of image rotations and flips.
-    # R# indicates number of counter-clockwise 90 degree rotations
-    # Example: R3 indicates 270 degree counter-clockwise rotation
-    # VF indicates a vertical flip
-    # HF indicates a horizontal flip
     _image_transformations = []
     _data_transformations = []
 
     def __init__(self, image: NDArray[np.floating]):
         """
-        Parameters
+        Generic 2D data class with basic image functionalities. This
+        class is not tied to any diffraction information.
+
+        Attributes
         ----------
         image : NDArray
-            Two-dimensional array of image intensities. The first
-            dimension corresponds to image rows from top to bottom and
-            the second dimension corresponds to image columns from left
-            to right.
+            Two-dimensional array containing the image as pixel
+            intensities. The first dimension corresponds to image rows
+            from top to bottom and the second dimension corresponds to
+            image columns from left to right.
         """
-
         self.image = image
 
-    def rotate_image_step90(self, degrees, direction='ccw'):
+    def rotate_image_ccw(self, steps):
         """
-        Rotate the image by a specified numer of degrees in the
-        direction specified.
+        Rotate the image by a specified number of 90 degree steps
+        counterclockwise.
 
-        The original image is always saved and can be recalled by
-        using 'reset_image_orientation'.
+        The original image can be recalled by using
+        'reset_image_orientation'.
 
         Parameters
         ----------
-        degrees : float
-            Number of degrees to rotate the image. This should be in
-            increments of 90 degrees. A negative value will reverse the
-            rotation direction specified by the 'direction' parameter,
-            use caution.
-        direction : str, optional
-            Rotation direction. Default is 'ccw' which indicates a
-            counterclockwise rotation. Set as 'cw' to indicate a
-            clockwise rotation.
+        steps : int
+            Number of 90 degree rotations to be performed. If a negative
+            value is provided, the rotations will be performed in the
+            clockwise direction.
         """
+        k = int(np.round(steps, 0))
 
-        if degrees < 0:
-            warnings.warn(
-                "You have provided a negative value for degrees of rotation. "
-                "This will reverse the direction specified in the 'direction' "
-                "argument. For example, a -90 degree rotation "
-                "counter-clockwise is the same as a 90 degree clockwise "
-                "rotation. Did you intend this?"
-            )
-        # switch to counterclockwise degrees
-        if direction == 'cw':
-            degrees = 360 - degrees % 360
-        else:
-            degrees = degrees % 360
-        # determine number of 90 degree rotations counterclockwise
-        # this will round down to the nearest 90 degree rotation
-        k = int(degrees/90)
-
+        # determine counterclockwise steps to achieve same rotation
+        while k < 0:
+            k += 4
         if k != 0:
             self.image = np.rot90(self.image, k=k, axes=(0, 1))
             self._image_transformations.append("R"+str(k))
@@ -116,13 +104,12 @@ class Data2D():
         self.image = np.flip(self.image, axis=0)
         self._image_transformations.append("VF")
 
-    def reset_image_orientation(self, transformations=None):
+    def reset_image_orientation(self):
         """
         Return the image to its original orientation removing any
         rotations or flips that have been done.
         """
-        if transformations is None:
-            transformations = self._image_transformations[::-1]
+        transformations = self._image_transformations[::-1]
 
         for tf in transformations:
             if tf == "VF":
@@ -130,8 +117,8 @@ class Data2D():
             elif tf == "HF":
                 self.flip_horizontally()
             else:
-                k = int(tf[1:])
-                self.rotate_image_step90(degrees=90*k, direction="cw")
+                k = -1*int(tf[1:])
+                self.rotate_image_ccw(steps=k)
 
         self._image_transformations = []
 
