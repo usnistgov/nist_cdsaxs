@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from cdsaxs.data1d import Data1D, IntegratedQSlice
+from cdsaxs.data1d import Data1D, IntegratedQSlice, ReducedData
 
 
 class TestData1D(unittest.TestCase):
@@ -462,9 +462,9 @@ class TestIntegratedQSlice(unittest.TestCase):
                 rotation_sampling_mode=self.rotation_sampling_mode,
                 rotation_center=self.rotation_center,
                 )
-    
+
     def test_integrated_q_slice_mirror(self):
-        
+
         mirror_q = np.array([
             0.005, 0.006, 0.007, 0.008, 0.009, 0.01, 0.1, 0.2
         ])
@@ -533,3 +533,96 @@ class TestIntegratedQSlice(unittest.TestCase):
         np.testing.assert_array_equal(
             self.integrated_q_slice.dq, self.dq
         )
+
+
+class TestReducedData(unittest.TestCase):
+
+    def setUp(self):
+        self.Iq = np.array([10, 100, 100, 10, 10])
+        self.qsx = np.array([2, 3, 4, 5, 6])
+        self.qsy = np.array([3, 4, 5, 6, 7])
+        self.qsz = np.array([4, 5, 6, 7, 8])
+        self.sample_phi_deg = 2.5
+        self.sample_chi_deg = 3
+        self.sample_omega_deg = 4.2
+        self.wavelength_nm = 0.007
+
+        self.reduced_data = ReducedData(
+            Iq=self.Iq,
+            qsx=self.qsx,
+            qsy=self.qsy,
+            qsz=self.qsz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            wavelength_nm=self.wavelength_nm
+        )
+
+    def test_init_params(self):
+
+        np.testing.assert_array_equal(self.reduced_data.Iq, self.Iq)
+        np.testing.assert_array_equal(self.reduced_data.qsx, self.qsx)
+        np.testing.assert_array_equal(self.reduced_data.qsy, self.qsy)
+        np.testing.assert_array_equal(self.reduced_data.qsz, self.qsz)
+        np.testing.assert_array_equal(self.reduced_data.q, self.qsz)
+
+        self.assertEqual(self.reduced_data.sample_phi_deg,
+                         self.sample_phi_deg)
+        self.assertEqual(self.reduced_data.sample_chi_deg,
+                         self.sample_chi_deg)
+        self.assertEqual(self.reduced_data.sample_omega_deg,
+                         self.sample_omega_deg)
+        self.assertEqual(self.reduced_data.wavelength_nm,
+                         self.wavelength_nm)
+
+    def test_init_bad_arguments(self):
+
+        with self.assertRaises(ValueError):
+            ReducedData(
+                Iq=self.Iq,
+                qsx=self.qsx,
+                qsy=self.qsy,
+                qsz=self.qsz,
+                primary_axis='qsxyz'
+            )
+
+            ReducedData(
+                Iq=self.Iq,
+                qsx=[1, 2, 3],
+                qsy=self.qsy,
+                qsz=self.qsz,
+                primary_axis='qsxyz'
+            )
+
+            ReducedData(
+                Iq=self.Iq,
+                qsx=self.qsx,
+                qsy=[1, 2, 3],
+                qsz=self.qsz,
+                primary_axis='qsxyz'
+            )
+
+            ReducedData(
+                Iq=self.Iq,
+                qsx=self.qsx,
+                qsy=self.qsy,
+                qsz=[1, 2, 3],
+                primary_axis='qsxyz'
+            )
+
+    def test_reduced_data_linear_interpolation(self):
+
+        _, interpolated_Iq = self.reduced_data.linear_interpolation(
+            [2.5, 4.2], 'qsx', mode='linear')
+        np.testing.assert_array_almost_equal(
+            interpolated_Iq, np.array([55, 82]))
+
+        _, interpolated_Iq = self.reduced_data.linear_interpolation(
+            [3.5, 5.2], 'qsy', mode='linear')
+        np.testing.assert_array_almost_equal(
+            interpolated_Iq, np.array([55, 82]))
+
+        _, interpolated_Iq = self.reduced_data.linear_interpolation(
+            [4.5, 6.2], 'qsz', mode='linear')
+        np.testing.assert_array_almost_equal(
+            interpolated_Iq, np.array([55, 82]))
