@@ -266,7 +266,7 @@ class Data2D():
                     "Size of the provided array does not"
                     "match the size of the image data.")
 
-        self.image *= value
+        self.image = self.image*value
         self._data_transformations.append(("scale", value))
 
     def normalize_data(self, value):
@@ -284,7 +284,7 @@ class Data2D():
                     "Size of the provided array does not"
                     "match the size of the image data.")
 
-        self.image *= value_r
+        self.image = self.image*value_r
         self._data_transformations.append(("normalize", value))
 
     def subtract_from_data(self, value):
@@ -299,7 +299,7 @@ class Data2D():
                 raise ValueError(
                     "Size of the provided array does not"
                     "match the size of the image data.")
-        self.image -= value
+        self.image = self.image-value
         self._data_transformations.append(("subtract", value))
 
     def add_to_data(self, value):
@@ -314,7 +314,7 @@ class Data2D():
                 raise ValueError(
                     "Size of the provided array does not"
                     "match the size of the image data.")
-        self.image += value
+        self.image = self.image+value
         self._data_transformations.append(("add", value))
 
     def reset_data_transformations(self):

@@ -141,7 +141,7 @@ class Data1D():
                     "Size of the provided array does not"
                     "match the size of the image data.")
 
-        self.Iq *= value
+        self.Iq = self.Iq*value
         self._data_transformations.append(("scale", value))
 
     def normalize_data(self, value):
@@ -159,7 +159,7 @@ class Data1D():
                     "Size of the provided array does not"
                     "match the size of the image data.")
 
-        self.scale_data(value_r)
+        self.Iq = self.Iq*value_r
         self._data_transformations.append(("normalize", value))
 
     def subtract_from_data(self, value):
@@ -174,7 +174,7 @@ class Data1D():
                 raise ValueError(
                     "Size of the provided array does not"
                     "match the size of the image data.")
-        self.Iq -= value
+        self.Iq = self.Iq-value
         self._data_transformations.append(("subtract", value))
 
     def add_to_data(self, value):
@@ -189,7 +189,7 @@ class Data1D():
                 raise ValueError(
                     "Size of the provided array does not"
                     "match the size of the image data.")
-        self.Iq += value
+        self.Iq = self.Iq+value
         self._data_transformations.append(("add", value))
 
     def reset_data_transformations(self):
