@@ -67,7 +67,7 @@ class TiffTools():
             raise ValueError("Count not extract count time from file.")
 
 
-def GeneralTIFFLoader(filepath_csv, name=None):
+def GeneralTIFFLoader(filepath_csv, name):
     """
     General TIFF loader. Any scattering metadata or user-defined
     parameters should be passed as a csv file where the first row is
@@ -146,7 +146,7 @@ def GeneralTIFFLoader(filepath_csv, name=None):
     return dataset
 
 
-def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
+def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
                                        pattern=None, scales=None,
                                        filter_by_substrings=None,
                                        filter_by_names=None,
