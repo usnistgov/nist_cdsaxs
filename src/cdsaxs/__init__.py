@@ -3,5 +3,8 @@ import cdsaxs.data1d
 import cdsaxs.data2d
 import cdsaxs.dataset
 import cdsaxs.loaders
-import cdsaxs.sample
+import cdsaxs.metadata
+import cdsaxs.plotting
 import cdsaxs.reduction
+import cdsaxs.sample
+import cdsaxs.tools
