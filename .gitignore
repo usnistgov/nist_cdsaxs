@@ -177,4 +177,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
 dev_workspace/
+validation/
