@@ -463,8 +463,8 @@ def slice_reduced_dataset(
             min_qsz = min(min_qsz, np.nanmin(data.qsz))
 
         for q, q_range in zip(q_values, q_ranges):
-            fig.axes[0].vlines(q, min_qsz, max_qsz, color='red', linestyles='dashed')
-            fig.axes[0].axvspan(q_range[0], q_range[1], facecolor='red', alpha=0.3) 
+            fig.axes[0].vlines(q, min_qsz, max_qsz, color='red', linestyles='dashed', zorder=100)
+            fig.axes[0].axvspan(q_range[0], q_range[1], facecolor='red', alpha=0.3, zorder=100) 
     else:
         fig = None
 

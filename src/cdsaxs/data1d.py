@@ -208,7 +208,7 @@ class Data1D():
                 raise ValueError(
                     "Size of the provided array does not"
                     "match the size of the image data.")
-        self.Iq -= value
+        self.Iq = self.Iq-value
         self._data_transformations.append(("subtract", value))
 
     def add_to_data(self, value):
@@ -223,7 +223,7 @@ class Data1D():
                 raise ValueError(
                     "Size of the provided array does not"
                     "match the size of the image data.")
-        self.Iq += value
+        self.Iq = self.Iq+value
         self._data_transformations.append(("add", value))
 
     def reset_data_transformations(self):

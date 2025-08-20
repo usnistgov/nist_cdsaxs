@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
+from tqdm import tqdm
 
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.dataset import Dataset
@@ -27,6 +28,12 @@ class TiffTools():
     def __init__(self, filepath):
         """Read an image and header information from TIFF file."""
 
+        if len(filepath) > 256:
+            warnings.warn(
+                "Caution: your file path is quite long"
+                f"({len(filepath)} characters) and might result in"
+                "this loader failing.")
+
         filepath = os.path.abspath(filepath)
         self.filepath = filepath
         try:
@@ -34,7 +41,7 @@ class TiffTools():
             self.image = np.array(image).astype(np.float64)
 
             header = {TAGS[key]: image.tag[key] for key in image.tag_v2
-                      if key in TAGS.keys()}
+                        if key in TAGS.keys()}
             self.header = header
         except:
             image = tifffile.imread(filepath).astype(np.float64)
@@ -60,7 +67,7 @@ class TiffTools():
             raise ValueError("Count not extract count time from file.")
 
 
-def GeneralTIFFLoader(filepath_csv, name=None):
+def GeneralTIFFLoader(filepath_csv, name):
     """
     General TIFF loader. Any scattering metadata or user-defined
     parameters should be passed as a csv file where the first row is
@@ -139,10 +146,12 @@ def GeneralTIFFLoader(filepath_csv, name=None):
     return dataset
 
 
-def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
+def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
                                        pattern=None, scales=None,
                                        filter_by_substrings=None,
-                                       filter_by_names=None):
+                                       filter_by_names=None,
+                                       verbose=True,
+                                       data_name=None):
     """
     General TIFF loader that pulls metadata from keywords in the
     filename. The keywords must match the metadata keywords in this
@@ -231,7 +240,13 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
     elif filter_by_names is not None:
         filenames = filter_by_names
 
+    print(f"Found {len(filenames)} images to load into this dataset.")
+
     dataset = Dataset(name=name)
+
+    if verbose:
+        pbar = tqdm(range(len(filenames)), desc="Loading files: ",
+                    position=0, leave=True)
 
     for i, filename in enumerate(filenames):
         metadata = {}
@@ -267,8 +282,8 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
                     params[key] = float(params[key])*value
                 else:
                     print(f"WARNING: the scale for {key} was not applied"
-                            "as the keyword could not be found in metadata or"
-                            "user params.")
+                          "as the keyword could not be found in metadata or"
+                          "user params.")
 
         # add in data directory and filename as metadata always
         metadata["data_directory"] = directory_path
@@ -293,9 +308,32 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name=None,
             warnings.warn(
                 f"Using default pixel size of {metadata['pixel_size_um']}")
 
-        data = DataQdyQdx(image, metadata=metadata, user_params=params)
+        if data_name is not None:
+            new_name = data_name
+            while '{' in new_name and '}' in new_name:
+                start = new_name.find('{')
+                stop = new_name.find('}')
+                key = new_name[start+1:stop]
+                if key in metadata.keys():
+                    value = metadata[key]
+                elif key in params.keys():
+                    value = params[key]
+                else:
+                    value = key
+                old_str = "{"+key+"}"
+                new_str = str(value)
+                new_name = new_name.replace(old_str, new_str)
+        else:
+            new_name = data_name
+
+        data = DataQdyQdx(image, metadata=metadata,
+                          user_params=params,
+                          name=new_name)
 
         dataset.add_data(data)
+
+        if verbose:
+            pbar.update(1)
 
     print('Made dataset from ' + directory_path)
 
