@@ -335,6 +335,9 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
         if verbose:
             pbar.update(1)
 
+    if verbose:
+        pbar.close()
+
     print('Made dataset from ' + directory_path)
 
     return dataset
