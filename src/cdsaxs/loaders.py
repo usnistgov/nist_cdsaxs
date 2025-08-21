@@ -23,10 +23,91 @@ from cdsaxs.metadata import check_metadata, correct_metadata_dtype
 import cdsaxs._loader_tools as lt
 
 
+def filter_filenames(
+        directory_path, filter_substrings=None, file_extension=None):
+    """
+    Filter the files found in the folder at the provided directory path.
+
+    The filters should be a list of substrings to either ensure are
+    included or excluded from the filename.
+
+    The most outer level at the list are all substrings that are joined
+    with an 'OR', meaning that only one of those keywords needs to
+    be present in the filename. If there are a set of keywords that
+    should be joined with 'AND', meaning that all of the keywords need
+    to be present in the filename, they should be found in a nested list
+    at any one or more of the outer list positions. Finally, if there
+    are keywords to exclude at either of these levels, they can be
+    nested in a tuple with the keyword "NOT".
+
+    For example, if filter_substrings was provided as:
+    [['red', 'apple', ('NOT', 'bad')], 'grape', ['orange', ('NOT', 'good')]]
+
+    then the files that would be accepted into the filtered list include
+    those with the word grape, those with both red and apple but not bad,
+    and those with orange but not good. The list would also include
+    any files that include any combinations of those three filters.
+
+    Be careful with the OR level, as 'red_apple_bad_grape.txt' would
+    make the cut in this case, even though it would have failed
+    the first filter. If the file has to pass both checks, then an
+    alternative filter_substrings could be:
+    [['red', 'apple', ('NOT', 'bad')],
+     ['grape', ('NOT', 'apple'),
+     ['orange', ('NOT', 'good')]]
+
+    In this case 'red_apple_bad_grape.txt' would not have passed, but
+    'red_apple_good_grape.txt' would have passed.
+
+    This is meant to only provide simple functionality and if a more
+    complicated filter is required, then the filenames should be
+    filtered by the user and provided directly to the loader.
+
+    Parameters
+    ----------
+    dir_path : str
+        Path to the directory where the files are located.
+    filter_substrings : list, optional
+        List of substring filters for the files. If not provided,
+        this function will return a list of all filenames in the
+        directory.
+    file_extension  : str, optional
+        A file extension can be provided as an additional filter
+        on the files. A file extension could also be provided in the
+        filter_substrings keyword.
+
+    """
+    directory_path = lt.clean_filepath(directory_path)
+    if file_extension is None:
+        file_extension = "."
+    filenames = [x for x in os.listdir(directory_path) if file_extension in x]
+
+    if filter_substrings is not None:
+        or_filtered = []
+
+        for or_item in filter_substrings:
+            if type(or_item) is str:
+                or_filtered.extend([x for x in filenames if or_item in x])
+            elif type(or_item) is list:
+                and_filtered = filenames.copy()
+                for and_item in or_item:
+                    if type(and_item) is str:
+                        and_filtered = [
+                            x for x in and_filtered if and_item in x]
+                    elif type(and_item) is tuple:
+                        and_filtered = [
+                            x for x in and_filtered if and_item not in x]
+                or_filtered.extend(and_filtered)
+
+        filenames = list(set(or_filtered))
+
+    return filenames
+
+
 def read_tiff(filepath):
     """
     Load an image and header from a tiff file.
-    
+
     Parameters
     ----------
     filepath : str, path
@@ -47,13 +128,16 @@ def read_tiff(filepath):
     try:
         image = Image.open(filepath)
         image = np.array(image).astype(np.float64)
-        header = {TAGS[key]: image.tag[key] for key in image.tag_v2
-                    if key in TAGS.keys()}
+        header = {
+            TAGS[key]: image.tag[key] for key in image.tag_v2
+            if key in TAGS.keys()
+            }
     except:
         image = tifffile.imread(filepath).astype(np.float64)
         with tifffile.TiffFile(filepath) as tif:
-            header = {tag.name: tag.value
-                            for tag in tif.pages[0].tags}
+            header = {
+                tag.name: tag.value
+                for tag in tif.pages[0].tags}
 
     return image, filepath, header
 
@@ -62,7 +146,7 @@ def read_nist_bin(filepath):
     """
     Load an image and metadata from a NIST-formatted bin/info file pair
     from the CD-SAXS instrument in group 642.06.
-    
+
     Parameters
     ----------
     filepath : str, path
@@ -97,14 +181,12 @@ def read_nist_bin(filepath):
 
     # extact required information and insert into clean dictionary
     metadata = {}
-    metadata['wavelength_nm'] = (float(sample_meta['Wavelength (nm) ']),
-                                       'nm')
-    metadata['exposure_time_s'] = (float(sample_meta['LiveTime ']),
-                                       's')
-    metadata['pixel_size_um'] = (float(sample_meta['Pixel Size ']),
-                                       'um')
+    metadata['wavelength_nm'] = float(sample_meta['Wavelength (nm) '])
+    metadata['exposure_time_s'] = float(sample_meta['LiveTime '])
+    metadata['pixel_size_um'] = float(sample_meta['Pixel Size '])
 
     return image, filepath, metadata
+
 
 def read_pilatus(filepath=None, header=None):
     """
@@ -175,13 +257,15 @@ def read_pilatus(filepath=None, header=None):
 
     return image, filepath, metadata
 
+
 def LoadData(
     filepath,
     metadata=None,
     user_params=None,
+    name=None,
     filetype=None,
     detector_type=None,
-    ):
+):
     """
     Create an instance of DataQdyQdx from a single data file.
 
@@ -199,6 +283,8 @@ def LoadData(
         Dictionary of user specified keyword, value pairs that provide
         additional parameters about the data that are outside the scope
         of the code's standard metadata.
+    name : str, optional
+        Name for the two-dimensional data instance.
     filetype : str
         Specify the filetype so that the proper reader is used.
         Currently, the accepted filetypes are:
@@ -225,7 +311,7 @@ def LoadData(
                 "Did not recognize the filtype extension:"
                 f"{os.path.basename(filepath)}."
             )
-        
+
     if metadata is None:
         metadata = {}
     else:
@@ -244,8 +330,8 @@ def LoadData(
             if key in metadata.keys():
                 warnings.warn(
                     f"Metadata for {key} was provided by the user and"
-                    "also extracted from the data files. I will not" \
-                    "overwrite the information provided by the user" \
+                    "also extracted from the data files. I will not"
+                    "overwrite the information provided by the user"
                     "but please make sure this is correct."
                 )
             else:
@@ -282,203 +368,174 @@ def LoadData(
     # handle negative values in the images as nan
     image[image < 0] = np.nan
 
-    return DataQdyQdx(image, metadata=metadata, user_params=user_params)
+    return DataQdyQdx(
+        image, metadata=metadata, user_params=user_params, name=name)
 
 
-class LoadDataset():
+def LoadDataset(
+    dataset_name,
+    directory_path,
+    filenames=None,
+    metadata_pattern=None,
+    metadata_scales=None,
+    data_name_pattern=None,
+    verbose=True,
+    filetype=None,
+    detector_type=None
+):
+    """
+    General data loader to create a dataset from a CD-SAXS angle scan
+    and load relevant metadata.
+    TODO : currently only implemented for tiff files
 
-    def __init__(
-        self,
-        dataset_name,
-        directory_path=None,
-        metadata_csv_filepath=None,
-        metadata_pattern=None,
-        metadata_scales=None,
-        data_name_pattern=None,
-        filter_by_substrings=None,
-        filter_by_filenames=None,
-        verbose=True,
-        detector_type=None
-    ):
-        """
-        General data loader to create a dataset from a CD-SAXS angle scan
-        and load relevant metadata.
-        TODO : currently only implemented for tiff files
+    Note that there are multiple filters that can be applied to the
+    dataset but this could result in unexpected behavior. Please refer
+    to this documentation to understand which keyword arguments are
+    critical to reading your data.
 
-        Note that there are multiple filters that can be applied to the
-        dataset but this could result in unexpected behavior. Please refer
-        to this documentation to understand which keyword arguments are
-        critical to reading your data.
-
-        Parameters
-        ----------
-        dataset_name : str
-        mode : str
-            Set the mode for the loader. This determines which keyword
-            arguments should be provided; others will be ignored if
-            provided anyway. Accepted modes include:
-            'csv' : Provide a csv file with metadata for each file to
-                be loaded. Accepted keyword arguments include:
-                    metadata_csv_filepath
-                    metadata_scales
-                    verbose
-                    detector_type
-            'filepaths' : Provide a list of filepaths to the files you
-                would like to load into the dataset. Accepted keywrod
-                arguments include:
-                    metadata_pattern
-                    metadata_scales
-                    data_name_
-            'substring_filter'
-        directory_path : str, path, optional
-            Set the path to the directory from which the tiff images should
-            be loaded. This will be ignored if filepats or
-            metadata_csv_filepath are provided as these also provide all
-            required information to locate the files.
-        filepaths : list[string], optional
-            Provide a list of filepaths to the specific tiff images to load.
-            This list will be further filtered by the following keyword
-            arguments if also provided:
-                filter_files_by_substrings
-                metadata_csv_filepath (from filename column)
-        metadata_csv_filepath : str, path, optional
-            The filepath to the csv file used to define the metadata for
-            each tiff image loaded. The column headers should specifiy
-            the metadata parameter or unique user-specified parameter the
-            value should be assigned to. An accepted metadata keyword must
-            be used otherwise the program will assign the information to
-            the user_params attribute of the data. The csv file should be
-            located in the same directory as the data.
-            Accepted metadata keywords:
-            ---------------------------
-                "filename" (required)
-                "sample_phi_deg"
-                "sample_phi_offset_deg",
-                "sample_omega_deg"
-                "sample_chi_deg",
-                "energy_ev"
-                "wavelength_nm",
-                "exposure_time_s"
-                "sdd_cm"
-                "pixel_size_um",
-                "scaling_factor"
-                "I0"
-                "beam_current",
-                "data_directory"
-                "name"
-                "center_px"
-                'sample_phi_offset_deg'
-        metadata_pattern : str, optional
-            Extract metadata from information stored in the filename.
-            A pattern for the filenames can be provided where the
-            keywords for either metadata or user parameters should be
-            enclosed in {}. For example, if two images had filenames of:
-                sample1_phi0_sdd_500_run001.tif
-                sample1_phi-1_sdd_500_run002.tif
-            The following pattern could be provided to extract meatadata
-            parameters of 'sample_phi_deg' and 'sdd_cm' as well as user
-            parameter 'run' for each data:
-                sample1_phi{sample_phi_deg}_sdd_{sdd_cm}_run{run}.tif
-            NOTE: conflicts can arise if both this pattern and the
-            metadata_csv_filepath are provided. Metadata parameters
-            specified in both places can result in one overwriting the
-            other.
-        metadata_scales : dict, optional
-            If the metadata was provided in incorrect units, a scaling
-            value can be provided to perform unit conversions. The
-            argument should be provided as a dictionary where the key
-            is the metadata keyword or user_params keyword, and the
-            value is the amount by which to scale or multiply the
-            parameter's current value.
-        data_name_pattern : str, optional
-            Provide a pattern to create a unique name for each data in
-            the dataset. Unless the name is provided in the csv file,
-            the default behavior is that the filename is used as the
-            data name. Alternatively, a pattern can be provided that
-            pulls information from helpful metadata. Keep in mind that
-            the name needs to be unique in the dataset.
-            An example is:
-                "Sample 4, Angle: {sample_phi_deg} deg"
-            The data name would be for a sample at a phi rotation angle
-            of 20 degrees:
-                "Sample 4, Angle: 20 deg"
-        filter_files_by_substrings : list[str, list[str]], optional
-            Filter which files to read from the specified data directory
-            by a set of substrings. If a list of strings (substrings) is
-            provided, a filename that includes at least one of those
-            substrings will be loaded. If it is required that the
-            filenames have all the required substrings present, then
-            they should be inclosed in a nested list. For example, if
-            the filter_files_by_substrings is set as:
-                [["red", "apple"], "orange", "strawberry"]
-            Then only files that have orange or strawberry or both (red
-            and apple) or any combination of those three will be loaded.
-            A filename of "apple_orange.tif" will be loaded,
-            "apple.tif" will not, and "red_apple.tif" will be.
-            This is only meant to provide simple filtering functionality
-            and for more complex filtering, we encourage the user to
-            specify the 'filepaths' or 'metadata_csv_filepath' instead.
-        verbose : bool, optional
-            If set to True, a progress bar will be displayed during the
-            loading process. Set to False to turn off this feature.
-            Default value is True
-        detector_type : str, optional
-            Specify the detector type to use built-in loader functions
-            specific to the detector. Accepted detector types are:
-                'Pilatus'
+    Parameters
+    ----------
+    dataset_name : str
+        User-specified name given to the dataset.
+    directory_path : str, path
+        Path to the directory containing the data to load.
+    filenames : list, optional
+        List of specific files to load into the dataset from the
+        directory at directory_path. Keep in mind that unless this is
+        specified, all files in the directory that align with the
+        filetype (if specified) will be loaded into the dataset.
+        A set of substring filters can be applied using the
+        'filter_filenames' function. The list of filenames returned
+        can be used as the input to this keyword argument.
+        Default is None.
+    metadata_pattern : str, optional
+        Extract metadata from information stored in the filenames.
+        A pattern for the filenames can be provided where the
+        keywords for either metadata or user parameters should be
+        enclosed in {}. For example, if two images had filenames of:
+            sample1_phi0_sdd_500_run001.tif
+            sample1_phi-1_sdd_500_run002.tif
+        The following pattern could be provided to extract meatadata
+        parameters of 'sample_phi_deg' and 'sdd_cm' as well as user
+        parameter 'run' for each data:
+            sample1_phi{sample_phi_deg}_sdd_{sdd_cm}_run{run}.tif
+        NOTE: conflicts can arise if both this pattern and the
+        metadata_csv_filepath are provided. Metadata parameters
+        specified in both places can result in one overwriting the
+        other.
+    metadata_scales : dict, optional
+        If any of the metadata was provided in incorrect units, a
+        scaling value can be provided to perform unit conversions. The
+        argument should be provided as a dictionary where the key
+        is the metadata keyword or user_params keyword, and the
+        value is the amount by which to scale or multiply the
+        parameter's current value.
+        NOTE: this will only apply to values extracted from the metadata
+        pattern of the filenames.
+    data_name_pattern : str, optional
+        Provide a pattern to create a unique name for each data in
+        the dataset. Unless the name is provided in the csv file,
+        the default behavior is that the filename is used as the
+        data name. Alternatively, a pattern can be provided that
+        pulls information from helpful metadata. Keep in mind that
+        the name needs to be unique in the dataset.
+        An example is:
+            "Sample 4, Angle: {sample_phi_deg} deg"
+        The data name would be for a sample at a phi rotation angle
+        of 20 degrees:
+            "Sample 4, Angle: 20 deg"
+    verbose : bool, optional
+        If set to True, a progress bar will be displayed during the
+        loading process. Set to False to turn off this feature.
+        Default value is True
+    filetype : str, optional
+        Specify the filetype so that the proper reader is used.
+        Currently, the accepted filetypes are:
+            'tiff' or 'tif'
+            'nist-bin'
+    detector_type : str
+        Specify the type of detector used to collect the image. This is
+        helpful if you know there is metadata stored in the file's
+        header (or other location in the file depending on the type).
+        Currently, the accepted detector types are:
+            'Pilatus'
         """
 
-        dataset = Dataset(name=dataset_name)
+    dataset = Dataset(name=dataset_name)
 
-         
-        
-        
-        # load the csv metadata file
-        csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
-        header = csv_data[0, :]
-        csv_data = csv_data[1:, :]
+    directory_path = lt.clean_filepath(directory_path)
 
-        # extract data directory
-        folder, _ = os.path.split(filepath_csv)
-        print('Made dataset from ' + folder)
+    if filenames is None:
+        filenames = [x for x in os.listdir(directory_path)]
+    filenames = lt.filter_filenames_by_filetype(filenames, filetype)
 
-        dataset = Dataset(name=name)
+    if verbose:
+        pbar = tqdm(range(len(filenames)), desc="Loading files: ",
+                    position=0, leave=True)
 
-        for i, row in enumerate(csv_data):
-            metadata = {}
-            params = {}
-            for ii, value in enumerate(row):
-                if header[ii] in METADATA_KEYWORDS:
-                    metadata[str(header[ii])] = correct_metadata_dtype(header[ii], value)
+    for filename in filenames:
+        filepath = os.path.join(directory_path, filename)
+        metadata = {}
+        user_params = {}
+
+        if metadata_pattern is not None:
+            regex = re.sub(r'{(.+?)}', r'(?P<\1>.+)', metadata_pattern)
+            values = list(re.search(regex, filename).groups())
+            keys = re.findall(r'{(.+?)}', metadata_pattern)
+            for key, value in zip(keys, values):
+                if key in METADATA_KEYWORDS:
+                    metadata[key] = correct_metadata_dtype(key, value)
                 else:
-                    params[str(header[ii])] = value
-            metadata["data_directory"] = folder
-            tiff = TiffTools(os.path.join(folder, metadata["filename"]))
-            if "exposure_time_s" not in metadata.keys():
-                try:
-                    metadata["exposure_time_s"] = tiff.extract_exposure_time()
-                except:
-                    pass
+                    user_params[key] = value
 
-            image = tiff.image
-            # treat pixels with negative values as nan
-            image[image < 0] = np.nan
+        if metadata_scales is not None:
+            for key, value in metadata_scales.items():
+                if key in metadata.keys():
+                    metadata[key] = metadata[key]*value
+                elif key in user_params.keys():
+                    user_params[key] = user_params[key]*value
+                else:
+                    warnings.warn(
+                        f"Did not find the parameter {key} to scale."
+                    )
 
-            if 'center_px' not in metadata.keys():
-                # default center pixel at bottom right of image
-                metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
+        if data_name_pattern is not None:
+            new_name = data_name_pattern
+            while '{' in new_name and '}' in new_name:
+                start = new_name.find('{')
+                stop = new_name.find('}')
+                key = new_name[start+1:stop]
+                if key in metadata.keys():
+                    value = metadata[key]
+                elif key in user_params.keys():
+                    value = user_params[key]
+                else:
+                    value = key
+                old_str = "{"+key+"}"
+                new_str = str(value)
+                new_name = new_name.replace(old_str, new_str)
+        else:
+            new_name = data_name_pattern
 
-            if 'pixel_size_um' not in metadata.keys():
-                # default pixel size
-                metadata['pixel_size_um'] = 172
-                warnings.warn(
-                    f"Using default pixel size of {metadata['pixel_size_um']}")
+        data = LoadData(
+            filepath=filepath,
+            metadata=metadata,
+            user_params=user_params,
+            filetype=filetype,
+            detector_type=detector_type,
+            name=new_name
+        )
 
-            data = DataQdyQdx(image, metadata=metadata, user_params=params)
+        dataset.add_data(data)
 
-            dataset.add_data(data)
+        if verbose:
+            pbar.update(1)
 
-        return dataset
+    if verbose:
+        pbar.close()
+    print(
+        f"Created dataset from data directory: {directory_path}")
+    return dataset
 
 
 def LoadDataset_MetadataCSV(
@@ -548,7 +605,7 @@ def LoadDataset_MetadataCSV(
     csv_header = csv_data[0, :]
     csv_data = csv_data[1:, :]
 
-    dir_path = os.path.dirname(metadata_csv_filepath)
+    directory_path = os.path.dirname(metadata_csv_filepath)
 
     if verbose:
         pbar = tqdm(range(csv_data.shape[0]), desc="Loading files: ",
@@ -561,7 +618,7 @@ def LoadDataset_MetadataCSV(
         for ii, value in enumerate(row):
             if csv_header[ii] in METADATA_KEYWORDS:
                 if csv_header[ii] == 'filename':
-                    filepath = os.path.join(dir_path, value)
+                    filepath = os.path.join(directory_path, value)
                 else:
                     metadata[str(csv_header[ii])]\
                         = correct_metadata_dtype(csv_header[ii], value)
@@ -584,202 +641,7 @@ def LoadDataset_MetadataCSV(
     if verbose:
         pbar.close()
     print(
-        f"Created dataset from data directory: {dir_path}\n"
+        f"Created dataset from data directory: {directory_path}\n"
         f"and csv file {os.path.basename(metadata_csv_filepath)}.")
-
-    return dataset
-
-
-
-def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
-                                       pattern=None, scales=None,
-                                       filter_by_substrings=None,
-                                       filter_by_names=None,
-                                       verbose=True,
-                                       data_name=None):
-    """
-    General TIFF loader that pulls metadata from keywords in the
-    filename. The keywords must match the metadata keywords in this
-    library exactly. This loader will assume that all tiff images in the
-    directory provided should be imported. It will ignore other files
-    with a different format.
-
-    The following keywords are required in the filename:
-        sample_phi_deg : sample rotation angle during cd-saxs in degrees
-        energy_ev : source energy in eV (cannot be used with wavelength_nm)
-        wavelength_nm : source wavelength in nm (only if energy_ev unavailable)
-        exposure_time_s : exposture time in s
-
-    All other keywords are optional. This function will search the
-    filename for all the keywords that it recognizes.
-
-    Alternatively, regular expressions can be used to assign sections
-    of the filename to different metadata keywords and user parameters.
-    In this case, the variable names should match the accepted metadata
-    keywords, otherwise they will be stored in the user params
-    dictionary of the 2D data. Please see the markdown file in
-    nist_cdsaxs/extras/SMI_filename_format_20250728.md for more info.
-
-    An example of this is:
-
-    filename = 'test_sample_sdd_cm_520_energy_ev_16100.tif
-    pattern = "{name}_sdd_cm_{sdd_cm}_energy_ev_{energy_ev}.tif"
-
-    The following will get stored in data.metadata:
-        'name' = 'test_sample'
-        'sdd_cm' = 520
-        'energy_ev' = 161000
-
-    Scaling values for any of the extracted key: value pairs can also
-    be provided as a dictionary of keyword: scale pairs. This enables
-    the user to control unit conversions as needed.
-
-    For example, if the energy_ev was provided as 16.1 (units keV), the
-    following dictionary can be passed for the scales argument:
-    {'energy_ev': 1000} so that 'energy_ev':16100 will be stored in the
-    metadata dictionary with correct units.
-    TODO: implement unit handling for metadata in the future
-
-    The files can also be filtered so that this function does not load
-    in all the images at once. A string or list of strings can be
-    provided and this loader will read any files that include any one
-    or more of these keywords. If you would like to ensure that two
-    or more keywords are included in the same filename, please nest
-    them in another list. For example:
-
-    [['red', 'apple'], 'orange', 'strawberry']
-
-    If filtering by the keyword list above, any files that contain the
-    word orange or strawberry or BOTH red and apple will be loaded. Files
-    that include all of these words will also be loaded.
-
-    If you would like more control over which files are loaded, you
-    can feed a list of the filenames directly as the 'filenames' keyword
-    argument to this laoder.
-
-    """
-
-    # create a list of files in the provided directory
-    directory_path = os.path.abspath(directory_path)
-    filenames = [x for x in os.listdir(directory_path) if '.tif' in x]
-
-    if filter_by_substrings is not None and filter_by_names is not None:
-        raise ValueError(
-            "You cannot define both filter_by_substrings"
-            "and filter_by_names. Please choose one or the"
-            "other to select which files to load.")
-    elif filter_by_substrings is not None:
-        filtered_filenames = []
-        if type(filter_by_substrings) is str:
-            filter_by_substrings = [filter_by_substrings]
-        for string in filter_by_substrings:
-            if type(string) is str:
-                filtered_filenames.extend([
-                    x for x in filenames if string in x])
-            else:
-                temp_filtered = filenames.copy()
-                for string_i in string:
-                    temp_filtered = [x for x in temp_filtered if string_i in x]
-                filtered_filenames.extend(temp_filtered)
-        filenames = list(set(filtered_filenames))
-    elif filter_by_names is not None:
-        filenames = filter_by_names
-
-    print(f"Found {len(filenames)} images to load into this dataset.")
-
-    dataset = Dataset(name=name)
-
-    if verbose:
-        pbar = tqdm(range(len(filenames)), desc="Loading files: ",
-                    position=0, leave=True)
-
-    for i, filename in enumerate(filenames):
-        metadata = {}
-        params = {}
-
-        # if a pattern is provided use that to interpret filename
-        if pattern is not None:
-            regex = re.sub(r'{(.+?)}', r'(?P<\1>.+)', pattern)
-            values = list(re.search(regex, filename).groups())
-            keys = re.findall(r'{(.+?)}', pattern)
-            for key, value in zip(keys, values):
-                if key in METADATA_KEYWORDS:
-                    metadata[key] = correct_metadata_dtype(key, value)
-                else:
-                    params[key] = value
-
-        # otherwise use the standard accepted keyword filename format
-        else:
-            filename_clean = filename[:filename.find('.tif')]
-            for keyword in METADATA_KEYWORDS:
-                keyword_search = f'_{keyword}_'
-                loc = filename_clean.find(keyword_search)
-                if loc != -1:
-                    value = filename_clean[loc+len(keyword_search):].split('_')[0]
-                    metadata[keyword] = correct_metadata_dtype(keyword, value)
-
-        # apply any scaling parameters
-        if scales is not None:
-            for key, value in scales.items():
-                if key in metadata.keys():
-                    metadata[key] = metadata[key]*value
-                elif key in params.keys():
-                    params[key] = float(params[key])*value
-                else:
-                    print(f"WARNING: the scale for {key} was not applied"
-                          "as the keyword could not be found in metadata or"
-                          "user params.")
-
-        # add in data directory and filename as metadata always
-        metadata["data_directory"] = directory_path
-        metadata["filename"] = filename
-
-        # load the image and try to extract info
-        tiff = TiffTools(os.path.join(directory_path, filename))
-        if "exposure_time_s" not in metadata.keys():
-            try:
-                metadata["exposure_time_s"] = tiff.extract_exposure_time()
-            except:
-                pass
-        image = tiff.image
-
-        if 'center_px' not in metadata.keys():
-            # default center pixel at bottom right of image
-            metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
-
-        if 'pixel_size_um' not in metadata.keys():
-            # default pixel size
-            metadata['pixel_size_um'] = 172
-            warnings.warn(
-                f"Using default pixel size of {metadata['pixel_size_um']}")
-
-        if data_name is not None:
-            new_name = data_name
-            while '{' in new_name and '}' in new_name:
-                start = new_name.find('{')
-                stop = new_name.find('}')
-                key = new_name[start+1:stop]
-                if key in metadata.keys():
-                    value = metadata[key]
-                elif key in params.keys():
-                    value = params[key]
-                else:
-                    value = key
-                old_str = "{"+key+"}"
-                new_str = str(value)
-                new_name = new_name.replace(old_str, new_str)
-        else:
-            new_name = data_name
-
-        data = DataQdyQdx(image, metadata=metadata,
-                          user_params=params,
-                          name=new_name)
-
-        dataset.add_data(data)
-
-        if verbose:
-            pbar.update(1)
-
-    print('Made dataset from ' + directory_path)
 
     return dataset
