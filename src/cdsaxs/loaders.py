@@ -18,65 +18,10 @@ from tqdm import tqdm
 
 from cdsaxs.data2d import DataQdyQdx
 from cdsaxs.dataset import Dataset
-from cdsaxs.metadata import correct_metadata_dtype, METADATA_KEYWORDS
+from cdsaxs.metadata import METADATA_KEYWORDS
+from cdsaxs.metadata import check_metadata, correct_metadata_dtype
+import cdsaxs._loader_tools as lt
 
-
-def _clean_filepath(filepath):
-    """checks filepath length and returns an os formatted absolute path"""
-    filepath = os.path.abspath(filepath)
-    if len(filepath) > 256:
-            warnings.warn(
-                "Caution: your file path is quite long"
-                f"({len(filepath)} characters) and might result in"
-                "this loader failing.")
-    return filepath
-
-def _extract_exposure_time_pilatus(self):
-        """
-        Extract exposure time in seconds from the TIFF file header"
-        of a Pilaturs detectr."
-        """
-
-        try:
-            _, value, units = [
-                x for x in self.header['ImageDescription'][0].split('#')
-                if 'Exposure_time' in x][0].split()
-            if units != 's':
-                warnings.warn(
-                    "Exposure time is in wrong units; returning None.")
-                return None
-            else:
-                return float(value)
-        except:
-            warnings.warn(
-                "Count not extract count time from file; returning None.")
-            return None
-
-    def extract_pixel_size(self):
-
-        "Extract pixel time in um from the TIFF file header."
-
-        try:
-            _, value0, units0, _, value1, units1 = [
-                x for x in self.header['ImageDescription'][0].split('#')
-                if 'Pixel_size' in x][0].split()
-            if units0 != 'm' or units1 != 'm':
-                warnings.warn(
-                    "Pixel size is in the wrong units; returning None."
-                )
-                return None
-            if float(value0) != float(value1):
-                raise ValueError(
-                    "Pixel dimensions are not square. This is currently"
-                    "not implemented in the code and requires consideration."
-                )
-            else:
-                return float(value0) * 1e6
-        except:
-            warnings.warn(
-                "Could not extract pixel size from the header; returning None"
-            )
-            return None
 
 def read_tiff(filepath):
     """
@@ -97,7 +42,7 @@ def read_tiff(filepath):
         Dictionary of the header information where the key: value paris
         correpond to the tag.name: tag.value pairs of the header tags.
     """
-    filepath = _clean_filepath(filepath=filepath)
+    filepath = lt.clean_filepath(filepath=filepath)
 
     try:
         image = Image.open(filepath)
@@ -109,7 +54,7 @@ def read_tiff(filepath):
         with tifffile.TiffFile(filepath) as tif:
             header = {tag.name: tag.value
                             for tag in tif.pages[0].tags}
-    
+
     return image, filepath, header
 
 
@@ -135,7 +80,7 @@ def read_nist_bin(filepath):
         Dictionary with metadata keyword: value pairs.
     """
 
-    filepath = _clean_filepath(filepath=filepath)
+    filepath = lt.clean_filepath(filepath=filepath)
 
     # read the image from the .bin file first
     image = np.fromfile(filepath, dtype=np.float64)[1:].reshape(195, 1475)
@@ -175,7 +120,7 @@ def read_pilatus(filepath=None, header=None):
     header : dict, optional
         Dictionary of tag.name: tag.value pairs from a tiff file from a
         Pilatus detector.
-    
+
     Returns
     -------
     NDArray, None
@@ -193,19 +138,42 @@ def read_pilatus(filepath=None, header=None):
             "No inputs provided; returning None. Please provide either"
             "the filepath or the header dictionary."
         )
-        return None, None, None
-
-    elif filepath is not None and header is None:
-        image, filepath, header = read_tiff(filepath=filepath)
-
-    elif filepath is None and header is not None:
         image = None
         filepath = None
-        
+        metadata = None
 
-    
-    image, filepath, header = read_tiff()
+    elif filepath is not None and header is not None:
+        warnings.warn(
+            "One one of either filepath or header should be provided.")
+        image = None
+        filepath = None
+        metadata = None
 
+    else:
+        if filepath is not None:
+            image, filepath, header = read_tiff(filepath=filepath)
+        else:
+            image = None
+            filepath = None
+
+        metadata = {}
+
+        # exposure time
+        exposure_time_s = lt.extract_exposure_time_pilatus(header)
+        if exposure_time_s is not None:
+            metadata["exposure_time_s"] = exposure_time_s
+
+        # pixel size
+        pixel_size_um = lt.extract_pixel_size_pilatus(header)
+        if pixel_size_um is not None:
+            metadata["pixel_size_um"] = pixel_size_um
+        else:
+            metadata["pixel_size_um"] = 172
+            warnings.warn(
+                "Assuming a pixel size of 172 micron!"
+                "Please confirm this is correct before proceeding.")
+
+    return image, filepath, metadata
 
 def LoadData(
     filepath,
@@ -234,7 +202,7 @@ def LoadData(
     filetype : str
         Specify the filetype so that the proper reader is used.
         Currently, the accepted filetypes are:
-            'tiff'
+            'tiff' or 'tif'
             'nist-bin'
     detector_type : str
         Specify the type of detector used to collect the image. This is
@@ -244,144 +212,80 @@ def LoadData(
             'Pilatus'
     """
 
-    filepath = os.path.abspath(filepath)
-
-
-
-    DataQdyQdx(image, metadata=metadata, user_params=params)
-
-
-class 
-
-class Load():
-
-    def __init__(self, filepaht):
-
-        """
-        Reads image files for the dataset loaders.
-        """
-
-def tiff_loader(filepath):
-    """
-    Load an image and header information fr
-    """
-
-
-
-class TiffData():
-    """Tools for reading and handling TIFF image files."""
-
-    def __init__(self, filepath):
-        """
-        Read an image and header information from TIFF file.
-
-        Parameters
-        ----------
-        filepath : filepath to the image file
-
-        Attributes
-        ----------
-        image : NDArray
-            Image extracted from the file.
-        header : dict
-            Header information extracted from the tiff file.
-        """
-
-        if len(filepath) > 256:
-            warnings.warn(
-                "Caution: your file path is quite long"
-                f"({len(filepath)} characters) and might result in"
-                "this loader failing.")
-
-        filepath = os.path.abspath(filepath)
-        self.filepath = filepath
-        try:
-            image = Image.open(filepath)
-            self.image = np.array(image).astype(np.float64)
-
-            header = {TAGS[key]: image.tag[key] for key in image.tag_v2
-                        if key in TAGS.keys()}
-            self.header = header
-        except:
-            image = tifffile.imread(filepath).astype(np.float64)
-            self.image = image
-
-            with tifffile.TiffFile(filepath) as tif:
-                self.header = {tag.name: tag.value
-                               for tag in tif.pages[0].tags}
-
-
-class PilatusData(TiffData):
-    """
-    Tools for handling TIFF image files from a Pilatus detector.
-    """
-
-    def __init__(self, filepath):
-        """
-        Read an image and header information from TIFF file.
-
-        Parameters
-        ----------
-        filepath : filepath to the image file
-
-        Attributes
-        ----------
-        image : NDArray
-            Image extracted from the file.
-        header : dict
-            Header information extracted from the tiff file.
-        """
-        super().__init__(filepath)
-
-    def extract_exposure_time(self):
-        """
-        Extract exposure time in seconds from the TIFF file header"
-        of a Pilaturs detectr."
-        """
-
-        try:
-            _, value, units = [
-                x for x in self.header['ImageDescription'][0].split('#')
-                if 'Exposure_time' in x][0].split()
-            if units != 's':
-                warnings.warn(
-                    "Exposure time is in wrong units; returning None.")
-                return None
-            else:
-                return float(value)
-        except:
-            warnings.warn(
-                "Count not extract count time from file; returning None.")
-            return None
-
-    def extract_pixel_size(self):
-
-        "Extract pixel time in um from the TIFF file header."
-
-        try:
-            _, value0, units0, _, value1, units1 = [
-                x for x in self.header['ImageDescription'][0].split('#')
-                if 'Pixel_size' in x][0].split()
-            if units0 != 'm' or units1 != 'm':
-                warnings.warn(
-                    "Pixel size is in the wrong units; returning None."
-                )
-                return None
-            if float(value0) != float(value1):
-                raise ValueError(
-                    "Pixel dimensions are not square. This is currently"
-                    "not implemented in the code and requires consideration."
-                )
-            else:
-                return float(value0) * 1e6
-        except:
-            warnings.warn(
-                "Could not extract pixel size from the header; returning None"
+    # clean the filepath and try to determine filetype if not provided
+    filepath = lt.clean_filepath(filepath)
+    if filetype is None:
+        extension = os.path.basename(filepath).split(".")[-1]
+        if extension == 'tif' or extension == 'tiff':
+            filetype = 'tiff'
+        elif extension == 'bin':
+            filetype = 'nist-bin'
+        else:
+            raise ValueError(
+                "Did not recognize the filtype extension:"
+                f"{os.path.basename(filepath)}."
             )
-            return None
+        
+    if metadata is None:
+        metadata = {}
+    else:
+        check_metadata(metadata=metadata)
+
+    if user_params is None:
+        user_params = {}
+
+    # try to use the right loader based on filetype
+    if filetype.lower() in ['tiff', 'tif']:
+        image, data_filepath, header = read_tiff(filepath=filepath)
+
+    elif filetype.lower() in ['nist-bin', 'nist_bin']:
+        image, data_filepath, metadata_add = read_nist_bin(filepath=filetype)
+        for key, value in metadata_add.items():
+            if key in metadata.keys():
+                warnings.warn(
+                    f"Metadata for {key} was provided by the user and"
+                    "also extracted from the data files. I will not" \
+                    "overwrite the information provided by the user" \
+                    "but please make sure this is correct."
+                )
+            else:
+                metadata[key] = value
+        check_metadata(metadata=metadata)
+
+    else:
+        raise ValueError(
+            f"Did not recognize the filetype {filetype}."
+        )
+
+    metadata['data_directory'] = os.path.dirname(data_filepath)
+    metadata['filename'] = os.path.basename(data_filepath)
+
+    # try to extract more information based on detector type
+    if detector_type is not None:
+        if detector_type.lower() in ["pilatus"]:
+            _, _, metadata_add = read_pilatus(header=header)
+            for key, value in metadata_add.items():
+                if key in metadata.keys():
+                    warnings.warn(
+                        f"Metadata for {key} was provided by the user or"
+                        "already extracted from reading the file."
+                        "I will not overwrite the existing metadadta with"
+                        "the value extracted by knowing the detector type."
+                    )
+                else:
+                    metadata[key] = value
+
+    if 'center_px' not in metadata.keys():
+        metadata['center_px'] = [
+                image.shape[0]-1, image.shape[1]-1]
+
+    # handle negative values in the images as nan
+    image[image < 0] = np.nan
+
+    return DataQdyQdx(image, metadata=metadata, user_params=user_params)
 
 
-class GeneralDataLoader():
+class LoadDataset():
 
     def __init__(
         self,
@@ -577,10 +481,11 @@ class GeneralDataLoader():
         return dataset
 
 
-def GeneralDataLoader_MetadataCSV(
+def LoadDataset_MetadataCSV(
     dataset_name,
     metadata_csv_filepath,
     verbose=True,
+    filetype=None,
     detector_type=None
 ):
     """
@@ -622,63 +527,69 @@ def GeneralDataLoader_MetadataCSV(
         If set to True, a progress bar will be displayed during the
         loading process. Set to False to turn off this feature.
         Default value is True
-    detector_type : str, optional
-        Specify the detector type to use built-in loader functions
-        specific to the detector. Accepted detector types are:
+    filetype : str
+        Specify the filetype so that the proper reader is used.
+        Currently, the accepted filetypes are:
+            'tiff' or 'tif'
+            'nist-bin'
+    detector_type : str
+        Specify the type of detector used to collect the image. This is
+        helpful if you know there is metadata stored in the file's
+        header (or other location in the file depending on the type).
+        Currently, the accepted detector types are:
             'Pilatus'
     """
 
     dataset = Dataset(name=dataset_name)
 
-         
-        
-        
-        # load the csv metadata file
-        csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
-        header = csv_data[0, :]
-        csv_data = csv_data[1:, :]
+    # load the csv metadata file
+    metadata_csv_filepath = lt.clean_filepath(filepath=metadata_csv_filepath)
+    csv_data = np.loadtxt(metadata_csv_filepath, dtype='str', delimiter=',')
+    csv_header = csv_data[0, :]
+    csv_data = csv_data[1:, :]
 
-        # extract data directory
-        folder, _ = os.path.split(filepath_csv)
-        print('Made dataset from ' + folder)
+    dir_path = os.path.dirname(metadata_csv_filepath)
 
-        dataset = Dataset(name=name)
+    if verbose:
+        pbar = tqdm(range(csv_data.shape[0]), desc="Loading files: ",
+                    position=0, leave=True)
 
-        for i, row in enumerate(csv_data):
-            metadata = {}
-            params = {}
-            for ii, value in enumerate(row):
-                if header[ii] in METADATA_KEYWORDS:
-                    metadata[str(header[ii])] = correct_metadata_dtype(header[ii], value)
+    for i, row in enumerate(csv_data):
+        metadata = {}
+        user_params = {}
+        filepath = None
+        for ii, value in enumerate(row):
+            if csv_header[ii] in METADATA_KEYWORDS:
+                if csv_header[ii] == 'filename':
+                    filepath = os.path.join(dir_path, value)
                 else:
-                    params[str(header[ii])] = value
-            metadata["data_directory"] = folder
-            tiff = TiffTools(os.path.join(folder, metadata["filename"]))
-            if "exposure_time_s" not in metadata.keys():
-                try:
-                    metadata["exposure_time_s"] = tiff.extract_exposure_time()
-                except:
-                    pass
+                    metadata[str(csv_header[ii])]\
+                        = correct_metadata_dtype(csv_header[ii], value)
+            else:
+                user_params[str(csv_header[ii])] = value
 
-            image = tiff.image
-            # treat pixels with negative values as nan
-            image[image < 0] = np.nan
+        data = LoadData(
+            filepath=filepath,
+            metadata=metadata,
+            user_params=user_params,
+            filetype=filetype,
+            detector_type=detector_type,
+        )
 
-            if 'center_px' not in metadata.keys():
-                # default center pixel at bottom right of image
-                metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
+        dataset.add_data(data)
 
-            if 'pixel_size_um' not in metadata.keys():
-                # default pixel size
-                metadata['pixel_size_um'] = 172
-                warnings.warn(
-                    f"Using default pixel size of {metadata['pixel_size_um']}")
+        if verbose:
+            pbar.update(1)
 
-            data = DataQdyQdx(image, metadata=metadata, user_params=params)
+    if verbose:
+        pbar.close()
+    print(
+        f"Created dataset from data directory: {dir_path}\n"
+        f"and csv file {os.path.basename(metadata_csv_filepath)}.")
 
-            dataset.add_data(data)
+    return dataset
 
-        return dataset
+
 
 def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
                                        pattern=None, scales=None,

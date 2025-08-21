@@ -58,3 +58,31 @@ def correct_metadata_dtype(name, value):
             f"No data type known for {name}."
         )
         return value
+
+
+def check_metadata(metadata):
+    """
+    Check the metadata dictionary for:
+    - unaccepted metadata keywords
+    - overspecified wavelength/energy (onle one should be set)
+    """
+    unaccepted_keywords = [
+        x for x in metadata.keys() if x not in METADATA_KEYWORDS
+    ]
+    if len(unaccepted_keywords) > 0:
+        raise ValueError(
+            "The following metadata keywords are not accepted:\n" +
+            f"{unaccepted_keywords}\n" +
+            "The following are accepted metadata keywords:\n" +
+            f"{METADATA_KEYWORDS}"
+        )
+
+    if "energy_ev" in metadata.keys() and\
+            "wavelength_nm" in metadata.keys():
+        raise ValueError(
+            "You have specified both the source energy and wavelength. "
+            "Only one of these can be specified and the other is "
+            "calculated. To avoid over-specifying or conflicting values, "
+            "please only use one of these values. "
+        )
+    return True

@@ -16,7 +16,7 @@ from plotly.offline import iplot
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
-from cdsaxs.metadata import METADATA_KEYWORDS
+from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
 from cdsaxs_gui_legacy import diffraction
@@ -449,7 +449,7 @@ class DataQdyQdx(Data2D):
             exists in self.metadata.
             Default value is True.
         """
-        if self._check_metadata(metadata):
+        if check_metadata(metadata):
             for key, value in metadata.items():
                 if key in self.metadata.keys() and not overwrite:
                     pass
@@ -1754,29 +1754,3 @@ class DataQdyQdx(Data2D):
 
         return angle
 
-    def _check_metadata(self, metadata):
-        """
-        Check the metadata dictionary for:
-        - unaccepted metadata keywords
-        - overspecified wavelength/energy (onle one should be set)
-        """
-        unaccepted_keywords = [
-            x for x in metadata.keys() if x not in METADATA_KEYWORDS
-        ]
-        if len(unaccepted_keywords) > 0:
-            raise ValueError(
-                "The following metadata keywords are not accepted:\n" +
-                f"{unaccepted_keywords}\n" +
-                "The following are accepted metadata keywords:\n" +
-                f"{METADATA_KEYWORDS}"
-            )
-
-        if "energy_ev" in metadata.keys() and\
-                "wavelength_nm" in metadata.keys():
-            raise ValueError(
-                "You have specified both the source energy and wavelength. "
-                "Only one of these can be specified and the other is "
-                "calculated. To avoid over-specifying or conflicting values, "
-                "please only use one of these values. "
-            )
-        return True
