@@ -21,6 +21,63 @@ from cdsaxs.dataset import Dataset
 from cdsaxs.metadata import correct_metadata_dtype, METADATA_KEYWORDS
 
 
+def _clean_filepath(filepath):
+    """checks filepath length and returns an os formatted absolute path"""
+    filepath = os.path.abspath(filepath)
+    if len(filepath) > 256:
+            warnings.warn(
+                "Caution: your file path is quite long"
+                f"({len(filepath)} characters) and might result in"
+                "this loader failing.")
+    return filepath
+
+def _extract_exposure_time_pilatus(self):
+        """
+        Extract exposure time in seconds from the TIFF file header"
+        of a Pilaturs detectr."
+        """
+
+        try:
+            _, value, units = [
+                x for x in self.header['ImageDescription'][0].split('#')
+                if 'Exposure_time' in x][0].split()
+            if units != 's':
+                warnings.warn(
+                    "Exposure time is in wrong units; returning None.")
+                return None
+            else:
+                return float(value)
+        except:
+            warnings.warn(
+                "Count not extract count time from file; returning None.")
+            return None
+
+    def extract_pixel_size(self):
+
+        "Extract pixel time in um from the TIFF file header."
+
+        try:
+            _, value0, units0, _, value1, units1 = [
+                x for x in self.header['ImageDescription'][0].split('#')
+                if 'Pixel_size' in x][0].split()
+            if units0 != 'm' or units1 != 'm':
+                warnings.warn(
+                    "Pixel size is in the wrong units; returning None."
+                )
+                return None
+            if float(value0) != float(value1):
+                raise ValueError(
+                    "Pixel dimensions are not square. This is currently"
+                    "not implemented in the code and requires consideration."
+                )
+            else:
+                return float(value0) * 1e6
+        except:
+            warnings.warn(
+                "Could not extract pixel size from the header; returning None"
+            )
+            return None
+
 def read_tiff(filepath):
     """
     Load an image and header from a tiff file.
@@ -40,12 +97,7 @@ def read_tiff(filepath):
         Dictionary of the header information where the key: value paris
         correpond to the tag.name: tag.value pairs of the header tags.
     """
-    if len(filepath) > 256:
-            warnings.warn(
-                "Caution: your file path is quite long"
-                f"({len(filepath)} characters) and might result in"
-                "this loader failing.")
-    filepath = os.path.abspath(filepath)
+    filepath = _clean_filepath(filepath=filepath)
 
     try:
         image = Image.open(filepath)
@@ -83,12 +135,7 @@ def read_nist_bin(filepath):
         Dictionary with metadata keyword: value pairs.
     """
 
-    if len(filepath) > 256:
-            warnings.warn(
-                "Caution: your file path is quite long"
-                f"({len(filepath)} characters) and might result in"
-                "this loader failing.")
-    filepath = os.path.abspath(filepath)
+    filepath = _clean_filepath(filepath=filepath)
 
     # read the image from the .bin file first
     image = np.fromfile(filepath, dtype=np.float64)[1:].reshape(195, 1475)
@@ -113,6 +160,51 @@ def read_nist_bin(filepath):
                                        'um')
 
     return image, filepath, metadata
+
+def read_pilatus(filepath=None, header=None):
+    """
+    Read a tiff file from a Pilatus detector, returning the image and
+    the formatted header as metadata. If only the header is provided as
+    a dictionary of tag.name: tag.value pairs, only the metadata
+    dictionary will be returned with None as the image.
+
+    Parameters
+    ----------
+    filepath : str, optional
+        Filepath to the tiff file from a Pilatus detector.
+    header : dict, optional
+        Dictionary of tag.name: tag.value pairs from a tiff file from a
+        Pilatus detector.
+    
+    Returns
+    -------
+    NDArray, None
+        Image from the tiff file if the filepath is provided.
+        Otherwise, this is None
+    str, None
+        Formatted filepath from which the image was loaded. If filepath
+        is not provided, this is None.
+    dict
+        Metadata dictionary with accepted metadata keywords extracted
+        from the tiff file header.
+    """
+    if filepath is None and header is None:
+        warnings.warn(
+            "No inputs provided; returning None. Please provide either"
+            "the filepath or the header dictionary."
+        )
+        return None, None, None
+
+    elif filepath is not None and header is None:
+        image, filepath, header = read_tiff(filepath=filepath)
+
+    elif filepath is None and header is not None:
+        image = None
+        filepath = None
+        
+
+    
+    image, filepath, header = read_tiff()
 
 
 def LoadData(
