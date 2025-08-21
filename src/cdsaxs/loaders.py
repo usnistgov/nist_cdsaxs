@@ -21,8 +21,163 @@ from cdsaxs.dataset import Dataset
 from cdsaxs.metadata import correct_metadata_dtype, METADATA_KEYWORDS
 
 
-class TiffTools():
-    """Tools for handling TIFF image files."""
+def read_tiff(filepath):
+    """
+    Load an image and header from a tiff file.
+    
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the tiff file to be loaded.
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary of the header information where the key: value paris
+        correpond to the tag.name: tag.value pairs of the header tags.
+    """
+    if len(filepath) > 256:
+            warnings.warn(
+                "Caution: your file path is quite long"
+                f"({len(filepath)} characters) and might result in"
+                "this loader failing.")
+    filepath = os.path.abspath(filepath)
+
+    try:
+        image = Image.open(filepath)
+        image = np.array(image).astype(np.float64)
+        header = {TAGS[key]: image.tag[key] for key in image.tag_v2
+                    if key in TAGS.keys()}
+    except:
+        image = tifffile.imread(filepath).astype(np.float64)
+        with tifffile.TiffFile(filepath) as tif:
+            header = {tag.name: tag.value
+                            for tag in tif.pages[0].tags}
+    
+    return image, filepath, header
+
+
+def read_nist_bin(filepath):
+    """
+    Load an image and metadata from a NIST-formatted bin/info file pair
+    from the CD-SAXS instrument in group 642.06.
+    
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the bin file to be loaded.
+        The paired info file should be in the same directory and have
+        the same filename (apart from the different extension).
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
+    """
+
+    if len(filepath) > 256:
+            warnings.warn(
+                "Caution: your file path is quite long"
+                f"({len(filepath)} characters) and might result in"
+                "this loader failing.")
+    filepath = os.path.abspath(filepath)
+
+    # read the image from the .bin file first
+    image = np.fromfile(filepath, dtype=np.float64)[1:].reshape(195, 1475)
+
+    # read the .info file
+    infopath = os.path.join(
+        os.path.dirname(filepath),
+        os.path.basename(filepath)[:-4] + ".info"
+    )
+    file = open(infopath)
+    sample_meta = file.readlines()
+    sample_meta = {x.split('=')[0]: x.split('=')[1] for x in sample_meta}
+    file.close()
+
+    # extact required information and insert into clean dictionary
+    metadata = {}
+    metadata['wavelength_nm'] = (float(sample_meta['Wavelength (nm) ']),
+                                       'nm')
+    metadata['exposure_time_s'] = (float(sample_meta['LiveTime ']),
+                                       's')
+    metadata['pixel_size_um'] = (float(sample_meta['Pixel Size ']),
+                                       'um')
+
+    return image, filepath, metadata
+
+
+def LoadData(
+    filepath,
+    metadata=None,
+    user_params=None,
+    filetype=None,
+    detector_type=None,
+    ):
+    """
+    Create an instance of DataQdyQdx from a single data file.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the file to be loaded. The loader will try and determine
+        the proper reader from the file extension. This can be
+        overwritten by providing the keyword argument 'filetype'.
+    metadata : dict, optional
+        Dictionary of metadata keyword, value pairs to be added to
+        the metadata attribute of the 2D data instance.
+        See metadata.py for full list of accepted keywords.
+    user_params : dict, optional
+        Dictionary of user specified keyword, value pairs that provide
+        additional parameters about the data that are outside the scope
+        of the code's standard metadata.
+    filetype : str
+        Specify the filetype so that the proper reader is used.
+        Currently, the accepted filetypes are:
+            'tiff'
+            'nist-bin'
+    detector_type : str
+        Specify the type of detector used to collect the image. This is
+        helpful if you know there is metadata stored in the file's
+        header (or other location in the file depending on the type).
+        Currently, the accepted detector types are:
+            'Pilatus'
+    """
+
+    filepath = os.path.abspath(filepath)
+
+
+
+    DataQdyQdx(image, metadata=metadata, user_params=params)
+
+
+class 
+
+class Load():
+
+    def __init__(self, filepaht):
+
+        """
+        Reads image files for the dataset loaders.
+        """
+
+def tiff_loader(filepath):
+    """
+    Load an image and header information fr
+    """
+
+
+
+class TiffData():
+    """Tools for reading and handling TIFF image files."""
 
     def __init__(self, filepath):
         """
@@ -64,7 +219,7 @@ class TiffTools():
                                for tag in tif.pages[0].tags}
 
 
-class PilatusDetector(TiffTools):
+class PilatusData(TiffData):
     """
     Tools for handling TIFF image files from a Pilatus detector.
     """
@@ -330,59 +485,108 @@ class GeneralDataLoader():
         return dataset
 
 
-class GeneralDataLoader_MetadataCSV(GeneralDataLoader):
+def GeneralDataLoader_MetadataCSV(
+    dataset_name,
+    metadata_csv_filepath,
+    verbose=True,
+    detector_type=None
+):
+    """
+    General data loader to create a dataset from a CD-SAXS angle scan
+    and load relevant metadata from a CSV file.
+    TODO : currently only implemented for tiff files
 
-    def __init__(
-        self,
-        dataset_name,
-        metadata_csv_filepath,
-        verbose=True,
-        detector_type=None
-    ):
-        """
-        General data loader to create a dataset from a CD-SAXS angle scan
-        and load relevant metadata from a CSV file.
-        TODO : currently only implemented for tiff files
+    Parameters
+    ----------
+    dataset_name : str
+    metadata_csv_filepath : str, path
+        The filepath to the csv file used to define the metadata for
+        each tiff image loaded. The column headers should specifiy
+        the metadata parameter or unique user-specified parameter the
+        value should be assigned to. An accepted metadata keyword must
+        be used otherwise the program will assign the information to
+        the user_params attribute of the data. The csv file should be
+        located in the same directory as the data.
+        Accepted metadata keywords:
+        ---------------------------
+            "filename" (required)
+            "sample_phi_deg"
+            "sample_phi_offset_deg",
+            "sample_omega_deg"
+            "sample_chi_deg",
+            "energy_ev"
+            "wavelength_nm",
+            "exposure_time_s"
+            "sdd_cm"
+            "pixel_size_um",
+            "scaling_factor"
+            "I0"
+            "beam_current",
+            "data_directory"
+            "name"
+            "center_px"
+            'sample_phi_offset_deg'
+    verbose : bool, optional
+        If set to True, a progress bar will be displayed during the
+        loading process. Set to False to turn off this feature.
+        Default value is True
+    detector_type : str, optional
+        Specify the detector type to use built-in loader functions
+        specific to the detector. Accepted detector types are:
+            'Pilatus'
+    """
 
-        Parameters
-        ----------
-        dataset_name : str
-        metadata_csv_filepath : str, path
-            The filepath to the csv file used to define the metadata for
-            each tiff image loaded. The column headers should specifiy
-            the metadata parameter or unique user-specified parameter the
-            value should be assigned to. An accepted metadata keyword must
-            be used otherwise the program will assign the information to
-            the user_params attribute of the data. The csv file should be
-            located in the same directory as the data.
-            Accepted metadata keywords:
-            ---------------------------
-                "filename" (required)
-                "sample_phi_deg"
-                "sample_phi_offset_deg",
-                "sample_omega_deg"
-                "sample_chi_deg",
-                "energy_ev"
-                "wavelength_nm",
-                "exposure_time_s"
-                "sdd_cm"
-                "pixel_size_um",
-                "scaling_factor"
-                "I0"
-                "beam_current",
-                "data_directory"
-                "name"
-                "center_px"
-                'sample_phi_offset_deg'
-       verbose : bool, optional
-            If set to True, a progress bar will be displayed during the
-            loading process. Set to False to turn off this feature.
-            Default value is True
-        detector_type : str, optional
-            Specify the detector type to use built-in loader functions
-            specific to the detector. Accepted detector types are:
-                'Pilatus'
-        """
+    dataset = Dataset(name=dataset_name)
+
+         
+        
+        
+        # load the csv metadata file
+        csv_data = np.loadtxt(filepath_csv, dtype='str', delimiter=',')
+        header = csv_data[0, :]
+        csv_data = csv_data[1:, :]
+
+        # extract data directory
+        folder, _ = os.path.split(filepath_csv)
+        print('Made dataset from ' + folder)
+
+        dataset = Dataset(name=name)
+
+        for i, row in enumerate(csv_data):
+            metadata = {}
+            params = {}
+            for ii, value in enumerate(row):
+                if header[ii] in METADATA_KEYWORDS:
+                    metadata[str(header[ii])] = correct_metadata_dtype(header[ii], value)
+                else:
+                    params[str(header[ii])] = value
+            metadata["data_directory"] = folder
+            tiff = TiffTools(os.path.join(folder, metadata["filename"]))
+            if "exposure_time_s" not in metadata.keys():
+                try:
+                    metadata["exposure_time_s"] = tiff.extract_exposure_time()
+                except:
+                    pass
+
+            image = tiff.image
+            # treat pixels with negative values as nan
+            image[image < 0] = np.nan
+
+            if 'center_px' not in metadata.keys():
+                # default center pixel at bottom right of image
+                metadata['center_px'] = [image.shape[0]-1, image.shape[1]-1]
+
+            if 'pixel_size_um' not in metadata.keys():
+                # default pixel size
+                metadata['pixel_size_um'] = 172
+                warnings.warn(
+                    f"Using default pixel size of {metadata['pixel_size_um']}")
+
+            data = DataQdyQdx(image, metadata=metadata, user_params=params)
+
+            dataset.add_data(data)
+
+        return dataset
 
 def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
                                        pattern=None, scales=None,
