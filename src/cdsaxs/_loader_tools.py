@@ -24,8 +24,12 @@ def extract_exposure_time_pilatus(header):
     """
 
     try:
+        if type(header["ImageDescription"]) is str:
+            image_desc = header["ImageDescription"]
+        else:
+            image_desc = header["ImageDescription"][0]
         _, value, units = [
-            x for x in header['ImageDescription'][0].split('#')
+            x for x in image_desc.split('#')
             if 'Exposure_time' in x][0].split()
         if units != 's':
             warnings.warn(
@@ -44,9 +48,15 @@ def extract_pixel_size_pilatus(header):
     "Extract pixel time in um from the TIFF file header."
 
     try:
+        if type(header["ImageDescription"]) is str:
+            image_desc = header["ImageDescription"]
+        else:
+            image_desc = header["ImageDescription"][0]
+
         _, value0, units0, _, value1, units1 = [
-            x for x in header['ImageDescription'][0].split('#')
+            x for x in image_desc.split('#')
             if 'Pixel_size' in x][0].split()
+
         if units0 != 'm' or units1 != 'm':
             warnings.warn(
                 "Pixel size is in the wrong units; returning None."
@@ -57,8 +67,7 @@ def extract_pixel_size_pilatus(header):
                 "Pixel dimensions are not square. This is currently"
                 "not implemented in the code and requires consideration."
             )
-        else:
-            return float(value0) * 1e6
+        return float(value0) * 1e6
     except:
         warnings.warn(
             "Could not extract pixel size from the header; returning None"
@@ -76,8 +85,9 @@ def filter_filenames_by_filetype(filenames, filetype):
         return filenames
 
     if filetype.lower() in ['tiff', 'tif']:
-        filenames = [x for x in filenames if '.tif' in x]
+        filenames = [x for x in filenames if 'tif' == x.split('.')[-1]
+                     or 'tiff' == x.split('.')[-1]]
     elif filetype.lower() in ['nist_bin', 'nist-bin']:
-        filenames = [x for x in filenames if '.bin' in x]
+        filenames = [x for x in filenames if 'bin' == x.split('.')[-1]]
 
     return filenames
