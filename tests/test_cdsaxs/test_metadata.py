@@ -2,6 +2,7 @@ import unittest
 
 from cdsaxs.metadata import correct_metadata_dtype, check_metadata
 from cdsaxs.metadata import METADATA_KEYWORDS, FLOATS, INTEGERS, STRINGS
+from cdsaxs.metadata import SAMPLE_METADATA_KEYWORDS
 
 
 class TestCorrectMetadataDtype(unittest.TestCase):
@@ -67,3 +68,16 @@ class TestCheckMetadata(unittest.TestCase):
                 'energy_ev': 16100,
                 'wavelength_nm': 1.2
             })
+
+    def test_operational_sample(self):
+
+        self.assertTrue(
+            check_metadata({
+                'q_peak_positions_Ang-1': [0.001],
+            }, sample_mode=True)
+        )
+
+    def test_unaccepted_keyswords_sample(self):
+
+        with self.assertRaises(ValueError):
+            check_metadata({'sample_phi_deg': 2}, sample_mode=True)

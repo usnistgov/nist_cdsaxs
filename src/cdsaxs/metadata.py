@@ -18,6 +18,8 @@ SAMPLE_METADATA_KEYWORDS = [
     'sample_size_mm',
     'substrate_thickness_um',
     'substrate_attenuation_coeff_um-1',
+    'pitch_nm',
+    'q_peak_positions_Ang-1'
 ]
 
 ACCEPTED_Q_AXES = [
@@ -32,6 +34,9 @@ FLOATS = [
     "energy_ev", "wavelength_nm",
     "exposure_time_s", "sdd_cm", "pixel_size_um",
     "scaling_factor", "I0", "beam_current",
+    "sample_size_mm", "substrate_thickness_um",
+    "substrate_attenuation_coeff_um-1",
+    "pitch_nm"
 ]
 
 INTEGERS = [
@@ -60,29 +65,48 @@ def correct_metadata_dtype(name, value):
         return value
 
 
-def check_metadata(metadata):
+def check_metadata(metadata, sample_mode=False):
     """
     Check the metadata dictionary for:
     - unaccepted metadata keywords
     - overspecified wavelength/energy (onle one should be set)
-    """
-    unaccepted_keywords = [
-        x for x in metadata.keys() if x not in METADATA_KEYWORDS
-    ]
-    if len(unaccepted_keywords) > 0:
-        raise ValueError(
-            "The following metadata keywords are not accepted:\n" +
-            f"{unaccepted_keywords}\n" +
-            "The following are accepted metadata keywords:\n" +
-            f"{METADATA_KEYWORDS}"
-        )
 
-    if "energy_ev" in metadata.keys() and\
-            "wavelength_nm" in metadata.keys():
-        raise ValueError(
-            "You have specified both the source energy and wavelength. "
-            "Only one of these can be specified and the other is "
-            "calculated. To avoid over-specifying or conflicting values, "
-            "please only use one of these values. "
-        )
-    return True
+    If sample_mode is set to True, it will check the metadata against
+    the accepted sample metadata keywords.
+    """
+    if sample_mode:
+        unaccepted_keywords = [
+            x for x in metadata.keys() if x not in SAMPLE_METADATA_KEYWORDS
+        ]
+
+        if len(unaccepted_keywords) > 0:
+            raise ValueError(
+                "The following metadata keywords are not accepted:\n" +
+                f"{unaccepted_keywords}\n" +
+                "The following are accepted sample metadata keywords:\n" +
+                f"{SAMPLE_METADATA_KEYWORDS}"
+            )
+        return True
+
+    else:
+        unaccepted_keywords = [
+            x for x in metadata.keys() if x not in METADATA_KEYWORDS
+        ]
+
+        if len(unaccepted_keywords) > 0:
+            raise ValueError(
+                "The following metadata keywords are not accepted:\n" +
+                f"{unaccepted_keywords}\n" +
+                "The following are accepted metadata keywords:\n" +
+                f"{METADATA_KEYWORDS}"
+            )
+
+        if "energy_ev" in metadata.keys() and\
+                "wavelength_nm" in metadata.keys():
+            raise ValueError(
+                "You have specified both the source energy and wavelength. "
+                "Only one of these can be specified and the other is "
+                "calculated. To avoid over-specifying or conflicting values, "
+                "please only use one of these values. "
+            )
+        return True
