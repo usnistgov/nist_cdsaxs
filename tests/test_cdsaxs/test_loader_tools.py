@@ -1,7 +1,6 @@
 import os
 import itertools
 
-import numpy as np
 import unittest
 
 import cdsaxs._loader_tools as loader_tools
@@ -113,3 +112,41 @@ class TestFilterFilenamesByFiletype(unittest.TestCase):
                     self.filenames, filetype),
                 filenames_bin
             )
+
+
+class TestExtractMetadataFromPattern(unittest.TestCase):
+
+    def setUp(self):
+        self.filename = "sample_phi_deg_-45.0_sdd_m_5.02_sample_25A.tif"
+        self.pattern = "sample_phi_deg_{sample_phi_deg}_sdd_m_{sdd_cm}_sample_{sample_name}.tif"
+        self.scales = {'sdd_cm': 100}
+        self.metadata, self.user_params\
+            = loader_tools.extract_metadata_from_pattern(
+                {'energy_ev': 16100}, {}, self.filename, self.pattern, self.scales
+            )
+
+    def testMetadata(self):
+
+        self.assertAlmostEqual(self.metadata['sample_phi_deg'], -45.0)
+        self.assertAlmostEqual(self.metadata['sdd_cm'], 502)
+        self.assertAlmostEqual(self.metadata['energy_ev'], 16100)
+
+    def testUserParams(self):
+
+        self.assertEqual(self.user_params['sample_name'], "25A")
+
+
+class TestGenerateDataNameFromPattern(unittest.TestCase):
+
+    def setUp(self):
+        pattern = "Sample: {sample}, Phi: {sample_phi_deg} deg"
+        metadata = {'sample_phi_deg': -45}
+        user_params = {'sample': '25A'}
+        self.name = loader_tools.generate_data_name_from_pattern(
+            pattern, metadata, user_params
+        )
+
+    def testName(self):
+
+        self.assertEqual(self.name,
+                         "Sample: 25A, Phi: -45 deg")

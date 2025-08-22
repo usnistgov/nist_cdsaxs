@@ -96,7 +96,7 @@ def filter_filenames(
                             x for x in and_filtered if and_item in x]
                     elif type(and_item) is tuple:
                         and_filtered = [
-                            x for x in and_filtered if and_item not in x]
+                            x for x in and_filtered if and_item[1] not in x]
                 or_filtered.extend(and_filtered)
 
         filenames = list(set(or_filtered))
@@ -478,44 +478,14 @@ def LoadDataset(
         metadata = {}
         user_params = {}
 
-        if metadata_pattern is not None:
-            regex = re.sub(r'{(.+?)}', r'(?P<\1>.+)', metadata_pattern)
-            values = list(re.search(regex, filename).groups())
-            keys = re.findall(r'{(.+?)}', metadata_pattern)
-            for key, value in zip(keys, values):
-                if key in METADATA_KEYWORDS:
-                    metadata[key] = correct_metadata_dtype(key, value)
-                else:
-                    user_params[key] = value
+        # extract information from the metadata filename pattern
+        metadata, user_params = lt.extract_metadata_from_pattern(
+            metadata, user_params, filename, metadata_pattern, metadata_scales
+        )
 
-        if metadata_scales is not None:
-            for key, value in metadata_scales.items():
-                if key in metadata.keys():
-                    metadata[key] = metadata[key]*value
-                elif key in user_params.keys():
-                    user_params[key] = user_params[key]*value
-                else:
-                    warnings.warn(
-                        f"Did not find the parameter {key} to scale."
-                    )
-
-        if data_name_pattern is not None:
-            new_name = data_name_pattern
-            while '{' in new_name and '}' in new_name:
-                start = new_name.find('{')
-                stop = new_name.find('}')
-                key = new_name[start+1:stop]
-                if key in metadata.keys():
-                    value = metadata[key]
-                elif key in user_params.keys():
-                    value = user_params[key]
-                else:
-                    value = key
-                old_str = "{"+key+"}"
-                new_str = str(value)
-                new_name = new_name.replace(old_str, new_str)
-        else:
-            new_name = data_name_pattern
+        # generate the name for the two-dimensional data
+        new_name = lt.generate_data_name(
+            data_name_pattern, metadata, user_params)
 
         data = LoadData(
             filepath=filepath,
