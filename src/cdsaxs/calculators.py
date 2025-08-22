@@ -30,6 +30,8 @@ def gaussian(x, mean, std_dev, scale, offset):
     TODO: format above equation to render correctly in docs
     """
 
+    x = np.array(x)
+
     a = scale * np.reciprocal(np.sqrt(2*np.pi)*std_dev)
     b = -((x-mean)**2)/(2*std_dev**2)
 
