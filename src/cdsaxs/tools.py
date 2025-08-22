@@ -10,7 +10,6 @@ from scipy.stats import linregress
 
 from cdsaxs.calculators import gaussian
 
-import matplotlib.pyplot as plt
 
 def find_gaussian_peakloc(x, y, p0=None):
     """
