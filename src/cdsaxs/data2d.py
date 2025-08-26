@@ -18,7 +18,7 @@ import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
-from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
+from cdsaxs.tools import line_fit, find_peaks_2D_legacy, rotate_image
 from cdsaxs_gui_legacy import diffraction
 
 # any changes to these metadata values should update calculated q values
@@ -1305,7 +1305,7 @@ class DataQdyQdx(Data2D):
 
         min0, max0 = integrated_q_slice.limits_axis0
         min1, max1 = integrated_q_slice.limits_axis1
-        peaks_px = gaussian_find_peaks_2D(
+        peaks_px = find_peaks_2D_legacy(
             self.image[min0:max0, min1:max1],
             integrated_q_slice.Iq,
             integrated_q_slice.integration_axis,
@@ -1508,6 +1508,7 @@ class DataQdyQdx(Data2D):
             warnings.warn("No peaks found, using the beam center guess.")
             center = beam_center_guess
 
+        print(peaks)
         center = np.average(peaks)
 
         if peak_axis == 1:
@@ -1634,6 +1635,14 @@ class DataQdyQdx(Data2D):
                 show_plot=False
             )
 
+        if show_plot:
+            fig, fig_slice = plotting.plot_find_beam_center(
+                self, integrated_q_slice, np.array(peaks_px),
+                np.array(peaks_q),
+                self.metadata['center_px'])
+            iplot(fig)
+            iplot(fig_slice)
+
         # convert to pixel distances relative to beam center
         peaks = np.array(peaks_px)
         peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
@@ -1666,14 +1675,6 @@ class DataQdyQdx(Data2D):
 
         # calculate average SDD from all peaks
         average_sdd = np.mean(np.concatenate((sdd_low, sdd_high)))
-
-        if show_plot:
-            fig, fig_slice = plotting.plot_find_beam_center(
-                self, integrated_q_slice, np.array(peaks_px),
-                np.array(peaks_q),
-                self.metadata['center_px'])
-            iplot(fig)
-            iplot(fig_slice)
 
         return average_sdd
 

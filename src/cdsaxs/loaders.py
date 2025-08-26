@@ -325,7 +325,7 @@ def LoadData(
         image, data_filepath, header = read_tiff(filepath=filepath)
 
     elif filetype.lower() in ['nist-bin', 'nist_bin']:
-        image, data_filepath, metadata_add = read_nist_bin(filepath=filetype)
+        image, data_filepath, metadata_add = read_nist_bin(filepath=filepath)
         for key, value in metadata_add.items():
             if key in metadata.keys():
                 warnings.warn(
@@ -354,9 +354,9 @@ def LoadData(
                 if key in metadata.keys():
                     warnings.warn(
                         f"Metadata for {key} was provided by the user or"
-                        "already extracted from reading the file."
-                        "I will not overwrite the existing metadadta with"
-                        "the value extracted by knowing the detector type."
+                        " already extracted from reading the file."
+                        " I will not overwrite the existing metadadta with"
+                        " the value extracted by knowing the detector type."
                     )
                 else:
                     metadata[key] = value
@@ -484,7 +484,7 @@ def LoadDataset(
         )
 
         # generate the name for the two-dimensional data
-        new_name = lt.generate_data_name(
+        new_name = lt.generate_data_name_from_pattern(
             data_name_pattern, metadata, user_params)
 
         data = LoadData(

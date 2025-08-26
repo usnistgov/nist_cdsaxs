@@ -257,7 +257,7 @@ class IntegratedQSlice(Data1D):
             integration_axis: int,
             dIq: NDArray = None,
             dq: NDArray = None,
-            rotation_angle: float = 0,
+            box_angle_deg: float = 0,
             rotation_center: list = [0, 0],
             rotation_sampling_mode: str = 'bicubic',
             rotated_image: NDArray = None
@@ -344,11 +344,11 @@ class IntegratedQSlice(Data1D):
                 f"the limits of {limits_axis1} along axis {1-integration_axis}."
             )
 
-        self.rotation_angle = rotation_angle
+        self.box_angle_deg = box_angle_deg
         self.rotation_center = rotation_center
         self.rotation_sampling_mode = rotation_sampling_mode
 
-        if self.rotation_angle != 0 and rotated_image is None:
+        if self.box_angle_deg != 0 and rotated_image is None:
             raise ValueError(
                 "Rotation angle is not equal to zero so a rotated image"
                 "is required."
