@@ -17,7 +17,7 @@ from PIL import Image
 from scipy.interpolate import griddata
 
 import cdsaxs._plotting_tools as plotting_tools
-from cdsaxs_gui_legacy import diffraction
+import cdsaxs.diffraction as diffraction
 
 
 def plot2D(image: NDArray, axis0=None, axis1=None,

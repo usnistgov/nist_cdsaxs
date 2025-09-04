@@ -8,7 +8,7 @@ import numpy as np
 from cdsaxs.data1d import Data1D, ReducedData
 from cdsaxs.dataset import Dataset
 import cdsaxs.plotting as plotting
-from cdsaxs_gui_legacy import diffraction
+import cdsaxs.diffraction as diffraction
 
 
 def integrate_dataset(
