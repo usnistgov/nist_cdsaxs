@@ -22,7 +22,8 @@ from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS
 import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
-from cdsaxs_gui_legacy import diffraction
+import cdsaxs.diffraction as diffraction
+
 
 UPDATE_Q_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
