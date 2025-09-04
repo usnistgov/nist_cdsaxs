@@ -622,7 +622,7 @@ class DataQdyQdx(Data2D):
                 value = None
             if type(key) is str:
                 for transform, val in self.data_transformations:
-                    if val == key and transform == "normalize":
+                    if type(val) is str and val == key and transform == "normalize":
                         warnings.warn(f"{key} was already used in a normalization data transformation. Skipping for now.")
                         value = None
             if value is not None:
