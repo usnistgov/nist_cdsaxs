@@ -624,7 +624,7 @@ class DataQdyQdx(Data2D):
             self.reset_data_transformations()
 
         for key in normalize_by:
-            if type(key) is float or type(key) is int:
+            if type(key) is not str:
                 value = float(key)
             elif key in METADATA_KEYWORDS:
                 value = self.metadata[key]
@@ -667,9 +667,9 @@ class DataQdyQdx(Data2D):
             self.reset_data_transformations()
 
         for key in scale_by:
-            if type(key) is float or type(key) is int:
+            if type(key) is not str:
                 value = float(key)
-            if key in METADATA_KEYWORDS:
+            elif key in METADATA_KEYWORDS:
                 value = self.metadata[key]
             elif key in self.user_params.keys():
                 value = float(self.user_params[key])
@@ -677,12 +677,12 @@ class DataQdyQdx(Data2D):
                 warnings.warn(f"Did not recognize {key} as an available parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, value in self.data_transformations:
-                    if value == key and transform == "scale":
+                for transform, val in self.data_transformations:
+                    if val == key and transform == "scale":
                         warnings.warn(
                             f"{key} was already used in a scaling data transformation. Skipping for now."
                         )
-                    value = None
+                        value = None
             if value is not None:
                 self.scale_data(value, keyword=key)
 
@@ -703,12 +703,12 @@ class DataQdyQdx(Data2D):
         self._check_for_keywords_in_metadata(required_metadata)
 
         sample_phi_deg = self.metadata["sample_phi_deg"]
-        sample_phi_deg += self.metdata["sample_phi_offset_deg"]
+        sample_phi_deg += self.metadata["sample_phi_offset_deg"]
         cos_sample_phi = np.cos(np.deg2rad(sample_phi_deg))
 
         footprint_factor = cos_sample_phi
 
-        self.update_metadata({"footprint_factor": footprint_factor})
+        self.update_metadata({"footprint_factor": float(footprint_factor)})
         self.scale_by_metadata(["footprint_factor"])
 
     def apply_sample_size_correction(self):
@@ -734,7 +734,7 @@ class DataQdyQdx(Data2D):
         sample_size_mm = self.metadata["sample_size_mm"]
 
         sample_phi_deg = self.metadata["sample_phi_deg"]
-        sample_phi_deg += self.metdata["sample_phi_offset_deg"]
+        sample_phi_deg += self.metadata["sample_phi_offset_deg"]
         cos_sample_phi = np.cos(np.deg2rad(sample_phi_deg))
 
         sigma_times_sqrt2 = 1e-99 + fwhm_mm / (2 * np.sqrt(np.log(2)))
@@ -746,7 +746,8 @@ class DataQdyQdx(Data2D):
                 erf((center_mm - sample_size_mm / 2)
                     * cos_sample_phi / sigma_times_sqrt2) + 1e-99))
 
-        self.update_metadata({"sample_size_factor": sample_size_factor})
+        self.update_metadata({
+            "sample_size_factor": float(sample_size_factor)})
         self.scale_by_metadata(["sample_size_factor"])
 
     def apply_substrate_absorption_correction(self):
@@ -771,7 +772,7 @@ class DataQdyQdx(Data2D):
         atten_coeff = self.metadata["substrate_attenuation_coeff_um-1"]
 
         sample_phi_deg = self.metadata["sample_phi_deg"]
-        sample_phi_deg += self.metdata["sample_phi_offset_deg"]
+        sample_phi_deg += self.metadata["sample_phi_offset_deg"]
         cos_sample_phi = np.cos(np.deg2rad(sample_phi_deg))
 
         substrate_absorption_factor = np.exp(
@@ -779,7 +780,8 @@ class DataQdyQdx(Data2D):
                 1 - 1 / cos_sample_phi))
 
         self.update_metadata({
-            "substrate_absorption_factor": substrate_absorption_factor})
+            "substrate_absorption_factor":
+            float(substrate_absorption_factor)})
         self.scale_by_metadata(["substrate_absorption_factor"])
 
     # def apply_sample_absorption_correction(self):
