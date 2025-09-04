@@ -6,7 +6,11 @@ METADATA_KEYWORDS = [
     "sample_kappa_deg", "sample_phi_deg", "sample_omega_deg", "energy_ev",
     "wavelength_nm", "exposure_time_s", "sdd_cm", "pixel_size_um",
     "scaling_factor", "I0", "beam_current", "data_directory", "filename",
-    "name", "center_px", 'sample_phi_offset_deg'
+    "name", "center_px", 'sample_phi_offset_deg',
+    "sample_size_mm", "beam_center_mm", "beam_fwhm_mm",
+    "substrate_thickness_um", "substrate_attenuation_coeff_um-1",
+    "footprint_factor", "sample_size_factor",
+    "substrate_absorption_factor",
 ]
 
 SAMPLE_METADATA_KEYWORDS = [
