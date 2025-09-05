@@ -3,7 +3,13 @@ import re
 import math
 import numpy as np
 import pandas as pd
-from scipy.optimize import differential_evolution
+from scipy.optimize import (
+    differential_evolution, 
+    dual_annealing, 
+    shgo, 
+    basinhopping, 
+    minimize
+)
 import matplotlib.pyplot as plt
 import copy
 from tqdm import tqdm
@@ -108,6 +114,21 @@ class CDSAXS_Model:
         # Create SimPar for compatibility with existing code
         if self.PAR is not None:
             self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
+            
+        # Initialize callback data storage
+        self._callback_data = {
+            'iteration': [],
+            'objective_values': [],
+            'best_objective': [],
+            'parameter_values': [],
+            'convergence': [],
+            'acceptance_flags': [],  # For dual_annealing
+            'optimizer_type': None
+        }
+        
+        # Simple callback settings
+        self._callback_enabled = False
+        self._callback_print_frequency = 10
     
     def build_model_params_from_traditional(self):
         """
@@ -616,13 +637,307 @@ class CDSAXS_Model:
         """
         raise NotImplementedError("Subclasses must implement this method")
 
-    def _print_parameter_changes(self, initial_model_params):
+    
+    def print_parameter_changes(self, initial_model_params=None, boundary_threshold=1.0, use_colors=True):
         """
-        Print a table of parameter changes from optimization.
-        To be implemented by subclasses.
+        Print a table of parameter changes from optimization with bounds and color coding.
+        Now includes original and final GF values at the top.
+        
+        Parameters:
+        -----------
+        initial_model_params : dict, optional
+            Model parameters before optimization
+            If None, uses self._initial_model_params if available
+        boundary_threshold : float, optional
+            Percentage threshold for boundary warning (default: 1.0%)
+        use_colors : bool, optional
+            Whether to use color coding (default: True)
         """
-        raise NotImplementedError("Subclasses must implement this method")
+        if initial_model_params is None:
+            if hasattr(self, '_initial_model_params'):
+                initial_model_params = self._initial_model_params
+            else:
+                print("Error: No initial parameters available for comparison.")
+                print("Either provide initial_model_params or run optimization first.")
+                return
+        
+        # Color codes for terminal output
+        if use_colors:
+            RED = '\033[91m'
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            BLUE = '\033[94m'
+            MAGENTA = '\033[95m'
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+        else:
+            RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = RESET = BOLD = ''
+        
+        # Get optimization parameters to extract bounds
+        optimization_params = getattr(self, 'model_params', {}).get('optimization', {})
+        if not optimization_params:
+            # Try to get from stored optimization info
+            optimization_params = getattr(self, 'mcmc_param_info', {})
+        
+        print(f"\n{BOLD}Parameter Changes with Optimization Bounds:{RESET}")
+        print("=" * 80)
+        
+        # Add GF comparison at the top
+        if hasattr(self, 'GF_Initial') and hasattr(self, 'GF'):
+            initial_gf = self.GF_Initial
+            final_gf = self.GF
+            improvement = initial_gf - final_gf
+            improvement_pct = (improvement / initial_gf) * 100 if initial_gf > 0 else 0
+            
+            print(f"{BOLD}Goodness of Fit Summary:{RESET}")
+            print(f"{'Original GF:':<15} {CYAN}{initial_gf:<12.6f}{RESET}")
+            print(f"{'Final GF:':<15} {GREEN if improvement > 0 else RED}{final_gf:<12.6f}{RESET}")
+            print(f"{'Improvement:':<15} {GREEN if improvement > 0 else RED}{improvement:<12.6f}{RESET} ({improvement_pct:+.2f}%)")
+            
+            # Add BIC if available
+            if hasattr(self, 'BIC_Initial') and hasattr(self, 'BIC'):
+                initial_bic = self.BIC_Initial
+                final_bic = self.BIC
+                bic_improvement = initial_bic - final_bic
+                bic_improvement_pct = (bic_improvement / initial_bic) * 100 if initial_bic > 0 else 0
+                
+                print(f"{'Original BIC:':<15} {CYAN}{initial_bic:<12.6f}{RESET}")
+                print(f"{'Final BIC:':<15} {GREEN if bic_improvement > 0 else RED}{final_bic:<12.6f}{RESET}")
+                print(f"{'BIC Improvement:':<15} {GREEN if bic_improvement > 0 else RED}{bic_improvement:<12.6f}{RESET} ({bic_improvement_pct:+.2f}%)")
+            
+            print("=" * 80)
+        
+        # Parameter change table
+        print(f"{'Parameter':<20} {'Initial':<12} {'Lower':<12} {'Optimized':<12} {'Upper':<12}")
+        print("-" * 80)
+        
+        try:
+            # Print trapezoid parameters
+            if self.geometry == 'trapezoid':
+                initial_traps = initial_model_params.get('trapezoids', [])
+                current_traps = self.model_params.get('trapezoids', [])
+                
+                max_traps = max(len(initial_traps), len(current_traps))
+                
+                for i in range(max_traps):
+                    if i < len(initial_traps) and i < len(current_traps):
+                        initial_trap = initial_traps[i]
+                        current_trap = current_traps[i]
+                        
+                        # Print width
+                        if 'width' in initial_trap and 'width' in current_trap:
+                            param_name = f'trap_{i}_width'
+                            initial_val = initial_trap['width']
+                            current_val = current_trap['width']
+                            
+                            # Get bounds and apply color coding
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Trap {i} Width{'':<8} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+                        
+                        # Print height
+                        if 'height' in initial_trap and 'height' in current_trap:
+                            param_name = f'trap_{i}_height'
+                            initial_val = initial_trap['height']
+                            current_val = current_trap['height']
+                            
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Trap {i} Height{'':<7} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+            
+            # Print cylinder parameters
+            elif self.geometry == 'cylinder':
+                initial_cyls = initial_model_params.get('cylinders', [])
+                current_cyls = self.model_params.get('cylinders', [])
+                
+                max_cyls = max(len(initial_cyls), len(current_cyls))
+                
+                for i in range(max_cyls):
+                    if i < len(initial_cyls) and i < len(current_cyls):
+                        initial_cyl = initial_cyls[i]
+                        current_cyl = current_cyls[i]
+                        
+                        # Print radius
+                        if 'radius' in initial_cyl and 'radius' in current_cyl:
+                            param_name = f'cyl_{i}_radius'
+                            initial_val = initial_cyl['radius']
+                            current_val = current_cyl['radius']
+                            
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Cyl {i} Radius{'':<8} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+                        
+                        # Print height
+                        if 'height' in initial_cyl and 'height' in current_cyl:
+                            param_name = f'cyl_{i}_height'
+                            initial_val = initial_cyl['height']
+                            current_val = current_cyl['height']
+                            
+                            param_info = optimization_params.get(param_name, {})
+                            lower_bound = param_info.get('min')
+                            upper_bound = param_info.get('max')
+                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                            boundary_threshold, use_colors)
+                            
+                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                            
+                            print(f"Cyl {i} Height{'':<8} {initial_val:<12.4f} {lower_str:<12} "
+                                f"{colored_value:<12} {upper_str:<12}")
+            
+            # Print global parameters (DW, I0)
+            for param in ['DW', 'I0']:
+                if param in initial_model_params and param in self.model_params:
+                    initial_val = initial_model_params[param]
+                    current_val = self.model_params[param]
+                    
+                    param_info = optimization_params.get(param, {})
+                    lower_bound = param_info.get('min')
+                    upper_bound = param_info.get('max')
+                    colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                    boundary_threshold, use_colors)
+                    
+                    lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
+                    upper_str = f"{upper_bound:.6f}" if upper_bound is not None else "N/A"
+                    
+                    print(f"{param:<20} {initial_val:<12.6f} {lower_str:<12} "
+                        f"{colored_value:<12} {upper_str:<12}")
+            
+            # Print background parameters
+            initial_bk = initial_model_params.get('Bk')
+            current_bk = self.model_params.get('Bk')
+            
+            if initial_bk is not None and current_bk is not None:
+                # Handle array background
+                if isinstance(initial_bk, (list, np.ndarray)) and isinstance(current_bk, (list, np.ndarray)):
+                    initial_bk = np.array(initial_bk)
+                    current_bk = np.array(current_bk)
+                    
+                    for i in range(min(len(initial_bk), len(current_bk))):
+                        param_name = f'Bk_{i}'
+                        initial_val = initial_bk[i]
+                        current_val = current_bk[i]
+                        
+                        param_info = optimization_params.get(param_name, {})
+                        lower_bound = param_info.get('min')
+                        upper_bound = param_info.get('max')
+                        colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                        boundary_threshold, use_colors)
+                        
+                        lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
+                        upper_str = f"{upper_bound:.6f}" if upper_bound is not None else "N/A"
+                        
+                        print(f"Bk_{i:<17} {initial_val:<12.6f} {lower_str:<12} "
+                            f"{colored_value:<12} {upper_str:<12}")
+                
+                # Handle scalar background
+                elif not isinstance(initial_bk, (list, np.ndarray)) and not isinstance(current_bk, (list, np.ndarray)):
+                    param_info = optimization_params.get('Bk', {})
+                    lower_bound = param_info.get('min')
+                    upper_bound = param_info.get('max')
+                    colored_value = self._get_colored_value(current_bk, lower_bound, upper_bound, 
+                                                    boundary_threshold, use_colors)
+                    
+                    lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
+                    upper_str = f"{upper_bound:.6f}" if upper_bound is not None else "N/A"
+                    
+                    print(f"Bk{'':<18} {initial_bk:<12.6f} {lower_str:<12} "
+                        f"{colored_value:<12} {upper_str:<12}")
+        
+        except Exception as e:
+            print(f"Error printing parameter changes: {str(e)}")
+            print("Falling back to basic display...")
+            
+            # Basic fallback - just show current parameters
+            print("Current parameters:")
+            for key, value in self.model_params.items():
+                if isinstance(value, (int, float)):
+                    print(f"{key:<20} {value:<12.6f}")
+        
+        print("=" * 80)
+        
+        if use_colors:
+            print(f"\n{GREEN}Green{RESET}: Parameter safely within bounds")
+            print(f"{RED}Red{RESET}: Parameter within {boundary_threshold}% of optimization boundary") 
+            print(f"{YELLOW}Yellow{RESET}: No bounds information available")
 
+
+    def _get_colored_value(self, value, lower_bound, upper_bound, threshold_percent=1.0, use_colors=True):
+        """
+        Get colored value string based on proximity to bounds.
+        
+        Parameters:
+        -----------
+        value : float
+            Current parameter value
+        lower_bound : float or None
+            Lower optimization bound
+        upper_bound : float or None
+            Upper optimization bound  
+        threshold_percent : float
+            Percentage threshold for boundary warning
+        use_colors : bool
+            Whether to use color codes
+            
+        Returns:
+        --------
+        str
+            Colored value string
+        """
+        if use_colors:
+            RED = '\033[91m'
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            RESET = '\033[0m'
+        else:
+            RED = GREEN = YELLOW = RESET = ''
+        
+        # Format the value
+        if abs(value) < 1:
+            value_str = f"{value:.6f}"
+        else:
+            value_str = f"{value:.4f}"
+        
+        if lower_bound is None or upper_bound is None:
+            return f"{YELLOW}{value_str}{RESET}"
+        
+        # Calculate threshold distances
+        bound_range = upper_bound - lower_bound
+        threshold_distance = bound_range * (threshold_percent / 100)
+        
+        # Check proximity to bounds
+        distance_to_lower = value - lower_bound
+        distance_to_upper = upper_bound - value
+        
+        if distance_to_lower <= threshold_distance or distance_to_upper <= threshold_distance:
+            return f"{RED}{value_str}{RESET}"
+        else:
+            return f"{GREEN}{value_str}{RESET}"
     def plot_structure(self):
         """
         Plots the current structure.
@@ -656,11 +971,11 @@ class CDSAXS_Model:
     
     
     def parameter_sweep_1d(self, sweep_param, sweep_range, n_points=20, 
-                                exclude_from_fit=None, plot_results=True, 
-                                figsize=(10, 6), save_results=False, filename=None,
-                                optimization_kwargs=None, verbose=True):
+                            exclude_from_fit=None, plot_results=True, 
+                            figsize=(10, 6), save_results=False, filename=None,
+                            optimization_kwargs=None, verbose=True):
         """
-        Fixed version of parameter_sweep_1d with proper error handling and results storage.
+        Clean version of parameter_sweep_1d with minimal progress bar updates.
         """
         if not hasattr(self, 'Intensity'):
             raise ValueError("Data must be imported before performing parameter sweep")
@@ -685,7 +1000,7 @@ class CDSAXS_Model:
         # Store original parameters
         original_params = copy.deepcopy(self.model_params)
         
-        # Setup progress bar
+        # Setup progress bar with fixed description (no updates)
         if verbose:
             pbar = tqdm(sweep_values, desc=f"Sweeping {sweep_param}")
         else:
@@ -715,32 +1030,22 @@ class CDSAXS_Model:
                     try:
                         # Handle both geometries correctly
                         if hasattr(self, 'discretization') and self.geometry == 'cylinder':
-                            # Cylinder models need discretization parameter
                             sim_result = self.simulate_structure(self.discretization)
                         else:
-                            # Trapezoid models don't need discretization
                             sim_result = self.simulate_structure()
                         
-                        # Check if simulation succeeded
                         if sim_result is not None:
                             gf = self.GF_calc(sim_result)
                             bic = self.BIC_calc(gf)
                             converged = True
                             
-                            # Debug output for first few points
-                            if verbose and i < 3:
-                                print(f"DEBUG: Point {i+1}: {sweep_param}={value:.1f}, GF={gf:.4f}")
-                        else:
-                            if verbose:
-                                print(f"Warning: Simulation failed at {sweep_param}={value}")
-                            
                     except Exception as e:
-                        if verbose:
-                            print(f"Warning: Simulation error at {sweep_param}={value}: {e}")
+                        if verbose and i < 3:  # Only print errors for first few points
+                            print(f"Warning: Simulation failed at {sweep_param}={value}")
+                            
                 else:
                     # Run optimization with suppressed output
                     try:
-                        # Don't assign the return value to avoid dictionary display
                         self.CDSAXS_DiffEvolution(
                             params_to_optimize=opt_params,
                             plot_results=False,  # Suppress plots during sweep
@@ -748,36 +1053,25 @@ class CDSAXS_Model:
                             **optimization_kwargs
                         )
                         
-                        # Get results from model attributes
                         if hasattr(self, 'GF') and hasattr(self, 'BIC'):
                             gf = self.GF
                             bic = self.BIC
                             converged = True
-                        else:
-                            if verbose:
-                                print(f"Warning: No GF/BIC attributes after optimization at {sweep_param}={value}")
                             
                     except Exception as e:
-                        if verbose:
+                        if verbose and i < 3:  # Only print errors for first few points
                             print(f"Warning: Optimization failed at {sweep_param}={value}: {e}")
                 
-                # Store results (make sure we always store something)
+                # Store results
                 results['gf_values'].append(gf)
                 results['bic_values'].append(bic)
                 results['optimized_params'].append(copy.deepcopy(self.model_params))
                 results['convergence_flags'].append(converged)
                 
-                # Update progress bar with current best
-                if verbose and hasattr(pbar, 'set_postfix'):
-                    finite_gfs = [g for g in results['gf_values'] if np.isfinite(g)]
-                    current_best_gf = min(finite_gfs) if finite_gfs else float('inf')
-                    pbar.set_postfix({
-                        f'{sweep_param}': f'{value:.3f}',
-                        'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
-                    })
+                # No progress bar updates - just let it show the percentage
                     
             except Exception as e:
-                if verbose:
+                if verbose and i < 3:  # Only print errors for first few points
                     print(f"Error at {sweep_param}={value}: {str(e)}")
                 # Still store something to maintain array lengths
                 results['gf_values'].append(float('inf'))
@@ -794,18 +1088,11 @@ class CDSAXS_Model:
         
         if actual_length != expected_length:
             print(f"WARNING: Results length mismatch. Expected {expected_length}, got {actual_length}")
-            # Pad with inf values if needed
             while len(results['gf_values']) < expected_length:
                 results['gf_values'].append(float('inf'))
                 results['bic_values'].append(float('inf'))
                 results['optimized_params'].append(None)
                 results['convergence_flags'].append(False)
-        
-        # Debug: Print a few results
-        if verbose:
-            print(f"DEBUG: First few results:")
-            for i in range(min(3, len(results['gf_values']))):
-                print(f"  {sweep_param}={sweep_values[i]:.1f} -> GF={results['gf_values'][i]}")
         
         # Print summary with best results
         if verbose:
@@ -827,42 +1114,12 @@ class CDSAXS_Model:
     
     
     
-    def parameter_sweep_2d(self, sweep_params, sweep_ranges, n_points=(10, 10),
+    def parameter_sweep_2d_clean(self, sweep_params, sweep_ranges, n_points=(10, 10),
                       exclude_from_fit=None, plot_results=True, 
                       figsize=(10, 8), save_results=False, filename=None,
                       optimization_kwargs=None, verbose=True, metric='GF'):
         """
-        Perform a 2D parameter sweep with heatmap visualization.
-        
-        Parameters:
-        -----------
-        sweep_params : tuple
-            (param1_name, param2_name) to sweep
-        sweep_ranges : tuple
-            ((min1, max1), (min2, max2)) for the sweep parameters
-        n_points : tuple, optional
-            (n_points1, n_points2) for each parameter. Default: (10, 10)
-        exclude_from_fit : list, optional
-            List of parameter names to exclude from optimization
-        plot_results : bool, optional
-            Whether to plot the heatmap. Default: True
-        figsize : tuple, optional
-            Figure size for the plot. Default: (10, 8)
-        save_results : bool, optional
-            Whether to save results to file. Default: False
-        filename : str, optional
-            Filename for saving results
-        optimization_kwargs : dict, optional
-            Additional kwargs for CDSAXS_DiffEvolution
-        verbose : bool, optional
-            Whether to print progress. Default: True
-        metric : str, optional
-            Metric to plot ('GF' or 'BIC'). Default: 'GF'
-            
-        Returns:
-        --------
-        dict
-            Dictionary with sweep values, GF/BIC matrices, and optimized parameters
+        Clean version of 2D parameter sweep with minimal progress bar updates.
         """
         import numpy as np
         import copy
@@ -893,13 +1150,16 @@ class CDSAXS_Model:
         # Store original parameters
         original_params = copy.deepcopy(self.model_params)
         
-        # Setup progress bar
+        # Setup progress bar with fixed description (no updates)
         total_points = n_points[0] * n_points[1]
         if verbose:
             pbar = tqdm(total=total_points, desc=f"2D Sweep: {sweep_params[0]} vs {sweep_params[1]}")
         
+        point_count = 0
         for i, val1 in enumerate(param1_values):
             for j, val2 in enumerate(param2_values):
+                point_count += 1
+                
                 # Initialize variables for this iteration
                 gf = float('inf')
                 bic = float('inf')
@@ -922,48 +1182,36 @@ class CDSAXS_Model:
                     if not opt_params:
                         # No parameters to optimize, just calculate GF
                         try:
-                            # Handle both geometries correctly
                             if hasattr(self, 'discretization') and self.geometry == 'cylinder':
-                                # Cylinder models need discretization parameter
                                 sim_result = self.simulate_structure(self.discretization)
                             else:
-                                # Trapezoid models don't need discretization
                                 sim_result = self.simulate_structure()
                             
-                            # Check if simulation succeeded
                             if sim_result is not None:
                                 gf = self.GF_calc(sim_result)
                                 bic = self.BIC_calc(gf)
                                 converged = True
-                            else:
-                                if verbose and total_points <= 25:  # Only print for small grids
-                                    print(f"Warning: Simulation failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
                                 
                         except Exception as e:
-                            if verbose and total_points <= 25:  # Only print for small grids
-                                print(f"Warning: Simulation error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
+                            if verbose and total_points <= 25 and point_count <= 3:
+                                print(f"Warning: Simulation failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
                     else:
                         # Run optimization with suppressed output
                         try:
-                            # Don't assign the return value to avoid dictionary display
                             self.CDSAXS_DiffEvolution(
                                 params_to_optimize=opt_params,
-                                plot_results=False,  # Suppress plots during sweep
-                                verbose=False,       # Suppress optimization output
+                                plot_results=False,
+                                verbose=False,
                                 **optimization_kwargs
                             )
                             
-                            # Get results from model attributes
                             if hasattr(self, 'GF') and hasattr(self, 'BIC'):
                                 gf = self.GF
                                 bic = self.BIC
                                 converged = True
-                            else:
-                                if verbose and total_points <= 25:  # Only print for small grids
-                                    print(f"Warning: No GF/BIC attributes after optimization at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}")
                                 
                         except Exception as e:
-                            if verbose and total_points <= 25:  # Only print for small grids
+                            if verbose and total_points <= 25 and point_count <= 3:
                                 print(f"Warning: Optimization failed at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {e}")
                     
                     # Store results
@@ -972,22 +1220,12 @@ class CDSAXS_Model:
                     results['optimized_params'][j][i] = copy.deepcopy(self.model_params)
                     results['convergence_matrix'][j, i] = converged
                     
-                    # Update progress bar
+                    # Just update progress, no description changes
                     if verbose:
-                        # Calculate current best for progress display
-                        current_gf_matrix = results['gf_matrix'][:j+1, :i+1] if j > 0 or i > 0 else results['gf_matrix'][j:j+1, i:i+1]
-                        finite_gfs = current_gf_matrix[np.isfinite(current_gf_matrix)]
-                        current_best_gf = np.min(finite_gfs) if len(finite_gfs) > 0 else float('inf')
-                        
-                        pbar.set_postfix({
-                            f'{sweep_params[0]}': f'{val1:.3f}',
-                            f'{sweep_params[1]}': f'{val2:.3f}',
-                            'Best_GF': f'{current_best_gf:.4f}' if current_best_gf != float('inf') else 'inf'
-                        })
                         pbar.update(1)
                         
                 except Exception as e:
-                    if verbose:
+                    if verbose and point_count <= 3:
                         print(f"Error at {sweep_params[0]}={val1:.3f}, {sweep_params[1]}={val2:.3f}: {str(e)}")
                     
                     # Store failed results
@@ -1001,13 +1239,6 @@ class CDSAXS_Model:
         
         if verbose:
             pbar.close()
-        
-        # Verify results matrices
-        expected_shape = (n_points[1], n_points[0])
-        if results['gf_matrix'].shape != expected_shape:
-            print(f"WARNING: GF matrix shape mismatch. Expected {expected_shape}, got {results['gf_matrix'].shape}")
-        if results['bic_matrix'].shape != expected_shape:
-            print(f"WARNING: BIC matrix shape mismatch. Expected {expected_shape}, got {results['bic_matrix'].shape}")
         
         # Print summary with best results
         if verbose:
@@ -3107,8 +3338,6 @@ class CDSAXS_Model:
             height_points.append(current_height)
             width_points.append(structures[i + 1][width_key])
         
-        print(f"DEBUG: Extracted {len(height_points)} height points: {height_points}")
-        print(f"DEBUG: Corresponding widths: {width_points}")
         
         return np.array(height_points), np.array(width_points)
 
@@ -4229,3 +4458,2006 @@ class CDSAXS_Model:
         
         plt.tight_layout()
         plt.show()
+        
+        
+    def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
+                       plot_results=True, plot_structure=True, plot_grid=True, 
+                       plot_combined=False, verbose=False, use_callbacks=False, 
+                       callback_frequency=10, **kwargs):
+        """
+        Flexible optimization method for CDSAXS model fitting with optional callback monitoring.
+        
+        Parameters:
+        -----------
+        params_to_optimize : dict, optional
+            Dictionary containing parameters to optimize with their bounds
+        optimizer : str, optional
+            Optimizer to use ('differential_evolution', 'dual_annealing', etc.). Default: 'differential_evolution'
+        plot_results : bool, optional
+            Whether to generate before/after comparison plots. Default: True
+        plot_structure : bool, optional
+            Whether to plot structure comparison. Default: True
+        plot_grid : bool, optional
+            Whether to plot grid of individual cuts. Default: True
+        plot_combined : bool, optional
+            Whether to plot combined view with all cuts. Default: True
+        verbose : bool, optional
+            Whether to print detailed output. Default: False
+        use_callbacks : bool, optional
+            Whether to enable callback monitoring. Default: False
+        callback_frequency : int, optional
+            Print progress every N iterations when using callbacks. Default: 10
+        **kwargs : dict
+            Additional arguments passed to the scipy optimizer
+            
+        Returns:
+        --------
+        dict or None
+            Optimized model parameters or None if failed
+        """
+        try:
+            # Check if required attributes exist
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                if self.geometry == 'cylinder' and hasattr(self, 'Qy'):
+                    self.convert_Cartesian_Cylindrical()
+                else:
+                    raise AttributeError("Missing required scattering vector attributes")
+            
+            # Initialize optimization parameters if needed
+            if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+                self.initialize_optimization_params()
+            
+            # Determine parameters to optimize
+            if params_to_optimize is None:
+                params_to_optimize = self.model_params['optimization']
+            
+            # Ensure all parameters have default values
+            params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+            
+            # Create parameter names list and bounds list
+            param_names = []
+            bounds = []
+            initial_values = []
+            
+            for param_name, param_config in params_to_optimize.items():
+                param_names.append(param_name)
+                bounds.append((param_config['min'], param_config['max']))
+                initial_values.append(param_config['default'])
+            
+            # Store for use in optimization
+            self.param_names = param_names
+            
+            # Setup callbacks if requested
+            if use_callbacks:
+                self._callback_enabled = True
+                self._callback_print_frequency = callback_frequency
+                self._clear_callback_data()
+                
+                # Add appropriate callback to kwargs based on optimizer
+                if optimizer == 'differential_evolution':
+                    kwargs['callback'] = self._create_differential_evolution_callback()
+                elif optimizer == 'dual_annealing':
+                    kwargs['callback'] = self._create_dual_annealing_callback()
+                
+                if verbose:
+                    print(f"Callbacks enabled for {optimizer} (print every {callback_frequency} iterations)")
+            else:
+                self._callback_enabled = False
+            
+            # Store current parameters and simulation results for before/after comparison
+            initial_model_params = copy.deepcopy(self.model_params)
+            
+            # Calculate initial simulated intensity if not already done
+            if not hasattr(self, 'SimInt') or self.SimInt is None:
+                self.SimInt = self.simulate_structure()
+                
+            # Store initial simulation results
+            initial_simInt = copy.deepcopy(self.SimInt)
+            self._initial_model_params = initial_model_params
+            
+            # Calculate initial goodness of fit if not already done
+            if not hasattr(self, 'GF_Initial') or self.GF_Initial is None:
+                self.GF_Initial = self.GF_calc(self.SimInt)
+            
+            # Choose wrapper function based on geometry
+            if self.geometry == 'cylinder':
+                wrapper_func = self._cylinder_optimization_wrapper
+            elif self.geometry == 'trapezoid':
+                wrapper_func = self._trapezoid_optimization_wrapper
+            else:
+                raise ValueError(f"Unsupported geometry: {self.geometry}")
+            
+            # Run optimization
+            if verbose:
+                print(f"Starting optimization with {optimizer} using {len(param_names)} parameters...")
+            
+            result = self._run_scipy_optimizer(
+                optimizer, wrapper_func, bounds, initial_values, verbose, **kwargs
+            )
+            
+            # Store the optimization result
+            self.optimization_result = result
+            
+            # Update model parameters with optimized values
+            optimized_params = self._update_model_with_optimization_result(
+                result, param_names, initial_model_params
+            )
+            
+            # Update class attributes with optimized values
+            self.model_params = optimized_params
+            self.update_traditional_from_model_params()
+            
+            # Simulate with optimized parameters
+            self.SimInt = self.simulate_structure()
+            
+            # Calculate goodness of fit and BIC
+            self.GF = self.GF_calc(self.SimInt)
+            self.BIC = self.BIC_calc(self.GF)
+            
+            # Print callback summary if callbacks were used
+            if use_callbacks and verbose:
+                self._print_callback_summary()
+            
+            # Generate callback plots if callbacks were used
+            if use_callbacks:
+                self._plot_callback_results()
+            
+            # Generate before/after comparison plots if requested
+            if plot_results:
+                self._plot_optimization_results(initial_model_params, initial_simInt,
+                                            plot_structure, plot_grid, plot_combined)
+            
+            # Print parameter changes only if verbose
+            if verbose:
+                self.print_parameter_changes(initial_model_params)
+            
+            return self.model_params
+                
+        except Exception as e:
+            if verbose:
+                print(f"Error in CDSAXS_Optimize: {str(e)}")
+                import traceback
+                traceback.print_exc()
+            return None
+        
+        
+    def _run_scipy_optimizer(self, optimizer, objective_func, bounds, initial_values, verbose, **kwargs):
+        """
+        Run the specified scipy optimizer with appropriate parameters.
+        
+        Parameters:
+        -----------
+        optimizer : str
+            Name of the scipy optimizer
+        objective_func : callable
+            Objective function to minimize
+        bounds : list
+            Parameter bounds
+        initial_values : list
+            Initial parameter values
+        verbose : bool
+            Whether to print progress
+        **kwargs : dict
+            Additional optimizer-specific arguments
+            
+        Returns:
+        --------
+        scipy.optimize.OptimizeResult
+            Optimization result object
+        """
+        
+        if optimizer == 'differential_evolution':
+            # Default parameters for differential_evolution
+            default_params = {
+                'polish': True,
+                'x0': np.array(initial_values),
+                'maxiter': 100,
+                'popsize': 15
+            }
+            default_params.update(kwargs)
+            
+            result = differential_evolution(
+                objective_func, bounds, **default_params
+            )
+            
+        elif optimizer == 'dual_annealing':
+            # Default parameters for dual_annealing
+            default_params = {
+                'x0': np.array(initial_values),
+                'maxiter': 1000,
+                #'local_search_options': {'method': 'L-BFGS-B'}
+            }
+            default_params.update(kwargs)
+            
+            result = dual_annealing(
+                objective_func, bounds, **default_params
+            )
+            
+        elif optimizer == 'shgo':
+            # Default parameters for SHGO (Simplicial Homology Global Optimization)
+            default_params = {
+                'n': 100,  # Number of sampling points
+                'iters': 3,  # Number of iterations
+                'sampling_method': 'sobol'
+            }
+            default_params.update(kwargs)
+            
+            result = shgo(
+                objective_func, bounds, **default_params
+            )
+            
+        elif optimizer == 'basinhopping':
+            # Basin hopping requires an initial point and local minimizer
+            default_params = {
+                'niter': 100,
+                'T': 1.0,
+                'stepsize': 0.5,
+                'minimizer_kwargs': {
+                    'method': 'L-BFGS-B',
+                    'bounds': bounds
+                }
+            }
+            default_params.update(kwargs)
+            
+            # Start from initial values
+            x0 = np.array(initial_values)
+            
+            result = basinhopping(
+                objective_func, x0, **default_params
+            )
+            
+        elif optimizer == 'minimize':
+            # Local optimization - requires method to be specified
+            method = kwargs.pop('method', 'L-BFGS-B')
+            
+            default_params = {
+                'method': method,
+                'bounds': bounds if method in ['L-BFGS-B', 'TNC', 'SLSQP'] else None,
+                'options': {'maxiter': 1000}
+            }
+            default_params.update(kwargs)
+            
+            x0 = np.array(initial_values)
+            
+            result = minimize(
+                objective_func, x0, **default_params
+            )
+            
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer}. "
+                            f"Supported options: 'differential_evolution', 'dual_annealing', "
+                            f"'shgo', 'basinhopping', 'minimize'")
+        
+        return result
+    
+    def _update_model_with_optimization_result(self, result, param_names, initial_model_params):
+        """
+        Update model parameters with optimization results.
+        
+        Parameters:
+        -----------
+        result : scipy.optimize.OptimizeResult
+            Optimization result
+        param_names : list
+            List of parameter names
+        initial_model_params : dict
+            Initial model parameters
+            
+        Returns:
+        --------
+        dict
+            Updated model parameters
+        """
+        optimized_params = copy.deepcopy(initial_model_params)
+        
+        # Handle different result types
+        if hasattr(result, 'x'):
+            optimal_values = result.x
+        elif hasattr(result, 'best_x'):  # Some optimizers use this
+            optimal_values = result.best_x
+        else:
+            raise ValueError("Could not extract optimal values from optimization result")
+        
+        # Update parameters based on geometry
+        if self.geometry == 'trapezoid':
+            # Make a deep copy of trapezoids to avoid modifying the original
+            optimized_params['trapezoids'] = [trap.copy() for trap in initial_model_params['trapezoids']]
+            
+            # Initialize background array for updates
+            if isinstance(self.Bk, np.ndarray):
+                optimized_bk = self.Bk.copy()
+            else:
+                optimized_bk = self.Bk
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('trap_'):
+                    # Parse trapezoid parameter
+                    parts = param_name.split('_')
+                    trap_idx = int(parts[1])
+                    param_type = parts[2]  # 'width' or 'height'
+                    
+                    optimized_params['trapezoids'][trap_idx][param_type] = optimal_values[i]
+                elif param_name.startswith('Bk_'):
+                    # Background parameter for specific column
+                    bk_idx = int(param_name.split('_')[1])
+                    if isinstance(optimized_bk, np.ndarray):
+                        optimized_bk[bk_idx] = optimal_values[i]
+                    else:
+                        # Convert scalar to array if needed
+                        n_columns = self.Intensity.shape[1]
+                        optimized_bk = np.full(n_columns, optimized_bk)
+                        optimized_bk[bk_idx] = optimal_values[i]
+                elif param_name == 'Bk':
+                    # Scalar background parameter
+                    optimized_bk = optimal_values[i]
+                else:
+                    # Global parameter (DW, I0)
+                    optimized_params[param_name] = optimal_values[i]
+            
+            # Update background in optimized parameters
+            optimized_params['Bk'] = optimized_bk.tolist() if isinstance(optimized_bk, np.ndarray) else optimized_bk
+            
+        elif self.geometry == 'cylinder':
+            # Make a deep copy of cylinders to avoid modifying the original
+            optimized_params['cylinders'] = [cyl.copy() for cyl in initial_model_params['cylinders']]
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('cyl_'):
+                    # Parse cylinder parameter
+                    parts = param_name.split('_')
+                    cyl_idx = int(parts[1])
+                    param_type = parts[2]  # 'radius' or 'height'
+                    
+                    optimized_params['cylinders'][cyl_idx][param_type] = optimal_values[i]
+                else:
+                    # Global parameter (DW, I0, Bk)
+                    optimized_params[param_name] = optimal_values[i]
+        
+        return optimized_params
+    
+    
+    import numpy as np
+    import copy
+    import matplotlib.pyplot as plt
+    import corner  # For corner plots
+    from tqdm import tqdm
+    import warnings
+
+    def CDSAXS_MCMC(self, params_to_sample=None, n_walkers=50, n_steps=1000, 
+                    burn_in=200, thin=1, progress=True, plot_results=True,
+                    plot_chains=True, plot_corner=True, plot_structure=False,
+                    save_chains=False, chain_filename=None, verbose=True,
+                    prior_type='uniform', sigma_multiplier=10.0, **emcee_kwargs):
+        """
+        Perform MCMC sampling using emcee to estimate parameters and uncertainties.
+        
+        Parameters:
+        -----------
+        params_to_sample : dict, optional
+            Dictionary containing parameters to sample with their bounds
+            If None, uses self.model_params['optimization']
+        n_walkers : int, optional
+            Number of MCMC walkers. Default: 50
+        n_steps : int, optional
+            Number of MCMC steps per walker. Default: 1000
+        burn_in : int, optional
+            Number of burn-in steps to discard. Default: 200
+        thin : int, optional
+            Thinning factor for chains. Default: 1 (no thinning)
+        progress : bool, optional
+            Whether to show progress bar. Default: True
+        plot_results : bool, optional
+            Whether to generate plots. Default: True
+        plot_chains : bool, optional
+            Whether to plot walker chains. Default: True
+        plot_corner : bool, optional
+            Whether to plot corner plot. Default: True
+        plot_structure : bool, optional
+            Whether to plot structure with uncertainties. Default: True
+        save_chains : bool, optional
+            Whether to save chains to file. Default: False
+        chain_filename : str, optional
+            Filename for saved chains
+        verbose : bool, optional
+            Whether to print detailed output. Default: True
+        prior_type : str, optional
+            Type of prior: 'uniform', 'gaussian'. Default: 'uniform'
+        sigma_multiplier : float, optional
+            For Gaussian priors: std = (max-min)/sigma_multiplier. Default: 10.0
+        **emcee_kwargs : dict
+            Additional arguments passed to emcee.EnsembleSampler
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing MCMC results, chains, and statistics
+        """
+        try:
+            # Check if emcee is available
+            try:
+                import emcee
+            except ImportError:
+                raise ImportError("emcee package is required. Install with: pip install emcee")
+            
+            # Check if required attributes exist
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+                
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                if self.geometry == 'cylinder' and hasattr(self, 'Qy'):
+                    self.convert_Cartesian_Cylindrical()
+                else:
+                    raise AttributeError("Missing required scattering vector attributes")
+            
+            # Initialize optimization parameters if needed
+            if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+                self.initialize_optimization_params()
+            
+            # Determine parameters to sample
+            if params_to_sample is None:
+                params_to_sample = self.model_params['optimization']
+            
+            # Ensure all parameters have default values
+            params_to_sample = self._ensure_defaults_in_params(params_to_sample)
+            
+            # Setup MCMC parameters
+            param_names = list(params_to_sample.keys())
+            n_params = len(param_names)
+            
+            if verbose:
+                print(f"Setting up MCMC with {n_params} parameters and {n_walkers} walkers")
+                print(f"Parameters to sample: {param_names}")
+            
+            # Store parameter info
+            self.mcmc_param_names = param_names
+            self.mcmc_param_info = params_to_sample
+            
+            # Setup priors and initial positions
+            bounds, initial_positions, log_prior_func = self._setup_mcmc_priors(
+                params_to_sample, n_walkers, prior_type, sigma_multiplier
+            )
+            
+            # Create log probability function
+            def log_probability(theta):
+                # Check priors
+                lp = log_prior_func(theta)
+                if not np.isfinite(lp):
+                    return -np.inf
+                
+                # Calculate likelihood
+                ll = self._mcmc_log_likelihood(theta)
+                if not np.isfinite(ll):
+                    return -np.inf
+                    
+                return lp + ll
+            
+            # Initialize sampler
+            sampler = emcee.EnsembleSampler(
+                n_walkers, n_params, log_probability, **emcee_kwargs
+            )
+            
+            if verbose:
+                print(f"Running MCMC: {n_steps} steps with {n_walkers} walkers")
+                print(f"Burn-in: {burn_in} steps, Thinning: {thin}")
+            
+            # Run MCMC
+            if progress:
+                # Run with progress bar
+                with tqdm(total=n_steps, desc="MCMC Progress") as pbar:
+                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps)):
+                        pbar.update(1)
+                        if i % 100 == 0 and verbose:
+                            acceptance = np.mean(sampler.acceptance_fraction)
+                            pbar.set_postfix({"Accept": f"{acceptance:.3f}"})
+            else:
+                # Run without progress bar
+                sampler.run_mcmc(initial_positions, n_steps)
+            
+            # Extract results
+            chains = sampler.get_chain()
+            log_prob = sampler.get_log_prob()
+            
+            # Apply burn-in and thinning
+            if burn_in > 0:
+                chains_burned = chains[burn_in:]
+                log_prob_burned = log_prob[burn_in:]
+            else:
+                chains_burned = chains
+                log_prob_burned = log_prob
+            
+            if thin > 1:
+                chains_final = chains_burned[::thin]
+                log_prob_final = log_prob_burned[::thin]
+            else:
+                chains_final = chains_burned
+                log_prob_final = log_prob_burned
+            
+            # Flatten chains for analysis
+            flat_chains = chains_final.reshape(-1, n_params)
+            flat_log_prob = log_prob_final.flatten()
+            
+            # Calculate statistics
+            param_stats = self._calculate_mcmc_statistics(flat_chains, param_names)
+            
+            # Find best-fit parameters
+            best_idx = np.argmax(flat_log_prob)
+            best_params = flat_chains[best_idx]
+            
+            # Create results dictionary
+            results = {
+                'chains': chains,
+                'chains_burned': chains_burned,
+                'chains_final': chains_final,
+                'flat_chains': flat_chains,
+                'log_prob': log_prob,
+                'log_prob_final': log_prob_final,
+                'param_names': param_names,
+                'param_stats': param_stats,
+                'best_params': best_params,
+                'best_log_prob': flat_log_prob[best_idx],
+                'n_walkers': n_walkers,
+                'n_steps': n_steps,
+                'burn_in': burn_in,
+                'thin': thin,
+                'acceptance_fraction': sampler.acceptance_fraction,
+                'mean_acceptance': np.mean(sampler.acceptance_fraction),
+                'autocorr_time': None,  # Will calculate if possible
+                'effective_samples': len(flat_chains)
+            }
+            
+            # Calculate autocorrelation time if possible
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    autocorr_time = sampler.get_autocorr_time(quiet=True)
+                    results['autocorr_time'] = autocorr_time
+                    results['mean_autocorr_time'] = np.mean(autocorr_time)
+            except Exception:
+                if verbose:
+                    print("Warning: Could not calculate autocorrelation time")
+            
+            # Apply best-fit parameters to model
+            self._apply_mcmc_parameters(best_params, param_names)
+            
+            # Print summary
+            if verbose:
+                self._print_mcmc_summary(results)
+            
+            # Generate plots
+            if plot_results:
+                self._plot_mcmc_results(results, plot_chains, plot_corner, plot_structure)
+            
+            # Save chains if requested
+            if save_chains:
+                filename = self._save_mcmc_chains(results, chain_filename)
+                if verbose:
+                    print(f"Chains saved to: {filename}")
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error in CDSAXS_MCMC: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _setup_mcmc_priors(self, params_to_sample, n_walkers, prior_type, sigma_multiplier):
+        """
+        Setup priors and initial walker positions for MCMC.
+        
+        Parameters:
+        -----------
+        params_to_sample : dict
+            Parameters to sample with bounds
+        n_walkers : int
+            Number of walkers
+        prior_type : str
+            Type of prior ('uniform' or 'gaussian')
+        sigma_multiplier : float
+            For Gaussian priors
+            
+        Returns:
+        --------
+        tuple
+            (bounds, initial_positions, log_prior_function)
+        """
+        param_names = list(params_to_sample.keys())
+        n_params = len(param_names)
+        
+        bounds = []
+        defaults = []
+        
+        for param_name in param_names:
+            param_info = params_to_sample[param_name]
+            bounds.append((param_info['min'], param_info['max']))
+            defaults.append(param_info['default'])
+        
+        bounds = np.array(bounds)
+        defaults = np.array(defaults)
+        
+        # Generate initial positions
+        if prior_type == 'uniform':
+            # Uniform distribution around default values
+            widths = bounds[:, 1] - bounds[:, 0]
+            initial_positions = []
+            
+            for _ in range(n_walkers):
+                pos = defaults + 0.1 * widths * (np.random.random(n_params) - 0.5)
+                # Ensure within bounds
+                pos = np.clip(pos, bounds[:, 0], bounds[:, 1])
+                initial_positions.append(pos)
+            
+            initial_positions = np.array(initial_positions)
+            
+            # Define uniform log prior
+            def log_prior_uniform(theta):
+                if np.all((theta >= bounds[:, 0]) & (theta <= bounds[:, 1])):
+                    return 0.0
+                else:
+                    return -np.inf
+                    
+            log_prior_func = log_prior_uniform
+            
+        elif prior_type == 'gaussian':
+            # Gaussian priors centered on defaults
+            sigmas = (bounds[:, 1] - bounds[:, 0]) / sigma_multiplier
+            
+            # Generate initial positions from Gaussian around defaults
+            initial_positions = []
+            for _ in range(n_walkers):
+                pos = np.random.normal(defaults, sigmas * 0.5)
+                # Ensure within bounds
+                pos = np.clip(pos, bounds[:, 0], bounds[:, 1])
+                initial_positions.append(pos)
+            
+            initial_positions = np.array(initial_positions)
+            
+            # Define Gaussian log prior
+            def log_prior_gaussian(theta):
+                if np.all((theta >= bounds[:, 0]) & (theta <= bounds[:, 1])):
+                    # Gaussian prior
+                    log_prior = -0.5 * np.sum(((theta - defaults) / sigmas) ** 2)
+                    return log_prior
+                else:
+                    return -np.inf
+                    
+            log_prior_func = log_prior_gaussian
+            
+        else:
+            raise ValueError(f"Unknown prior_type: {prior_type}")
+        
+        return bounds, initial_positions, log_prior_func
+
+    def _mcmc_log_likelihood(self, theta):
+        """
+        Calculate log likelihood for MCMC with better error handling.
+        
+        Parameters:
+        -----------
+        theta : array_like
+            Parameter values
+            
+        Returns:
+        --------
+        float
+            Log likelihood
+        """
+        try:
+            # Ensure param_names is available for the wrapper functions
+            if not hasattr(self, 'param_names') and not hasattr(self, 'mcmc_param_names'):
+                if hasattr(self, 'model_params') and 'optimization' in self.model_params:
+                    self.mcmc_param_names = list(self.model_params['optimization'].keys())
+                else:
+                    return -np.inf
+            
+            # Choose wrapper function based on geometry
+            if self.geometry == 'cylinder':
+                gf = self._cylinder_optimization_wrapper(theta)
+            elif self.geometry == 'trapezoid':
+                gf = self._trapezoid_optimization_wrapper(theta)
+            else:
+                return -np.inf
+            
+            if not np.isfinite(gf) or gf <= 0:
+                return -np.inf
+            
+            # Convert goodness of fit to log likelihood
+            # Assuming Chi-square likelihood: log_likelihood = -0.5 * chi2
+            log_likelihood = -0.5 * gf
+            
+            return log_likelihood
+            
+        except Exception as e:
+            # Don't print errors during MCMC as it will spam the output
+            return -np.inf
+
+    def _apply_mcmc_parameters(self, params, param_names):
+        """
+        Apply MCMC parameter values to the model.
+        
+        Parameters:
+        -----------
+        params : array_like
+            Parameter values
+        param_names : list
+            Parameter names
+        """
+        # Create a copy of current model parameters
+        updated_params = copy.deepcopy(self.model_params)
+        
+        # Update parameters based on geometry
+        if self.geometry == 'trapezoid':
+            # Make a deep copy of trapezoids
+            updated_params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+            
+            # Initialize background
+            if isinstance(self.Bk, np.ndarray):
+                updated_bk = self.Bk.copy()
+            else:
+                updated_bk = self.Bk
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('trap_'):
+                    parts = param_name.split('_')
+                    trap_idx = int(parts[1])
+                    param_type = parts[2]
+                    updated_params['trapezoids'][trap_idx][param_type] = params[i]
+                elif param_name.startswith('Bk_'):
+                    bk_idx = int(param_name.split('_')[1])
+                    if isinstance(updated_bk, np.ndarray):
+                        updated_bk[bk_idx] = params[i]
+                    else:
+                        n_columns = self.Intensity.shape[1]
+                        updated_bk = np.full(n_columns, updated_bk)
+                        updated_bk[bk_idx] = params[i]
+                elif param_name == 'Bk':
+                    updated_bk = params[i]
+                else:
+                    updated_params[param_name] = params[i]
+            
+            # Update background
+            updated_params['Bk'] = updated_bk.tolist() if isinstance(updated_bk, np.ndarray) else updated_bk
+            
+        elif self.geometry == 'cylinder':
+            # Make a deep copy of cylinders
+            updated_params['cylinders'] = [cyl.copy() for cyl in self.model_params['cylinders']]
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('cyl_'):
+                    parts = param_name.split('_')
+                    cyl_idx = int(parts[1])
+                    param_type = parts[2]
+                    updated_params['cylinders'][cyl_idx][param_type] = params[i]
+                else:
+                    updated_params[param_name] = params[i]
+        
+        # Apply updated parameters
+        self.model_params = updated_params
+        self.update_traditional_from_model_params()
+        
+        # Update simulation
+        self.SimInt = self.simulate_structure()
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC = self.BIC_calc(self.GF)
+
+    def _calculate_mcmc_statistics(self, flat_chains, param_names):
+        """
+        Calculate statistics from MCMC chains.
+        
+        Parameters:
+        -----------
+        flat_chains : ndarray
+            Flattened MCMC chains
+        param_names : list
+            Parameter names
+            
+        Returns:
+        --------
+        dict
+            Dictionary of parameter statistics
+        """
+        param_stats = {}
+        
+        for i, param_name in enumerate(param_names):
+            chain = flat_chains[:, i]
+            
+            # Calculate percentiles
+            percentiles = np.percentile(chain, [2.5, 16, 50, 84, 97.5])
+            
+            param_stats[param_name] = {
+                'mean': np.mean(chain),
+                'median': percentiles[2],
+                'std': np.std(chain),
+                'percentile_2.5': percentiles[0],
+                'percentile_16': percentiles[1],
+                'percentile_84': percentiles[3],
+                'percentile_97.5': percentiles[4],
+                'confidence_68': [percentiles[1], percentiles[3]],
+                'confidence_95': [percentiles[0], percentiles[4]],
+                'samples': chain
+            }
+        
+        return param_stats
+
+    def _print_mcmc_summary(self, results):
+        """
+        Print a summary of MCMC results.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results dictionary
+        """
+        print(f"\n{'='*80}")
+        print(f"MCMC SAMPLING SUMMARY")
+        print(f"{'='*80}")
+        
+        print(f"Walkers: {results['n_walkers']}")
+        print(f"Steps: {results['n_steps']} (burn-in: {results['burn_in']}, thin: {results['thin']})")
+        print(f"Effective samples: {results['effective_samples']}")
+        print(f"Mean acceptance fraction: {results['mean_acceptance']:.3f}")
+        
+        if results['autocorr_time'] is not None:
+            print(f"Mean autocorrelation time: {results['mean_autocorr_time']:.1f}")
+            
+            # Check convergence
+            n_effective = results['n_steps'] - results['burn_in']
+            if results['mean_autocorr_time'] > 0:
+                n_independent = n_effective / results['mean_autocorr_time']
+                print(f"Independent samples per walker: ~{n_independent:.0f}")
+                
+                if n_independent < 50:
+                    print("⚠️  Warning: Low number of independent samples. Consider longer chains.")
+                elif n_independent > 100:
+                    print("✓ Good number of independent samples")
+        
+        print(f"\nBest-fit log probability: {results['best_log_prob']:.3f}")
+        print(f"Best-fit GF: {self.GF:.6f}")
+        print(f"Best-fit BIC: {self.BIC:.6f}")
+        
+        print(f"\nParameter Estimates (68% confidence intervals):")
+        print(f"{'Parameter':<20} {'Median':<12} {'68% CI':<20} {'95% CI':<20}")
+        print("-" * 80)
+        
+        for param_name, stats in results['param_stats'].items():
+            median = stats['median']
+            ci_68 = stats['confidence_68']
+            ci_95 = stats['confidence_95']
+            
+            ci_68_str = f"[{ci_68[0]:.4f}, {ci_68[1]:.4f}]"
+            ci_95_str = f"[{ci_95[0]:.4f}, {ci_95[1]:.4f}]"
+            
+            print(f"{param_name:<20} {median:<12.4f} {ci_68_str:<20} {ci_95_str:<20}")
+        
+        print(f"{'='*80}")
+
+    def _plot_mcmc_results(self, results, plot_chains=True, plot_corner=True, plot_structure=True):
+        """
+        Generate plots for MCMC results.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        plot_chains : bool
+            Whether to plot walker chains
+        plot_corner : bool
+            Whether to plot corner plot
+        plot_structure : bool
+            Whether to plot structure with uncertainties
+        """
+        
+        if plot_chains:
+            self._plot_mcmc_chains(results)
+        
+        if plot_corner:
+            self._plot_mcmc_corner(results)
+        
+        if plot_structure:
+            self._plot_mcmc_structure_uncertainty(results)
+
+    def _plot_mcmc_chains(self, results):
+        """
+        Plot MCMC walker chains to check convergence.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        """
+        chains = results['chains']
+        param_names = results['param_names']
+        burn_in = results['burn_in']
+        n_params = len(param_names)
+        
+        # Create subplots
+        fig, axes = plt.subplots(n_params, 1, figsize=(12, 2.5 * n_params), sharex=True)
+        if n_params == 1:
+            axes = [axes]
+        
+        for i, (ax, param_name) in enumerate(zip(axes, param_names)):
+            # Plot all walker chains
+            for walker in range(results['n_walkers']):
+                ax.plot(chains[:, walker, i], alpha=0.3, color='steelblue', linewidth=0.5)
+            
+            # Mark burn-in
+            if burn_in > 0:
+                ax.axvline(burn_in, color='red', linestyle='--', alpha=0.7, label='Burn-in')
+            
+            ax.set_ylabel(param_name)
+            if i == 0 and burn_in > 0:
+                ax.legend()
+            
+            # Add statistics
+            stats = results['param_stats'][param_name]
+            ax.axhline(stats['median'], color='orange', linestyle='-', alpha=0.8, linewidth=1)
+            ax.axhline(stats['confidence_68'][0], color='orange', linestyle=':', alpha=0.6)
+            ax.axhline(stats['confidence_68'][1], color='orange', linestyle=':', alpha=0.6)
+        
+        axes[-1].set_xlabel('Step')
+        plt.suptitle('MCMC Walker Chains', fontsize=14)
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_mcmc_corner(self, results):
+        """
+        Plot corner plot showing parameter correlations.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        """
+        try:
+            import corner
+        except ImportError:
+            print("Corner package not available. Install with: pip install corner")
+            return
+        
+        flat_chains = results['flat_chains']
+        param_names = results['param_names']
+        
+        # Create labels with units (customize as needed)
+        labels = []
+        for name in param_names:
+            if 'width' in name or 'radius' in name or 'height' in name:
+                labels.append(f"{name} (Å)")
+            elif name == 'DW':
+                labels.append("DW (Å)")
+            elif name == 'I0':
+                labels.append("I0")
+            elif name.startswith('Bk'):
+                labels.append(f"{name}")
+            else:
+                labels.append(name)
+        
+        # Calculate quantiles for plotting
+        quantiles = [0.16, 0.5, 0.84]
+        
+        fig = corner.corner(
+            flat_chains,
+            labels=labels,
+            quantiles=quantiles,
+            show_titles=True,
+            title_kwargs={"fontsize": 12},
+            color='steelblue',
+            plot_density=True,
+            plot_contours=True,
+            fill_contours=True,
+            levels=(0.68, 0.95),
+            smooth=1.0
+        )
+        
+        plt.suptitle('Parameter Posterior Distributions', fontsize=16, y=0.98)
+        plt.show()
+
+    def _plot_mcmc_structure_uncertainty(self, results):
+        """
+        Fixed version: Plot structure with uncertainty bands from MCMC samples.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        """
+        # Sample parameter sets from posterior
+        flat_chains = results['flat_chains']
+        param_names = results['param_names']
+        n_samples = min(100, len(flat_chains))  # Limit for performance
+        
+        # Randomly select parameter sets
+        indices = np.random.choice(len(flat_chains), n_samples, replace=False)
+        
+        # Store original parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Calculate structures for sampled parameters
+        structures_samples = []
+        
+        for idx in indices:
+            params = flat_chains[idx]
+            self._apply_mcmc_parameters(params, param_names)
+            
+            # Extract structure points for plotting
+            if self.geometry == 'trapezoid':
+                heights, widths = self._extract_width_height_relationship()
+                structures_samples.append((heights, widths))
+            elif self.geometry == 'cylinder':
+                heights, radii = self._extract_width_height_relationship()
+                structures_samples.append((heights, radii))
+        
+        # Restore original (best-fit) parameters
+        self.model_params = original_params
+        self.update_traditional_from_model_params()
+        
+        # Apply best-fit parameters
+        best_params = results['best_params']
+        self._apply_mcmc_parameters(best_params, param_names)
+        
+        # Plot structure uncertainty
+        plt.figure(figsize=(10, 6))
+        
+        # Plot sample structures properly
+        for heights, widths in structures_samples:
+            if self.geometry == 'trapezoid':
+                # Plot proper trapezoid shape
+                base_width = widths[0]
+                
+                # Create trapezoid outline coordinates
+                x_coords = []
+                y_coords = []
+                
+                # Bottom edge
+                x_coords.extend([-base_width/2, base_width/2])
+                y_coords.extend([0, 0])
+                
+                # Right edge going up
+                for i in range(len(heights)-1):
+                    h1, h2 = heights[i], heights[i+1]
+                    w1, w2 = widths[i], widths[i+1]
+                    x_coords.extend([w1/2, w2/2])
+                    y_coords.extend([h1, h2])
+                
+                # Top edge
+                top_width = widths[-1]
+                x_coords.extend([top_width/2, -top_width/2])
+                y_coords.extend([heights[-1], heights[-1]])
+                
+                # Left edge going down
+                for i in range(len(heights)-1, 0, -1):
+                    h1, h2 = heights[i], heights[i-1]
+                    w1, w2 = widths[i], widths[i-1]
+                    x_coords.extend([-w1/2, -w2/2])
+                    y_coords.extend([h1, h2])
+                
+                # Close the shape
+                x_coords.append(-base_width/2)
+                y_coords.append(0)
+                
+                plt.plot(x_coords, y_coords, 'b-', alpha=0.05, linewidth=0.5)
+                    
+            elif self.geometry == 'cylinder':
+                # Plot cylinder outline (both sides)
+                for i in range(len(heights)):
+                    radius = widths[i]  # widths are actually radii for cylinders
+                    height = heights[i]
+                    plt.plot([-radius, radius], [height, height], 'b-', alpha=0.05, linewidth=0.5)
+                    
+                    # Connect layers with vertical lines
+                    if i > 0:
+                        prev_radius = widths[i-1]
+                        prev_height = heights[i-1]
+                        plt.plot([prev_radius, radius], [prev_height, height], 'b-', alpha=0.05, linewidth=0.5)
+                        plt.plot([-prev_radius, -radius], [prev_height, height], 'b-', alpha=0.05, linewidth=0.5)
+        
+        # Plot best-fit structure on top (on the same axes)
+        best_heights, best_widths = self._extract_width_height_relationship()
+        
+        if self.geometry == 'trapezoid':
+            # Plot best-fit trapezoid in red
+            base_width = best_widths[0]
+            
+            # Create trapezoid outline coordinates
+            x_coords = []
+            y_coords = []
+            
+            # Bottom edge
+            x_coords.extend([-base_width/2, base_width/2])
+            y_coords.extend([0, 0])
+            
+            # Right edge going up
+            for i in range(len(best_heights)-1):
+                h1, h2 = best_heights[i], best_heights[i+1]
+                w1, w2 = best_widths[i], best_widths[i+1]
+                x_coords.extend([w1/2, w2/2])
+                y_coords.extend([h1, h2])
+            
+            # Top edge
+            top_width = best_widths[-1]
+            x_coords.extend([top_width/2, -top_width/2])
+            y_coords.extend([best_heights[-1], best_heights[-1]])
+            
+            # Left edge going down
+            for i in range(len(best_heights)-1, 0, -1):
+                h1, h2 = best_heights[i], best_heights[i-1]
+                w1, w2 = best_widths[i], best_widths[i-1]
+                x_coords.extend([-w1/2, -w2/2])
+                y_coords.extend([h1, h2])
+            
+            # Close the shape
+            x_coords.append(-base_width/2)
+            y_coords.append(0)
+            
+            plt.plot(x_coords, y_coords, 'r-', linewidth=2, label='Best fit')
+            
+        elif self.geometry == 'cylinder':
+            # Plot best-fit cylinder in red
+            for i in range(len(best_heights)):
+                radius = best_widths[i]
+                height = best_heights[i]
+                plt.plot([-radius, radius], [height, height], 'r-', linewidth=2)
+                
+                # Connect layers with vertical lines
+                if i > 0:
+                    prev_radius = best_widths[i-1]
+                    prev_height = best_heights[i-1]
+                    plt.plot([prev_radius, radius], [prev_height, height], 'r-', linewidth=2)
+                    plt.plot([-prev_radius, -radius], [prev_height, height], 'r-', linewidth=2)
+        
+        plt.title(f'Structure Uncertainty from MCMC\n({n_samples} posterior samples)', fontsize=14)
+        plt.xlabel('Width/Radius (Å)')
+        plt.ylabel('Height (Å)')
+        
+        # Add text with confidence info
+        plt.text(0.02, 0.98, f'Blue envelope: Posterior uncertainty\nRed line: Best fit', 
+                transform=plt.gca().transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.show()
+
+    def _save_mcmc_chains(self, results, filename=None):
+        """
+        Save MCMC chains and results to file.
+        
+        Parameters:
+        -----------
+        results : dict
+            MCMC results
+        filename : str, optional
+            Output filename
+            
+        Returns:
+        --------
+        str
+            Filename where data was saved
+        """
+        if filename is None:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"mcmc_chains_{self.geometry}_{self.layers}L_{timestamp}.npz"
+        
+        # Save chains and key results
+        np.savez_compressed(
+            filename,
+            chains=results['chains'],
+            flat_chains=results['flat_chains'],
+            log_prob=results['log_prob'],
+            param_names=results['param_names'],
+            best_params=results['best_params'],
+            acceptance_fraction=results['acceptance_fraction'],
+            autocorr_time=results['autocorr_time'] if results['autocorr_time'] is not None else np.array([]),
+            n_walkers=results['n_walkers'],
+            n_steps=results['n_steps'],
+            burn_in=results['burn_in'],
+            thin=results['thin']
+        )
+        
+        return filename
+
+    def load_mcmc_chains(filename):
+        """
+        Load MCMC chains from file.
+        
+        Parameters:
+        -----------
+        filename : str
+            Filename to load
+            
+        Returns:
+        --------
+        dict
+            Loaded MCMC results
+        """
+        data = np.load(filename, allow_pickle=True)
+        
+        results = {
+            'chains': data['chains'],
+            'flat_chains': data['flat_chains'],
+            'log_prob': data['log_prob'],
+            'param_names': data['param_names'].tolist(),
+            'best_params': data['best_params'],
+            'acceptance_fraction': data['acceptance_fraction'],
+            'n_walkers': int(data['n_walkers']),
+            'n_steps': int(data['n_steps']),
+            'burn_in': int(data['burn_in']),
+            'thin': int(data['thin'])
+        }
+        
+        if 'autocorr_time' in data and len(data['autocorr_time']) > 0:
+            results['autocorr_time'] = data['autocorr_time']
+        else:
+            results['autocorr_time'] = None
+        
+        return results
+    
+
+
+
+    def plot_mcmc_uncertainty_envelope(self, mcmc_results, n_samples=100, n_slices=101, 
+                                 confidence_level=0.95, plot_results=True, 
+                                 figsize=(10, 6), show_best_fit=True, show_mean=True,
+                                 show_base=True, colors=None):
+        """
+        Plot uncertainty envelope around structure from emcee MCMC results.
+        
+        Parameters:
+        -----------
+        mcmc_results : dict
+            Results from CDSAXS_MCMC containing chains and parameter info
+        n_samples : int, optional
+            Number of MCMC samples to use for uncertainty calculation. Default: 100
+        n_slices : int, optional
+            Number of height slices for uncertainty envelope. Default: 101
+        confidence_level : float, optional
+            Confidence level for uncertainty envelope (0.68 or 0.95). Default: 0.95
+        plot_results : bool, optional
+            Whether to plot the results. Default: True
+        figsize : tuple, optional
+            Figure size. Default: (10, 6)
+        show_best_fit : bool, optional
+            Whether to overlay the best-fit structure. Default: True
+        show_mean : bool, optional
+            Whether to show the mean structure. Default: True
+        show_base : bool, optional
+            Whether to show the base line at y=0. Default: True
+        colors : dict, optional
+            Custom colors for plotting. Keys: 'envelope', 'mean', 'best_fit', 'structure'
+            
+        Returns:
+        --------
+        tuple
+            (center_line, inner_envelope, outer_envelope) arrays for plotting
+        """
+        
+        # Set default colors
+        if colors is None:
+            colors = {
+                'envelope': 'cornflowerblue',
+                'mean': 'red',
+                'best_fit': 'darkgreen',
+                'structure': 'red'  # Same color for base and structure lines
+            }
+        
+        # Extract flattened chains and parameter names
+        flat_chains = mcmc_results['flat_chains']
+        param_names = mcmc_results['param_names']
+        
+        # Limit number of samples for performance
+        total_samples = len(flat_chains)
+        if n_samples > total_samples:
+            n_samples = total_samples
+        
+        # Randomly select samples for diversity
+        sample_indices = np.random.choice(total_samples, n_samples, replace=False)
+        selected_samples = flat_chains[sample_indices]
+        
+        # Store original model parameters
+        original_params = self.model_params.copy()
+        
+        # Initialize arrays for uncertainty calculation
+        xi = np.zeros([n_slices, 2, n_samples])  # [slice, side(left/right), sample]
+        yi = np.zeros([n_slices, 1, n_samples])  # [slice, 1, sample]
+        
+        try:
+            # Process each MCMC sample
+            for pop_number, sample_params in enumerate(selected_samples):
+                # Apply MCMC parameters to model
+                self._apply_mcmc_parameters(sample_params, param_names)
+                
+                # Extract structure information based on geometry
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    trap_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        trap_heights[i + 1] = trap_heights[i] + heights[i]
+                    total_height = trap_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_trapezoid_envelope_sample(
+                        widths, heights, trap_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+                    
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    cyl_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+                    total_height = cyl_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_cylinder_envelope_sample(
+                        radii, heights, cyl_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+            
+            # Calculate statistics across all samples
+            center_line, inner_envelope, outer_envelope = self._calculate_uncertainty_statistics(
+                xi, yi, confidence_level, n_slices
+            )
+            
+            # Plot results if requested
+            if plot_results:
+                self._plot_uncertainty_envelope_enhanced(
+                    center_line, inner_envelope, outer_envelope, figsize, 
+                    show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results
+                )
+            
+            return center_line, inner_envelope, outer_envelope
+            
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+
+    def _extract_structure_for_uncertainty(self):
+        """
+        Extract structure information for uncertainty calculation.
+        
+        Returns:
+        --------
+        tuple
+            (heights, widths_or_radii) arrays
+        """
+        if self.geometry == 'trapezoid':
+            structures = self.model_params['trapezoids']
+            widths = [trap['width'] for trap in structures]
+            heights = [trap['height'] for trap in structures[:-1]]  # Skip last (top)
+            return heights, widths
+        
+        elif self.geometry == 'cylinder':
+            structures = self.model_params['cylinders']
+            radii = [cyl['radius'] for cyl in structures]
+            heights = [cyl['height'] for cyl in structures[:-1]]  # Skip last (top)
+            return heights, radii
+        
+        else:
+            raise ValueError(f"Unsupported geometry: {self.geometry}")
+
+    def _calculate_trapezoid_envelope_sample(self, widths, heights, trap_heights, total_height,
+                                        xi, yi, pop_number, n_slices):
+        """
+        Calculate uncertainty envelope for a single trapezoid sample.
+        """
+        # Debug: print array sizes
+        if pop_number == 0:  # Only print for first sample
+            print(f"Debug: widths length: {len(widths)}")
+            print(f"Debug: heights length: {len(heights)}")
+            print(f"Debug: trap_heights length: {len(trap_heights)}")
+            print(f"Debug: trap_heights: {trap_heights}")
+            print(f"Debug: total_height: {total_height}")
+        
+        # Convert to coordinates similar to your SymCoordAssign function
+        coord = np.zeros([len(widths), 2])  # [layer, left/right]
+        
+        for i in range(len(widths)):
+            coord[i, 0] = -widths[i] / 2  # Left side
+            coord[i, 1] = widths[i] / 2   # Right side
+        
+        # Calculate envelope for each height slice
+        for c in range(n_slices):
+            if total_height > 0:
+                disc_height = c * total_height / (n_slices - 1)
+            else:
+                disc_height = 0
+                
+            yi[c, 0, pop_number] = disc_height
+            
+            # Find which trapezoid layer we're in
+            layer_idx = 0
+            for i in range(len(trap_heights) - 1):
+                if disc_height >= trap_heights[i] and disc_height <= trap_heights[i + 1]:
+                    layer_idx = i
+                    break
+            
+            # Ensure we don't go out of bounds
+            layer_idx = min(layer_idx, len(coord) - 2)
+            layer_idx = max(layer_idx, 0)
+            
+            # Get coordinates for this layer
+            if layer_idx < len(coord) - 1 and layer_idx >= 0:
+                x1_left = coord[layer_idx, 0]
+                x2_left = coord[layer_idx + 1, 0]
+                x1_right = coord[layer_idx, 1]
+                x2_right = coord[layer_idx + 1, 1]
+                y1 = trap_heights[layer_idx]
+                y2 = trap_heights[layer_idx + 1]
+                
+                # Linear interpolation to find x positions at disc_height
+                if abs(y2 - y1) > 1e-10:  # Avoid division by zero
+                    # Calculate position fraction within this layer
+                    frac = (disc_height - y1) / (y2 - y1)
+                    frac = max(0, min(1, frac))  # Clamp between 0 and 1
+                    
+                    # Linear interpolation
+                    xi[c, 0, pop_number] = x1_left + frac * (x2_left - x1_left)
+                    xi[c, 1, pop_number] = x1_right + frac * (x2_right - x1_right)
+                else:
+                    xi[c, 0, pop_number] = x1_left
+                    xi[c, 1, pop_number] = x1_right
+            else:
+                # Top of structure or edge case
+                if len(coord) > 0:
+                    xi[c, 0, pop_number] = coord[-1, 0]
+                    xi[c, 1, pop_number] = coord[-1, 1]
+                else:
+                    xi[c, 0, pop_number] = 0
+                    xi[c, 1, pop_number] = 0
+
+    def _calculate_cylinder_envelope_sample(self, radii, heights, cyl_heights, total_height,
+                                        xi, yi, pop_number, n_slices):
+        """
+        Calculate uncertainty envelope for a single cylinder sample.
+        """
+        # Debug: print array sizes for first sample
+        if pop_number == 0:
+            print(f"Debug Cylinder: radii length: {len(radii)}")
+            print(f"Debug Cylinder: heights length: {len(heights)}")
+            print(f"Debug Cylinder: cyl_heights length: {len(cyl_heights)}")
+            print(f"Debug Cylinder: total_height: {total_height}")
+        
+        # For cylinders, we treat them similar to trapezoids but with radius instead of half-width
+        for c in range(n_slices):
+            if total_height > 0:
+                disc_height = c * total_height / (n_slices - 1)
+            else:
+                disc_height = 0
+                
+            yi[c, 0, pop_number] = disc_height
+            
+            # Find which cylinder layer we're in
+            layer_idx = 0
+            for i in range(len(cyl_heights) - 1):
+                if disc_height >= cyl_heights[i] and disc_height <= cyl_heights[i + 1]:
+                    layer_idx = i
+                    break
+            
+            # Ensure we don't go out of bounds
+            layer_idx = min(layer_idx, len(radii) - 2)
+            layer_idx = max(layer_idx, 0)
+            
+            # Linear interpolation between cylinder radii
+            if layer_idx < len(radii) - 1 and layer_idx >= 0:
+                r1 = radii[layer_idx]
+                r2 = radii[layer_idx + 1]
+                y1 = cyl_heights[layer_idx]
+                y2 = cyl_heights[layer_idx + 1]
+                
+                if abs(y2 - y1) > 1e-10:  # Avoid division by zero
+                    # Calculate position fraction within this layer
+                    frac = (disc_height - y1) / (y2 - y1)
+                    frac = max(0, min(1, frac))  # Clamp between 0 and 1
+                    
+                    # Linear interpolation of radius
+                    radius_at_height = r1 + frac * (r2 - r1)
+                else:
+                    radius_at_height = r1
+                
+                xi[c, 0, pop_number] = -radius_at_height  # Left side
+                xi[c, 1, pop_number] = radius_at_height   # Right side
+            else:
+                # Top of structure or edge case
+                if len(radii) > 0:
+                    xi[c, 0, pop_number] = -radii[-1]
+                    xi[c, 1, pop_number] = radii[-1]
+                else:
+                    xi[c, 0, pop_number] = 0
+                    xi[c, 1, pop_number] = 0
+
+    def _calculate_uncertainty_statistics(self, xi, yi, confidence_level, n_slices):
+        """
+        Calculate uncertainty statistics from all samples.
+        """
+        # Calculate confidence interval multiplier
+        if confidence_level == 0.68:
+            z_score = 1.0  # 1 sigma
+        elif confidence_level == 0.95:
+            z_score = 1.96  # 2 sigma
+        else:
+            # Custom confidence level
+            from scipy.stats import norm
+            z_score = norm.ppf(1 - (1 - confidence_level) / 2)
+        
+        # Calculate statistics
+        center_x = np.mean(xi, axis=2)  # Average across samples
+        std_x = np.std(xi, axis=2) * z_score  # Standard deviation with confidence multiplier
+        
+        center_y = np.mean(yi, axis=2)
+        std_y = np.std(yi, axis=2) * z_score
+        
+        # Create envelope arrays
+        outer_edge = center_x.copy()
+        outer_edge[:, 0] = outer_edge[:, 0] - std_x[:, 0]  # Left side outward
+        outer_edge[:, 1] = outer_edge[:, 1] + std_x[:, 1]  # Right side outward
+        
+        inner_edge = center_x.copy()
+        inner_edge[:, 0] = inner_edge[:, 0] + std_x[:, 0]  # Left side inward
+        inner_edge[:, 1] = inner_edge[:, 1] - std_x[:, 1]  # Right side inward
+        
+        y_inner = center_y - std_y
+        y_outer = center_y + std_y
+        
+        # Create plotting arrays (similar to your original LinePlot, InnerPlot, OuterPlot)
+        center_line = np.zeros([2 * n_slices, 2])
+        inner_envelope = np.zeros([2 * n_slices, 2])
+        outer_envelope = np.zeros([2 * n_slices, 2])
+        
+        # Center line
+        center_line[0:n_slices, 0] = center_x[:, 0]  # Left side
+        center_line[n_slices:2*n_slices, 0] = np.flipud(center_x[:, 1])  # Right side (flipped)
+        center_line[0:n_slices, 1] = center_y[:, 0]  # Heights
+        center_line[n_slices:2*n_slices, 1] = np.flipud(center_y[:, 0])  # Heights (flipped)
+        
+        # Inner envelope
+        inner_envelope[0:n_slices, 0] = inner_edge[:, 0]
+        inner_envelope[n_slices:2*n_slices, 0] = np.flipud(inner_edge[:, 1])
+        inner_envelope[0:n_slices, 1] = y_inner[:, 0]
+        inner_envelope[n_slices:2*n_slices, 1] = np.flipud(y_inner[:, 0])
+        
+        # Outer envelope
+        outer_envelope[0:n_slices, 0] = outer_edge[:, 0]
+        outer_envelope[n_slices:2*n_slices, 0] = np.flipud(outer_edge[:, 1])
+        outer_envelope[0:n_slices, 1] = y_outer[:, 0]
+        outer_envelope[n_slices:2*n_slices, 1] = np.flipud(y_outer[:, 0])
+        
+        return center_line, inner_envelope, outer_envelope
+
+    def _plot_uncertainty_envelope_enhanced(self, center_line, inner_envelope, outer_envelope, 
+                                        figsize, show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results):
+        """
+        Enhanced plot of the uncertainty envelope with better visualization.
+        """
+        plt.figure(figsize=figsize)
+        
+        # Convert confidence level to percentage for label
+        conf_percent = int(confidence_level * 100)
+        
+        # Plot outer envelope (filled with semi-transparent color)
+        plt.fill(outer_envelope[:, 0], outer_envelope[:, 1], 
+                alpha=0.4, color=colors['envelope'], 
+                label=f'{conf_percent}% Confidence Interval', 
+                zorder=2)
+        
+        # Plot dashed lines around the outside of the confidence interval
+        plt.plot(outer_envelope[:, 0], outer_envelope[:, 1], 
+                color='steelblue', linewidth=1.5, linestyle='--', 
+                alpha=0.8, zorder=4)
+        
+        # Plot inner envelope (filled with white to create "hole" effect)
+        plt.fill(inner_envelope[:, 0], inner_envelope[:, 1], 
+                alpha=1.0, color='white', zorder=3)
+        
+        # Plot mean structure if requested
+        if show_mean:
+            plt.plot(center_line[:, 0], center_line[:, 1], 
+                    color=colors['mean'], linewidth=1.5, 
+                    label='Mean Structure', zorder=5)
+        
+        # Add base line connecting left and right sides (not spanning whole plot)
+        if show_base:
+            # Get the leftmost and rightmost points at the base (y=0)
+            base_indices = np.where(np.abs(center_line[:, 1]) < 1e-6)[0]  # Find points at y≈0
+            if len(base_indices) >= 2:
+                # Find the leftmost and rightmost base points
+                base_x_coords = center_line[base_indices, 0]
+                base_y_coords = center_line[base_indices, 1]
+                
+                # Connect the extreme points
+                x_left = np.min(base_x_coords)
+                x_right = np.max(base_x_coords)
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)  # Removed label='Base'
+            else:
+                # Fallback: use the width of the structure at the base
+                # Find the first and last points (should be at the base)
+                n_slices = len(center_line) // 2
+                x_left = center_line[0, 0]    # First point (left side at base)
+                x_right = center_line[n_slices, 0]  # Middle point (right side at base)
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)  # Removed label='Base'
+        
+        # Optionally overlay the best-fit structure from MCMC
+        if show_best_fit:
+            try:
+                # Apply best-fit parameters and plot structure
+                best_params = mcmc_results['best_params']
+                param_names = mcmc_results['param_names']
+                
+                # Temporarily apply best parameters
+                original_params = self.model_params.copy()
+                self._apply_mcmc_parameters(best_params, param_names)
+                
+                # Extract best-fit structure
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    self._plot_trapezoid_outline(widths, heights, 
+                                            color=colors['best_fit'], 
+                                            linewidth=1.0, linestyle='-',
+                                            label='Best Fit (MCMC)', zorder=6)
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    self._plot_cylinder_outline(radii, heights,
+                                            color=colors['best_fit'],
+                                            linewidth=1.0, linestyle='-',
+                                            label='Best Fit (MCMC)', zorder=6)
+                
+                # Restore original parameters
+                self.model_params = original_params
+                self.update_traditional_from_model_params()
+                
+            except Exception as e:
+                print(f"Warning: Could not plot best-fit structure: {e}")
+        
+        # Add grid for better readability
+        plt.grid(True, alpha=0.3, zorder=0)
+        
+        # Formatting
+        plt.title(f'Structure Uncertainty from MCMC\n({self.geometry.title()} Model)', 
+                fontsize=14, fontweight='bold')
+        plt.xlabel('Width/Radius (Å)', fontsize=12)
+        plt.ylabel('Height (Å)', fontsize=12)
+        
+        # Improve legend
+        plt.legend(frameon=True, framealpha=0.9, fontsize=11, 
+                fancybox=True, shadow=True, loc='best')
+        
+        # Set equal aspect ratio for better shape visualization
+        plt.axis('equal')
+        
+        # Adjust layout and show
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_trapezoid_outline(self, widths, heights, **kwargs):
+        """
+        Plot trapezoid structure outline.
+        """
+        # Calculate cumulative heights
+        trap_heights = np.zeros(len(heights) + 1)
+        for i in range(len(heights)):
+            trap_heights[i + 1] = trap_heights[i] + heights[i]
+        
+        # Create outline coordinates
+        x_coords = []
+        y_coords = []
+        
+        # Bottom edge
+        x_coords.extend([-widths[0]/2, widths[0]/2])
+        y_coords.extend([0, 0])
+        
+        # Right edge going up
+        for i in range(len(heights)):
+            x_coords.extend([widths[i]/2, widths[i+1]/2])
+            y_coords.extend([trap_heights[i], trap_heights[i+1]])
+        
+        # Top edge
+        x_coords.extend([widths[-1]/2, -widths[-1]/2])
+        y_coords.extend([trap_heights[-1], trap_heights[-1]])
+        
+        # Left edge going down
+        for i in range(len(heights)-1, -1, -1):
+            x_coords.extend([-widths[i+1]/2, -widths[i]/2])
+            y_coords.extend([trap_heights[i+1], trap_heights[i]])
+        
+        # Close the shape
+        x_coords.append(-widths[0]/2)
+        y_coords.append(0)
+        
+        plt.plot(x_coords, y_coords, **kwargs)
+
+    def _plot_cylinder_outline(self, radii, heights, **kwargs):
+        """
+        Plot cylinder structure outline.
+        """
+        # Calculate cumulative heights
+        cyl_heights = np.zeros(len(heights) + 1)
+        for i in range(len(heights)):
+            cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+        
+        # Plot right side
+        for i in range(len(heights)):
+            plt.plot([radii[i], radii[i+1]], [cyl_heights[i], cyl_heights[i+1]], **kwargs)
+            if i == 0:  # Remove label for subsequent lines
+                kwargs.pop('label', None)
+        
+        # Plot left side
+        for i in range(len(heights)):
+            plt.plot([-radii[i], -radii[i+1]], [cyl_heights[i], cyl_heights[i+1]], **kwargs)
+        
+        # Plot horizontal lines
+        for i in range(len(radii)):
+            plt.plot([-radii[i], radii[i]], [cyl_heights[i], cyl_heights[i]], **kwargs)
+            
+            
+    def _clear_callback_data(self):
+        """Clear stored callback data."""
+        self._callback_data = {
+            'iteration': [],
+            'objective_values': [],
+            'best_objective': [],
+            'parameter_values': [],
+            'convergence': [],
+            'acceptance_flags': [],
+            'optimizer_type': None
+        }
+    
+    def _create_differential_evolution_callback(self):
+        """Create callback for differential_evolution."""
+        def de_callback(xk, convergence=None):
+            if not self._callback_enabled:
+                return False
+            
+            iteration = len(self._callback_data['iteration']) + 1
+            self._callback_data['iteration'].append(iteration)
+            self._callback_data['optimizer_type'] = 'differential_evolution'
+            
+            # Calculate objective function value
+            try:
+                if hasattr(self, '_cylinder_optimization_wrapper'):
+                    objective_value = self._cylinder_optimization_wrapper(xk)
+                elif hasattr(self, '_trapezoid_optimization_wrapper'):
+                    objective_value = self._trapezoid_optimization_wrapper(xk)
+                else:
+                    objective_value = float('inf')
+            except Exception as e:
+                objective_value = float('inf')
+            
+            # Store results
+            self._callback_data['objective_values'].append(objective_value)
+            self._callback_data['parameter_values'].append(xk.copy())
+            self._callback_data['convergence'].append(convergence)
+            
+            # Track best objective
+            if self._callback_data['best_objective']:
+                best_so_far = min(self._callback_data['best_objective'][-1], objective_value)
+            else:
+                best_so_far = objective_value
+            self._callback_data['best_objective'].append(best_so_far)
+            
+            # Print progress
+            if iteration % self._callback_print_frequency == 0:
+                conv_str = f", Conv = {convergence:.6f}" if convergence is not None else ""
+                print(f"DE Iter {iteration:4d}: Objective = {objective_value:.6f}, "
+                      f"Best = {best_so_far:.6f}{conv_str}")
+            
+            return False
+        
+        return de_callback
+    
+    def _create_dual_annealing_callback(self):
+        """Create callback for dual_annealing."""
+        def da_callback(x, f, accept):
+            if not self._callback_enabled:
+                return False
+            
+            iteration = len(self._callback_data['iteration']) + 1
+            self._callback_data['iteration'].append(iteration)
+            self._callback_data['optimizer_type'] = 'dual_annealing'
+            
+            # Store results
+            self._callback_data['objective_values'].append(f)
+            self._callback_data['parameter_values'].append(x.copy())
+            self._callback_data['acceptance_flags'].append(accept)
+            
+            # Track best objective
+            if self._callback_data['best_objective']:
+                best_so_far = min(self._callback_data['best_objective'][-1], f)
+            else:
+                best_so_far = f
+            self._callback_data['best_objective'].append(best_so_far)
+            
+            # Print progress with acceptance rate
+            if iteration % self._callback_print_frequency == 0:
+                recent_accepts = sum(self._callback_data['acceptance_flags'][-self._callback_print_frequency:])
+                accept_rate = recent_accepts / min(self._callback_print_frequency, 
+                                                 len(self._callback_data['acceptance_flags'])) * 100
+                print(f"DA Iter {iteration:4d}: Objective = {f:.6f}, Best = {best_so_far:.6f}, "
+                      f"Accept = {accept}, Recent Accept Rate = {accept_rate:.1f}%")
+            
+            return False
+        
+        return da_callback
+    
+    def _plot_callback_results(self):
+        """Plot callback results after optimization."""
+        if len(self._callback_data['objective_values']) < 2:
+            return
+        
+        optimizer_type = self._callback_data.get('optimizer_type', 'unknown')
+        
+        if optimizer_type == 'dual_annealing':
+            self._plot_dual_annealing_results()
+        else:
+            self._plot_differential_evolution_results()
+    
+    def _plot_differential_evolution_results(self):
+        """Plot differential_evolution results."""
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        # Plot 1: Convergence
+        axes[0].plot(self._callback_data['iteration'], self._callback_data['objective_values'], 
+                    'b-', alpha=0.7, label='Current')
+        axes[0].plot(self._callback_data['iteration'], self._callback_data['best_objective'], 
+                    'r-', linewidth=2, label='Best so far')
+        axes[0].set_xlabel('Iteration')
+        axes[0].set_ylabel('Objective Function (GF)')
+        axes[0].set_title('Differential Evolution Convergence')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_yscale('log')
+        
+        # Plot 2: Parameter evolution (first 4 parameters)
+        param_array = np.array(self._callback_data['parameter_values'])
+        n_params_to_show = min(4, param_array.shape[1])
+        
+        for i in range(n_params_to_show):
+            param_name = getattr(self, 'param_names', [f'Param_{i}'])[i] if hasattr(self, 'param_names') else f'Param_{i}'
+            axes[1].plot(self._callback_data['iteration'], param_array[:, i], 
+                        label=param_name, alpha=0.8)
+        
+        axes[1].set_xlabel('Iteration')
+        axes[1].set_ylabel('Parameter Value')
+        axes[1].set_title('Parameter Evolution (First 4)')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+        
+        # Plot 3: Improvement rate
+        improvements = []
+        for i in range(1, len(self._callback_data['best_objective'])):
+            if self._callback_data['best_objective'][i-1] > 0:
+                improvement = (self._callback_data['best_objective'][i-1] - 
+                             self._callback_data['best_objective'][i]) / self._callback_data['best_objective'][i-1]
+                improvements.append(improvement)
+            else:
+                improvements.append(0)
+        
+        if improvements:
+            axes[2].plot(self._callback_data['iteration'][1:], improvements, 'g-', alpha=0.7)
+            axes[2].set_xlabel('Iteration')
+            axes[2].set_ylabel('Relative Improvement')
+            axes[2].set_title('Best Objective Improvement Rate')
+            axes[2].grid(True, alpha=0.3)
+            axes[2].axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def _plot_dual_annealing_results(self):
+        """Plot dual_annealing results."""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        
+        # Plot 1: Convergence
+        axes[0, 0].plot(self._callback_data['iteration'], self._callback_data['objective_values'], 
+                       'b-', alpha=0.7, label='Current')
+        axes[0, 0].plot(self._callback_data['iteration'], self._callback_data['best_objective'], 
+                       'r-', linewidth=2, label='Best so far')
+        axes[0, 0].set_xlabel('Iteration')
+        axes[0, 0].set_ylabel('Objective Function (GF)')
+        axes[0, 0].set_title('Dual Annealing Convergence')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
+        axes[0, 0].set_yscale('log')
+        
+        # Plot 2: Acceptance pattern
+        window_size = min(20, len(self._callback_data['acceptance_flags']) // 4)
+        if window_size > 1:
+            accept_array = np.array(self._callback_data['acceptance_flags'])
+            moving_accept = np.convolve(accept_array, np.ones(window_size)/window_size, mode='valid')
+            moving_iterations = self._callback_data['iteration'][window_size-1:]
+            axes[0, 1].plot(moving_iterations, moving_accept * 100, 'g-', linewidth=2, 
+                           label=f'Moving Average (window={window_size})')
+        
+        # Scatter plot of accepts/rejects
+        accepts = [i for i, flag in enumerate(self._callback_data['acceptance_flags']) if flag == 1]
+        rejects = [i for i, flag in enumerate(self._callback_data['acceptance_flags']) if flag == 0]
+        
+        if accepts:
+            axes[0, 1].scatter([self._callback_data['iteration'][i] for i in accepts], [100] * len(accepts), 
+                              c='green', alpha=0.6, s=10, label='Accepted')
+        if rejects:
+            axes[0, 1].scatter([self._callback_data['iteration'][i] for i in rejects], [0] * len(rejects), 
+                              c='red', alpha=0.6, s=10, label='Rejected')
+        
+        axes[0, 1].set_xlabel('Iteration')
+        axes[0, 1].set_ylabel('Acceptance (%)')
+        axes[0, 1].set_title('Acceptance Pattern')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+        axes[0, 1].set_ylim(-5, 105)
+        
+        # Plot 3: Parameter evolution
+        param_array = np.array(self._callback_data['parameter_values'])
+        n_params_to_show = min(4, param_array.shape[1])
+        
+        for i in range(n_params_to_show):
+            param_name = getattr(self, 'param_names', [f'Param_{i}'])[i] if hasattr(self, 'param_names') else f'Param_{i}'
+            axes[1, 0].plot(self._callback_data['iteration'], param_array[:, i], 
+                           label=param_name, alpha=0.8)
+        
+        axes[1, 0].set_xlabel('Iteration')
+        axes[1, 0].set_ylabel('Parameter Value')
+        axes[1, 0].set_title('Parameter Evolution (First 4)')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Plot 4: Running acceptance rate
+        if len(self._callback_data['acceptance_flags']) > 20:
+            window = min(50, len(self._callback_data['acceptance_flags']) // 4)
+            running_accept = []
+            for i in range(window, len(self._callback_data['acceptance_flags'])):
+                recent_rate = sum(self._callback_data['acceptance_flags'][i-window:i]) / window * 100
+                running_accept.append(recent_rate)
+            
+            axes[1, 1].plot(self._callback_data['iteration'][window:], running_accept, 'orange', linewidth=2)
+            axes[1, 1].set_xlabel('Iteration')
+            axes[1, 1].set_ylabel('Running Acceptance Rate (%)')
+            axes[1, 1].set_title(f'Running Acceptance Rate (window={window})')
+            axes[1, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def _print_callback_summary(self):
+        """Print summary of callback results."""
+        if len(self._callback_data['objective_values']) == 0:
+            return
+        
+        optimizer_type = self._callback_data.get('optimizer_type', 'unknown')
+        
+        print(f"\n{'='*60}")
+        print(f"OPTIMIZATION SUMMARY ({optimizer_type.upper()})")
+        print(f"{'='*60}")
+        
+        total_iterations = len(self._callback_data['iteration'])
+        initial_obj = self._callback_data['objective_values'][0]
+        final_obj = self._callback_data['objective_values'][-1]
+        best_obj = min(self._callback_data['objective_values'])
+        
+        print(f"Total iterations: {total_iterations}")
+        print(f"Initial objective: {initial_obj:.6f}")
+        print(f"Final objective: {final_obj:.6f}")
+        print(f"Best objective: {best_obj:.6f}")
+        
+        total_improvement = initial_obj - best_obj
+        relative_improvement = total_improvement / initial_obj * 100 if initial_obj > 0 else 0
+        
+        print(f"Total improvement: {total_improvement:.6f}")
+        print(f"Relative improvement: {relative_improvement:.2f}%")
+        
+        # Dual annealing specific stats
+        if optimizer_type == 'dual_annealing' and self._callback_data['acceptance_flags']:
+            total_accepts = sum(self._callback_data['acceptance_flags'])
+            accept_rate = total_accepts / len(self._callback_data['acceptance_flags']) * 100
+            print(f"Overall acceptance rate: {accept_rate:.1f}% ({total_accepts}/{len(self._callback_data['acceptance_flags'])})")
+        
+        print(f"{'='*60}")

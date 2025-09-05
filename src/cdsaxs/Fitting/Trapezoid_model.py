@@ -3,7 +3,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-from scipy.optimize import differential_evolution
+from scipy.optimize import (
+    differential_evolution, 
+    dual_annealing, 
+    shgo, 
+    basinhopping, 
+    minimize
+)
 from tqdm import tqdm
 import seaborn as sns
 
@@ -78,6 +84,9 @@ class TrapezoidModelArray(CDSAXS_Model):
         
         # Initialize array background support
         self._initialize_array_background()
+        
+        # Initialize SLD values
+        self._initialize_sld_values()
     
     def _initialize_array_background(self):
         """
@@ -97,9 +106,13 @@ class TrapezoidModelArray(CDSAXS_Model):
         if hasattr(self, '_full_background_array'):
             delattr(self, '_full_background_array')
     
+    
+    
+    
+    
     def build_model_params_from_traditional(self):
         """
-        Build model_params dictionary from traditional parameters.
+        Build model_params dictionary from traditional parameters including SLD support.
         """
         if not hasattr(self, 'PAR') or self.PAR is None:
             return
@@ -122,9 +135,18 @@ class TrapezoidModelArray(CDSAXS_Model):
             'Bk': self.Bk.tolist() if isinstance(self.Bk, np.ndarray) else self.Bk
         }
         
+        # Add SLD values to model_params
+        if hasattr(self, 'sld_values'):
+            self.model_params['slds'] = self.sld_values.tolist()
+        
         # Add optional parameters if they exist
         if hasattr(self, 'SLD') and self.SLD is not None:
-            self.model_params['SLD'] = self.SLD
+            # For backward compatibility, but slds takes precedence
+            if 'slds' not in self.model_params:
+                if np.isscalar(self.SLD):
+                    self.model_params['slds'] = [self.SLD] * (self.layers + 1)
+                else:
+                    self.model_params['slds'] = self.SLD.tolist()
             
         if hasattr(self, 'Pitch') and self.Pitch is not None:
             self.model_params['Pitch'] = self.Pitch
@@ -133,7 +155,7 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     def update_traditional_from_model_params(self):
         """
-        Update traditional parameters from model_params dictionary.
+        Update traditional parameters from model_params dictionary including SLD support.
         """
         if not hasattr(self, 'model_params'):
             return
@@ -159,6 +181,14 @@ class TrapezoidModelArray(CDSAXS_Model):
             self.Bk = bk_param
         else:
             self.Bk = bk_param
+        
+        # Update SLD parameters
+        if 'slds' in self.model_params:
+            sld_values = self.model_params['slds']
+            if isinstance(sld_values, list):
+                self.sld_values = np.array(sld_values)
+            else:
+                self.sld_values = np.array([sld_values])
         
         # Update optional parameters
         if 'SLD' in self.model_params:
@@ -196,7 +226,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                     self.Bk_Initial = self.Bk.copy()
             
             # For trapezoid model, run initial simulation
-            self.SymCoordAssign_SingleMaterial()
+            self.SymCoordAssign()
             self.SimTrap_SM()
             self.SimInt_Initial = self.SimInt.copy() if hasattr(self, 'SimInt') else None
             self.GF = self.GF_calc(self.SimInt)
@@ -209,18 +239,7 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     def initialize_optimization_params(self, param_limits=None):
         """
-        Initialize optimization parameters with bounds, including array background support.
-        
-        Parameters:
-        -----------
-        param_limits : dict, optional
-            Dictionary of parameters to optimize with their limits
-            If None, creates default limits of ±10% for all parameters
-            
-        Returns:
-        --------
-        dict
-            Dictionary of optimization parameters with limits
+        Initialize optimization parameters with bounds including SLD support.
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
@@ -256,7 +275,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                 'default': self.I0
             }
             
-            # Add background parameters (one per column)
+            # Add background parameters (one per column if array)
             if isinstance(self.Bk, np.ndarray):
                 for i, bk_val in enumerate(self.Bk):
                     param_limits[f'Bk_{i}'] = {
@@ -271,15 +290,37 @@ class TrapezoidModelArray(CDSAXS_Model):
                     'default': self.Bk
                 }
         else:
-            # FIXED: Ensure default values are set for all parameters
+            # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
                 if 'default' not in limits:
-                    # Get default value from current model state
-                    default_value = self._get_current_parameter_value(param)
-                    limits['default'] = default_value
-                    #print(f"INFO: Added missing default for {param}: {default_value}")
+                    try:
+                        # Get default value from current model state
+                        default_value = self._get_current_parameter_value(param)
+                        limits['default'] = default_value
+                    except Exception as e:
+                        # Fallback: use middle of min/max range
+                        if 'min' in limits and 'max' in limits:
+                            default_value = (limits['min'] + limits['max']) / 2
+                            limits['default'] = default_value
+                            print(f"WARNING: Could not get current value for {param}, using range midpoint: {default_value}")
+                        else:
+                            raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
         
-        # Store optimization parameters
+        # Add SLD parameters - they're treated just like other parameters
+        if hasattr(self, 'sld_values'):
+            for i, sld_val in enumerate(self.sld_values):
+                param_name = f'sld_{i}'
+                
+                # Only add to optimization if not already specified
+                if param_name not in param_limits:
+                    # Set reasonable default bounds for SLD values
+                    param_limits[param_name] = {
+                        'min': max(0.1, sld_val * 0.5),  # Positive SLD with 50% range
+                        'max': sld_val * 2.0,
+                        'default': sld_val
+                    }
+        
+        # Update stored optimization parameters
         self.model_params['optimization'] = param_limits
         
         return param_limits
@@ -426,6 +467,223 @@ class TrapezoidModelArray(CDSAXS_Model):
                 return False
             return None
     
+    def SymCoordAssign(self, PAR=None, layers=None, sld_values=None):
+        """
+        Alternative implementation with even clearer SLD assignment logic.
+        Each coordinate index directly corresponds to its layer index.
+        """
+        try:
+            # Parameter validation (same as above)
+            using_self = False
+            
+            if PAR is None:
+                if not hasattr(self, 'PAR'):
+                    if hasattr(self, 'model_params'):
+                        PAR = self._extract_PAR_from_model_params()
+                    else:
+                        raise AttributeError("Missing required attribute: PAR")
+                PAR = self.PAR
+                using_self = True
+                
+            if layers is None:
+                if not hasattr(self, 'layers'):
+                    raise AttributeError("Missing required attribute: layers")
+                layers = self.layers
+                
+            if sld_values is not None:
+                sld_array = np.array(sld_values, dtype=float)
+            elif hasattr(self, 'sld_values'):
+                sld_array = self.sld_values.copy()
+            else:
+                sld_array = np.ones(layers, dtype=float)
+            
+            # STRICT VALIDATION
+            if len(sld_array) != layers:
+                raise ValueError(
+                    f"SLD array length ({len(sld_array)}) must exactly match number of layers ({layers}). "
+                    f"Each layer requires its own SLD value."
+                )
+            
+            # Validate PAR
+            if not isinstance(PAR, np.ndarray) or len(PAR) < layers + 1 or PAR.shape[1] < 2:
+                raise ValueError("Invalid PAR array dimensions")
+            
+            # Initialize coordinate array
+            Coord = np.zeros([layers + 1, 5, 1])
+            
+            # Assign coordinates and SLD values
+            for layer_idx in range(layers):
+                # Each layer_idx corresponds to coordinate index layer_idx
+                T = layer_idx
+                
+                if T == 0:
+                    # Bottom layer
+                    Coord[T, 0, 0] = 0
+                    Coord[T, 1, 0] = PAR[0, 0]
+                    Coord[T, 2, 0] = PAR[0, 1]
+                    Coord[T, 3, 0] = 0
+                else:
+                    # Upper layers
+                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
+                    Coord[T, 2, 0] = PAR[T, 1]
+                    Coord[T, 3, 0] = 0
+                
+                # CLEAR SLD ASSIGNMENT: layer_idx gets sld_array[layer_idx]
+                Coord[T, 4, 0] = sld_array[layer_idx]
+            
+            # Handle the top vertex (T = layers)
+            T = layers
+            Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+            Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
+            Coord[T, 2, 0] = PAR[T, 1]
+            Coord[T, 3, 0] = 0
+            Coord[T, 4, 0] = 0.0  # Top vertex - no layer associated
+            
+            if using_self:
+                self.Coord = Coord
+                return True
+                
+            return Coord
+            
+        except Exception as e:
+            print(f"Error in SymCoordAssign_Alternative: {str(e)}")
+            if using_self:
+                return False
+            return None
+
+    
+    def _get_current_parameter_value(self, param_name):
+        """
+        Get the current value of a parameter from the model including SLD support.
+        """
+        if param_name.startswith('sld_'):
+            sld_idx = int(param_name.split('_')[1])
+            if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
+                return float(self.sld_values[sld_idx])
+            else:
+                raise ValueError(f"SLD index {sld_idx} out of range")
+        
+        elif param_name.startswith('trap_'):
+            parts = param_name.split('_')
+            trap_idx = int(parts[1])
+            param_type = parts[2]
+            return self.model_params['trapezoids'][trap_idx][param_type]
+        
+        elif param_name.startswith('Bk_'):
+            bk_idx = int(param_name.split('_')[1])
+            if isinstance(self.Bk, np.ndarray):
+                return self.Bk[bk_idx]
+            else:
+                return self.Bk
+        
+        elif param_name == 'Bk':
+            if isinstance(self.Bk, np.ndarray):
+                return self.Bk[0]  # Return first element for scalar case
+            else:
+                return self.Bk
+        
+        elif param_name in ['DW', 'I0']:
+            return getattr(self, param_name)
+        
+        else:
+            # Try to get from model_params
+            if hasattr(self, 'model_params') and param_name in self.model_params:
+                return self.model_params[param_name]
+            else:
+                raise ValueError(f"Unknown parameter: {param_name}")
+
+    def _set_parameter_value(self, param_name, value):
+        """
+        Set a parameter value in the model including SLD support.
+        """
+        if param_name.startswith('sld_'):
+            sld_idx = int(param_name.split('_')[1])
+            if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
+                self.sld_values[sld_idx] = value
+                # Update model_params if it exists
+                if hasattr(self, 'model_params') and 'slds' in self.model_params:
+                    self.model_params['slds'][sld_idx] = value
+            else:
+                raise ValueError(f"SLD index {sld_idx} out of range")
+        
+        elif param_name.startswith('trap_'):
+            # Trapezoid parameter
+            parts = param_name.split('_')
+            trap_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['trapezoids'][trap_idx][param_type] = value
+            
+        elif param_name.startswith('Bk_'):
+            # Background parameter for specific column
+            bk_idx = int(param_name.split('_')[1])
+            if isinstance(self.Bk, np.ndarray):
+                self.Bk[bk_idx] = value
+            else:
+                # Convert scalar to array if needed
+                n_columns = getattr(self, 'Intensity', np.array([[0]])).shape[1]
+                self.Bk = np.full(n_columns, self.Bk)
+                self.Bk[bk_idx] = value
+                
+        elif param_name == 'Bk':
+            # Scalar background parameter
+            self.Bk = value
+            
+        else:
+            # Global parameter (DW, I0) or other model parameter
+            if hasattr(self, param_name):
+                setattr(self, param_name, value)
+            if hasattr(self, 'model_params'):
+                self.model_params[param_name] = value
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
+            
+    def _initialize_sld_values(self):
+        """
+        Initialize SLD values from various sources, with sensible defaults.
+        FIXED: Ensures SLD values are always float dtype for mathematical operations.
+        """
+        # For trapezoids, we need SLD values for each LAYER (trapezoid), not each vertex
+        n_sld_values = self.layers  # Number of actual trapezoids/layers
+        
+        # Priority order: model_params['slds'] > SLD parameter > default values
+        if hasattr(self, 'model_params') and 'slds' in self.model_params:
+            # Use SLD values from model_params (main approach)
+            sld_values = self.model_params['slds']
+            if isinstance(sld_values, list):
+                # FIXED: Explicitly convert to float dtype
+                self.sld_values = np.array(sld_values, dtype=float)
+            else:
+                # FIXED: Ensure single values are also float
+                self.sld_values = np.array([float(sld_values)])
+                
+        elif hasattr(self, 'SLD') and self.SLD is not None:
+            # Use legacy SLD parameter for backward compatibility
+            if np.isscalar(self.SLD):
+                # FIXED: Use float dtype
+                self.sld_values = np.full(n_sld_values, float(self.SLD))
+            else:
+                # FIXED: Convert array to float dtype
+                self.sld_values = np.array(self.SLD, dtype=float)
+                
+        else:
+            # Default: all SLDs = 1.0 (single material behavior)
+            # FIXED: Use float dtype for defaults
+            self.sld_values = np.ones(n_sld_values, dtype=float)
+        
+        # Ensure correct array size
+        if len(self.sld_values) != n_sld_values:
+            if len(self.sld_values) == 1:
+                # Extend single value to all layers
+                # FIXED: Maintain float dtype
+                self.sld_values = np.full(n_sld_values, float(self.sld_values[0]))
+            else:
+                # Resize array to correct length
+                # FIXED: Ensure float dtype after resize
+                self.sld_values = np.resize(self.sld_values, n_sld_values).astype(float)
+                print(f"Warning: Resized SLD array to {n_sld_values} elements for {self.layers} layers")
+    
     def FreeFormTrapezoid(self, Coord=None, layers=None, Qx=None, Qz=None):
         """
         Calculates the form factor for a free-form trapezoid structure.
@@ -526,37 +784,7 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     def SimTrap_SM(self, PAR=None, layers=None, Qx=None, Qz=None, DW=None, I0=None, Bk=None):
         """
-        Simulates the intensity for a single material trapezoid structure with array background support.
-        
-        Parameters:
-        -----------
-        PAR : numpy.ndarray, optional
-            Array with parameters for each layer
-            If None, uses self.PAR
-        layers : int, optional
-            Number of layers in the trapezoid structure
-            If None, uses self.layers
-        Qx : numpy.ndarray, optional
-            X-component of scattering vector, 2D array
-            If None, uses self.Qx
-        Qz : numpy.ndarray, optional
-            Z-component of scattering vector, 2D array
-            If None, uses self.Qz
-        DW : float, optional
-            Debye-Waller factor
-            If None, uses self.DW
-        I0 : float, optional
-            Intensity scaling factor
-            If None, uses self.I0
-        Bk : float or numpy.ndarray, optional
-            Background intensity (scalar or array with one value per column)
-            If None, uses self.Bk
-            
-        Returns:
-        --------
-        numpy.ndarray
-            The simulated intensity
-            If called with self attributes, also sets self.SimInt
+        Enhanced simulation that uses the new coordinate assignment function.
         """
         try:
             # Determine whether to use passed parameters or class attributes
@@ -564,11 +792,9 @@ class TrapezoidModelArray(CDSAXS_Model):
             
             if PAR is None:
                 if not hasattr(self, 'PAR'):
-                    # Try to use model_params if available
                     if hasattr(self, 'model_params'):
                         PAR = self._extract_PAR_from_model_params()
                     else:
-                        # If PAR is not available, we'll try to use existing Coord
                         if not hasattr(self, 'Coord'):
                             raise AttributeError("Missing required attributes: PAR and Coord")
                 else:
@@ -605,18 +831,18 @@ class TrapezoidModelArray(CDSAXS_Model):
                     raise AttributeError("Missing required attribute: Bk")
                 Bk = self.Bk
             
-            # Generate coordinates if PAR is provided
+            # Generate coordinates if PAR is provided - uses current SLD values
             if PAR is not None:
-                Coord = self.SymCoordAssign_SingleMaterial(PAR, layers)
+                Coord = self.SymCoordAssign(PAR, layers)
                 if Coord is None or (using_self and Coord is False):
-                    raise RuntimeError("Failed to assign coordinates in SymCoordAssign_SingleMaterial")
+                    raise RuntimeError("Failed to assign coordinates in SymCoordAssign")
             else:
                 # Use existing Coord
                 if not hasattr(self, 'Coord'):
                     raise AttributeError("Missing required attribute: Coord")
                 Coord = self.Coord
             
-            # Calculate form factor
+            # Calculate form factor using the enhanced coordinates with SLD
             form = self.FreeFormTrapezoid(Coord, layers, Qx, Qz)
             if form is None:
                 raise RuntimeError("Failed to calculate form factor in FreeFormTrapezoid")
@@ -656,30 +882,7 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     def SimTrap_GF(self, optimization_values, param_names=None, Intensity=None, Qx=None, Qz=None):
         """
-        Simulates a trapezoid structure and calculates goodness of fit (GF) with array background support.
-        Used by the differential evolution algorithm.
-        
-        Parameters:
-        -----------
-        optimization_values : numpy.ndarray
-            1D array containing values for the parameters being optimized
-        param_names : list, optional
-            List of parameter names corresponding to optimization_values
-            If None, uses self.param_names
-        Intensity : numpy.ndarray, optional
-            Measured intensity data for comparison
-            If None, uses self.Intensity
-        Qx : numpy.ndarray, optional
-            X-component of scattering vector, 2D array
-            If None, uses self.Qx
-        Qz : numpy.ndarray, optional
-            Z-component of scattering vector, 2D array
-            If None, uses self.Qz
-            
-        Returns:
-        --------
-        float
-            Chi-square value representing goodness of fit
+        Enhanced goodness of fit calculation with SLD support.
         """
         try:
             # Validate input parameters
@@ -720,6 +923,12 @@ class TrapezoidModelArray(CDSAXS_Model):
             else:
                 temp_Bk = self.Bk
             
+            # Initialize SLD array
+            if hasattr(self, 'sld_values'):
+                temp_sld_values = self.sld_values.copy()
+            else:
+                temp_sld_values = np.ones(self.layers + 1)
+            
             # Update parameters with optimization values
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('trap_'):
@@ -733,6 +942,12 @@ class TrapezoidModelArray(CDSAXS_Model):
                         params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
                     
                     params['trapezoids'][trap_idx][param_type] = optimization_values[i]
+                    
+                elif param_name.startswith('sld_'):
+                    # SLD parameter - treat just like any other parameter
+                    sld_idx = int(param_name.split('_')[1])
+                    temp_sld_values[sld_idx] = optimization_values[i]
+                    
                 elif param_name.startswith('Bk_'):
                     # Background parameter for specific column
                     bk_idx = int(param_name.split('_')[1])
@@ -761,10 +976,36 @@ class TrapezoidModelArray(CDSAXS_Model):
             temp_DW = params['DW']
             temp_I0 = params['I0']
             
-            # Simulate intensity
-            SimInt = self.SimTrap_SM(temp_PAR, self.layers, Qx, Qz, temp_DW, temp_I0, temp_Bk)
-            if SimInt is None:
-                raise RuntimeError("Failed to simulate intensity in SimTrap_SM")
+            # Use SymCoordAssign with current SLD values
+            Coord = self.SymCoordAssign(temp_PAR, self.layers, sld_values=temp_sld_values)
+            if Coord is None:
+                raise RuntimeError("Failed to assign coordinates with SLD values")
+            
+            # Calculate form factor
+            form = self.FreeFormTrapezoid(Coord, self.layers, Qx, Qz)
+            if form is None:
+                raise RuntimeError("Failed to calculate form factor")
+            
+            # Calculate Debye-Waller factor
+            M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(temp_DW, 2)), 0.5)
+            
+            # Apply Debye-Waller factor to form factor
+            Formfactor = form * M
+            Formfactor = abs(Formfactor)
+            
+            # Calculate intensity with array background support
+            intensity_base = np.power(Formfactor, 2) * temp_I0
+            
+            if isinstance(temp_Bk, np.ndarray):
+                # Array background - broadcast across columns
+                if len(temp_Bk) != intensity_base.shape[1]:
+                    raise ValueError(f"Background array length ({len(temp_Bk)}) must match number of columns ({intensity_base.shape[1]})")
+                
+                # Add background to each column
+                SimInt = intensity_base + temp_Bk[np.newaxis, :]
+            else:
+                # Scalar background
+                SimInt = intensity_base + temp_Bk
             
             # Calculate goodness of fit
             Chi2 = self.GF_calc(SimInt, Intensity)
@@ -774,34 +1015,16 @@ class TrapezoidModelArray(CDSAXS_Model):
         except Exception as e:
             print(f"Error in SimTrap_GF: {str(e)}")
             return float('inf')  # Return infinity as worst-case fit
-    
+        
+        
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                        plot_structure=True, plot_grid=True, plot_combined=True,
-                        verbose=False,**kwargs):
+                    plot_structure=True, plot_grid=True, plot_combined=True,
+                    verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS trapezoid model fitting
         with array background support and shows before/after comparison plots.
         
-        Parameters:
-        -----------
-        params_to_optimize : dict, optional
-            Dictionary containing parameters to optimize with their bounds
-            If None, uses self.model_params['optimization']
-        plot_results : bool, optional
-            Whether to generate any plots (master switch for all plotting)
-        plot_structure : bool, optional
-            Whether to plot trapezoid structure comparison
-        plot_grid : bool, optional
-            Whether to plot the grid of individual Qz cuts
-        plot_combined : bool, optional
-            Whether to plot the combined view with all cuts
-        **kwargs : dict
-            Additional keyword arguments to pass to scipy's differential_evolution function
-            
-        Returns:
-        --------
-        dict
-            Optimized parameter dictionary with the same structure as the input model_params
+        Fixed to respect verbose parameter properly.
         """
         try:
             # Check if required attributes exist
@@ -859,7 +1082,9 @@ class TrapezoidModelArray(CDSAXS_Model):
                 self.GF_Initial = self.GF_calc(self.SimInt)
             
             # Run differential evolution optimization
-            print(f"Starting optimization with {len(param_names)} parameters...")
+            if verbose:  # Only print if verbose=True
+                print(f"Starting optimization with {len(param_names)} parameters...")
+            
             result = differential_evolution(
                 self.SimTrap_GF,
                 bounds, 
@@ -921,7 +1146,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             self.GF = self.GF_calc(self.SimInt)
             self.BIC = self.BIC_calc(self.GF)
             
-            # Print optimization results
+            # Print optimization results only if verbose
             if verbose:
                 print(f"Optimization complete after {result.nfev} function evaluations")
                 print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
@@ -933,17 +1158,19 @@ class TrapezoidModelArray(CDSAXS_Model):
                 self._plot_optimization_results(initial_model_params, initial_simInt,
                                             plot_structure, plot_grid, plot_combined)
             
-            # Print parameter changes
+            # Print parameter changes only if verbose
             if verbose:
-                self._print_parameter_changes(initial_model_params)
+                self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
         except Exception as e:
-            print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if verbose:  # Only print errors if verbose
+                print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
+                import traceback
+                traceback.print_exc()
             return None
+
     
     def _plot_optimization_results(self, initial_model_params, initial_simInt, 
                                   plot_structure=True, plot_grid=True, plot_combined=True):
@@ -1176,86 +1403,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         plt.tight_layout()
         plt.show()
     
-    def _print_parameter_changes(self, initial_model_params):
-        """
-        Print a table of parameter changes from optimization, including array background.
-        
-        Parameters:
-        -----------
-        initial_model_params : dict
-            Model parameters before optimization
-        """
-        print("\nParameter Changes:")
-        print("=" * 60)
-        print(f"{'Parameter':<20} {'Initial':<15} {'Optimized':<15} {'Change %':<10}")
-        print("-" * 60)
-        
-        # Print trapezoid parameters
-        initial_traps = initial_model_params['trapezoids']
-        optimized_traps = self.model_params['trapezoids']
-        max_traps = max(len(initial_traps), len(optimized_traps))
-        
-        for i in range(max_traps):
-            # Handle the case where the trapezoid exists in both models
-            if i < len(initial_traps) and i < len(optimized_traps):
-                # Print width
-                width_init = initial_traps[i]['width']
-                width_optim = optimized_traps[i]['width']
-                width_change = (width_optim - width_init) / width_init * 100 if width_init != 0 else float('inf')
-                print(f"Trap {i} Width{'':<10} {width_init:<15.4f} {width_optim:<15.4f} {width_change:+.2f}%")
-                
-                # Print height if this isn't the top-most trapezoid (which might not have a height)
-                if 'height' in initial_traps[i] and 'height' in optimized_traps[i]:
-                    height_init = initial_traps[i]['height']
-                    height_optim = optimized_traps[i]['height']
-                    height_change = (height_optim - height_init) / height_init * 100 if height_init != 0 else float('inf')
-                    print(f"Trap {i} Height{'':<9} {height_init:<15.4f} {height_optim:<15.4f} {height_change:+.2f}%")
-            
-            # Handle the case where the trapezoid only exists in the initial model
-            elif i < len(initial_traps):
-                width_init = initial_traps[i]['width']
-                print(f"Trap {i} Width{'':<10} {width_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-                
-                if 'height' in initial_traps[i]:
-                    height_init = initial_traps[i]['height']
-                    print(f"Trap {i} Height{'':<9} {height_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-            
-            # Handle the case where the trapezoid only exists in the optimized model
-            elif i < len(optimized_traps):
-                width_optim = optimized_traps[i]['width']
-                print(f"Trap {i} Width{'':<10} {'N/A':<15} {width_optim:<15.4f} {'N/A':<10}")
-                
-                if 'height' in optimized_traps[i]:
-                    height_optim = optimized_traps[i]['height']
-                    print(f"Trap {i} Height{'':<9} {'N/A':<15} {height_optim:<15.4f} {'N/A':<10}")
-        
-        # Print global parameters
-        for param in ['DW', 'I0']:
-            if param in initial_model_params and param in self.model_params:
-                init_val = initial_model_params[param]
-                optim_val = self.model_params[param]
-                change = (optim_val - init_val) / init_val * 100 if init_val != 0 else float('inf')
-                
-                print(f"{param:<20} {init_val:<15.6f} {optim_val:<15.6f} {change:+.2f}%")
-        
-        # Print background parameters
-        initial_bk = initial_model_params['Bk']
-        optimized_bk = self.model_params['Bk']
-        
-        if isinstance(initial_bk, list) and isinstance(optimized_bk, list):
-            # Array background
-            for i, (init_val, optim_val) in enumerate(zip(initial_bk, optimized_bk)):
-                change = (optim_val - init_val) / init_val * 100 if init_val != 0 else float('inf')
-                print(f"Bk_{i:<17} {init_val:<15.6f} {optim_val:<15.6f} {change:+.2f}%")
-        elif not isinstance(initial_bk, list) and not isinstance(optimized_bk, list):
-            # Scalar background
-            change = (optimized_bk - initial_bk) / initial_bk * 100 if initial_bk != 0 else float('inf')
-            print(f"Bk{'':<18} {initial_bk:<15.6f} {optimized_bk:<15.6f} {change:+.2f}%")
-        else:
-            # Mixed case (shouldn't happen in normal use)
-            print(f"Bk{'':<18} {str(initial_bk):<15} {str(optimized_bk):<15} {'Mixed':<10}")
-        
-        print("=" * 60)
+    
     
     def plot_structure(self, figsize=(10, 6), xlim=None, ylim=None, title='Trapezoid Structure', 
                       show_dimensions=False, color='blue', linewidth=2, equal_aspect=True, **kwargs):
@@ -1537,54 +1685,41 @@ class TrapezoidModelArray(CDSAXS_Model):
         return self.SimTrap_SM(*args, **kwargs)
 
 
-
-    def _get_current_parameter_value(self, param_name):
-        """
-        Get the current value of a parameter from the model.
-        
-        Parameters:
-        -----------
-        param_name : str
-            Name of the parameter
+         
             
-        Returns:
-        --------
-        float
-            Current value of the parameter
-        """
-        if param_name.startswith('trap_'):
-            parts = param_name.split('_')
-            trap_idx = int(parts[1])
-            param_type = parts[2]
-            return self.model_params['trapezoids'][trap_idx][param_type]
+            
+            
+            
+    def _trapezoid_optimization_wrapper(self, optimization_values):
+            """
+            Enhanced wrapper function for trapezoid optimization with SLD support.
+            """
+            try:
+                # CRITICAL FIX: Always convert to numpy array first
+                if not isinstance(optimization_values, np.ndarray):
+                    optimization_values = np.array(optimization_values, dtype=float)
+                
+                # Get parameter names from available sources
+                if hasattr(self, 'param_names'):
+                    param_names = self.param_names
+                elif hasattr(self, 'mcmc_param_names'):
+                    param_names = self.mcmc_param_names
+                else:
+                    # Generate parameter names from optimization parameters
+                    param_names = list(self.model_params.get('optimization', {}).keys())
+                
+                if len(optimization_values) != len(param_names):
+                    raise ValueError(f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}")
+                
+                # Call SimTrap_GF with numpy array
+                return self.SimTrap_GF(optimization_values, param_names, self.Intensity, self.Qx, self.Qz)
+                
+            except Exception as e:
+                print(f"Error in trapezoid wrapper: {e}")
+                return float('inf')
+
         
-        elif param_name.startswith('cyl_'):
-            parts = param_name.split('_')
-            cyl_idx = int(parts[1])
-            param_type = parts[2]
-            return self.model_params['cylinders'][cyl_idx][param_type]
-        
-        elif param_name.startswith('Bk_'):
-            bk_idx = int(param_name.split('_')[1])
-            if isinstance(self.Bk, np.ndarray):
-                return self.Bk[bk_idx]
-            else:
-                return self.Bk
-        
-        elif param_name == 'Bk':
-            if isinstance(self.Bk, np.ndarray):
-                return self.Bk[0]  # Return first element for scalar case
-            else:
-                return self.Bk
-        
-        elif param_name in ['DW', 'I0']:
-            return getattr(self, param_name)
-        
-        else:
-            # Try to get from model_params
-            if hasattr(self, 'model_params') and param_name in self.model_params:
-                return self.model_params[param_name]
-            else:
-                raise ValueError(f"Unknown parameter: {param_name}")
+    
 # Create an alias for backward compatibility
 TrapezoidModel = TrapezoidModelArray
+

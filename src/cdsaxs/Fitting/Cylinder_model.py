@@ -4,7 +4,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.special as sp
 import copy
-from scipy.optimize import differential_evolution
+from scipy.optimize import (
+    differential_evolution, 
+    dual_annealing, 
+    shgo, 
+    basinhopping, 
+    minimize
+)
 from tqdm import tqdm
 
 from CDSAXS_base_model import CDSAXS_Model
@@ -50,10 +56,13 @@ class CylinderModel(CDSAXS_Model):
             self.discretization = [10] * self.layers
             if hasattr(self, 'model_params'):
                 self.model_params['discretization'] = self.discretization
+                
+        # Initialize SLD values
+        self._initialize_sld_values()
     
     def build_model_params_from_traditional(self):
         """
-        Build model_params dictionary from traditional parameters.
+        Build model_params dictionary from traditional parameters including SLD support.
         """
         if not hasattr(self, 'PAR') or self.PAR is None:
             return
@@ -77,10 +86,19 @@ class CylinderModel(CDSAXS_Model):
             'discretization': self.discretization if hasattr(self, 'discretization') else [10] * self.layers
         }
         
+        # Add SLD values to model_params
+        if hasattr(self, 'sld_values'):
+            self.model_params['slds'] = self.sld_values.tolist()
+        
         # Add optional parameters if they exist
         if hasattr(self, 'SLD') and self.SLD is not None:
-            self.model_params['SLD'] = self.SLD
-            
+            # For backward compatibility, but slds takes precedence
+            if 'slds' not in self.model_params:
+                if np.isscalar(self.SLD):
+                    self.model_params['slds'] = [self.SLD] * (self.layers)
+                else:
+                    self.model_params['slds'] = self.SLD.tolist()
+        
         if hasattr(self, 'Pitch') and self.Pitch is not None:
             self.model_params['Pitch'] = self.Pitch
             
@@ -88,7 +106,7 @@ class CylinderModel(CDSAXS_Model):
     
     def update_traditional_from_model_params(self):
         """
-        Update traditional parameters from model_params dictionary.
+        Update traditional parameters from model_params dictionary including SLD support.
         """
         if not hasattr(self, 'model_params'):
             return
@@ -110,6 +128,14 @@ class CylinderModel(CDSAXS_Model):
         # Update discretization
         if 'discretization' in self.model_params:
             self.discretization = self.model_params['discretization']
+        
+        # Update SLD parameters
+        if 'slds' in self.model_params:
+            sld_values = self.model_params['slds']
+            if isinstance(sld_values, list):
+                self.sld_values = np.array(sld_values, dtype=float)
+            else:
+                self.sld_values = np.array([sld_values], dtype=float)
         
         # Update optional parameters
         if 'SLD' in self.model_params:
@@ -187,18 +213,7 @@ class CylinderModel(CDSAXS_Model):
     
     def initialize_optimization_params(self, param_limits=None):
         """
-        Initialize optimization parameters with bounds.
-        
-        Parameters:
-        -----------
-        param_limits : dict, optional
-            Dictionary of parameters to optimize with their limits
-            If None, creates default limits of ±10% for all parameters
-            
-        Returns:
-        --------
-        dict
-            Dictionary of optimization parameters with limits
+        Initialize optimization parameters with bounds including SLD support.
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
@@ -240,14 +255,37 @@ class CylinderModel(CDSAXS_Model):
                 'default': self.Bk
             }
         else:
-            # FIXED: Ensure default values are set if not provided
+            # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
                 if 'default' not in limits:
-                    default_value = self._get_current_parameter_value(param)
-                    limits['default'] = default_value
-                    #print(f"INFO: Added missing default for {param}: {default_value}")
+                    try:
+                        # Get default value from current model state
+                        default_value = self._get_current_parameter_value(param)
+                        limits['default'] = default_value
+                    except Exception as e:
+                        # Fallback: use middle of min/max range
+                        if 'min' in limits and 'max' in limits:
+                            default_value = (limits['min'] + limits['max']) / 2
+                            limits['default'] = default_value
+                            print(f"WARNING: Could not get current value for {param}, using range midpoint: {default_value}")
+                        else:
+                            raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
         
-        # Store optimization parameters
+        # Add SLD parameters - they're treated just like other parameters
+        if hasattr(self, 'sld_values'):
+            for i, sld_val in enumerate(self.sld_values):
+                param_name = f'sld_{i}'
+                
+                # Only add to optimization if not already specified
+                if param_name not in param_limits:
+                    # Set reasonable default bounds for SLD values
+                    param_limits[param_name] = {
+                        'min': max(0.1, sld_val * 0.5),  # Positive SLD with 50% range
+                        'max': sld_val * 2.0,
+                        'default': sld_val
+                    }
+        
+        # Update stored optimization parameters
         self.model_params['optimization'] = param_limits
         
         return param_limits
@@ -293,19 +331,26 @@ class CylinderModel(CDSAXS_Model):
 
     def _get_current_parameter_value(self, param_name):
         """
-        Get the current value of a parameter from the model.
-        
-        Parameters:
-        -----------
-        param_name : str
-            Name of the parameter
-            
-        Returns:
-        --------
-        float
-            Current value of the parameter
+        Get the current value of a parameter from the model including SLD support.
+        FIXED: Ensures SLD values are returned as floats.
         """
-        if param_name.startswith('cyl_'):
+        if param_name.startswith('sld_'):
+            sld_idx = int(param_name.split('_')[1])
+            if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
+                # FIXED: Ensure return value is Python float, not numpy type
+                return float(self.sld_values[sld_idx])
+            elif hasattr(self, 'model_params') and 'slds' in self.model_params:
+                slds = self.model_params['slds']
+                if isinstance(slds, list) and sld_idx < len(slds):
+                    # FIXED: Ensure return value is float
+                    return float(slds[sld_idx])
+                elif isinstance(slds, np.ndarray) and sld_idx < len(slds):
+                    # FIXED: Ensure return value is float
+                    return float(slds[sld_idx])
+            else:
+                raise ValueError(f"SLD index {sld_idx} out of range or SLD values not initialized")
+        
+        elif param_name.startswith('cyl_'):
             parts = param_name.split('_')
             cyl_idx = int(parts[1])
             param_type = parts[2]
@@ -320,6 +365,49 @@ class CylinderModel(CDSAXS_Model):
                 return self.model_params[param_name]
             else:
                 raise ValueError(f"Unknown parameter: {param_name}")
+            
+    def _set_parameter_value(self, param_name, value):
+        """
+        Set a parameter value in the model including SLD support.
+        """
+        if param_name.startswith('sld_'):
+            sld_idx = int(param_name.split('_')[1])
+            if hasattr(self, 'sld_values') and sld_idx < len(self.sld_values):
+                self.sld_values[sld_idx] = float(value)
+                # Update model_params if it exists
+                if hasattr(self, 'model_params') and 'slds' in self.model_params:
+                    self.model_params['slds'][sld_idx] = float(value)
+            else:
+                # Initialize sld_values if it doesn't exist
+                if not hasattr(self, 'sld_values'):
+                    self.sld_values = np.ones(self.layers, dtype=float)
+                if sld_idx < len(self.sld_values):
+                    self.sld_values[sld_idx] = float(value)
+                    # Also update model_params
+                    if hasattr(self, 'model_params'):
+                        if 'slds' not in self.model_params:
+                            self.model_params['slds'] = self.sld_values.tolist()
+                        else:
+                            self.model_params['slds'][sld_idx] = float(value)
+                else:
+                    raise ValueError(f"SLD index {sld_idx} out of range")
+        
+        elif param_name.startswith('cyl_'):
+            # Cylinder parameter
+            parts = param_name.split('_')
+            cyl_idx = int(parts[1])
+            param_type = parts[2]
+            self.model_params['cylinders'][cyl_idx][param_type] = value
+        
+        else:
+            # Global parameter (DW, I0, Bk)
+            if hasattr(self, param_name):
+                setattr(self, param_name, value)
+            if hasattr(self, 'model_params'):
+                self.model_params[param_name] = value
+        
+        # Update traditional parameters
+        self.update_traditional_from_model_params()
         
     def _extract_PAR_from_model_params(self):
         """
@@ -345,15 +433,17 @@ class CylinderModel(CDSAXS_Model):
                 
         return PAR
     
-    def ConeFourierTransform(self, Discretization=None):
+    def ConeFourierTransform(self, Discretization=None, sld_values=None):
         """
-        Fourier transform for a cone in cylindrical coordinates (Qr,Qz) 
+        Fourier transform for a cone in cylindrical coordinates (Qr,Qz) with SLD support
         
         Parameters:
         -----------
         Discretization : list or numpy.ndarray, optional
             Number of discretization steps for each layer
             If None, uses self.discretization
+        sld_values : numpy.ndarray, optional
+            SLD values for each layer. If None, uses self.sld_values
             
         Returns:
         --------
@@ -382,12 +472,27 @@ class CylinderModel(CDSAXS_Model):
             if len(Discretization) < self.layers:
                 raise ValueError(f"Discretization array must have at least {self.layers} elements")
             
+            # Determine SLD values to use
+            if sld_values is not None:
+                sld_array = np.array(sld_values, dtype=float)
+            elif hasattr(self, 'sld_values'):
+                sld_array = self.sld_values.copy()
+            else:
+                sld_array = np.ones(self.layers, dtype=float)
+            
+            # STRICT VALIDATION
+            if len(sld_array) != self.layers:
+                raise ValueError(
+                    f"SLD array length ({len(sld_array)}) must exactly match number of layers ({self.layers}). "
+                    f"Each layer requires its own SLD value."
+                )
+            
             # Initialize variables
             H1 = 0
             H2 = 0
             self.form = np.zeros([int(len(self.Qr[:,0])), int(len(self.Qr[0,:]))])
             
-            # Perform Fourier transform
+            # Perform Fourier transform with SLD support
             for i in range(self.layers):
                 H2 = H2 + self.PAR[i, 1]
                 stepsize = self.PAR[i, 1] / Discretization[i]
@@ -410,10 +515,13 @@ class CylinderModel(CDSAXS_Model):
                     RI2 = (z[ii+1] - H1) / Slope + R1
                     fa = 2 * np.pi * RI1 / self.Qr * sp.jv(1, self.Qr * RI1) * np.exp(1j * self.Qz * z[ii])
                     fb = 2 * np.pi * RI2 / self.Qr * sp.jv(1, self.Qr * RI2) * np.exp(1j * self.Qz * z[ii+1])
-                    self.form = self.form + stepsize * (fb + fa) / 2  # If you had an SLD variation you would multiply by the SLD here
+                    
+                    # FIXED: Multiply by SLD of this layer (layer i gets sld_array[i])
+                    layer_sld = sld_array[i]
+                    self.form = self.form + stepsize * (fb + fa) / 2 * layer_sld
             
             return self.form
-            
+        
         except Exception as e:
             print(f"Error in ConeFourierTransform: {str(e)}")
             self.form = None
@@ -691,34 +799,61 @@ class CylinderModel(CDSAXS_Model):
         
         # Call cylindrical GF function
         return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+    
+    def _initialize_sld_values(self):
+        """
+        Initialize SLD values from various sources, with sensible defaults.
+        FIXED: Ensures SLD values are always float dtype for mathematical operations.
+        """
+        # For cylinders, we need SLD values for each LAYER (cylinder), not each vertex
+        n_sld_values = self.layers  # Number of actual cylinders/layers
+        
+        # Priority order: model_params['slds'] > SLD parameter > default values
+        if hasattr(self, 'model_params') and 'slds' in self.model_params:
+            # Use SLD values from model_params (main approach)
+            sld_values = self.model_params['slds']
+            if isinstance(sld_values, list):
+                # FIXED: Explicitly convert to float dtype
+                self.sld_values = np.array(sld_values, dtype=float)
+            else:
+                # FIXED: Ensure single values are also float
+                self.sld_values = np.array([float(sld_values)])
+                
+        elif hasattr(self, 'SLD') and self.SLD is not None:
+            # Use legacy SLD parameter for backward compatibility
+            if np.isscalar(self.SLD):
+                # FIXED: Use float dtype
+                self.sld_values = np.full(n_sld_values, float(self.SLD))
+            else:
+                # FIXED: Convert array to float dtype
+                self.sld_values = np.array(self.SLD, dtype=float)
+                
+        else:
+            # Default: all SLDs = 1.0 (single material behavior)
+            # FIXED: Use float dtype for defaults
+            self.sld_values = np.ones(n_sld_values, dtype=float)
+        
+        # Ensure correct array size
+        if len(self.sld_values) != n_sld_values:
+            if len(self.sld_values) == 1:
+                # Extend single value to all layers
+                # FIXED: Maintain float dtype
+                self.sld_values = np.full(n_sld_values, float(self.sld_values[0]))
+            else:
+                # Resize array to correct length
+                # FIXED: Ensure float dtype after resize
+                self.sld_values = np.resize(self.sld_values, n_sld_values).astype(float)
+                print(f"Warning: Resized SLD array to {n_sld_values} elements for {self.layers} layers")
+
 
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
-                        plot_structure=True, plot_grid=True, plot_combined=True,
-                        verbose=False,**kwargs):
+                    plot_structure=True, plot_grid=True, plot_combined=True,
+                    verbose=False,**kwargs):
         """
         Performs differential evolution optimization for CDSAXS cylindrical model fitting
         and shows before/after comparison plots.
         
-        Parameters:
-        -----------
-        params_to_optimize : dict, optional
-            Dictionary containing parameters to optimize with their bounds
-            If None, uses self.model_params['optimization']
-        plot_results : bool, optional
-            Whether to generate any plots (master switch for all plotting)
-        plot_structure : bool, optional
-            Whether to plot cylinder structure comparison
-        plot_grid : bool, optional
-            Whether to plot the grid of individual Qz cuts
-        plot_combined : bool, optional
-            Whether to plot the combined view with all cuts
-        **kwargs : dict
-            Additional keyword arguments to pass to scipy's differential_evolution function
-            
-        Returns:
-        --------
-        dict
-            Optimized parameter dictionary with the same structure as the input model_params
+        Fixed to respect verbose parameter properly.
         """
         try:
             # Check if required attributes exist
@@ -785,7 +920,8 @@ class CylinderModel(CDSAXS_Model):
                 self.GF_Initial = self.GF_calc(self.SimInt)
             
             # Run differential evolution optimization
-            print(f"Starting optimization with {len(param_names)} parameters...")
+            if verbose:  # Only print if verbose=True
+                print(f"Starting optimization with {len(param_names)} parameters...")
             
             # Run the optimization using the method-level wrapper (can be pickled)
             result = differential_evolution(
@@ -826,7 +962,7 @@ class CylinderModel(CDSAXS_Model):
             self.GF = self.GF_calc(self.SimInt)
             self.BIC = self.BIC_calc(self.GF)
             
-            # Print optimization results
+            # Print optimization results only if verbose
             if verbose:
                 print(f"Optimization complete after {result.nfev} function evaluations")
                 print(f"Initial goodness of fit: {self.GF_Initial:.4f}")
@@ -838,16 +974,17 @@ class CylinderModel(CDSAXS_Model):
                 self._plot_optimization_results(initial_model_params, initial_simInt,
                                             plot_structure, plot_grid, plot_combined)
             
-            # Print parameter changes
+            # Print parameter changes only if verbose
             if verbose:
-                self._print_parameter_changes(initial_model_params)
+                self.print_parameter_changes(initial_model_params)
             
             return self.model_params
                 
         except Exception as e:
-            print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if verbose:  # Only print errors if verbose
+                print(f"Error in CDSAXS_DiffEvolution: {str(e)}")
+                import traceback
+                traceback.print_exc()
             return None
     
     def _plot_optimization_results(self, initial_model_params, initial_simInt, 
@@ -1070,69 +1207,7 @@ class CylinderModel(CDSAXS_Model):
         plt.tight_layout()
         plt.show()
     
-    def _print_parameter_changes(self, initial_model_params):
-        """
-        Print a table of parameter changes from optimization.
-        
-        Parameters:
-        -----------
-        initial_model_params : dict
-            Model parameters before optimization
-        """
-        print("\nParameter Changes:")
-        print("=" * 60)
-        print(f"{'Parameter':<20} {'Initial':<15} {'Optimized':<15} {'Change %':<10}")
-        print("-" * 60)
-        
-        # Print cylinder parameters
-        initial_cyls = initial_model_params['cylinders']
-        optimized_cyls = self.model_params['cylinders']
-        max_cyls = max(len(initial_cyls), len(optimized_cyls))
-        
-        for i in range(max_cyls):
-            # Handle the case where the cylinder exists in both models
-            if i < len(initial_cyls) and i < len(optimized_cyls):
-                # Print radius
-                radius_init = initial_cyls[i]['radius']
-                radius_optim = optimized_cyls[i]['radius']
-                radius_change = (radius_optim - radius_init) / radius_init * 100 if radius_init != 0 else float('inf')
-                print(f"Cyl {i} Radius{'':<10} {radius_init:<15.4f} {radius_optim:<15.4f} {radius_change:+.2f}%")
-                
-                # Print height if this isn't the top-most cylinder (which might not have a height)
-                if 'height' in initial_cyls[i] and 'height' in optimized_cyls[i]:
-                    height_init = initial_cyls[i]['height']
-                    height_optim = optimized_cyls[i]['height']
-                    height_change = (height_optim - height_init) / height_init * 100 if height_init != 0 else float('inf')
-                    print(f"Cyl {i} Height{'':<9} {height_init:<15.4f} {height_optim:<15.4f} {height_change:+.2f}%")
-            
-            # Handle the case where the cylinder only exists in the initial model
-            elif i < len(initial_cyls):
-                radius_init = initial_cyls[i]['radius']
-                print(f"Cyl {i} Radius{'':<10} {radius_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-                
-                if 'height' in initial_cyls[i]:
-                    height_init = initial_cyls[i]['height']
-                    print(f"Cyl {i} Height{'':<9} {height_init:<15.4f} {'N/A':<15} {'N/A':<10}")
-            
-            # Handle the case where the cylinder only exists in the optimized model
-            elif i < len(optimized_cyls):
-                radius_optim = optimized_cyls[i]['radius']
-                print(f"Cyl {i} Radius{'':<10} {'N/A':<15} {radius_optim:<15.4f} {'N/A':<10}")
-                
-                if 'height' in optimized_cyls[i]:
-                    height_optim = optimized_cyls[i]['height']
-                    print(f"Cyl {i} Height{'':<9} {'N/A':<15} {height_optim:<15.4f} {'N/A':<10}")
-        
-        # Print global parameters
-        for param in ['DW', 'I0', 'Bk']:
-            if param in initial_model_params and param in self.model_params:
-                init_val = initial_model_params[param]
-                optim_val = self.model_params[param]
-                change = (optim_val - init_val) / init_val * 100 if init_val != 0 else float('inf')
-                
-                print(f"{param:<20} {init_val:<15.6f} {optim_val:<15.6f} {change:+.2f}%")
-        
-        print("=" * 60)
+    
     
     def plot_structure(self):
         """
@@ -1158,3 +1233,58 @@ class CylinderModel(CDSAXS_Model):
             The simulated intensity (also sets self.SimInt)
         """
         return self.SimCyl_SM(*args, **kwargs)
+    
+    
+    def _cylinder_optimization_wrapper(self, optimization_values):
+        """
+        Fixed wrapper function for cylinder optimization that ensures numpy array input.
+        """
+        try:
+            # CRITICAL FIX: Always convert to numpy array first
+            if not isinstance(optimization_values, np.ndarray):
+                optimization_values = np.array(optimization_values, dtype=float)
+            
+            # Get parameter names from available sources
+            if hasattr(self, 'param_names'):
+                param_names = self.param_names
+            elif hasattr(self, 'mcmc_param_names'):
+                param_names = self.mcmc_param_names
+            else:
+                # Generate parameter names from optimization parameters
+                param_names = list(self.model_params.get('optimization', {}).keys())
+            
+            if len(optimization_values) != len(param_names):
+                raise ValueError(f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}")
+            
+            # Create PAR array from optimization values
+            temp_PAR = np.zeros((self.layers + 1, 2))
+            temp_DW = self.DW
+            temp_I0 = self.I0
+            temp_Bk = self.Bk
+            
+            for i, param_name in enumerate(param_names):
+                if param_name.startswith('cyl_'):
+                    parts = param_name.split('_')
+                    cyl_idx = int(parts[1])
+                    param_type = parts[2]
+                    
+                    if param_type == 'radius':
+                        temp_PAR[cyl_idx, 0] = optimization_values[i]
+                    elif param_type == 'height':
+                        temp_PAR[cyl_idx, 1] = optimization_values[i]
+                elif param_name == 'DW':
+                    temp_DW = optimization_values[i]
+                elif param_name == 'I0':
+                    temp_I0 = optimization_values[i]
+                elif param_name == 'Bk':
+                    temp_Bk = optimization_values[i]
+            
+            # Create SimPar array for cylindrical GF function
+            SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
+            
+            # Call cylindrical GF function
+            return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+            
+        except Exception as e:
+            print(f"Error in cylinder wrapper: {e}")
+            return float('inf')
