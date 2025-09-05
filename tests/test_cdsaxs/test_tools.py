@@ -4,6 +4,8 @@ import numpy as np
 
 from cdsaxs.tools import find_gaussian_peakloc, line_fit
 from cdsaxs.tools import gaussian_refine_peak_2D
+from cdsaxs.tools import find_peaks_2D, find_peaks_1D
+from cdsaxs.tools import find_peaks_2D_one_axis
 
 
 class TestTools(unittest.TestCase):
@@ -44,9 +46,7 @@ class TestTools(unittest.TestCase):
         self.assertAlmostEqual(intercept, 12.6)
 
     def test_gaussian_refine_peak_2D(self):
-        """
-        TODO: implement
-        """
+
         image = np.array([
             [0.5436, 0.0083, 0.6645, 0.3204, 0.9405, 0.3734, 0.6948, 0.8988,
              0.6844, 0.2968, 0.2876, 0.1235, 0.2931, 0.1992, 0.4979],
@@ -88,9 +88,184 @@ class TestTools(unittest.TestCase):
         self.assertAlmostEqual(a_opt_test, a_opt, 5)
         self.assertAlmostEqual(b_opt_test, b_opt, 5)
 
-
     def test_rotate_image(self):
         """
         TODO: implement
         """
         pass
+
+    def test_find_peaks_2D(self):
+        image = np.array(
+            [[0.91913391, 3.        , 0.91913391, 0.        , 0.        ,
+                0.57987207],
+             [3.        , 5.        , 3.        , 0.        , 0.        ,
+                0.57987207],
+             [0.91913391, 3.        , 0.91913391, 0.        , 0.        ,
+                0.57987207],
+             [0.        , 0.        , 0.        , 0.        , 0.        ,
+                0.57987207],
+             [0.        , 0.        , 0.        , 0.        , 0.        ,
+                0.57987207],
+             [0.76574962, 0.66395775, 0.90228066, 2.        , 3.        ,
+                2.        ],
+             [0.51796119, 0.59285603, 0.5356811 , 3.        , 4.        ,
+                3.        ],
+             [0.46730955, 0.62937721, 0.3429157 , 2.        , 3.        ,
+                2.        ],
+             [0.10071061, 0.10071061, 0.10071061, 0.10071061, 0.10071061,
+                0.57987207],
+             [0.10071061, 0.30071061, 0.30071061, 0.30071061, 0.30071061,
+                0.57987207],
+             [0.10071061, 0.30071061, 2.1       , 2.        , 0.30071061,
+                0.57987207],
+             [0.10071061, 0.30071061, 0.30071061, 0.30071061, 0.30071061,
+                0.57987207],
+             [0.10071061, 0.10071061, 0.10071061, 0.10071061, 0.10071061,
+                0.57987207]])
+
+        peak_coordinates = [
+            [1.0, 1.0],
+            [5.9955356927226766, 4.1173757322214435],
+            [10.0, 2.480795490081457],
+        ]
+
+        test_coordinates = find_peaks_2D(image, log_scale=False,
+                                         refinement_size=5, threshold_abs=1)
+
+        for actual, test in zip(peak_coordinates, test_coordinates):
+            self.assertListEqual(test, actual)
+
+    def test_find_peaks_2D_refinement_width_check(self):
+        image = np.array(
+            [[ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [10.        ,  3.        ,  0.        ,  0.        ],
+             [ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.66395775,  0.90228066,  2.        ,  3.        ],
+             [ 0.59285603,  0.5356811 ,  3.        ,  4.        ],
+             [ 0.62937721,  0.3429157 ,  2.        ,  3.        ],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061],
+             [ 0.30071061,  2.1       ,  2.        ,  0.30071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061]])
+
+        peak_coordinates = [
+            [1, 0],
+            [6, 3],
+            [10, 1],
+        ]
+
+        test_coordinates = find_peaks_2D(image, log_scale=False,
+                                         refinement_size=3, threshold_abs=1,
+                                         exclude_border=False)
+
+        for actual, test in zip(peak_coordinates, test_coordinates):
+            self.assertListEqual(test, actual)
+
+    def test_find_peaks_1D(self):
+        image = np.array(
+            [[ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [10.        ,  3.        ,  0.        ,  0.        ],
+             [ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.66395775,  0.90228066,  2.        ,  3.        ],
+             [ 0.59285603,  0.5356811 ,  3.        ,  4.        ],
+             [ 0.62937721,  0.3429157 ,  2.        ,  3.        ],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061],
+             [ 0.30071061,  2.1       ,  2.        ,  0.30071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061]])
+
+        data = np.nansum(image, axis=1)[:10]
+        peak_coordinates = [
+            0.999827841102188,
+            5.961187929025904,
+        ]
+
+        test_coordinates = find_peaks_1D(data, log_scale=False,
+                                         refinement_size=8, threshold_abs=1,
+                                         exclude_border=False, min_distance=2)
+
+        self.assertListEqual(test_coordinates, peak_coordinates)
+
+    def test_find_peaks_1D_scipy(self):
+        image = np.array(
+            [[ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [10.        ,  3.        ,  0.        ,  0.        ],
+             [ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.66395775,  0.90228066,  2.        ,  3.        ],
+             [ 0.59285603,  0.5356811 ,  3.        ,  4.        ],
+             [ 0.62937721,  0.3429157 ,  2.        ,  3.        ],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061],
+             [ 0.30071061,  2.1       ,  2.        ,  0.30071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061]])
+
+        data = np.nansum(image, axis=1)[:10]
+        peak_coordinates = [
+            0.999827841102188,
+            5.961187929025904,
+        ]
+
+        test_coordinates = find_peaks_1D(data, log_scale=False,
+                                         refinement_size=8, algorithm='scipy')
+
+        self.assertListEqual(test_coordinates, peak_coordinates)
+
+    def test_find_peaks_2D_one_axis(self):
+        image = np.array(
+            [[ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [10.        ,  3.        ,  0.        ,  0.        ],
+             [ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.66395775,  0.90228066,  2.        ,  3.        ],
+             [ 0.59285603,  0.5356811 ,  3.        ,  4.        ],
+             [ 0.62937721,  0.3429157 ,  2.        ,  3.        ],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061]])
+
+        peak_coordinates = [
+            [0.999827841102188, 0.0],
+            [5.961187929025904, 2.5404629363356612],
+        ]
+
+        test_coordinates = find_peaks_2D_one_axis(
+            image, peak_axis=0, log_scale=False,
+            refinement_size=8, threshold_abs=1,
+            exclude_border=False)
+
+        for actual, test in zip(peak_coordinates, test_coordinates):
+            self.assertListEqual(test, actual)
+
+    def test_find_peaks_2D_one_axis_scipy(self):
+        image = np.array(
+            [[ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [10.        ,  3.        ,  0.        ,  0.        ],
+             [ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.66395775,  0.90228066,  2.        ,  3.        ],
+             [ 0.59285603,  0.5356811 ,  3.        ,  4.        ],
+             [ 0.62937721,  0.3429157 ,  2.        ,  3.        ],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061]])
+
+        peak_coordinates = [
+            [0.999827841102188, 0.0],
+            [5.961187929025904, 2.5404629363356612],
+        ]
+
+        test_coordinates = find_peaks_2D_one_axis(
+            image, peak_axis=0, log_scale=False,
+            refinement_size=8, algorithm='scipy')
+
+        for actual, test in zip(peak_coordinates, test_coordinates):
+            self.assertListEqual(test, actual)
