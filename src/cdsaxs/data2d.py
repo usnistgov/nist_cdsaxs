@@ -18,14 +18,9 @@ import cdsaxs.calculators as calculators
 from cdsaxs.data1d import IntegratedQSlice
 from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
-<<<<<<< HEAD
 from cdsaxs.tools import line_fit, find_peaks_2D_legacy, rotate_image
-from cdsaxs_gui_legacy import diffraction
-=======
-from cdsaxs.tools import line_fit, gaussian_find_peaks_2D, rotate_image
 import cdsaxs.diffraction as diffraction
 
->>>>>>> origin/main
 
 # any changes to these metadata values should update calculated q values
 UPDATE_Q_TRIGGERS = [
