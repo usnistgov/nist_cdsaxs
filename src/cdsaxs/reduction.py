@@ -442,8 +442,8 @@ def slice_reduced_dataset(
                                  (data.qsx <= q_range[1]) &
                                  (~np.isnan(data.Iq)))[0]
             if len(selection) > 0:
-                qsz.append(data.qsz[selection])
-                Iq.append(data.Iq[selection])
+                qsz.append(np.nanmean(data.qsz[selection]))
+                Iq.append(np.nanmean(data.Iq[selection]))
 
         slices[q_values[i]] = Data1D(q=qsz, Iq=Iq, q_axis='qsz')
 
