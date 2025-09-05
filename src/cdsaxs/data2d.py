@@ -195,12 +195,16 @@ class Data2D():
             )
 
         if mode == 'sum':
+            mask_all_nan = np.isnan(
+                image[limits_axis0[0]:limits_axis0[1],
+                      limits_axis1[0]:limits_axis1[1]]).all(axis=axis)
             integrated_i = np.nansum(
                 image[limits_axis0[0]:limits_axis0[1],
                       limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
-            
+            integrated_i[mask_all_nan] = np.nan
+
             # if subtract_background:
             #     if axis == 0:
             #         integrated_i_bkg_above = np.nansum(
