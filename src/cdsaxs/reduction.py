@@ -440,7 +440,7 @@ def slice_reduced_dataset(
         for data in dataset.reduced_datasets[reduced_index].values():
             selection = np.where((data.qsx >= q_range[0]) &
                                  (data.qsx <= q_range[1]) &
-                                 (data.Iq >= 0))[0]
+                                 (~np.isnan(data.Iq)))[0]
             if len(selection) > 0:
                 qsz.append(data.qsz[selection])
                 Iq.append(data.Iq[selection])
