@@ -297,6 +297,8 @@ def GeneralTIFFLoader_MetadataKeywords(directory_path, name,
             except:
                 pass
         image = tiff.image
+        # treat pixels with negative values as nan
+        image[image < 0] = np.nan
 
         if 'center_px' not in metadata.keys():
             # default center pixel at bottom right of image
