@@ -221,6 +221,60 @@ class Dataset():
             data = self.datas[key]
             data.scale_by_metadata(scale_by, reset_first=reset_first)
 
+    def apply_footprint_correction(self, keys=None):
+        """
+        Apply the footprint correction to all data. If it has already
+        been applied, this function will not redo it.
+
+        Parameters
+        ----------
+        keys : list
+            A list of datas keys can be used to only apply the
+            correction to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_footprint_correction()
+
+    def apply_sample_size_correction(self, keys=None):
+        """
+        Apply the sample size correction to all data. If it has already
+        been applied, this function will not redo it.
+
+        Parameters
+        ----------
+        keys : list
+            A list of datas keys can be used to only apply the
+            correction to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_sample_size_correction()
+
+    def apply_substrate_absorption_correction(self, keys=None):
+        """
+        Apply the footprint correction to all data. If it has already
+        been applied, this function will not redo it.
+
+        Parameters
+        ----------
+        keys : list
+            A list of datas keys can be used to only apply the
+            correction to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_substrate_absorption_correction()
+
     def normalize_datas(self, value, keys=None):
         """
         Scale the data by the recipricol of the specified value.or array
