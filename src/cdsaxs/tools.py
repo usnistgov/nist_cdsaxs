@@ -39,7 +39,7 @@ def find_gaussian_peakloc(x, y, p0=None):
         gaussian,
         x, y,
         p0=p0 if p0 is not None else [
-            x[np.nanargmax(y)], 1, np.max(y), 0
+            x[np.nanargmax(y)], 1, np.nanmax(y), 0
         ]
     )
     peak_x = popt[0]
@@ -89,15 +89,19 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
     Returns list of peak coordinates.
     """
 
+    integrated_slice_clean = integrated_slice[~np.isnan(integrated_slice)]
     if peak_find_scale == 'linear':
-        peaks, _ = find_peaks(integrated_slice, **peak_params)
+        peaks, _ = find_peaks(integrated_slice_clean, **peak_params)
     elif peak_find_scale == 'log':
         peaks, _ = find_peaks(
-            np.log10(integrated_slice), **peak_params)
+            np.log10(integrated_slice_clean), **peak_params)
     else:
         raise ValueError(
             f"The peak_find_scale {peak_find_scale} is not recognized."
         )
+    for i, bool in enumerate(np.isnan(integrated_slice)):
+        if bool:
+            peaks[peaks >= i] += 1
 
     if integrated_axis == 0:
         peaks_other = np.argmax(image[:, peaks], axis=0)
