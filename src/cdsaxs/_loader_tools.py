@@ -134,11 +134,8 @@ def extract_metadata_from_pattern(metadata, user_params, filename,
         parameter's current value.
         NOTE: this will only apply to values extracted from the metadata
         pattern of the filenames.
-    
+
     """
-
-    print(filename, metadata_pattern)
-
     filename = os.path.basename(filename)
     if metadata_pattern is not None:
         regex = re.sub(r'{(.+?)}', r'(?P<\1>.+)', metadata_pattern)

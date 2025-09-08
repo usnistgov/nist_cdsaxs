@@ -473,33 +473,35 @@ def LoadDataset(
         pbar = tqdm(range(len(filenames)), desc="Loading files: ",
                     position=0, leave=True)
 
-    for filename in filenames:
-        filepath = os.path.join(directory_path, filename)
-        metadata = {}
-        user_params = {}
+    with warnings.catch_warnings(record=True) as warnings_output:
+        for filename in filenames:
+            filepath = os.path.join(directory_path, filename)
+            metadata = {}
+            user_params = {}
 
-        # extract information from the metadata filename pattern
-        metadata, user_params = lt.extract_metadata_from_pattern(
-            metadata, user_params, filename, metadata_pattern, metadata_scales
-        )
+            # extract information from the metadata filename pattern
+            metadata, user_params = lt.extract_metadata_from_pattern(
+                metadata, user_params, filename, metadata_pattern, metadata_scales
+            )
 
-        # generate the name for the two-dimensional data
-        new_name = lt.generate_data_name_from_pattern(
-            data_name_pattern, metadata, user_params)
+            # generate the name for the two-dimensional data
+            new_name = lt.generate_data_name_from_pattern(
+                data_name_pattern, metadata, user_params)
 
-        data = LoadData(
-            filepath=filepath,
-            metadata=metadata,
-            user_params=user_params,
-            filetype=filetype,
-            detector_type=detector_type,
-            name=new_name
-        )
+            data = LoadData(
+                filepath=filepath,
+                metadata=metadata,
+                user_params=user_params,
+                filetype=filetype,
+                detector_type=detector_type,
+                name=new_name
+            )
+            dataset.add_data(data)
 
-        dataset.add_data(data)
+            if verbose:
+                pbar.update(1)
 
-        if verbose:
-            pbar.update(1)
+    print(warnings_output)
 
     if verbose:
         pbar.close()
