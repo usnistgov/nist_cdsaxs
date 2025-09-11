@@ -676,10 +676,8 @@ class DataQdyQdx(Data2D):
                 value = float(key)
             elif key in METADATA_KEYWORDS:
                 value = self.metadata[key]
-                print("recognized the keyword in metadata")
             elif key in self.user_params.keys():
                 value = float(self.user_params[key])
-                print("recognized the keyword in user params")
             else:
                 warnings.warn(f"Did not recognize {key} as an available parameter in either metadata or user_params.")
                 value = None
@@ -691,7 +689,6 @@ class DataQdyQdx(Data2D):
                         )
                         value = None
             if value is not None:
-                print("sending: ", key, value)
                 self.scale_data(value, keyword=key)
 
     def apply_footprint_correction(self):
