@@ -664,8 +664,8 @@ class DataQdyQdx(Data2D):
                 warnings.warn(f"Did not recognize {key} as an available parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, value in self.data_transformations:
-                    if value == key and transform == "scale":
+                for transform, val in self.data_transformations:
+                    if val == key and transform == "scale":
                         warnings.warn(
                             f"{key} was already used in a scaling data transformation. Skipping for now."
                         )
