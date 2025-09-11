@@ -126,11 +126,11 @@ def gaussian_find_peaks_2D(image, integrated_slice, integrated_axis,
         try:
             a_opt, _, _ = find_gaussian_peakloc(
                 np.arange(a_min, a_max),
-                np.sum(image_box, axis=1))
+                np.nansum(image_box, axis=1))
 
             b_opt, _, _ = find_gaussian_peakloc(
                 np.arange(b_min, b_max),
-                np.sum(image_box, axis=0))
+                np.nansum(image_box, axis=0))
         except RuntimeError:
             warnings.warn(
                 "Could not fit Gaussian to the peak location;"
