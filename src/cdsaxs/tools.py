@@ -288,7 +288,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7,
     if algorithm == 'scikit':
         value = kwargs.get("threshold_abs")
         if value is None:
-            kwargs["threhold_abs"] = 0
+            kwargs["threshold_abs"] = 0
 
     data_fed = np.array(data)
     if log_scale:

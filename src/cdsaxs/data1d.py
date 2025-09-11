@@ -97,7 +97,7 @@ class Data1D():
             mode='log',
             _alternative_q=None):
         """
-        Linearly interpolatex the one-dimensional dataset and extract
+        Linearly interpolatexs the one-dimensional dataset and extract
         intensity values at the specified interpolated q-values. Please
         refer to the numpy.interp documentation for in-depth description
         of the interpolation method used.
