@@ -70,7 +70,8 @@ class Data2D():
         self._raw_image = np.copy(self.image)
         self.mask = np.isnan(image)  # mask out nan
         self.mask += np.isinf(image) + np.isneginf(image)  # mask inf
-        self.mask += mask  # apply user-provided mask
+        if mask is not None:
+            self.mask += mask  # apply user-provided mask
         self._data_transformations = []
 
     def mask(self, mask):
