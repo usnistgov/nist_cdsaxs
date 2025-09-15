@@ -11,7 +11,8 @@ METADATA_KEYWORDS = [
     "exposure_time_s", "sdd_cm", "pixel_size_um",
     "scaling_factor", "I0", "beam_current",
     "data_directory", "filename",
-    "name", "center_px", 'sample_phi_offset_deg'
+    "name", "center_px", 'sample_phi_offset_deg',
+    "image_rotation_angle",
 ]
 
 SAMPLE_METADATA_KEYWORDS = [
@@ -36,7 +37,7 @@ FLOATS = [
     "scaling_factor", "I0", "beam_current",
     "sample_size_mm", "substrate_thickness_um",
     "substrate_attenuation_coeff_um-1",
-    "pitch_nm"
+    "pitch_nm", "image_rotation_angle"
 ]
 
 INTEGERS = [

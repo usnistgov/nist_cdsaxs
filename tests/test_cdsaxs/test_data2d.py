@@ -29,7 +29,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(90)
+        self.data2d.rotate_image_ccw(1)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -53,7 +53,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(180)
+        self.data2d.rotate_image_ccw(2)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -74,7 +74,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(270)
+        self.data2d.rotate_image_ccw(3)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -95,32 +95,11 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(-90)
+        self.data2d.rotate_image_ccw(-1)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
             err_msg="The counter-clockwise -90 degree rotation resulted in the"
-            " wrong image.")
-        self.assertEqual(self.data2d._image_transformations[-1],
-                         "R3")
-
-        self.data2d.reset_image_orientation()
-
-    def test_data2d_rotate_cw90(self):
-        """test 90 degree rotation clockwise"""
-        expected_image = np.array(
-            [[15954., 10592., 18439., 60019.,  4701., 64811., 44386.],
-             [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
-             [35295., 10893., 99999.,   857., 61100., 45711., 48676.],
-             [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
-        ).astype(np.float64)
-
-        self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(90, direction='cw')
-
-        np.testing.assert_array_equal(
-            self.data2d.image, expected_image,
-            err_msg="The clockwise 90 degree rotation resulted in the"
             " wrong image.")
         self.assertEqual(self.data2d._image_transformations[-1],
                          "R3")
@@ -140,7 +119,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(180, direction='cw')
+        self.data2d.rotate_image_ccw(-2)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -161,7 +140,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(270, direction='cw')
+        self.data2d.rotate_image_ccw(-3)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -182,7 +161,7 @@ class TestData2D(unittest.TestCase):
         ).astype(np.float64)
 
         self.data2d.reset_image_orientation()
-        self.data2d.rotate_image_step90(630, direction='cw')
+        self.data2d.rotate_image_ccw(-7)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,

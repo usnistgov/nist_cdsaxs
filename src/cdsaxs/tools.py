@@ -158,7 +158,9 @@ def find_peaks_2D_legacy(
     return peaks_px_opt
 
 
-def rotate_image(image, degrees, rotation_center, resampling_mode="bicubic"):
+def rotate_image(image,
+                 degrees, rotation_center, resampling_mode="bicubic",
+                 fillcolor=-9999):
     """
 
     Rotates an image by a specified number of degrees counterclockwise
@@ -179,6 +181,14 @@ def rotate_image(image, degrees, rotation_center, resampling_mode="bicubic"):
         image intensities can be performed with the 'nearest',
         'bilinear', or 'bicubic' methods in the PILLOW package.
         Default value is 'bicubic'.
+    fillcolor : float
+        A temporary value used to fill pixels that are outside of the
+        original image after rotation. These pixels will
+        be replaced with NAN after the rotation is complete. A float
+        is used to comply with the keyword argument requirements of
+        the pillow package rotate() function used to perform the
+        rotation.
+        Default value is -9999.
 
     Returns
     -------
@@ -199,8 +209,10 @@ def rotate_image(image, degrees, rotation_center, resampling_mode="bicubic"):
         degrees,
         resample=resample,
         # pillow calls for (x, y) of beam center
-        center=(rotation_center[1], rotation_center[0]))
+        center=(rotation_center[1], rotation_center[0]),
+        fillcolor=fillcolor)
     image = np.array(image)
+    image[image == fillcolor] = np.nan
 
     return image
 

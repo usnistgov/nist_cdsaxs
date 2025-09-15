@@ -33,14 +33,6 @@ class Data2D():
     """
     Protected Attributes
     --------------------
-    _image_transformations : list
-        Will keep track of image rotations and flips.
-        The following are appended to the list at each transformation:
-            RX : indicates X-number of counter-clockwise 90 degree
-                 step rotations. For example, R3 indicates a 270
-                 degree rotation counterclockwise.
-            VF : vertical flip; reversal of y-axis (index 0)
-            HF : horizontal flip; reversal of x-axis (index 1)
     _data_transformations : list of tuples
         Will keep track of intensity data transformations, including
         a normalization, scaling, adding or subtracting by or of a
@@ -53,10 +45,9 @@ class Data2D():
         and where value can either be a single float or an array of
         floats with the same dimensions as the image.
     """
-    _image_transformations = []
-    _data_transformations = []
 
-    def __init__(self, image: NDArray[np.floating]):
+    def __init__(self, image: NDArray[np.floating],
+                 mask: NDArray[np.bool] = None):
         """
         Generic 2D data class with basic image functionalities. This
         class is not tied to any diffraction information.
@@ -68,13 +59,63 @@ class Data2D():
             intensities. The first dimension corresponds to image rows
             from top to bottom and the second dimension corresponds to
             image columns from left to right.
+        mask : NDArray
+            Two-dimensional boolean array of same dimensions as image
+            that are True at pixel values that should be masked out
+            for all operations.
+            All pixels that are nan, inf, or -inf will be masked by
+            default.
         """
         self.image = image
+        self._raw_image = np.copy(self.image)
+        self.mask = np.isnan(image)  # mask out nan
+        self.mask += np.isinf(image) + np.isneginf(image)  # mask inf
+        self.mask += mask  # apply user-provided mask
+        self._data_transformations = []
 
-    def rotate_image_ccw(self, steps):
+    def mask(self, mask):
         """
-        Rotate the image by a specified number of 90 degree steps
-        counterclockwise.
+        Add points to the data mask. This will not unmask any previously
+        masked points in the image.
+
+        Parameters
+        ----------
+        mask : NDArray
+            Two-dimensional boolean array of same dimensions as the
+            data image. Pixels that are True will be masked out for
+            all data operations. This will NOT unmask any previously
+            masked points.
+        """
+        self.mask += mask
+
+    def overwrite_mask(self, mask):
+        """
+        Set a new mask for the data. This will unmask all previously
+        masked points and only mask the points provided to this
+        function call.
+
+        Parameters
+        ----------
+        mask : NDArray
+            Two-dimensional boolean array of same dimensions as the
+            data image. Pixels that are True will be masked out for
+            all data operations. This will unmask any previously
+            masked points.
+        """
+        self.mask = self.mask*False + mask
+
+    def reset_mask(self):
+        """
+        Reset the mask to only mask out pixels with values of nan, inf,
+        or -inf.
+        """
+        self.mask = np.isnan(self.image)  # mask out nan
+        self.mask += np.isinf(self.image) + np.isneginf(self.image)  # mask inf
+
+    def rotate_image_ccw(self, steps=1):
+        """
+        Rotate the image counterclockwise by 90 degree, or by a
+        specified number of 90 degree steps.
 
         The original image can be recalled by using
         'reset_image_orientation'.
@@ -86,6 +127,7 @@ class Data2D():
             value is provided, the rotations will be performed in the
             clockwise direction.
         """
+
         k = int(np.round(steps, 0))
 
         # determine counterclockwise steps to achieve same rotation
@@ -93,154 +135,18 @@ class Data2D():
             k += 4
         if k != 0:
             self.image = np.rot90(self.image, k=k, axes=(0, 1))
-            self._image_transformations.append("R"+str(k))
+            self.mask = np.rot90(self.mask, k=k, axes=(0, 1))
 
     def flip_horizontally(self):
 
         self.image = np.flip(self.image, axis=1)
-        self._image_transformations.append("HF")
+        self.mask = np.flip(self.mask, axis=1)
 
     def flip_vertically(self):
 
         self.image = np.flip(self.image, axis=0)
-        self._image_transformations.append("VF")
+        self.mask = np.flip(self.mask, axis=0)
 
-    def reset_image_orientation(self):
-        """
-        Return the image to its original orientation removing any
-        rotations or flips that have been done.
-        """
-        transformations = self._image_transformations[::-1]
-
-        for tf in transformations:
-            if tf == "VF":
-                self.flip_vertically()
-            elif tf == "HF":
-                self.flip_horizontally()
-            else:
-                k = -1*int(tf[1:])
-                self.rotate_image_ccw(steps=k)
-
-        self._image_transformations = []
-
-    def integrate_box(
-            self,
-            limits_axis0,
-            limits_axis1,
-            mode,
-            axis,
-            box_angle_deg=0,
-            rotation_center=[0, 0],
-            rotation_sampling_mode='bicubic',
-    ):
-        """
-        Simple integration in a box defined by the [min, max) limits
-        for each axis.
-
-        Parameters
-        ----------
-        limits_axis0 : tuple[int, int]
-            Defines the limits (indices) of the box in the first
-            dimension. This is a half open range [min, max).
-        limits_axis1 : tuple[int, int]
-            Defines the limits (indices) of the box in the second
-            dimension. This is a half open range [min, max).
-        mode : str
-            Sets the integration mode. This can be set to 'sum' or
-            'mean'.
-        axis : int
-            The axis along which the integration should be performed.
-            This can be set to either 0 (rows) or 1 (columns).
-        box_angle_deg : float
-            Rotate the box by the set number of degrees clockwise
-            about the center point. Rotating the box will maintain the
-            size of the box.
-            Units are in degrees.
-            Default value is 0.
-        rotation_center : list
-            Center of rotation if the box_angle_deg is not 0. The
-            default is the upper left of the image.
-        rotation_sampling_mode : str
-            Set the resampling method used when a box angle is provided.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
-        """
-        image = np.copy(self.image)
-        image[image < 0] = np.nan
-        image[np.isinf(image)] = np.nan
-        image[np.isneginf(image)] = np.nan
-
-        if box_angle_deg != 0:
-            image = rotate_image(
-                image,
-                box_angle_deg,
-                rotation_center,
-                resampling_mode=rotation_sampling_mode,
-            )
-
-        if mode == 'sum':
-            integrated_i = np.nansum(
-                image[limits_axis0[0]:limits_axis0[1],
-                      limits_axis1[0]:limits_axis1[1]],
-                axis=axis
-            )
-            
-            # if subtract_background:
-            #     if axis == 0:
-            #         integrated_i_bkg_above = np.nansum(
-            #             image[limits_axis0[0]:limits_axis0[1],
-            #                 limits_axis1[0]+subtraction_offset:limits_axis1[1]+subtraction_offset],
-            #             axis=axis
-            #         )
-            #         integrated_i_bkg_below =np.nansum(
-            #             image[limits_axis0[0]:limits_axis0[1],
-            #                 limits_axis1[0]-subtraction_offset:limits_axis1[1]-subtraction_offset],
-            #             axis=axis
-            #         )
-            #     elif axis == 1:
-            #         integrated_i_bkg_above = np.nansum(
-            #             image[limits_axis0[0]+subtraction_offset:limits_axis0[1]+subtraction_offset,
-            #                   limits_axis1[0]:limits_axis1[1]],
-            #             axis=axis
-            #         )
-            #         integrated_i_bkg_below =np.nansum(
-            #             image[limits_axis0[0]-subtraction_offset:limits_axis0[1]-subtraction_offset,
-            #                 limits_axis1[0]:limits_axis1[1]],
-            #             axis=axis
-            #         )
-                    
-            #     integrated_i_bkg_mean = (integrated_i_bkg_above+integrated_i_bkg_below)/2
-            #     integrated_i = integrated_i-integrated_i_bkg_mean
-    
-        elif mode == 'mean':
-            integrated_i = np.nanmean(
-                image[limits_axis0[0]:limits_axis0[1],
-                      limits_axis1[0]:limits_axis1[1]],
-                axis=axis
-            )
-        
-        else:
-            raise ValueError(
-                f"Integration mode of {mode} is not recognized. Accepted modes"
-                " include 'sum' and 'mean'."
-            )
-
-        integrated_i[integrated_i < 0] = 0
-
-        return integrated_i.reshape(-1), {
-                'mode': mode,
-                'axis': axis,
-                'limits_axis0': limits_axis0,
-                'limits_axis1': limits_axis1,
-                'box_angle_deg': box_angle_deg,
-                'rotation_center': rotation_center,
-                'rotation_sampling_mode': rotation_sampling_mode,
-                'rotated_image': np.copy(image) if box_angle_deg != 0 else None
-            }
-    
     def scale_data(self, value):
         """
         Scale the data by the specified value or array of values
@@ -305,10 +211,10 @@ class Data2D():
         self.image = self.image+value
         self._data_transformations.append(("add", value))
 
-    def reset_data_transformations(self):
+    def reset_intensity(self):
         """
         Resets any normailzation, scaling, added or subtracted values
-        applied to the image data.
+        applied to the image data intensity.
         """
         for transform, value in reversed(self._data_transformations):
             if transform == "add":
@@ -321,26 +227,149 @@ class Data2D():
                 self.normalize_data(value)
         self._data_transformations = []
 
+    def reset_image(self):
+        """
+        Resets the image to the raw image and also resets the applied
+        mask. This will undo any orientation transformations to the
+        image as well as any scaling, normalization, additions or
+        subtractions applied to the image.
+        """
+        self._data_transformations = []
+        self.image = np.copy(self._raw_image)
+        self.reset_mask()
+
+    def sum_box(
+            self,
+            limits_axis0,
+            limits_axis1,
+            axis,
+    ):
+        """
+        Select a region of interest (box shape) and sum over the
+        selected axis (or axes).
+
+        Be careful if you have any pixels with a value of nan that are
+        not masked by the mask attribute. If the summation algorithm
+        encounters all nan values, it will return 0 rather than nan. By
+        default, all nan values are masked out unless the user
+        overwrites this behavior.
+
+        Parameters
+        ----------
+        limits_axis0: tuple[int, int]
+            Defines the limits (indices) of the box in the first
+            dimension. This is a half open range [min, max).
+        limits_axis1 : tuple[int, int]
+            Defines the limits (indices) of the box in the second
+            dimension. This is a half open range [min, max).
+        axis : int | tuple
+            The axis or axes over which to perform the sum.
+            Setting axis to 0 will sum over each row.
+            Setting axis to 1 will sum over each column.
+            Setting axis to (0, 1) will sum over all axes and return a
+            single value.
+
+        Returns
+        -------
+        ndarray
+            Intensity of the selected box summed over the selected axis
+            or axes.
+        ndarray
+            The two dimensional box selected from the image data used
+            in the summation.
+        """
+        image_box = self.image[limits_axis0, limits_axis1]
+        sum_intensity = np.nansum(
+            image_box,
+            axis=axis,
+            where=~self.mask
+        )
+
+        return sum_intensity.reshape(-1), image_box
+
+    def mean_box(
+            self,
+            limits_axis0,
+            limits_axis1,
+            axis,
+    ):
+        """
+        Select a region of interest (box shape) and perform an
+        arithmetic mean over the selected axis (or axes).
+
+        Parameters
+        ----------
+        limits_axis0: tuple[int, int]
+            Defines the limits (indices) of the box in the first
+            dimension. This is a half open range [min, max).
+        limits_axis1 : tuple[int, int]
+            Defines the limits (indices) of the box in the second
+            dimension. This is a half open range [min, max).
+        axis : int | tuple
+            The axis or axes over which to perform the mean.
+            Setting axis to 0 will average over each row.
+            Setting axis to 1 will average over each column.
+            Setting axis to (0, 1) will average over all axes and return
+            a single value.
+
+        Returns
+        -------
+        ndarray
+            Intensity of the selected box averaged over the selected
+            axis or axes.
+        ndarray
+            The two dimensional box selected from the image data used
+            in the summation.
+        """
+        image_box = self.image[limits_axis0, limits_axis1]
+        mean_intensity = np.nanmean(
+            image_box,
+            axis=axis,
+            where=~self.mask
+        )
+
+        return mean_intensity.reshape(-1), image_box
+
+    def rotate_image(self,
+                     rotation_angle_deg,
+                     rotation_center=(0, 0),
+                     resampling_mode="bicubic"):
+
+        """
+        Rotate the image counterclockwise by the specified angle about
+        the rotation center.
+        NOTE: This operation will convert any masked points in your
+        array to nan prior to the image rotation so they are not used
+        in the resampling algorithms. The mask will then be reset to
+        mask out any nan pixels after the rotation.
+
+        Parameters
+        ----------
+        rotation_angle_deg : float
+            Angle in degrees by which to rotate the image
+            counterclockwise.
+        rotation_center : tuple
+            Center of rotatation.
+            Default is the upper left pixel.
+        resampling_mode: str
+            Set the resampling method used during the rotation.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
+        """
+
+        self.image[self.mask] = np.nan
+        self.image = rotate_image(self.image,
+                                  degrees=rotation_angle_deg,
+                                  rotation_center=rotation_center,
+                                  resampling_mode=resampling_mode)
+        self.reset_mask()
+
 
 class DataQdyQdx(Data2D):
     """
-    This class contains 2D scattering images with coordinates of
-    y vs x defined in the detector coordinate frame with positive y
-    in the upward vertical direction and positive x in the left
-    horizontal direction. The z axis is then defined as normal
-    incidence to follow the right-hand rule.
-
-    In many instances the detector coordinates will align with the lab
-    frame, where the z axis aligns with the beam path and the detector
-    is configured normal to the primary beam.
-
-    In cases where the detector has moved from the position with the
-    incident beam normal to the surface, two angles can be defined.
-    detector_phi : Rotation counterclockwise about the y-axis
-        originating at the sample position in the x-z plane (lab frame).
-    detector_omega : Rotation counterclockwise about the x-axis
-        originating at the sample position in the y-z plane (lab frame).
-
     Attributes
     ----------
     image : NDarray
@@ -361,59 +390,78 @@ class DataQdyQdx(Data2D):
         Note: Only wavelength or energy should be specified, not both.
     user_params : dict
         Additional user-provided parameters or metadata relevant to the
-        data workflow. These are not accessed by the cdsaxs package.
+        data workflow. These are not recognized and therefore, not
+        accessed by the cdsaxs package in any built-in operations. They
+        can, however, be used for scaling or normalization of the data
+        if the user requests them in the function call.
     name : str
         Identifier for this image acquisition. The default when using
         the cdsaxs loaders is the filename, but be cautious when
         creating a Dataset as the filenames alone may not always result
         in unique identifiers for each image. A custom name can be set
-        by passing 'name' metadata.
-
-    Metadata Keywords
-    -----------------
-    sample_kappa_deg
-    sample_phi_deg
-    sample_omega_deg
-
-    energy_ev
-    wavelength_nm
-    exposure_time_s
-    sdd_cm
-    pixel_size_um
-
-    detector_phi_deg
-    detector_omega_deg
-
-    scaling_factor
-    I0
-    beam_current
-    center_px
-
-    data_directory
-    filename
-    name
-
+        by passing 'name' metadata. This name is used as a key in the
+        dictionaries storing the data objects within the dataset class.
     """
 
     def __init__(
             self,
             image: NDArray[np.floating],
-            metadata: dict = None,
-            user_params: dict = None,
-            name: str = None
+            name: str = None,
+            **kwargs
     ):
-        """Create an instance od DataQdyQdx"""
+        """
+        This class contains 2D scattering images with coordinates of
+        y vs x defined in the detector coordinate frame with positive y
+        in the upward vertical direction and positive x in the left
+        horizontal direction. The z axis is then defined as normal
+        incidence to follow the right-hand rule.
+
+        In many instances the detector coordinates will align with the lab
+        frame, where the z axis aligns with the beam path and the detector
+        is configured normal to the primary beam.
+
+        In cases where the detector has moved from the position with the
+        incident beam normal to the surface, two angles can be defined.
+        detector_phi : Rotation counterclockwise about the y-axis
+            originating at the sample position in the x-z plane (lab frame).
+        detector_omega : Rotation counterclockwise about the x-axis
+            originating at the sample position in the y-z plane (lab frame).
+
+        Parameters
+        ----------
+        image : NDarray
+            Scattering image as a two-dimensional numpy array. The first
+            dimension corresponds to the y-axis (detector frame) and the
+            second dimension corresponds to the x-axis (detector frame).
+        name : str
+            Identifier for this image acquisition. The default when using
+            the cdsaxs loaders is the filename, but be cautious when
+            creating a Dataset as the filenames alone may not always result
+            in unique identifiers for each image. A custom name can be set
+            by passing 'name' metadata. This name is used as a key in the
+            dictionaries storing the data objects within the dataset class.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Relevant scattering metadata to the image acquisition can
+            be passed as additional keyword argument. Any keywords
+            recognized as metadata by the cdsaxs code will be saved in
+            the metadata attribute. The remaining information will be
+            stored in the user_params dictionary.
+        """
 
         # run base class init
         super().__init__(image)
 
         self.metadata = {}
-        if metadata is not None:
-            self.update_metadata(metadata)
+        self.update_metadata(
+            {x: y for x, y in kwargs.items() if x in METADATA_KEYWORDS})
 
         self.user_params = {}
-        if user_params is not None:
-            self.update_user_params(user_params)
+        self.update_user_params(
+            {x: y for x, y in kwargs.items() if x not in METADATA_KEYWORDS}
+        )
 
         self.qdy = None
         self.qdx = None
@@ -425,11 +473,13 @@ class DataQdyQdx(Data2D):
             print(f"WARNING: insufficient metadata for q calculation:\n{e}")
 
         self.name = name if name is not None else\
-            metadata['name'] if 'name' in metadata.keys() else\
-            metadata['filename'] if 'filename' in metadata.keys() else 'name'
+            self.metadata['name'] if 'name' in self.metadata.keys() else\
+            self.metadata['filename'] if 'filename' in self.metadata.keys()\
+            else 'name'
 
-        # set default metadata values not required by user
+        # set required default metadata values not required by user
         self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
+        self.update_metadata({'center_px': (0, 0)}, overwrite=False)
 
         self.data_transformations = []
 
@@ -548,7 +598,7 @@ class DataQdyQdx(Data2D):
         """
         super().scale_data(value)
         self.data_transformations.append(
-            ("scale", value if keyword is None else keyword))
+            ("scale", value, keyword))
 
     def normalize_data(self, value, keyword=None):
         """
@@ -558,7 +608,7 @@ class DataQdyQdx(Data2D):
 
         super().normalize_data(value)
         self.data_transformations.append(
-            ("normalize", value if keyword is None else keyword))
+            ("normalize", value, keyword))
 
     def subtract_from_data(self, value, keyword=None):
         """
@@ -567,7 +617,7 @@ class DataQdyQdx(Data2D):
         """
         super().subtract_from_data(value)
         self.data_transformations.append(
-            ("subtract", value if keyword is None else keyword))
+            ("subtract", value, keyword))
 
     def add_to_data(self, value, keyword=None):
         """
@@ -576,39 +626,36 @@ class DataQdyQdx(Data2D):
         """
         super().add_to_data(value)
         self.data_transformations.append(
-            ("add", value if keyword is None else keyword))
+            ("add", value, keyword))
 
-    def reset_data_transformations(self):
+    def normalize_by_metadata(self, normalize_by):
         """
-        Resets any normailzation, scaling, added or subtracted values
-        applied to the image data.
-        """
-        super().reset_data_transformations()
-        self.data_transformations = []
+        Normalize (divide) the image by the selected metadata or user
+        parameters. This function will check if the normalization was
+        already performed using any of the requested metadata. If so,
+        this function will skip that normalization as to not 'double up'
+        on the requested transformation.
 
-    def normalize_by_metadata(self, normalize_by, reset_first=False):
-        """
-        Normalize the image by the selected metadata or user parameters.
-        This will not reset any previous normalization. If a new
-        series or normalizations is desired, please run reset normalization
-        first or change reset_first to True.
+        If the user has updated any metadata values and would like to
+        apply the new value to the data, the user should reset the
+        data intensity transformations and perform them again in the
+        required order. This is because these transformation functions
+        do not account for order of operations.
 
         Parameters
         ----------
-        normalize_by : list
+        normalize_by : list, str
             List of accepted metadata keywords or user parameter keys
-            that should be used to normalize the data.
-            A float or integer value can also be provided in this list
-            to include a standard normalization by the value.
-        reset_first : boolean
-            If set to True, any previous normalizations will be rest
-            before applying the new requested normalization series.
-            If left as False, the new parameters will be factored into
-            the existing normalization factor.
+            that should be used to normalize the data. A single string
+            keyword can also be provided.
         """
-
-        if reset_first:
-            self.reset_data_transformations()
+        if type(normalize_by) is str:
+            normalize_by = [normalize_by]
+        elif type(normalize_by) is not list:
+            raise ValueError(
+                "The 'normalize_by' argument should be a single string "
+                "keyword or a list of string keywords, not type "
+                f"{type(normalize_by)}.")
 
         for key in normalize_by:
             if type(key) is float or type(key) is int:
@@ -622,36 +669,43 @@ class DataQdyQdx(Data2D):
                               "parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, val in self.data_transformations:
+                for transform, val, keyword in self.data_transformations:
                     if type(val) is str and val == key and transform == "normalize":
-                        warnings.warn(f"{key} was already used in a normalization data transformation. Skipping for now.")
+                        warnings.warn(
+                            f"{key} was already used in a normalization data "
+                            "transformation. Skipping for now.")
                         value = None
             if value is not None:
                 self.normalize_data(value, keyword=key)
 
     def scale_by_metadata(self, scale_by, reset_first=False):
         """
-        Scale the image by the selected metadata or user parameters.
-        This will not reset any previous transformations. If a new
-        series of transformations is desired, please run reset normalization
-        first or change reset_first to True.
+        Scale (multiple) the image by the selected metadata or user
+        parameters. This function will check if the normalization was
+        already performed using any of the requested metadata. If so,
+        this function will skip that scaling as to not 'double up' on
+        the requested transformation.
+
+        If the user has updated any metadata values and would like to
+        apply the new value to the data, the user should reset the
+        data intensity transformations and perform them again in the
+        required order. This is because these transformation functions
+        do not account for order of operations.
 
         Parameters
         ----------
-        scale_by : list
+        scale_by : list, str
             List of accepted metadata keywords or user parameter keys
-            that should be used to scale the data.
-            A float or integer value can also be provided in this list
-            to include a standard normalization by the value.
-        reset_first : boolean
-            If set to True, any previous transformations will be rest
-            before applying the new requested normalization series.
-            If left as False, the new parameters will be factored into
-            the existing normalization factor.
+            that should be used to scale the data. A single string
+            keyword can also be provided.
         """
-
-        if reset_first:
-            self.reset_data_transformations()
+        if type(scale_by) is str:
+            scale_by = [scale_by]
+        elif type(scale_by) is not list:
+            raise ValueError(
+                "The 'scale_by' argument should be a single string "
+                "keyword or a list of string keywords, not type "
+                f"{type(scale_by)}.")
 
         for key in scale_by:
             if type(key) is float or type(key) is int:
@@ -661,121 +715,108 @@ class DataQdyQdx(Data2D):
             elif key in self.user_params.keys():
                 value = float(self.user_params[key])
             else:
-                warnings.warn(f"Did not recognize {key} as an available parameter in either metadata or user_params.")
+                warnings.warn(f"Did not recognize {key} as an available "
+                              "parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, val in self.data_transformations:
+                for transform, val, keyword in self.data_transformations:
                     if val == key and transform == "scale":
                         warnings.warn(
-                            f"{key} was already used in a scaling data transformation. Skipping for now."
+                            f"{key} was already used in a scaling data "
+                            "transformation. Skipping for now."
                         )
                     value = None
             if value is not None:
                 self.scale_data(value, keyword=key)
 
-    def rotate_image_step90(self, degrees, direction='ccw'):
+    def reset_intensity(self):
         """
-        Rotate the scattering image by a specified numer of degrees in
-        the direction specified. The scattering vectors qdy and qdx as
-        well as the beam center position in metadata (center_px) will
-        be updated to follow the rotation (if they exist).
+        Resets any normailzation, scaling, added or subtracted values
+        applied to the image data intensity values.
+        """
+        super().reset_intensity()
+        self.data_transformations = []
 
-        The current image rotation with respect to the original image
-        is saved. The rotations can be undone with 'reset_rotations'.
+    def rotate_image_ccw(self, steps):
+        """
+        Rotate the scattering image in 90 degree counterclockwise steps.
+        The scattering vectors qdy and qdx as well as the beam center
+        position in metadata(center_px) will be updated with the
+        rotation.
 
         Parameters
         ----------
-        degrees : float
-            Number of degrees to rotate the image. This should be in
-            increments of 90 degrees. A negative value will reverse the
-            rotation direction specified by the 'direction' parameter,
-            use caution.
-        direction : str, optional
-            Rotation direction. Default is 'ccw' which indicates a
-            counterclockwise rotation. Set as 'cw' to indicate a
-            clockwise rotation.
+        steps : int
+            Number of 90 degree steps to rotation the image in the
+            counterclockwise direction.
         """
         # temporarily store information about current state
         length0 = self.image.shape[0]
         length1 = self.image.shape[1]
-        try:
-            center_px = self.metadata['center_px']
-        except KeyError:
-            center_px = None
+        center_px = (
+            self.metadata['center_px'][0], self.metadata['center_px'][1])
 
-        # do the rotation and store original image information if needed
-        super().rotate_image_step90(degrees, direction=direction)
-        k = int(self._image_transformations[-1][1:])
+        # do the rotation
+        k = int(np.round(steps, 0))
+        super().rotate_image_ccw(steps=k)
 
         if k == 1:
             if center_px is not None:
-                self.metadata['center_px'] = [
+                self.metadata['center_px'] = (
                     length1-center_px[1]-1,
-                    center_px[0]]
+                    center_px[0])
 
         if k == 2:
             if center_px is not None:
-                self.metadata['center_px'] = [
+                self.metadata['center_px'] = (
                     length0-center_px[0]-1,
-                    length1-center_px[1]-1]
+                    length1-center_px[1]-1)
 
         if k == 3:
             if center_px is not None:
-                self.metadata['center_px'] = [
+                self.metadata['center_px'] = (
                     center_px[1],
-                    length0-center_px[0]-1]
+                    length0-center_px[0]-1)
 
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
 
     def flip_horizontally(self):
         super().flip_horizontally()
-        try:
-            center_px = self.metadata['center_px']
-            self.metadata['center_px'] = [
-                center_px[0],
-                self.image.shape[1] - center_px[1] - 1
-            ]
-        except KeyError:
-            pass
-
+        center_px = self.metadata['center_px']
+        self.metadata['center_px'] = [
+            center_px[0],
+            self.image.shape[1] - center_px[1] - 1
+        ]
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
 
     def flip_vertically(self):
         super().flip_vertically()
-        try:
-            center_px = self.metadata['center_px']
-            self.metadata['center_px'] = [
-                self.image.shape[0] - center_px[0] - 1,
-                center_px[1]
-            ]
-        except KeyError:
-            pass
-
+        center_px = self.metadata['center_px']
+        self.metadata['center_px'] = [
+            self.image.shape[0] - center_px[0] - 1,
+            center_px[1]
+        ]
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
 
-    def reset_image_orientation(self, transformations=None):
+    def reset_image(self):
         """
         Return the scattering image to its original orientation
-        removing any rotations that may have been done. The beam center
-        and scattering vectors will be tracked and updated through this
-        process (if they exist).
+        removing any rotations or flips that may have been performed.
+
+        All transformations to the scattering intensity will also be
+        undone, including scale, normalize, add and subtract functions.
+
+        This function will reset the image to the raw image and the beam
+        center will be reset back to default of (0, 0). The mask will
+        be reset to the default conditions of masking any nan, inf, or
+        -inf values.
         """
-        if transformations is None:
-            transformations = self._image_transformations[::-1]
-
-        for tf in transformations:
-            if tf == "VF":
-                self.flip_vertically()
-            elif tf == "HF":
-                self.flip_horizontally()
-            else:
-                k = int(tf[1:])
-                self.rotate_image_step90(degrees=90*k, direction="cw")
-
-        self._image_transformations = []
+        self.update_metadata({'center_px': (0, 0)})
+        super().reset_image()
+        self.data_transformations = []
 
     def integrate_box(
         self,
