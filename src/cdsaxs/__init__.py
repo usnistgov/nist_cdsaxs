@@ -5,3 +5,4 @@ import cdsaxs.dataset
 import cdsaxs.loaders
 import cdsaxs.sample
 import cdsaxs.reduction
+import cdsaxs.Fitting

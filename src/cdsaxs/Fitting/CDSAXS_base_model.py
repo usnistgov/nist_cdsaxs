@@ -53,10 +53,10 @@ class CDSAXS_Model:
             Appropriate model instance based on geometry
         """
         if geometry == 'trapezoid':
-            from .trapezoid_model import TrapezoidModel
+            from .Trapezoid_model import TrapezoidModel
             return TrapezoidModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
         elif geometry == 'cylinder':
-            from .cylinder_model import CylinderModel
+            from .Cylinder_model import CylinderModel
             return CylinderModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
         else:
             raise ValueError(f"Unsupported geometry: {geometry}")

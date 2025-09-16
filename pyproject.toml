@@ -1,0 +1,105 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cdsaxs"
+version = "0.4.0"
+description = "CD-SAXS data processing library for X-ray scattering analysis"
+readme = "README.md"
+license = {text = "Public Domain"}
+authors = [
+    {name = "Christopher Liman", email = "christopher.liman@nist.gov"},
+    {name = "Daniel Sunday", email = "daniel.sunday@nist.gov"},
+    {name = "Joseph Kline", email = "r.kline@nist.gov"},
+    {name = "Caitlyn Wolf", email = "caitlyn.wolf@nist.gov"}
+]
+maintainers = [
+    {name = "Caitlyn Wolf", email = "caitlyn.wolf@nist.gov"},
+    {name = "Daniel Sunday", email = "daniel.sunday@nist.gov"},
+    {name = "Joseph Kline", email = "r.kline@nist.gov"}
+]
+keywords = ["x-ray", "scattering", "saxs", "cd-saxs", "data-analysis", "materials-science"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: Public Domain",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Information Analysis"
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.18.0",
+    "scipy>=1.4.0",
+    "matplotlib>=3.0.0",
+    "pandas>=0.25.0",
+    "tifffile>=2019.7.0",
+    "pillow>=7.0.0",
+    "plotly>=6.0.0",
+    "seaborn>=0.11.0",
+    "tqdm>=4.60.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "flake8>=7.0.0",
+    "jupyterlab>=4.0.0"
+]
+legacy = [
+    "future>=0.18.0",
+    "futures>=3.0.0",
+    "namedlist>=1.8.0",
+    "pyfits>=3.5.0",
+    "astropy>=3.2.0",
+    "pyqt5>=5.15.0",
+    "pyside2>=5.15.0",
+    "qtpy>=1.9.0",
+    "statsmodels>=0.11.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/usnistgov/nist_cdsaxs"
+Repository = "https://github.com/usnistgov/nist_cdsaxs"
+Documentation = "https://github.com/usnistgov/nist_cdsaxs"
+"Bug Tracker" = "https://github.com/usnistgov/nist_cdsaxs/issues"
+
+[project.scripts]
+cdsaxs-gui = "cdsaxs_gui.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cdsaxs*", "cdsaxs.Fitting*"]
+exclude = ["cdsaxs_gui*", "cdsaxs_gui_legacy*"]
+
+[tool.setuptools.package-data]
+cdsaxs = ["*.yaml", "*.yml", "*.json", "*.txt", "*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info"
+]
