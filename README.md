@@ -1,8 +1,27 @@
 # nist_cdsaxs
 _Insert a description of our software, including a statement of purpose and maturity and description of repo contents._
 
-## Installation Instructions
-_Insert basic installation instructions here._
+## Installation
+
+The package follows a standard Python layout (`src/` with `pyproject.toml`). You can install it with pip.
+
+Basic install (recommended):
+
+```bash
+pip install --upgrade pip setuptools wheel
+pip install .
+```
+
+Editable/developer install with optional dev tools:
+
+```bash
+pip install --upgrade pip setuptools wheel
+pip install -e .[dev]
+```
+
+Notes:
+- If you use conda/mamba, create and activate an environment first, then run the pip commands above.
+- The `-e` (editable) install lets you modify the source and use the changes without re-installing.
 
 ## Legay GUI
 The legacy GUI for CD-SAXS data reduction is no longer supported in this package.
@@ -19,9 +38,13 @@ conda env create -f environment_dev.yml
 ```
 conda activate cdsaxs_dev
 ```
+After activating the development environment, install the repo in editable mode:
 
-To access the developers version of the code until proper installation is enabled,
-you may need to add the 'cdsaxs/src' directory to your python path.
+```
+pip install -e .[dev]
+```
+
+This is preferred over manually modifying `PYTHONPATH`.
 
 ## Citation Information
 _Insert information here about how to cite this software._
