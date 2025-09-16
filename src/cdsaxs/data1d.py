@@ -243,7 +243,7 @@ class Data1D():
         self._data_transformations = []
 
 
-class IntegratedQSlice(Data1D):
+class QSlice(Data1D):
 
     def __init__(
             self,
@@ -254,18 +254,18 @@ class IntegratedQSlice(Data1D):
             limits_axis0: tuple[int, int],
             limits_axis1: tuple[int, int],
             mode: str,
-            integration_axis: int,
+            axis: int,
+            image_box: NDArray,
+            q_int: float,
+            q_int_axis: str,
             dIq: NDArray = None,
             dq: NDArray = None,
-            box_angle_deg: float = 0,
-            rotation_center: list = [0, 0],
-            rotation_sampling_mode: str = 'bicubic',
-            rotated_image: NDArray = None
+            dq_int: float = None
     ):
         """
-        Child class of DataSlice that includes information about the
-        integration performed to create the slice from a defined region of
-        a two-dimensional dataset or image.
+        Child class of Data1D that includes information about the
+        integration performed to create a 1D slice from a defined region of
+        interest in a two-dimensional dataset or image.
 
         Parameters
         ----------
@@ -279,82 +279,76 @@ class IntegratedQSlice(Data1D):
         name : str
             Unique name associated to the data image integrated.
             This is the key associated to the 2D data object in the dataset.
-        limits_axis0 : list
+        limits_axis0 : tuple
             Indexing limits of the image region of interest
             in the first dimension, [min, max).
-        limits_axis1 : list
+        limits_axis1 : tuple
             Indexing limits of the image region of interest
             in the second dimension, [min, max).
         mode : str
             Integration mode of either 'sum' or 'mean'.
-        integration_axis : int
+        axis : int
             Axis over which integration was performed, 0 or 1.
+        image_box : NDArray
+            Two dimensional region of interest selected from the original
+            image over which the integration was performed.
+        q_int : float
+            Scattering vector of the axis that the summation or mean was
+            performed over. This will be the average value across the
+            reduced pixels.
+        q_int_axis : str
+            Defines q_int as one of the accepted axes.
+            See Data1D for more details on accepted axes.
         dIq : NDArray, optional
             Uncertainity along I.
             Default is None
         dq : NDArray, optional
             Uncertainty along q.
             Default is None
-        rotation_angle : float, optional
-            Angle by which the image was rotated counterclockwise
-            prior to the integration.
-            Default value is 0.
-        rotation_center : list, optional
-            Center point about which the rotation is performed.
-            Default is [0, 0].
-        rotation_sampling_mode : str, optional
-            Resampling mode used when rotating the image and resampling
-            onto a rectangular grid of the same dimensions.
-        rotated_image : NDArray, optional
-            Rotated image from which the integration was performed if
-            a rotation was applied (i.e., rotation_angle != 0).
-            Default value is None.
+        dq_int: float, optional
+            Uncertaintly along q_int.
+            Default is None.
 
         """
 
         # Base class init
         super().__init__(q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, dq=dq)
+        self.q_int = q_int
+        self.q_int_axis = q_int_axis
+        self.dq_int = dq_int
 
         self.name = name
 
         if len(limits_axis0) != 2 or len(limits_axis1) != 2:
             raise ValueError(
                 "Length of axis limits should be two (min and max).")
-        self.limits_axis0 = limits_axis0
-        self.limits_axis1 = limits_axis1
+        self.limits_axis0 = tuple(limits_axis0)
+        self.limits_axis1 = tuple(limits_axis1)
 
         if mode not in ['sum', 'mean']:
             raise ValueError(f"An integration mode of {mode} is not"
                              "accepted.")
         self.mode = mode
 
-        if integration_axis not in [0, 1]:
+        if axis not in [0, 1]:
             raise ValueError(
-                f"Integration axis {integration_axis} not understood.")
-        self.integration_axis = integration_axis
+                f"Integration axis {axis} not understood; use 0 or 1.")
+        self.axis = axis
 
         # make sure that the length of q matches the non-integrated axis
-        if (integration_axis == 0 and q.shape[0] != (limits_axis1[1] 
-                                                    - limits_axis1[0])
-            ) or (integration_axis == 1 and q.shape[0] != (limits_axis0[1]
-                                                      - limits_axis0[0])):
+        if (axis == 0 and q.shape[0] != (limits_axis1[1] - limits_axis1[0])
+            ) or (axis == 1 and q.shape[0] != (limits_axis0[1]
+                                               - limits_axis0[0])):
             raise ValueError(
                 f"Your data has a length of {q.shape[0]} after integrating"
-                f"along axis {integration_axis}, but this does not align with"
-                f"the limits of {limits_axis1} along axis {1-integration_axis}."
+                f"along axis {axis}, but this does not align with"
+                f"the limits of {limits_axis1 if axis==0 else limits_axis0} "
+                f"along axis {1-axis}."
             )
 
-        self.box_angle_deg = box_angle_deg
-        self.rotation_center = rotation_center
-        self.rotation_sampling_mode = rotation_sampling_mode
+        self.image_box = image_box
 
-        if self.box_angle_deg != 0 and rotated_image is None:
-            raise ValueError(
-                "Rotation angle is not equal to zero so a rotated image"
-                "is required."
-            )
-        self.rotated_image = rotated_image
-
+        # make place to store original data if the mirror q method is called
         self._data_before_mirror = None
 
     def mirror_q(self):
@@ -372,7 +366,7 @@ class IntegratedQSlice(Data1D):
 
         self.q = np.abs(self.q)
 
-        # resort arrays
+        # re-sort arrays
         sort_arrays = np.argsort(self.q)
         self.q = self.q[sort_arrays]
         self.Iq = self.Iq[sort_arrays]

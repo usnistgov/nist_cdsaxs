@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 from plotly.offline import iplot
 
 import cdsaxs.calculators as calculators
-from cdsaxs.data1d import IntegratedQSlice
+from cdsaxs.data1d import QSlice
 from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit, find_peaks_2D_legacy, rotate_image
@@ -27,6 +27,52 @@ UPDATE_Q_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
     "detector_phi_deg", "detector_phi_omega"
 ]
+
+
+def _default_mask(image: NDArray):
+
+    """
+    Generate a default mask of points that are nan, inf, or -inf.
+    """
+    mask = np.isnan(image)
+    mask += np.isinf(image)
+    mask += np.isneginf(image)
+
+    return mask
+
+
+def combine_data2D(*data2d: Data2D):
+    """
+    Combine two or more instances of Data2D into a single instance of
+    Data2D. This operation is not senstivie to any data transformations
+    or orientation changes that have been performed and so the user
+    should carefully consider when to perform this operation.
+
+    The image intensities will be summed together. Any points that
+    were masked in one or more of the data instances will be masked
+    in the new comined instance. Any nan, inf, or -inf points will also
+    be masked prior to this operation to ensure no unexpected behavior
+    of nansum arises (e.g., sum of all nan values resulting in 0 for
+    a single pixel.)
+
+    Parameters
+    ----------
+    *data2d : Data2D
+        Any number of Data2D instances can be passed to this function
+        and summed together.
+    """
+    mask = data2d[0].mask
+    image = data2d[0].image
+    mask += _default_mask(image)
+
+    for data in data2d[1:]:
+        mask += data.mask
+        mask += _default_mask[data.image]
+        image = np.nansum(image, data.image)
+
+    new_data2d = Data2D(image=image, mask=mask)
+
+    return new_data2d
 
 
 class Data2D():
@@ -68,8 +114,7 @@ class Data2D():
         """
         self.image = image
         self._raw_image = np.copy(self.image)
-        self.mask = np.isnan(image)  # mask out nan
-        self.mask += np.isinf(image) + np.isneginf(image)  # mask inf
+        self.mask = _default_mask(self.image)
         if mask is not None:
             self.mask += mask  # apply user-provided mask
         self._data_transformations = []
@@ -408,6 +453,7 @@ class DataQdyQdx(Data2D):
             self,
             image: NDArray[np.floating],
             name: str = None,
+            mask: NDArray[np.bool] = None,
             **kwargs
     ):
         """
@@ -441,6 +487,12 @@ class DataQdyQdx(Data2D):
             in unique identifiers for each image. A custom name can be set
             by passing 'name' metadata. This name is used as a key in the
             dictionaries storing the data objects within the dataset class.
+        mask : NDArray
+            Two-dimensional boolean array of same dimensions as image
+            that are True at pixel values that should be masked out
+            for all operations.
+            All pixels that are nan, inf, or -inf will be masked by
+            default.
 
         Other Parameters
         ----------------
@@ -453,7 +505,7 @@ class DataQdyQdx(Data2D):
         """
 
         # run base class init
-        super().__init__(image)
+        super().__init__(image=image, mask=mask)
 
         self.metadata = {}
         self.update_metadata(
@@ -670,8 +722,8 @@ class DataQdyQdx(Data2D):
                               "parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, val, keyword in self.data_transformations:
-                    if type(val) is str and val == key and transform == "normalize":
+                for transform, _, keyword in self.data_transformations:
+                    if key == keyword and transform == "normalize":
                         warnings.warn(
                             f"{key} was already used in a normalization data "
                             "transformation. Skipping for now.")
@@ -679,7 +731,7 @@ class DataQdyQdx(Data2D):
             if value is not None:
                 self.normalize_data(value, keyword=key)
 
-    def scale_by_metadata(self, scale_by, reset_first=False):
+    def scale_by_metadata(self, scale_by):
         """
         Scale (multiple) the image by the selected metadata or user
         parameters. This function will check if the normalization was
@@ -720,8 +772,8 @@ class DataQdyQdx(Data2D):
                               "parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
-                for transform, val, keyword in self.data_transformations:
-                    if val == key and transform == "scale":
+                for transform, _, keyword in self.data_transformations:
+                    if key == keyword and transform == "scale":
                         warnings.warn(
                             f"{key} was already used in a scaling data "
                             "transformation. Skipping for now."
@@ -827,15 +879,12 @@ class DataQdyQdx(Data2D):
         axis: str | int,
         show_plot=False,
         log_scale=True,
-        box_angle_deg: float = 0,
-        rotation_sampling_mode: str = 'bicubic',
-        rotation_center_point: list | tuple = None,
-        subtract_background=False,
-        subtraction_offset=None,        
+        subtract_background_offset: int | list[int] = None,
         # interactive_plot=True
-    ) -> IntegratedQSlice:
+    ) -> QSlice:
         """
-        Integrate a box defined by indexing limits.
+        Integrate a region of interest defined by the limits along both
+        axes qdy and qdx (0 and 1, respectively).
 
         Parameters
         ----------
@@ -848,9 +897,13 @@ class DataQdyQdx(Data2D):
         mode : str
             Integration mode, either 'sum' or 'mean'.
         axis : str, int
-            Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
-            can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
-            axis is set to 'qdy', integration will return I vs. qdx data.
+            Axis over which the summation or mean will be
+            performed. Either the q name or numpy index can be provided
+            here.
+            If axis is set to 'qdy' or 0, this integration will be
+            performed over all rows in each column and return I vs. qdx.
+            If axis is set to 'qdx' or 1, this integration will be
+            performed over all columns in each row and return I vs. qdy.
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
@@ -868,24 +921,17 @@ class DataQdyQdx(Data2D):
             the size of the box.
             Units are in degrees.
             Default value is 0.
-        rotation_sampling_mode : str
-            Set the resampling method used when a box angle is provided.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
-        subtract_background : bool, optional
-            If set to true, will run a background subtraction on the integrated
-            data based on the supplied integration box offset by a set number 
-            of pixels.
-            TODO: decide how to best approach this subtraction past this 
-            initial implementation.
-        subtraction_offset: int, optional
-            The number of pixels to offset the integration box for calculating 
-            the background intensity by. The default offset will be
-            the same width as the integration box along the integration
-            axis.
+        subtract_background_offset: int, list[int], optional
+            If set to a number of pixels greater than or equal to the
+            width of the region of interest to be integrated over, a
+            background subtraction will be performed by subtracting the
+            intensity of an integrated box offset by the set number of
+            pixels. If a single integer is provided, only one offset
+            box will be used in the subtraction. If multiple are
+            provided, the average signal from mulitple integrated offset
+            boxes will be used in the subtraction.
+            Note that the integration mode for these boxes will align
+            with the selected mode for this integration function.
         interactive_plot : bool, optional
             If set to True, the plots returned will be interactive plots
             built via Plotly. If set to False, the plots returned will be
@@ -895,7 +941,7 @@ class DataQdyQdx(Data2D):
 
         Returns
         -------
-        IntegratedQSlice
+        QSlice
             One-dimensional I vs. q data extracted from the integration.
 
         """
@@ -907,39 +953,49 @@ class DataQdyQdx(Data2D):
                 axis = 1
             else:
                 raise ValueError(f"Invalid integration axis of {axis}.")
-    
+
         # access parent method of box integration
-        integrated_i, params = super().integrate_box(
-            limits_axis0=limits_qdy_px,
-            limits_axis1=limits_qdx_px,
-            mode=mode,
-            axis=axis,
-            box_angle_deg=box_angle_deg,
-            rotation_center=self.metadata['center_px'] \
-                if rotation_center_point is None else rotation_center_point,
-            rotation_sampling_mode=rotation_sampling_mode,
-        )
+        if mode == 'sum':
+            integrated_i, image_box = super().sum_box(
+                limits_axis0=limits_qdy_px,
+                limits_axis1=limits_qdx_px,
+                axis=axis
+            )
+        elif mode == 'mean':
+            integrated_i, image_box = super().mean_box(
+                limits_axis0=limits_qdy_px,
+                limits_axis1=limits_qdx_px,
+                axis=axis
+            )
+        else:
+            raise ValueError(f"Invalid integration mode of {mode}.")
 
         # extract scattering vector for this integration
         if axis == 0:
             q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]
+            q_int = np.mean(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
+            q_axis = 'qdx'
+            q_int_axis = 'qdy'
         elif axis == 1:
             q = self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
+            q_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
+            q_axis = 'qdy'
+            q_int_axis = 'qdx'
 
-        # create instance of IntegratedQSlice to hold integration metadata
-        integrated_q_slice = IntegratedQSlice(
+
+        # create instance of QSlice to hold integration metadata
+        integrated_q_slice = QSlice(
             q=q,
             Iq=integrated_i,
-            q_axis='qdx' if axis == 0 else 'qdy',
+            q_axis=q_axis,
             name=self.name,
-            limits_axis0=params["limits_axis0"],
-            limits_axis1=params["limits_axis1"],
+            limits_axis0=limits_qdy_px,
+            limits_axis1=limits_qdx_px,
             mode=mode,
-            integration_axis=params["axis"],
-            box_angle_deg=params['box_angle_deg'],
-            rotation_sampling_mode=params['rotation_sampling_mode'],
-            rotation_center=params['rotation_center'],
-            rotated_image=params['rotated_image']
+            axis=axis,
+            image_box=image_box,
+            q_int=q_int,
+            q_int_axis=q_int_axis,
         )
         
         if subtract_background:
