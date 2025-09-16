@@ -42,8 +42,8 @@ try:
     from .Trapezoid_model import TrapezoidModelArray
     from .Cylinder_model import CylinderModel
 except ImportError:
-    from Trapezoid_model import TrapezoidModelArray
-    from Cylinder_model import CylinderModel
+    from .Trapezoid_model import TrapezoidModelArray
+    from .Cylinder_model import CylinderModel
 
 class AcceleratedTrapezoidModel(TrapezoidModelArray):
     """
