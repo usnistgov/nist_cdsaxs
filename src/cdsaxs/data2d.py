@@ -195,10 +195,10 @@ class Data2D():
                 resampling_mode=rotation_sampling_mode,
             )
 
-        if mode == 'sum':
-            mask_all_nan = np.isnan(
+        mask_all_nan = np.isnan(
                 image[limits_axis0[0]:limits_axis0[1],
-                      limits_axis1[0]:limits_axis1[1]]).all(axis=axis)
+                      limits_axis1[0]:limits_axis1[1]]).any(axis=axis)
+        if mode == 'sum':
             integrated_i = np.nansum(
                 image[limits_axis0[0]:limits_axis0[1],
                       limits_axis1[0]:limits_axis1[1]],
@@ -239,6 +239,7 @@ class Data2D():
                       limits_axis1[0]:limits_axis1[1]],
                 axis=axis
             )
+            integrated_i[mask_all_nan] = np.nan
         
         else:
             raise ValueError(
