@@ -19,6 +19,7 @@ from cdsaxs.data1d import QSlice
 from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit, find_peaks_2D_legacy, rotate_image
+from cdsaxs.tools import find_peaks_2D, find_peaks_1D, find_peaks_2D_one_axis
 import cdsaxs.diffraction as diffraction
 
 
@@ -41,38 +42,61 @@ def _default_mask(image: NDArray):
     return mask
 
 
-def combine_data2D(*data2d: Data2D):
+def combine_dataqdyqdx(*dataqdyqdx: DataQdyQdx, name=None):
     """
-    Combine two or more instances of Data2D into a single instance of
-    Data2D. This operation is not senstivie to any data transformations
-    or orientation changes that have been performed and so the user
-    should carefully consider when to perform this operation.
+    Combine two or more instances of DataQdyQdx into a single instance
+    of DataQdyQdx. This operation is not sensitive to any data
+    transformations or orientation changes that have been performed and
+    so the user should carefully consider when to perform this operation.
 
-    The image intensities will be summed together. Any points that
-    were masked in one or more of the data instances will be masked
-    in the new comined instance. Any nan, inf, or -inf points will also
+    The image intensities will be summed together. Any points that were
+    masked in one or more of the data instances will be masked in the
+    new combined instance. Any nan, inf, or -inf points will also
     be masked prior to this operation to ensure no unexpected behavior
-    of nansum arises (e.g., sum of all nan values resulting in 0 for
-    a single pixel.)
+    of nansum arises (e.g., sum of all nan values resulting in 0 for a
+    single pixel).
+
+    The user is responsible for ensuring that the scattering images
+    can be summed together at their measurement conditions, including
+    wavelength, sample to detector distance, sample configuration, etc.
+    By default, the metadata will be transferred from the first data
+    instance provided. The exception is exposure_time_s which will
+    be summed across the instances to accurately reflect the total
+    measurement time. If only some of the instances have exposure time
+    in the metadata dictionary, this could give an artifically low value
+    for exposure time.
 
     Parameters
     ----------
-    *data2d : Data2D
-        Any number of Data2D instances can be passed to this function
-        and summed together.
+    *dataqdyqdx : DataQdyQdx
+        Any number of DataQdyQdx instances can be passed to this
+        function and summed together.
     """
-    mask = data2d[0].mask
-    image = data2d[0].image
-    mask += _default_mask(image)
 
-    for data in data2d[1:]:
+    # initialize information from the first 2d data instance
+    first_data = dataqdyqdx[0]
+    metadata = first_data.metadata
+    user_params = first_data.user_params
+    mask = first_data.mask
+    image = first_data.image
+    if name is None:
+        name = first_data.name
+
+    for data in dataqdyqdx[1:]:
+        if 'exposure_time_s' in data.metadata.keys():
+            metadata['exposure_time_s'] += data.metadata['exposure_time_s']
         mask += data.mask
-        mask += _default_mask[data.image]
         image = np.nansum(image, data.image)
 
-    new_data2d = Data2D(image=image, mask=mask)
+    new_data = DataQdyQdx(
+        image=image,
+        name=name,
+        mask=mask,
+        **metadata,
+        **user_params,
+    )
 
-    return new_data2d
+    return new_data
 
 
 class Data2D():
@@ -119,7 +143,7 @@ class Data2D():
             self.mask += mask  # apply user-provided mask
         self._data_transformations = []
 
-    def mask(self, mask):
+    def mask_points(self, mask):
         """
         Add points to the data mask. This will not unmask any previously
         masked points in the image.
@@ -375,6 +399,63 @@ class Data2D():
         )
 
         return mean_intensity.reshape(-1), image_box
+
+    def slice_box(
+            self,
+            limits_axis0,
+            limits_axis1,
+            axis,
+            mode,
+    ):
+        """
+        Select a region of interest (box shape) and perform an
+        arithmetic mean or sum over the selected axis (or axes).
+
+        Parameters
+        ----------
+        limits_axis0: tuple[int, int]
+            Defines the limits (indices) of the box in the first
+            dimension. This is a half open range [min, max).
+        limits_axis1 : tuple[int, int]
+            Defines the limits (indices) of the box in the second
+            dimension. This is a half open range [min, max).
+        axis : int | tuple
+            The axis or axes over which to perform the mean or sum.
+            Setting axis to 0 will average/sum over each row.
+            Setting axis to 1 will average/sum over each column.
+            Setting axis to (0, 1) will average/sum over all axes and return
+            a single value.
+        mode : str
+            Select whether to perform a 'mean' or 'sum'.
+
+        Returns
+        -------
+        ndarray
+            Intensity of the selected box averaged over the selected
+            axis or axes.
+        ndarray
+            The two dimensional box selected from the image data used
+            in the summation.
+        """
+
+        if mode == 'sum':
+            slice_i, slice_box = self.sum_box(
+                limits_axis0=limits_axis0,
+                limits_axis1=limits_axis1,
+                axis=axis
+            )
+        elif mode == 'mean':
+            slice_i, slice_box = self.mean_box(
+                limits_axis0=limits_axis0,
+                limits_axis1=limits_axis1,
+                axis=axis
+            )
+        else:
+            raise ValueError(
+                f"Did not recognize slice mode {mode}. Use 'sum' or 'mean'."
+            )
+
+        return slice_i, slice_box
 
     def rotate_image(self,
                      rotation_angle_deg,
@@ -871,6 +952,86 @@ class DataQdyQdx(Data2D):
         super().reset_image()
         self.data_transformations = []
 
+    def get_box_dims_size(self, size_qdy_px, size_qdx_px,
+                          shift_box_qdy_px=0, shift_box_qdx_px=0):
+        """
+        Find the pixel index limits in half open ranges [min, max) that
+        define a region of interest based on a box with a specific width
+        along the two axes.
+
+        Parameters
+        ----------
+        size_qdy_px : int
+            Size of the box in pixels along qdy axis (axis 0)
+        size_qdx_px : int
+            Size of the box in pixels along qdx axis (axis 1)
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+
+        Returns
+        -------
+        tuple(int, int)
+            Half open range along the qdy axis (axis 0).
+        tuple(int, int)
+            Half open range along the qdx axis (axis 0).
+        """
+        # figure out where the box lies with respect to beam center
+        # make sure that the box doesn't fall off the image
+        center0, center1 = self.metadata['center_px']
+
+        center0 = int(np.round(center0, 0))  # closest pixel
+        min0 = center0 - int(size_qdy_px/2) - shift_box_qdy_px
+        max0 = min0 + size_qdy_px
+        min0 = max(min0, 0)
+        max0 = min(max0, self.image.shape[0])
+
+        center1 = int(np.round(center1, 0))  # closest pixel
+        min1 = center1 - int(size_qdx_px/2) - shift_box_qdx_px
+        max1 = min1 + size_qdx_px
+        min1 = max(min1, 0)
+        max1 = min(max1, self.image.shape[1])
+
+        return (min0, max0), (min1, max1)
+
+    def get_box_dims_qrange(self, range_qdy, range_qdx):
+        """
+        Find the pixel index limits in half open ranges [min, max) that
+        define a region of interest based on a box with set q ranges
+        on both axes.
+
+        Parameters
+        ----------
+        range_qdy : iterable of float
+            Range of scattering vector qdy defining the integration box.
+            Half open range of [min, max). Pixels with a q value that
+            satisfies min <= q < max will be accepted into the box.
+        range_qdx : iterable of float
+            Range of scattering vector qdx definiing the integration box.
+            Half open range of [min, max). Pixels with a q value that
+            satisfies min <= q < max will be accepted into the box.
+        """
+        # fix the min, max order if the user provided them reversed
+        range_qdy = [min(range_qdy), max(range_qdy)]
+        range_qdx = [min(range_qdx), max(range_qdx)]
+
+        qdy_indices = np.where((self.qdy >= range_qdy[0])
+                               & (self.qdy < range_qdy[1]))[0]
+        limits_qdy_px = (np.min(qdy_indices), np.max(qdy_indices)+1)
+
+        qdx_indices = np.where((self.qdx >= range_qdx[0])
+                               & (self.qdx < range_qdx[1]))[0]
+        limits_qdx_px = (np.min(qdx_indices), np.max(qdx_indices)+1)
+
+        return limits_qdy_px, limits_qdx_px
+
     def integrate_box(
         self,
         limits_qdy_px: list | tuple,
@@ -885,6 +1046,12 @@ class DataQdyQdx(Data2D):
         """
         Integrate a region of interest defined by the limits along both
         axes qdy and qdx (0 and 1, respectively).
+
+        The limits along the qdy and qdx axes with respect to the
+        pixel indices are required. The method get_box_dims can be
+        used to retrieve the box dimensions based on a q-range or a
+        specific box of size if desired. It returns the two axis limits
+        in the correct format and can be fed directly into this function.
 
         Parameters
         ----------
@@ -915,12 +1082,6 @@ class DataQdyQdx(Data2D):
             on a linear scale. This only applies to the plots and does
             not affect the data operation.
             Default value is True.
-        box_angle_deg : float
-            Rotate the box by the set number of degrees clockwise
-            about the beam center point. Rotating the box will maintain 
-            the size of the box.
-            Units are in degrees.
-            Default value is 0.
         subtract_background_offset: int, list[int], optional
             If set to a number of pixels greater than or equal to the
             width of the region of interest to be integrated over, a
@@ -945,7 +1106,6 @@ class DataQdyQdx(Data2D):
             One-dimensional I vs. q data extracted from the integration.
 
         """
-
         if isinstance(axis, str):
             if axis == 'qdy':
                 axis = 0
@@ -955,33 +1115,63 @@ class DataQdyQdx(Data2D):
                 raise ValueError(f"Invalid integration axis of {axis}.")
 
         # access parent method of box integration
-        if mode == 'sum':
-            integrated_i, image_box = super().sum_box(
-                limits_axis0=limits_qdy_px,
-                limits_axis1=limits_qdx_px,
-                axis=axis
-            )
-        elif mode == 'mean':
-            integrated_i, image_box = super().mean_box(
-                limits_axis0=limits_qdy_px,
-                limits_axis1=limits_qdx_px,
-                axis=axis
-            )
-        else:
-            raise ValueError(f"Invalid integration mode of {mode}.")
+        integrated_i, image_box = super().slice_box(
+            limits_axis0=limits_qdy_px,
+            limits_axis1=limits_qdx_px,
+            axis=axis,
+            mode=mode,
+        )
 
         # extract scattering vector for this integration
         if axis == 0:
             q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]
             q_int = np.mean(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
+            dq_int = np.std(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
             q_axis = 'qdx'
             q_int_axis = 'qdy'
         elif axis == 1:
             q = self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
             q_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
+            dq_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
             q_axis = 'qdy'
             q_int_axis = 'qdx'
 
+        # extract background intensity
+        if subtract_background_offset is not None:
+            backgrounds = []
+            if type(subtract_background_offset) is int:
+                subtract_background_offset = [subtract_background_offset]
+            for offset in subtract_background_offset:
+                if offset < image_box.shape[axis]:
+                    warnings.warn(
+                        f"A background subtraction offset of {offset} "
+                        "is less than the integrated axis width and so"
+                        "it will be skipped in the subtraction.")
+                else:
+                    limits_qdy_px_sub = (
+                        limits_qdy_px[0] + (offset if axis == 0 else 0),
+                        limits_qdy_px[1] + (offset if axis == 0 else 0)
+                    )
+                    limits_qdx_px_sub = (
+                        limits_qdx_px[0] + (offset if axis == 1 else 0),
+                        limits_qdy_px[1] + (offset if axis == 1 else 0)
+                    )
+                    background_i, _ = super().sum_box(
+                        limits_axis0=limits_qdy_px_sub,
+                        limits_axis1=limits_qdx_px_sub,
+                        axis=axis
+                    )
+                    backgrounds.append(
+                        [background_i, limits_qdy_px_sub, limits_qdx_px_sub])
+
+            background_i_avg = np.array([
+                background_i for background_i, _, _ in backgrounds])
+            background_i_avg = np.nanmean(background_i_avg, axis=0)
+
+            integrated_i -= background_i_avg
+        else:
+            background_i_avg = None
+            backgrounds = None
 
         # create instance of QSlice to hold integration metadata
         integrated_q_slice = QSlice(
@@ -995,440 +1185,260 @@ class DataQdyQdx(Data2D):
             axis=axis,
             image_box=image_box,
             q_int=q_int,
+            dq_int=dq_int,
             q_int_axis=q_int_axis,
+            background=background_i_avg
         )
-        
-        if subtract_background:
-            if subtraction_offset is None:
-                if axis == 0:
-                    subtraction_offset = int(limits_qdy_px[1] - limits_qdy_px[0])
-                elif axis == 1:
-                    subtraction_offset = int(limits_qdx_px[1] - limits_qdx_px[0])
-        
-            if axis == 0:
-                background_limits_axis0_high = (
-                    limits_qdy_px[0] + subtraction_offset,
-                    limits_qdy_px[1] + subtraction_offset)
-                background_limits_axis1_high = (
-                    limits_qdx_px[0],
-                    limits_qdx_px[1])
-            elif axis == 1:
-                background_limits_axis0_high = (
-                    limits_qdy_px[0],
-                    limits_qdy_px[1])
-                background_limits_axis1_high = (
-                    limits_qdx_px[0] + subtraction_offset,
-                    limits_qdx_px[1] + subtraction_offset)
-
-            integrated_background_high, _ = super().integrate_box(
-                limits_axis0=background_limits_axis0_high,
-                limits_axis1=background_limits_axis1_high,
-                mode=mode,
-                axis=axis,
-                box_angle_deg=box_angle_deg,
-                rotation_center=self.metadata['center_px'] \
-                    if rotation_center_point is None else rotation_center_point,
-                rotation_sampling_mode=rotation_sampling_mode,
-            )
-
-            if axis == 0:
-                background_limits_axis0_low = (
-                    limits_qdy_px[0] - subtraction_offset,
-                    limits_qdy_px[1] - subtraction_offset)
-                background_limits_axis1_low = (
-                    limits_qdx_px[0],
-                    limits_qdx_px[1])
-            elif axis == 1:
-                background_limits_axis0_low = (
-                    limits_qdy_px[0],
-                    limits_qdy_px[1])
-                background_limits_axis1_low = (
-                    limits_qdx_px[0] - subtraction_offset,
-                    limits_qdx_px[1] - subtraction_offset)
-
-            integrated_background_low, _ = super().integrate_box(
-                limits_axis0=background_limits_axis0_low,
-                limits_axis1=background_limits_axis1_low,
-                mode=mode,
-                axis=axis,
-                box_angle_deg=box_angle_deg,
-                rotation_center=self.metadata['center_px'] \
-                    if rotation_center_point is None else rotation_center_point,
-                rotation_sampling_mode=rotation_sampling_mode,
-            )
-
-            integrated_i_bkg_mean = np.nanmean(
-                np.array([integrated_background_high,
-                          integrated_background_low]), axis=0)
-
-            integrated_q_slice.subtract_from_data(integrated_i_bkg_mean)
-
-        if subtract_background:
-            background_subtractions = [
-                    integrated_i_bkg_mean, integrated_i,
-                    background_limits_axis0_high, background_limits_axis1_high,
-                    background_limits_axis0_low, background_limits_axis1_low]
-        else:
-            background_subtractions = None
 
         if show_plot:
             fig, fig_slice = plotting.plot_QdyQdx_integration(
                 self,
                 integrated_q_slice=integrated_q_slice,
                 log_scale=log_scale,
-                background_subtractions=background_subtractions
+                background_subtractions=backgrounds
             )
             iplot(fig)
             iplot(fig_slice)
 
         return integrated_q_slice
 
-    def integrate_box_of_size(
-            self,
-            size_qdy_px: int,
-            size_qdx_px: int,
-            mode: str,
-            axis: str | int,
-            shift_box_qdy_px: int = 0,
-            shift_box_qdx_px: int = 0,
-            box_angle_deg: float = 0,
-            rotation_sampling_mode: str = 'bicubic',
-            subtract_background=False,
-            subtraction_offset=None,
-            show_plot=False,
-            log_scale=True,
-    ):
+    def find_peaks2D(
+            self, box_dims=None, log_scale=True, refinement_size=7, **kwargs):
         """
-        Integrate a box of a specific size. By default this box is
-        centered at the closest pixel to the beam center position (q=0),
-        but it can be shifted in either qdy or qdx by a set number of
-        pixels.
+        Find peaks across a two-dimensional image or region of interest
+        using the scikit-image.feature peak_local_max() function and
+        then further refined with local Gaussian fits across the two
+        axes. Refinement is required for more accurate peak positions as
+        the peak_local_max() only retuns the nearest pixel.
 
         Parameters
         ----------
-        size_qdy_px : int
-            Size of the integration box in pixels along qdy axis.
-        size_qdx_px : int
-            Size of the integration box in pixels along qdx axis.
-        mode : str
-            Integration mode, either 'sum' or 'mean'.
-        axis : str, int
-            Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
-            can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
-            axis is set to 'qdy', integration will return I vs. qdx data.
-        shift_box_qdy_px : int, optional
-            Number of pixels to shift the box by in the positive qdy
-            direction. A negative value will shift the box in the
-            negative qdy direction.
-            Default value is 0.
-        shift_box_qdx_px : int, optional
-            Number of pixels to shift the box by in the positive qdx
-            direction. A negative value will shift the box in the
-            negative qdx direction.
-            Default value is 0.
-        box_angle_deg : float
-            Rotate the box by the set number of degrees clockwise
-            about the center point. Rotating the box will maintain the
-            size of the box.
-            Units are in degrees.
-            Default value is 0.
-        rotation_sampling_mode : str
-            Set the resampling method used when a box angle is provided.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
-        subtract_background : bool, optional
-            If set to true, will run a background subtraction on the integrated
-            data based on the supplied integration box offset by a set number 
-            of pixels.
-            TODO: decide how to best approach this subtraction past this 
-            initial implementation.
-        subtraction_offset: int, optional
-            The number of pixels to offset the integration box for calculating 
-            the background intensity by. 
-        show_plot : bool, optional
-            If set to False, the scattering image overlaid with the
-            integration box boundaries will be shown in a first figure
-            and the one-dimensional data will be shown in a second figure.
-            Default value is False.
+        box_dims : tuple[int, int], tuple[int, int]
+            Tuples that define the bounds along axis 0 and axis 1 of the
+            image, respectively, in pixel indices. The get_box_dims...
+            methods can be used to determine these bounds based on a
+            q-range or a specific box size.
+            The ranges are half open intervals [min, max).
         log_scale : bool, optional
-            If set to True, the plots will show the scattering intensity
-            on a log scale. If set to False, intensity will be displayed
-            on a linear scale. This only applies to the plots and does
-            not affect the data operation.
+            If set to True, the image will be passed to the peak finding
+            algorithm on a log sale of intensity. If set to False, the image
+            will be sent to the peak finding algorithm with its original
+            values.
             Default value is True.
-        interactive_plot : bool, optional
-            If set to True, the plots returned will be interactive plots
-            built via Plotly. If set to False, the plots returned will be
-            static matplotlib figures.
-            TODO: currently this is disabled and only True is accepted.
-            Default value is True.
+        refinement_size : int
+            Define the box size around the peaks in which to peform the
+            Gaussian refinement.
+            Default value is 7. Minimum value is 4.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            The keyword arguments for scikit-image's peak_local_max()
+            function can be passed through. Please refer to the scikit-image
+            documentation for detailed information on the parameters.
+            A brief list is provided here:
+                min_distance
+                threshold_abs
+                threshold_rel
+                exclude_border
+                num_peaks
+                footprint
+                labels
+                num_peaks_per_label
+                p_norm
+            The threshold_abs keyword will always be set to 0 if no other
+            value is provided by the user. This is to account for the -inf
+            values after the log transform of the image.
 
         Returns
         -------
-        IntegratedQSlice
-            One-dimensional I vs. q data extracted from the integration.
-
+        NDArray
+            An n x 2 array of peak coordinate positions will be returned
+            for n number of peaks found.
+        NDArray
+            An n x 2 array of peak coordinate positions in (qdy, qdx)
+            will be returned for n number of peaks found. If the
+            scattering vector has not yet been calculated, this will be
+            None.
         """
 
-        # figure out where the box lies with respect to beam center
-        # make sure that the box doesn't fall off the image
-        center0, center1 = self.metadata['center_px']
-
-        center0 = int(np.round(center0, 0))  # closest pixel
-        min0 = center0 - int(size_qdy_px/2) - shift_box_qdy_px
-        max0 = min0 + size_qdy_px
-        min0 = max(min0, 0)
-        max0 = min(max0, self.image.shape[0])
-
-        center1 = int(np.round(center1, 0))  # closest pixel
-        min1 = center1 - int(size_qdx_px/2) - shift_box_qdx_px
-        max1 = min1 + size_qdx_px
-        min1 = max(min1, 0)
-        max1 = min(max1, self.image.shape[1])
-
-        # integrate the box area of image
-        integrated_q_slice = self.integrate_box(
-            limits_qdy_px=[min0, max0],
-            limits_qdx_px=[min1, max1],
-            mode=mode,
-            axis=axis,
-            box_angle_deg=box_angle_deg,
-            rotation_sampling_mode=rotation_sampling_mode,
-            subtract_background=subtract_background,
-            subtraction_offset=subtraction_offset,
-            show_plot=show_plot,
-            log_scale=log_scale
-        )
-
-        # if show_plot:
-        #     fig, fig_slice = plotting.plot_QdyQdx_integration(
-        #         self, integrated_q_slice=integrated_q_slice,
-        #         log_scale=log_scale)
-        #     iplot(fig)
-        #     iplot(fig_slice)
-
-        return integrated_q_slice
-
-    def integrate_box_of_q_range(
-            self,
-            range_qdy: list | tuple,
-            range_qdx: list | tuple,
-            mode: str,
-            axis: str | int,
-            box_angle_deg: float = 0,
-            rotation_sampling_mode: str = 'bicubic',
-            subtract_background=False,
-            subtraction_offset=None,
-            show_plot=False,
-            log_scale=True,
-    ):
-        """
-        Integrate a box defined by scattering vector limits.
-
-        Parameters
-        ----------
-        range_qdy : iterable of float
-            Range of scattering vector qdy defining the integration box.
-            Half open range of [min, max). Pixels with a q value that
-            satisfies min <= q < max will be accepted into the box.
-        range_qdx : iterable of float
-            Range of scattering vector qdx definiing the integration box.
-            Half open range of [min, max). Pixels with a q value that
-            satisfies min <= q < max will be accepted into the box.
-        mode : str
-            Integration mode, either 'sum' or 'mean'.
-        axis : str, int
-            Axis to integrate over, either 'qdy' or 'qdx'. The axis indices
-            can also be used, 0 for 'qdy' or 1 for 'qdx'. For example, if
-            axis is set to 'qdy', integration will return I vs. qdx data.
-        box_angle_deg : float
-            Rotate the box by the set number of degrees clockwise
-            about the center point. Rotating the box will maintain the
-            size of the box.
-            Units are in degrees.
-            Default value is 0.
-        rotation_sampling_mode : str
-            Set the resampling method used when a box angle is provided.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
-        subtract_background : bool, optional
-            If set to true, will run a background subtraction on the integrated
-            data based on the supplied integration box offset by a set number 
-            of pixels.
-            TODO: decide how to best approach this subtraction past this 
-            initial implementation.
-        subtraction_offset: int, optional
-            The number of pixels to offset the integration box for calculating 
-            the background intensity by. 
-        show_plot : bool, optional
-            If set to False, the scattering image overlaid with the
-            integration box boundaries will be shown in a first figure
-            and the one-dimensional data will be shown in a second figure.
-            Default value is False.
-        log_scale : bool, optional
-            If set to True, the plots will show the scattering intensity
-            on a log scale. If set to False, intensity will be displayed
-            on a linear scale. This only applies to the plots and does
-            not affect the data operation.
-            Default value is True.
-        interactive_plot : bool, optional
-            If set to True, the plots returned will be interactive plots
-            built via Plotly. If set to False, the plots returned will be
-            static matplotlib figures.s
-            TODO: currently this is disabled and only True is accepted.
-            Default value is True.
-
-        Returns
-        -------
-        IntegratedQSlice
-            One-dimensional I vs. q data extracted from the integration.
-
-        """
-
-        # fix the min, max order if the user provided them reversed
-        range_qdy = [min(range_qdy), max(range_qdy)]
-        range_qdx = [min(range_qdx), max(range_qdx)]
-
-        qdy_indices = np.where((self.qdy >= range_qdy[0])
-                               & (self.qdy < range_qdy[1]))[0]
-        limits_qdy_px = (np.min(qdy_indices), np.max(qdy_indices)+1)
-
-        qdx_indices = np.where((self.qdx >= range_qdx[0])
-                               & (self.qdx < range_qdx[1]))[0]
-        limits_qdx_px = (np.min(qdx_indices), np.max(qdx_indices)+1)
-
-        integrated_q_slice = self.integrate_box(
-            limits_qdy_px=limits_qdy_px,
-            limits_qdx_px=limits_qdx_px,
-            mode=mode,
-            axis=axis,
-            box_angle_deg=box_angle_deg,
-            rotation_sampling_mode=rotation_sampling_mode,
-            subtract_background=subtract_background,
-            subtraction_offset=subtraction_offset,
-            show_plot=show_plot,
-            log_scale=log_scale
-        )
-
-        # if show_plot:
-        #     fig, fig_slice = plotting.plot_QdyQdx_integration(
-        #         self, integrated_q_slice=integrated_q_slice,
-        #         log_scale=log_scale)
-        #     iplot(fig)
-        #     iplot(fig_slice)
-
-        return integrated_q_slice
-
-    def find_peaks1D(self,
-                     box_mode,
-                     box_params: dict,
-                     peak_params: dict,
-                     peak_find_scale='linear',
-                     show_plot=True):
-        """
-        Simple peak finding function in 1D to determine appropriate
-        rotation angle of the sample coordinate system in the x-y
-        detector plane.
-
-        The box used to search for peaks is defined in the same way as
-        the integrator methods. This method assumes that there is only
-        a one-dimensional line of peaks along the axis NOT defined as
-        the integration axis in box_params. The location of the peaks
-        along the integration axis are then determined at the max
-        intensity value at a single position along the first axis.
-
-        Parameters
-        ----------
-        box_mode : str
-            Type of integration box to use. Options are:
-                'box' : use DataQdyQdx.integrate_box
-                'box_size' : use DataQdyQdx.integrate_box_of_size
-                'q_range' : use DataQdyQdx.integrate_box_of_q_range
-        box_params : dict
-            Dictionary of keyword arguments for the selected integration
-            method (box_mode). See the docstring of the corresponding
-            integration method for more information of available
-            arguments and their definitions.
-        peak_params : dict
-            Dictionary of keyword arguments for the scipy.find_peaks
-            algorithm; see scipy documentation for more information.
-        peak_find_scale : str
-            The scale of the intesity data to use for peak finding.
-            Can be set to 'linear' or 'log'.
-            Default value is 'linear'.
-        show_plot : bool
-            If set to True, a first figure will display the scattering
-            image overlaid with the integration box and markers on each
-            detected peak while a second figure will show the 1D slice
-            extracted from the integration and vertical lines at each
-            peak position.
-
-        Returns
-        -------
-        list[tuple[float, float]]
-            List of peak positions in (qdy, qdx) scattering vector coordiantes.
-        list[tuple[float, float]]
-            List of peak positions in (px_dy, px_dx) pixel coordinates.
-        list[tuple[int, int]]
-            List of peak positions in (px_dy, px_dx) integer pixel coordinates.
-        float
-            Angle of rotation of best line fit to the peaks clockwise
-            from a line parallel to the qdx axis.
-            Units are degrees.
-        tuple[float, float]
-            Results from linear fit to the peaks of (slope, intercept).
-            The units are in pixels; keep in mind for images pixels
-            are numbered from top to bottom and left to right (rows and
-            columns).
-        IntegratedQSlice
-            Integrated I vs. Q slice used for peak finding.
-        """
-
-        # integrate over the box
-        if box_mode == 'box':
-            integrated_q_slice = self.integrate_box(**box_params)
-        elif box_mode == 'box_size':
-            integrated_q_slice = self.integrate_box_of_size(**box_params)
-        elif box_mode == 'q_range':
-            integrated_q_slice = self.integrate_box_of_q_range(**box_params)
+        if box_dims is not None:
+            (min0, max0), (min1, max1) = box_dims
         else:
-            raise ValueError(
-                f"The box_mode {box_mode} is not recognized."
-            )
+            min0 = 0
+            max0 = self.image.shape[0]
+            min1 = 0
+            max1 = self.image.shape[1]
 
-        min0, max0 = integrated_q_slice.limits_axis0
-        min1, max1 = integrated_q_slice.limits_axis1
-        peaks_px = find_peaks_2D_legacy(
+        peaks = find_peaks_2D(
             self.image[min0:max0, min1:max1],
-            integrated_q_slice.Iq,
-            integrated_q_slice.integration_axis,
-            peak_params,
-            peak_find_scale=peak_find_scale,
-        )
-        peaks_px = [(y+min0, x+min1) for (y, x) in peaks_px]
-        peaks_px_int = [(
-            int(np.round(y+min0, 0)),
-            int(np.round(x+min1, 0))) for (y, x) in peaks_px]
+            log_scale=log_scale,
+            refinement_size=refinement_size,
+            **kwargs)
 
-        # linear interpolation to find the q value of peaks at partial pixel
-        peaks_q = [(
-                self.qdy[int(y)]+(y-np.floor(y))*(self.qdy[int(y)+1]-self.qdy[int(y)]),
-                self.qdx[int(x)]+(x-np.floor(x))*(self.qdx[int(x)+1]-self.qdx[int(x)])
-            ) for y, x in peaks_px]
+        if self.qdy is not None and self.qdx is not None:
+            peaks_q = np.ones_like(peaks).astype(np.float64)
 
-        if show_plot:
-            fig, fig_slice = plotting.plot_QdyQdx_find_peaks(
-                self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q))
-            iplot(fig)
-            iplot(fig_slice)
+            sort_qdy = np.argsort(self.qdy)
+            peaks_q[:, 0] = np.interp(
+                peaks[:, 0], np.arange(0, len(self.qdy)), self.qdy[sort_qdy])
 
-        return (peaks_q, peaks_px, peaks_px_int, integrated_q_slice)
+            sort_qdx = np.argsort(self.qdx)
+            peaks_q[:, 1] = np.interp(
+                peaks[:, 1], np.arange(0, len(self.qdx)), self.qdx[sort_qdx])
+        else:
+            peaks_q = None
+
+        return peaks, peaks_q
+
+    def find_peaks2D_one_axis(
+            self, box_dims=None, peak_axis=None, integration_mode='sum',
+            log_scale=True, refinement_size=7, algorithm='scikit', **kwargs):
+        """
+        Find peaks along one axis of a two-dimensional image using
+        the scikit-image.feature peak_local_max() function. The peaks
+        are further refined with local Gaussian fits across the two axes
+        at the peak location. Refinement is required for more accurate
+        peak positions as the peak_local_max() only returns the positions
+        to the nearest pixel.
+
+        The old version of this function used scipy.signal find_peaks()
+        to determine the intiial peak position. It is possible to use
+        this algorithm by siwtching the algorithm keyword argument to
+        'scipy'.
+
+        This function differs from find_peaks_2D() in that it only
+        allows for the primary peaks to be found along a single axis.
+        For example, if axis 1 is the peak axis, the image provided will
+        be integrated along axis 0 (summed or averaged) to find the
+        primary peak location along axis 1. Then the peak location in
+        axis 0 will be determined as the highest intensity pixel at each
+        peak location along axis 1. This is then refined by the Gaussian
+        fits. This function will assume that the peak axis is the
+        axis with the longest dimensions. If the region of interest
+        is square, then this function will assume peak axis is 1 unless
+        otherwise specified.
+
+        Parameters
+        ----------
+        box_dims : tuple[int, int], tuple[int, int]
+            Tuples that define the bounds along axis 0 and axis 1 of the
+            image, respectively, in pixel indices. The get_box_dims...
+            methods can be used to determine these bounds based on a
+            q-range or a specific box size.
+            The ranges are half open intervals [min, max).
+        peak_axis : int, optional
+            The axis along which the peaks are found. If axis 0 (qdy) is
+            selected, the image will be integrated along axis 1 (qdx).
+            If axis 1 (qdx) is selected, the image will be integrated
+            along axis 0 (qdy).
+            The peak_axis will default to the longer axis of the
+            image or region of interest. If the axes are the same
+            length, peak_axis will default to axis 1.
+        integration_mode : str, optional
+            Integration mode to be performed along the axis not set as
+            peak_axis. Options are 'mean' and 'sum'.
+            Default value is 'sum'.
+        log_scale : bool, optional
+            If set to True, the image will be passed to the peak finding
+            algorithm on a log sale of intensity. If set to False, the image
+            will be sent to the peak finding algorithm with its original
+            values.
+            Default value is True.
+        refinement_size : int
+            Define the box size around the peaks in which to peform the
+            Gaussian refinement.
+            Default value is 7.
+        algorithm: str
+            Specify which peak finding algorithm is used. Default value is
+            'scikit' which uses scikit-image.feature peak_local_max() to
+            locate the peaks. If set instead to 'scipy', the scipy.signal
+            find_peaks() algorithm will be used instead.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            The keyword arguments for the specified peak finding algorithm
+            can be passed through.
+            If using scikit-image's peak_local_max() function (algorithm set
+            to 'scikit'), keyword arguments include:
+                min_distance
+                threshold_abs
+                threshold_rel
+                exclude_border
+                num_peaks
+                footprint
+                labels
+                num_peaks_per_label
+                p_norm
+            The threshold_abs keyword will always be set to 0 if no other
+            value is provided by the user. This is to account for the -inf
+            values after the log transform of the image.
+
+            If using scipy's find_peaks() function (algorithm set to
+            'scipy'), keyword arguments include:
+                height
+                threshold
+                distance
+                prominence
+                width
+                wlen
+                rel_height
+                pleateau_size
+
+            Note that these argument lists are not always kept up to date
+            and we encourage the user to reference the scikit-image or
+            scipy documentation directly.
+
+        Returns
+        -------
+        NDArray
+            An n x 2 array of peak coordinate positions will be returned for
+            n number of peaks found.
+        NDArray
+            An n x 2 array of peak coordinate positions in (qdy, qdx)
+            will be returned for n number of peaks found. If the
+            scattering vector has not yet been calculated, this will be
+            None.
+        """
+
+        if box_dims is not None:
+            (min0, max0), (min1, max1) = box_dims
+        else:
+            min0 = 0
+            max0 = self.image.shape[0]
+            min1 = 0
+            max1 = self.image.shape[1]
+
+        if peak_axis is None:
+            if (max0 - min0) > (max1 - min1):
+                peak_axis = 0
+            else:
+                peak_axis = 1
+
+        peaks = find_peaks_2D_one_axis(
+            self.image[min0:max0, min1:max1],
+            peak_axis=peak_axis,
+            integration_mode=integration_mode,
+            log_scale=log_scale,
+            refinement_size=refinement_size,
+            algorithm=algorithm,
+            **kwargs)
+
+        if self.qdy is not None and self.qdx is not None:
+            peaks_q = np.ones_like(peaks).astype(np.float64)
+
+            sort_qdy = np.argsort(self.qdy)
+            peaks_q[:, 0] = np.interp(
+                peaks[:, 0], np.arange(0, len(self.qdy)), self.qdy[sort_qdy])
+
+            sort_qdx = np.argsort(self.qdx)
+            peaks_q[:, 1] = np.interp(
+                peaks[:, 1], np.arange(0, len(self.qdx)), self.qdx[sort_qdx])
+        else:
+            peaks_q = None
+
+        return peaks, peaks_q
 
     def plot_data(
             self,
@@ -1488,62 +1498,59 @@ class DataQdyQdx(Data2D):
 
     def find_beam_center_from_peaks(
             self,
-            beam_center_guess,
             size_qdy_px,
             size_qdx_px,
-            peak_axis,
-            peak_params: dict,
-            peak_find_scale='linear',
-            show_plot=True):
+            update=True,
+            beam_center_guess=None,
+            peak_axis=None,
+            **kwargs):
         """
-        Attempt to locate the beam center position using simple
-        1D peak finding. See DataQdyQdx.find_peaks1D for a more
-        detailed description of the peak finding process. For this
-        method, only an integration box of size can be used and it
-        must be centered on the beam center guess so that you have
-        equal number of peaks on each side of the beam. Having mirrored
-        peaks on either side of the beam center position detected is
-        critical to this function.
+        Attempt to locate the beam center position using the
+        find_peaks2D_one_axis() method. Please refer to the method
+        doc string for more information about the required arguments.
 
-        In many cases the beam center position is likely to fall on
-        an integer pixel value. This is because the peak finding
-        algorithm only returns the pixel on which the peak is and does
-        not perform any additional fit of the local intensity to determine
-        a float pixel location of the peak.
-        TODO: implement local gaussian fits for more accurate positions
+        For this method, the box dimensions are found internally for
+        a box with specific widths along each axis centered around the
+        starting beam center guess.
 
-        The beam center is determined by matching the same order peaks
-        in the negative and positive peak_axis direction. The peak_axis
-        is not the integration axis.
+        The peaks located will need to be symmetric about the beam
+        center and so this may require some careful consideration of
+        the peak finding algorithm parameters.
 
         Parameters
         ----------
-        beam_center_guess : iterable of int
-            Initial guess of the beam center position in pixels along
-            qdy and qdx [center_px_qdy, center_px_qdx].
+
         size_qdy_px : int
             Box size in pixels along the qdy axis.
         size_qdx_px : int
             Box size in pixels along the qdx axis.
-        peak_axis : str, int
-            Axis along which the peaks are present, either 'qdy' or 'qdx'.
-            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
-            For example, if peak_axis is set to 'qdx', peaks will be
-            detected along the qdx axis.
-        peak_params : dict
-            Dictionary of keyword arguments for the scipy.find_peaks
-            algorithm; see scipy documentation for more information.
-        peak_find_scale = 'linear'
-            The scale of the intesity data to use for peak finding.
-            Can be set to 'linear' or 'log'.
-            Default value is 'linear'.
-        show_plot : bool
-            If set to True, a first figure will display the scattering
-            image overlaid with the integration box and markers on each
-            detected peak while a second figure will show the 1D slice
-            extracted from the integration and vertical lines at each
-            peak position. The determiend beam center will be shown
-            with dashed red lines.
+        update : bool
+            If set to True, the found beam center will be updated in
+            the data metadata as well as returned. If set to False,
+            the center will only be returned and the data metadata will
+            remain at the last beam center position.
+        beam_center_guess : tuple[int, int], optional
+            Initial guess of the beam center position in pixels along
+            qdy and qdx (center_px_qdy, center_px_qdx). If provided,
+            this method will update the current metadata so that the
+            beam_center_guess is the beam_center_px.
+            If no beam_center_guess is provided, this method will use
+            the existing beam_center_px which will result in an error
+            if it is not close enough to the actual center.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Any additional keyword arguments for the find_peaks2D_one_axis()
+            method can be passed through to the underlying function.
+            This includes:
+                box_dims
+                peak_axis
+                integration_mode
+                log_scale
+                refinement_size
+                algorithm
+                any keyword arguments for the fitting algorithm
 
         Returns
         -------
@@ -1551,75 +1558,61 @@ class DataQdyQdx(Data2D):
             Beam center coordinates in units of pixels, [px_dy, px_dx].
         """
 
-        if isinstance(peak_axis, str):
-            if peak_axis == 'qdy' or peak_axis == 0:
+        if beam_center_guess is not None:
+            self.update_metadata({'center_px': beam_center_guess},
+                                 overwrite=True)
+        box_dims = self.get_box_dims_size(
+            size_qdy_px=size_qdy_px,
+            size_qdx_px=size_qdx_px
+        )
+
+        (min0, max0), (min1, max1) = box_dims
+        if peak_axis is None:
+            if (max0 - min0) > (max1 - min1):
                 peak_axis = 0
-            elif peak_axis == 'qdx' or peak_axis == 1:
-                peak_axis = 1
             else:
-                raise ValueError(
-                    f"Invalid integration peak axis of {peak_axis}.")
+                peak_axis = 1
+        peaks, peaks_q = self.find_peaks2D_one_axis(
+            box_dims=box_dims,
+            peak_axis=peak_axis,
+            **kwargs
+        )
 
-        box_params = {
-            "size_qdy_px": size_qdy_px,
-            "size_qdx_px": size_qdx_px,
-            "axis": 1 - peak_axis,
-            "mode": 'sum',
-        }
-        # use the box shift to correctly center the box on the beam center
-        # guess and not the default or current beam center
-        box_params["shift_box_qdy_px"] = int(
-            np.round(self.metadata['center_px'][0], 0) - beam_center_guess[0])
-        box_params["shift_box_qdx_px"] = int(
-            np.round(self.metadata['center_px'][1], 0) - beam_center_guess[1])
+        # check to make sure we found equal number of peaks on either
+        # side of the guessed beam center position
+        peaks_peak_axis = peaks[:, peak_axis]
+        peaks_peak_axis = peaks_peak_axis[np.argsort(peaks_peak_axis)]
+        low_peaks = peaks[peaks < self.metadata['center_px'][peak_axis]]
+        high_peaks = peaks[peaks > self.metadata['center_px'][peak_axis]]
 
-        peaks_q, peaks_px, peaks_px_int, integrated_q_slice =\
-            self.find_peaks1D(
-                box_mode='box_size',
-                box_params=box_params,
-                peak_params=peak_params,
-                peak_find_scale=peak_find_scale,
-                show_plot=False
-            )
+        # determine whether the right number of peaks was found
+        no_peak_warning = False
+        symmetric_warning = False
+        if peaks.shape[0] == 0:
+            no_peak_warning = True
+        elif peaks.shape[0] % 2 != 0 or len(low_peaks) != len(high_peaks):
+            symemtric_warning = True
 
-        # fit a line to the peaks
-        peaks_array = np.array(peaks_px)
-        if peaks_array.shape[0] > 1:
-            _, slope, intercept = line_fit(peaks_array[:, 1], peaks_array[:, 0])
+        # determine the slope and intercept if more than 1 peak
+        if peaks.shape[0] > 1:
+            _, slope, intercept = line_fit(peaks[:, 1], peaks[:, 0])
         else:
-            warnings.warn(
-                "WARNING: Only one peak found for:\n"
-                + f"{self.metadata['filename']}"
-                + "\n Setting angle, slope, and intercept to nan."
-                )
-            _ = np.nan
             slope = np.nan
             intercept = np.nan
 
-        peaks = peaks_array[:, peak_axis]
-        peaks = peaks[np.argsort(peaks)]
-        # check to make sure we found equal number of peaks on either
-        # side of the guessed beam center position
-        low_peaks = peaks[peaks < beam_center_guess[peak_axis]]
-        high_peaks = peaks[peaks > beam_center_guess[peak_axis]]
-        # if no peaks were found then we will use the beam center guess
-        if len(low_peaks) == 0 and len(high_peaks) == 0:
-            warnings.warn("No peaks found, using the beam center guess.")
-            center = beam_center_guess
+        if not no_peak_warning and not symmetric_warning:
+            center = np.mean(peaks_peak_axis)
 
-        print(peaks)
-        center = np.average(peaks)
-
-        if peak_axis == 1:
-            center_qdx = center
-            center_qdy = slope*center_qdx + intercept
-        elif peak_axis == 0:
-            center_qdy = center
-            if np.isnan(slope):
-                # this means the peaks form perfectly vertical line
-                center_qdx = np.array(peaks_px)[0, 0]
-            else:
-                center_qdx = (center_qdy-intercept)/slope
+            if peak_axis == 1:
+                center_qdx = center
+                center_qdy = slope*center_qdx + intercept
+            elif peak_axis == 0:
+                center_qdy = center
+                if np.isnan(slope):
+                    # this means the peaks form perfectly vertical line
+                    center_qdx = np.array(peaks_px)[0, 0]
+                else:
+                    center_qdx = (center_qdy-intercept)/slope
 
         if show_plot:
             fig, fig_slice = plotting.plot_find_beam_center(

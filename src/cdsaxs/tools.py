@@ -400,9 +400,6 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, **kwargs):
     NDArray
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
-    NDArray
-        An n x 2 array of peak coordinate positions rounded to the
-        nearest pixels will be returned for n number of peaks found.
     """
     # check the threshold_abs
     value = kwargs.get("threshold_abs")

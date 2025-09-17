@@ -258,6 +258,7 @@ class QSlice(Data1D):
             image_box: NDArray,
             q_int: float,
             q_int_axis: str,
+            background: None,
             dIq: NDArray = None,
             dq: NDArray = None,
             dq_int: float = None
@@ -299,6 +300,8 @@ class QSlice(Data1D):
         q_int_axis : str
             Defines q_int as one of the accepted axes.
             See Data1D for more details on accepted axes.
+        background : NDArray
+            Background intensity subtracted during the integration step.
         dIq : NDArray, optional
             Uncertainity along I.
             Default is None
@@ -316,6 +319,7 @@ class QSlice(Data1D):
         self.q_int = q_int
         self.q_int_axis = q_int_axis
         self.dq_int = dq_int
+        self.background = background
 
         self.name = name
 
