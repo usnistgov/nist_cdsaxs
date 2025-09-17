@@ -439,10 +439,15 @@ def slice_reduced_dataset(
 
         for data in dataset.reduced_datasets[reduced_index].values():
             selection = np.where((data.qsx >= q_range[0]) &
-                                 (data.qsx <= q_range[1]))[0]
-            if len(selection) > 0 and not np.isnan(data.Iq[selection]).any():
-                qsz.append(np.nanmean(data.qsz[selection]))
-                Iq.append(np.nanmean(data.Iq[selection]))
+                                 (data.qsx <= q_range[1]) &
+                                 (~np.isnan(data.Iq)))[0]
+            if len(selection) > 0:  # and not np.isnan(data.Iq[selection]).any():
+                # qsz.append(np.nanmean(data.qsz[selection]))
+                # Iq.append(np.nanmean(data.Iq[selection]))
+                qsz.append(data.qsz[selection])
+                Iq.append(data.Iq[selection])
+        qsz = np.array(qsz).reshape(-1)
+        Iq = np.array(Iq).reshape(-1)
 
         slices[q_values[i]] = Data1D(q=qsz, Iq=Iq, q_axis='qsz')
 
