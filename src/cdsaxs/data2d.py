@@ -247,8 +247,6 @@ class Data2D():
                 " include 'sum' and 'mean'."
             )
 
-        integrated_i[integrated_i < 0] = 0
-
         return integrated_i.reshape(-1), {
                 'mode': mode,
                 'axis': axis,
