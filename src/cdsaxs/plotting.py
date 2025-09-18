@@ -398,7 +398,7 @@ def plot_reduced_dataset(dataset, index=None, log_scale=True,
 
         colors = np.array(colors)
 
-        ax.scatter(qsxs, qszs, s=plot_marker_size, marker='o', color=colors)
+        ax.scatter(qsxs,  qszs, s=plot_marker_size, marker='o', color=colors)
         ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
         ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
 

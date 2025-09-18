@@ -411,6 +411,7 @@ def slice_reduced_dataset(
     show_plot=True,
     interpolated_image=True,
     plot_marker_size=5,
+    qz_bin=0.01
 ):
 
     """
@@ -439,13 +440,30 @@ def slice_reduced_dataset(
 
         for data in dataset.reduced_datasets[reduced_index].values():
             selection = np.where((data.qsx >= q_range[0]) &
-                                 (data.qsx <= q_range[1]) &
-                                 (~np.isnan(data.Iq)))[0]
-            if len(selection) > 0:  # and not np.isnan(data.Iq[selection]).any():
-                # qsz.append(np.nanmean(data.qsz[selection]))
-                # Iq.append(np.nanmean(data.Iq[selection]))
-                qsz.extend(list(data.qsz[selection]))
-                Iq.extend(list(data.Iq[selection]))
+                                 (data.qsx <= q_range[1]))[0]  # &
+                                # (~np.isnan(data.Iq)))[0]
+            if len(selection) > 0 and not np.isnan(data.Iq[selection]).any():
+                qsz.append(np.nanmean(data.qsz[selection]))
+                Iq.append(np.nanmean(data.Iq[selection]))
+                # qsz.extend(list(data.qsz[selection]))
+                # Iq.extend(list(data.Iq[selection]))
+
+        qsz = np.array(qsz)
+        Iq = np.array(Iq)
+
+        # qz_bin_min = np.ceil(np.abs(np.nanmin(qsz)/qz_bin))*qz_bin - qz_bin/2
+        # qz_bin_max = np.ceil(np.abs(np.nanmax(qsz)/qz_bin))*qz_bin + qz_bin/2
+        # qz_bin_edges = np.arange(qz_bin_min, qz_bin_max, qz_bin)
+
+        # qsz_binned = []
+        # Iq_binned = []
+
+        # for i, low_edge in enumerate(qz_bin_edges):
+        #     high_edge = qz_bin_edges[i+1]
+        #     find_points = np.where((qsz >= low_edge) & (qsz < high_edge))[0]
+        #     if len(find_points) > 0:
+        #         qsz_binned.append((high_edge-low_edge)/2)
+        #         Iq_binned.append(np.nanmean(Iq[find_points]))
 
         slices[q_values[i]] = Data1D(q=qsz, Iq=Iq, q_axis='qsz')
 
