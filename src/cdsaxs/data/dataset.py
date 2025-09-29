@@ -9,7 +9,8 @@ import warnings
 
 import numpy as np
 
-from cdsaxs.data2d import DataQdyQdx
+from cdsaxs.data.data_qdy_qdx import DataQdyQdx
+from cdsaxs.data.qslice import QSlice
 from cdsaxs.sample import Sample
 import cdsaxs.plotting as plotting
 
@@ -57,7 +58,7 @@ class Dataset():
             name: str = None,
             sample: str = None
     ):
-        if datas:
+        if datas is not None:
             self.add_data(datas)
         else:
             self.datas = {}
@@ -79,15 +80,25 @@ class Dataset():
             else:
                 self.datas[data.name] = data
 
-    def remove_data(self, datas: DataQdyQdx | list[DataQdyQdx]):
-        """Remove one or more DataQdyQdx instances from the dataset."""
-        datas = [datas] if isinstance(datas, DataQdyQdx) else datas
+    def remove_data(self,
+                    datas: DataQdyQdx | list[DataQdyQdx] | str | list[str]):
+        """
+        Remove one or more DataQdyQdx instances from the dataset.
+        One or more isntances of DataQdyQdx can be provided or a list
+        of keys to the datas dictionary.
+        """
+        if type(datas) is not list:
+            datas = [datas]
         for data in datas:
+            if isinstance(data, DataQdyQdx):
+                name = data.name
+            else:
+                name = data
             try:
-                del self.datas[data.name]
+                del self.datas[name]
             except KeyError:
-                warnings.warn(f"Could not delete {data.name} data as it was"
-                              "not part of the dataset.")
+                warnings.warn(f"Could not delete {name} data as it was"
+                            "not part of the dataset.")
 
     def assign_sample(self, sample: Sample):
         """
@@ -96,7 +107,10 @@ class Dataset():
         # TODO: implement required sample checks
         self.sample = sample
 
-    def update_all_metadata(self, metadata: dict, overwrite: bool = True):
+    def update_all_metadata(self,
+                            metadata: dict,
+                            overwrite: bool = True,
+                            keys: list = None):
         """
         Add or update metadata for all DataQdyQdx stored in this Dataset.
         Existing metadata parameters can be updated by keeping the
@@ -113,12 +127,19 @@ class Dataset():
             overwrite the existing value in the instance if it already
             exists in self.metadata.
             Default value is True.
+        keys : list
+            List of keys to the datas dictionary to select which data
+            the update should apply to.
         """
-
-        for data in self.datas.values():
+        if keys is None:
+            keys = list(self.datas.keys())
+        for key in keys:
+            data = self.datas[key]
             data.update_metadata(metadata=metadata, overwrite=overwrite)
 
-    def update_user_params_for_all(self, params: dict, overwrite: bool = True):
+    def update_user_params_for_all(
+            self, params: dict, overwrite: bool = True,
+            keys: list = None):
         """
         Add key: value pairs to the user params for all DataQdyQdx.
         Existing parameters can be updated by keeping the overwrite
@@ -134,26 +155,30 @@ class Dataset():
             overwrite the existing value in this instance if it already
             exists in self.uer_params.
             Default value is True.
+        keys : list
+            List of keys to the datas dictionary to select which data
+            the update should apply to.
         """
-
-        for data in self.datas.values():
+        if keys is None:
+            keys = list(self.datas.keys())
+        for key in keys:
+            data = self.datas[key]
             data.update_user_params(params=params, overwrite=overwrite)
 
-    def plot_datas(self, keys='ALL'):
+    def plot_datas(self, keys: list = None):
         """
         Plot one or more DataQdyQdx in the dataset.
 
         Parameters
         ----------
-        keys : list | str
-            If set to 'ALL', a list of all figures for all datas will
-            be returned. Otherwise, it can be a single data key or
-            a list of data keys to plot.
+        keys : list
+            List of keys to the datas dictionary to select which data
+            will be plotted.
         """
 
         figs = []
 
-        if keys == 'ALL':
+        if keys is None:
             keys = list(self.datas.keys())
         elif isinstance(keys, str):
             keys = [keys]
@@ -166,7 +191,7 @@ class Dataset():
         return figs
 
     def normalize_datas_by_metadata(
-            self, normalize_by, reset_first=False, keys=None):
+            self, normalize_by, keys=None):
         """
         Normalize all data by the selected metadata or user parameters.
         This will not reset any previous normalization. If a new
@@ -178,11 +203,6 @@ class Dataset():
         normalize_by : list
             List of accepted metadata keywords or user parameter keys
             that should be used to normalize the data.
-        reset_first : boolean
-            If set to True, any previous normalizations will be rest
-            before applying the new requested normalization series.
-            If left as False, the new parameters will be factored into
-            the existing normalization factor.
         keys : list
             A list of datas keys can be used to only apply the normalization
             to a subset of the data in datas.
@@ -192,10 +212,10 @@ class Dataset():
 
         for key in keys:
             data = self.datas[key]
-            data.normalize_by_metadata(normalize_by, reset_first=reset_first)
+            data.normalize_by_metadata(normalize_by)
 
     def scale_datas_by_metadata(
-            self, scale_by, reset_first=False, keys=None):
+            self, scale_by, keys=None):
         """
         Scale the image by the desired value.
         This does not undo any previous scalings unless reset_scale is
@@ -219,7 +239,7 @@ class Dataset():
 
         for key in keys:
             data = self.datas[key]
-            data.scale_by_metadata(scale_by, reset_first=reset_first)
+            data.scale_by_metadata(scale_by)
 
     def normalize_datas(self, value, keys=None):
         """
@@ -269,7 +289,7 @@ class Dataset():
             data = self.datas[key]
             data.subtract_from_data(value)
 
-    def reset_data_transformations(self, keys=None):
+    def reset_datas_intensity(self, keys=None):
         """
         Reset all normalization, scaling, adding and subtracting.
         """
@@ -278,141 +298,174 @@ class Dataset():
 
         for key in keys:
             data = self.datas[key]
-            data.reset_data_transformations()
+            data.reset_intensity()
 
-    def plot_integrated_dataset(
-            self,
-            index=None,
-            q_axis=None,
-            order_by='sample_phi_deg',
-            log_scale=True):
-        """
-        Plot the slices extracted from integrated a dataset of DataQdxQdy.
+    # def plot_integrated_dataset(
+    #         self,
+    #         index=None,
+    #         q_axis=None,
+    #         order_by='sample_phi_deg',
+    #         log_scale=True):
+    #     """
+    #     Plot the slices extracted from integrated a dataset of DataQdxQdy.
 
-        """
-        fig = plotting.plot_integrated_dataset(
-            self,
-            index=index,
-            q_axis=q_axis,
-            order_by=order_by,
-            log_scale=log_scale,
-        )
+    #     """
+    #     fig = plotting.plot_integrated_dataset(
+    #         self,
+    #         index=index,
+    #         q_axis=q_axis,
+    #         order_by=order_by,
+    #         log_scale=log_scale,
+    #     )
 
-        return fig
+    #     return fig
 
-    def mirror_integrated_dataset(
-        self,
-        index=None,
-    ):
-        if index is None:
-            index = max(self.integrated_datasets.keys())
+    # def mirror_integrated_dataset(
+    #     self,
+    #     index=None,
+    # ):
+    #     if index is None:
+    #         index = max(self.integrated_datasets.keys())
 
-        for int_q_slice in self.integrated_datasets[index].values():
-            int_q_slice.mirror_q()
+    #     for int_q_slice in self.integrated_datasets[index].values():
+    #         int_q_slice.mirror_q()
 
-    def reset_mirrored_integrated_dataset(
-            self,
-            index=None,
-    ):
-        if index is None:
-            index = max(self.integrated_datasets.keys())
+    # def reset_mirrored_integrated_dataset(
+    #         self,
+    #         index=None,
+    # ):
+    #     if index is None:
+    #         index = max(self.integrated_datasets.keys())
 
-        for int_q_slice in self.integrated_datasets[index].values():
-            int_q_slice.reset_mirrored_q()
+    #     for int_q_slice in self.integrated_datasets[index].values():
+    #         int_q_slice.reset_mirrored_q()
 
-    def plot_reduced_dataset(
-            self,
-            index=None,
-            log_scale=True,
-            interpolated_image=True,
-            plot_marker_size=5
-    ):
-        """
-        Plot the Qsz vs. Qsx reduced dataset after integration.
-        """
-        fig = plotting.plot_reduced_dataset(
-            self,
-            index=index,
-            log_scale=log_scale,
-            plot_marker_size=plot_marker_size,
-            interpolated_image=interpolated_image
-        )
+    # def plot_reduced_dataset(
+    #         self,
+    #         index=None,
+    #         log_scale=True,
+    #         interpolated_image=True,
+    #         plot_marker_size=5
+    # ):
+    #     """
+    #     Plot the Qsz vs. Qsx reduced dataset after integration.
+    #     """
+    #     fig = plotting.plot_reduced_dataset(
+    #         self,
+    #         index=index,
+    #         log_scale=log_scale,
+    #         plot_marker_size=plot_marker_size,
+    #         interpolated_image=interpolated_image
+    #     )
 
-        return fig
+    #     return fig
 
-    def plot_reduced_slices(
-            self,
-            index=None,
-            q_slice_axis='qsx',
-            log_scale=True,
-            offset_order=0,
-            offset_value=0
-    ):
+    # def plot_reduced_slices(
+    #         self,
+    #         index=None,
+    #         q_slice_axis='qsx',
+    #         log_scale=True,
+    #         offset_order=0,
+    #         offset_value=0
+    # ):
 
-        fig = plotting.plot_reduced_slices(
-            self,
-            index=index,
-            q_slice_axis=q_slice_axis,
-            log_scale=True,
-            offset_order=offset_order,
-            offset_value=offset_value,
-        )
+    #     fig = plotting.plot_reduced_slices(
+    #         self,
+    #         index=index,
+    #         q_slice_axis=q_slice_axis,
+    #         log_scale=True,
+    #         offset_order=offset_order,
+    #         offset_value=offset_value,
+    #     )
 
-        return fig
+    #     return fig
 
-    def save_reduced_slices(self, filepath, index=None, q_slice_axis='qsx',
-                            decimals=5):
-        """
-        Returns the slected reduced slices set currently stored in the
-        dataset. The user must specify the index of the set of slices
-        as well as the q_slice_axis. The number of decimal places the
-        slice positions are rounded at can be changed with the
-        decimals keyword argument.
+    # def save_reduced_slices(self, filepath, index=None, q_slice_axis='qsx',
+    #                         decimals=5):
+    #     """
+    #     Returns the slected reduced slices set currently stored in the
+    #     dataset. The user must specify the index of the set of slices
+    #     as well as the q_slice_axis. The number of decimal places the
+    #     slice positions are rounded at can be changed with the
+    #     decimals keyword argument.
 
-        NOTE: currently only a q_slice_axis of 'qsx' is accepted or
-        formatted appropriately in the output file.
-        TODO: generalize this in the future.
-        """
+    #     NOTE: currently only a q_slice_axis of 'qsx' is accepted or
+    #     formatted appropriately in the output file.
+    #     TODO: generalize this in the future.
+    #     """
 
-        if index is None:
-            index = max(self.reduced_slices.keys())
-        reduced_slices = self.reduced_slices[index][q_slice_axis]
+    #     if index is None:
+    #         index = max(self.reduced_slices.keys())
+    #     reduced_slices = self.reduced_slices[index][q_slice_axis]
 
-        length = 0
-        for key, val in reduced_slices.items():
-            length = np.max((length, val.q.shape[0]))
+    #     length = 0
+    #     for key, val in reduced_slices.items():
+    #         length = np.max((length, val.q.shape[0]))
 
-        datas = []
+    #     datas = []
         
-        for key, val in reduced_slices.items():
-            q = val.q
-            Iq = val.Iq
+    #     for key, val in reduced_slices.items():
+    #         q = val.q
+    #         Iq = val.Iq
             
-            #sort by q
-            sorted_indexes = np.argsort(q)
-            q = q[sorted_indexes]
-            Iq = Iq[sorted_indexes]
+    #         #sort by q
+    #         sorted_indexes = np.argsort(q)
+    #         q = q[sorted_indexes]
+    #         Iq = Iq[sorted_indexes]
 
-            select = Iq > 0
+    #         select = Iq > 0
 
-            if len(q[select]) < length:
-                new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
-                                   q.astype(str)[select],
-                                   [""]*(length-len(q[select]))))
-            else:
-                new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
-                                   q.astype(str)[select]))
+    #         if len(q[select]) < length:
+    #             new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
+    #                                q.astype(str)[select],
+    #                                [""]*(length-len(q[select]))))
+    #         else:
+    #             new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
+    #                                q.astype(str)[select]))
 
-            if len(q[select]) < length:
-                new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
-                                    Iq.astype(str)[select],
-                                    [""]*(length-len(Iq[select]))))
-            else:
-                new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
-                                    Iq.astype(str)[select]))
+    #         if len(q[select]) < length:
+    #             new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
+    #                                 Iq.astype(str)[select],
+    #                                 [""]*(length-len(Iq[select]))))
+    #         else:
+    #             new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
+    #                                 Iq.astype(str)[select]))
 
-            datas.append(new_q)
-            datas.append(new_Iq)
+    #         datas.append(new_q)
+    #         datas.append(new_Iq)
 
-        datas = np.array(datas).T
-        np.savetxt(filepath, datas, delimiter=',', fmt='%s')
+    #     datas = np.array(datas).T
+    #     np.savetxt(filepath, datas, delimiter=',', fmt='%s')
+
+
+class IntegratedDataset():
+
+    def __init__(self, qslices: QSlice | list = None, name=None):
+        """
+        A set of 1D slices taken from detector images in a dataset.
+
+        Parameters
+        ----------
+        qslices : QSlice | list, optional
+            A single QSlice instance or list of QSlice instances to
+            initialize the qslices attribute of this class. If not
+            provided, the qslices attribute will be an empty list and
+            instances of QSlice can later be added.
+        name : str
+            Custom name of the integrated dataset.
+        """
+
+        self.name = name
+        self.qslices = []
+        if qslices is not None:
+            self.add_slices(qslices=qslices)
+
+    def add_slices(self, qslices: QSlice | list):
+        """
+        Add a single QSlice or list of QSlice instances to this dataset.
+        """
+        if isinstance(qslices, QSlice):
+            qslices = [qslices]
+        for qs in qslices:
+            self.qslices.append(qs)
+

@@ -1,7 +1,10 @@
+import cdsaxs.data.data1d
+import cdsaxs.data.data2d
+import cdsaxs.data.data_qdy_qdx
+import cdsaxs.data.qslice
+import cdsaxs.data.reduced_data1d
+import cdsaxs.data.dataset
 import cdsaxs.calculators
-import cdsaxs.data1d
-import cdsaxs.data2d
-import cdsaxs.dataset
 import cdsaxs.loaders
 import cdsaxs.metadata
 import cdsaxs.plotting

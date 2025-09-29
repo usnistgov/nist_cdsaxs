@@ -19,7 +19,6 @@ class TestPilatusHeader(unittest.TestCase):
 
     def test_exposure_time(self):
 
-        print(os.path.abspath("."))
         exposure_time = 0.2  # seconds
 
         self.assertEqual(
@@ -28,12 +27,26 @@ class TestPilatusHeader(unittest.TestCase):
 
     def test_pixel_size(self):
 
-        print(os.path.abspath("."))
         pixel_size = 172  # mircrons
 
         self.assertEqual(
             loader_tools.extract_pixel_size_pilatus(self.header),
             pixel_size)
+
+    def test_pilatus_header_to_metadata(self):
+
+        metadata = loader_tools.pilatus_header_to_metadata(self.header)
+        self.assertEqual(
+            metadata["exposure_time_s"],
+            0.2
+        )
+        self.assertEqual(
+            metadata["pixel_size_um"],
+            172
+        )
+
+        self.assertListEqual(["exposure_time_s", "pixel_size_um"],
+                             list(metadata.keys()))
 
 
 class TestFilterFilenamesByFiletype(unittest.TestCase):

@@ -15,11 +15,13 @@ from numpy.typing import NDArray
 from plotly.offline import iplot
 
 import cdsaxs.calculators as calculators
-from cdsaxs.data1d import QSlice
+from cdsaxs.data.data2d import Data2D
+from cdsaxs.data.qslice import QSlice
 from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit, find_peaks_2D_legacy, rotate_image
 from cdsaxs.tools import find_peaks_2D, find_peaks_1D, find_peaks_2D_one_axis
+from cdsaxs.tools import default_mask
 import cdsaxs.diffraction as diffraction
 
 
@@ -28,18 +30,6 @@ UPDATE_Q_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
     "detector_phi_deg", "detector_phi_omega"
 ]
-
-
-def _default_mask(image: NDArray):
-
-    """
-    Generate a default mask of points that are nan, inf, or -inf.
-    """
-    mask = np.isnan(image)
-    mask += np.isinf(image)
-    mask += np.isneginf(image)
-
-    return mask
 
 
 def combine_dataqdyqdx(*dataqdyqdx: DataQdyQdx, name=None):
@@ -99,402 +89,6 @@ def combine_dataqdyqdx(*dataqdyqdx: DataQdyQdx, name=None):
     return new_data
 
 
-class Data2D():
-    """
-    Protected Attributes
-    --------------------
-    _data_transformations : list of tuples
-        Will keep track of intensity data transformations, including
-        a normalization, scaling, adding or subtracting by or of a
-        specified value. Each item in the list is a tuple of
-        (transformation, value) where transformation can be:
-            normalize
-            scale
-            add
-            subtract
-        and where value can either be a single float or an array of
-        floats with the same dimensions as the image.
-    """
-
-    def __init__(self, image: NDArray[np.floating],
-                 mask: NDArray[np.bool] = None):
-        """
-        Generic 2D data class with basic image functionalities. This
-        class is not tied to any diffraction information.
-
-        Attributes
-        ----------
-        image : NDArray
-            Two-dimensional array containing the image as pixel
-            intensities. The first dimension corresponds to image rows
-            from top to bottom and the second dimension corresponds to
-            image columns from left to right.
-        mask : NDArray
-            Two-dimensional boolean array of same dimensions as image
-            that are True at pixel values that should be masked out
-            for all operations.
-            All pixels that are nan, inf, or -inf will be masked by
-            default.
-        """
-        self.image = image
-        self._raw_image = np.copy(self.image)
-        self.mask = _default_mask(self.image)
-        if mask is not None:
-            self.mask += mask  # apply user-provided mask
-        self._data_transformations = []
-
-    def mask_points(self, mask):
-        """
-        Add points to the data mask. This will not unmask any previously
-        masked points in the image.
-
-        Parameters
-        ----------
-        mask : NDArray
-            Two-dimensional boolean array of same dimensions as the
-            data image. Pixels that are True will be masked out for
-            all data operations. This will NOT unmask any previously
-            masked points.
-        """
-        self.mask += mask
-
-    def overwrite_mask(self, mask):
-        """
-        Set a new mask for the data. This will unmask all previously
-        masked points and only mask the points provided to this
-        function call.
-
-        Parameters
-        ----------
-        mask : NDArray
-            Two-dimensional boolean array of same dimensions as the
-            data image. Pixels that are True will be masked out for
-            all data operations. This will unmask any previously
-            masked points.
-        """
-        self.mask = self.mask*False + mask
-
-    def reset_mask(self):
-        """
-        Reset the mask to only mask out pixels with values of nan, inf,
-        or -inf.
-        """
-        self.mask = np.isnan(self.image)  # mask out nan
-        self.mask += np.isinf(self.image) + np.isneginf(self.image)  # mask inf
-
-    def rotate_image_ccw(self, steps=1):
-        """
-        Rotate the image counterclockwise by 90 degree, or by a
-        specified number of 90 degree steps.
-
-        The original image can be recalled by using
-        'reset_image_orientation'.
-
-        Parameters
-        ----------
-        steps : int
-            Number of 90 degree rotations to be performed. If a negative
-            value is provided, the rotations will be performed in the
-            clockwise direction.
-        """
-
-        k = int(np.round(steps, 0))
-
-        # determine counterclockwise steps to achieve same rotation
-        while k < 0:
-            k += 4
-        if k != 0:
-            self.image = np.rot90(self.image, k=k, axes=(0, 1))
-            self.mask = np.rot90(self.mask, k=k, axes=(0, 1))
-
-    def flip_horizontally(self):
-
-        self.image = np.flip(self.image, axis=1)
-        self.mask = np.flip(self.mask, axis=1)
-
-    def flip_vertically(self):
-
-        self.image = np.flip(self.image, axis=0)
-        self.mask = np.flip(self.mask, axis=0)
-
-    def scale_data(self, value):
-        """
-        Scale the data by the specified value or array of values
-        that match the dimensions of the data image.
-        """
-        if type(value) is float or type(value) is int:
-            value = float(value)
-        else:
-            if value.shape != self.image.shape:
-                raise ValueError(
-                    "Size of the provided array does not"
-                    "match the size of the image data.")
-
-        self.image = self.image*value
-        self._data_transformations.append(("scale", value))
-
-    def normalize_data(self, value):
-        """
-        Scale the data by the recipricol of the specified value.or array
-        of values that match the dimensions of the data image.
-        """
-        if type(value) is float or type(value) is int:
-            value = float(value)
-            value_r = 1/value
-        else:
-            value_r = np.reciprocal(value)
-            if value_r.shape != self.image.shape:
-                raise ValueError(
-                    "Size of the provided array does not"
-                    "match the size of the image data.")
-
-        self.image = self.image*value_r
-        self._data_transformations.append(("normalize", value))
-
-    def subtract_from_data(self, value):
-        """
-        Subtract a specified single value or an array of values that
-        matches the image dimensions from the image data.
-        """
-        if type(value) is float or type(value) is int:
-            value = float(value)
-        else:
-            if value.shape != self.image.shape:
-                raise ValueError(
-                    "Size of the provided array does not"
-                    "match the size of the image data.")
-        self.image = self.image-value
-        self._data_transformations.append(("subtract", value))
-
-    def add_to_data(self, value):
-        """
-        Add a specified single value or an array of values that
-        matches the image dimensions to the image data.
-        """
-        if type(value) is float or type(value) is int:
-            value = float(value)
-        else:
-            if value.shape != self.image.shape:
-                raise ValueError(
-                    "Size of the provided array does not"
-                    "match the size of the image data.")
-        self.image = self.image+value
-        self._data_transformations.append(("add", value))
-
-    def reset_intensity(self):
-        """
-        Resets any normailzation, scaling, added or subtracted values
-        applied to the image data intensity.
-        """
-        for transform, value in reversed(self._data_transformations):
-            if transform == "add":
-                self.subtract_from_data(value)
-            elif transform == "subtract":
-                self.add_to_data(value)
-            elif transform == "normalize":
-                self.scale_data(value)
-            elif transform == "scale":
-                self.normalize_data(value)
-        self._data_transformations = []
-
-    def reset_image(self):
-        """
-        Resets the image to the raw image and also resets the applied
-        mask. This will undo any orientation transformations to the
-        image as well as any scaling, normalization, additions or
-        subtractions applied to the image.
-        """
-        self._data_transformations = []
-        self.image = np.copy(self._raw_image)
-        self.reset_mask()
-
-    def sum_box(
-            self,
-            limits_axis0,
-            limits_axis1,
-            axis,
-    ):
-        """
-        Select a region of interest (box shape) and sum over the
-        selected axis (or axes).
-
-        Be careful if you have any pixels with a value of nan that are
-        not masked by the mask attribute. If the summation algorithm
-        encounters all nan values, it will return 0 rather than nan. By
-        default, all nan values are masked out unless the user
-        overwrites this behavior.
-
-        Parameters
-        ----------
-        limits_axis0: tuple[int, int]
-            Defines the limits (indices) of the box in the first
-            dimension. This is a half open range [min, max).
-        limits_axis1 : tuple[int, int]
-            Defines the limits (indices) of the box in the second
-            dimension. This is a half open range [min, max).
-        axis : int | tuple
-            The axis or axes over which to perform the sum.
-            Setting axis to 0 will sum over each row.
-            Setting axis to 1 will sum over each column.
-            Setting axis to (0, 1) will sum over all axes and return a
-            single value.
-
-        Returns
-        -------
-        ndarray
-            Intensity of the selected box summed over the selected axis
-            or axes.
-        ndarray
-            The two dimensional box selected from the image data used
-            in the summation.
-        """
-        image_box = self.image[limits_axis0, limits_axis1]
-        sum_intensity = np.nansum(
-            image_box,
-            axis=axis,
-            where=~self.mask
-        )
-
-        return sum_intensity.reshape(-1), image_box
-
-    def mean_box(
-            self,
-            limits_axis0,
-            limits_axis1,
-            axis,
-    ):
-        """
-        Select a region of interest (box shape) and perform an
-        arithmetic mean over the selected axis (or axes).
-
-        Parameters
-        ----------
-        limits_axis0: tuple[int, int]
-            Defines the limits (indices) of the box in the first
-            dimension. This is a half open range [min, max).
-        limits_axis1 : tuple[int, int]
-            Defines the limits (indices) of the box in the second
-            dimension. This is a half open range [min, max).
-        axis : int | tuple
-            The axis or axes over which to perform the mean.
-            Setting axis to 0 will average over each row.
-            Setting axis to 1 will average over each column.
-            Setting axis to (0, 1) will average over all axes and return
-            a single value.
-
-        Returns
-        -------
-        ndarray
-            Intensity of the selected box averaged over the selected
-            axis or axes.
-        ndarray
-            The two dimensional box selected from the image data used
-            in the summation.
-        """
-        image_box = self.image[limits_axis0, limits_axis1]
-        mean_intensity = np.nanmean(
-            image_box,
-            axis=axis,
-            where=~self.mask
-        )
-
-        return mean_intensity.reshape(-1), image_box
-
-    def slice_box(
-            self,
-            limits_axis0,
-            limits_axis1,
-            axis,
-            mode,
-    ):
-        """
-        Select a region of interest (box shape) and perform an
-        arithmetic mean or sum over the selected axis (or axes).
-
-        Parameters
-        ----------
-        limits_axis0: tuple[int, int]
-            Defines the limits (indices) of the box in the first
-            dimension. This is a half open range [min, max).
-        limits_axis1 : tuple[int, int]
-            Defines the limits (indices) of the box in the second
-            dimension. This is a half open range [min, max).
-        axis : int | tuple
-            The axis or axes over which to perform the mean or sum.
-            Setting axis to 0 will average/sum over each row.
-            Setting axis to 1 will average/sum over each column.
-            Setting axis to (0, 1) will average/sum over all axes and return
-            a single value.
-        mode : str
-            Select whether to perform a 'mean' or 'sum'.
-
-        Returns
-        -------
-        ndarray
-            Intensity of the selected box averaged over the selected
-            axis or axes.
-        ndarray
-            The two dimensional box selected from the image data used
-            in the summation.
-        """
-
-        if mode == 'sum':
-            slice_i, slice_box = self.sum_box(
-                limits_axis0=limits_axis0,
-                limits_axis1=limits_axis1,
-                axis=axis
-            )
-        elif mode == 'mean':
-            slice_i, slice_box = self.mean_box(
-                limits_axis0=limits_axis0,
-                limits_axis1=limits_axis1,
-                axis=axis
-            )
-        else:
-            raise ValueError(
-                f"Did not recognize slice mode {mode}. Use 'sum' or 'mean'."
-            )
-
-        return slice_i, slice_box
-
-    def rotate_image(self,
-                     rotation_angle_deg,
-                     rotation_center=(0, 0),
-                     resampling_mode="bicubic"):
-
-        """
-        Rotate the image counterclockwise by the specified angle about
-        the rotation center.
-        NOTE: This operation will convert any masked points in your
-        array to nan prior to the image rotation so they are not used
-        in the resampling algorithms. The mask will then be reset to
-        mask out any nan pixels after the rotation.
-
-        Parameters
-        ----------
-        rotation_angle_deg : float
-            Angle in degrees by which to rotate the image
-            counterclockwise.
-        rotation_center : tuple
-            Center of rotatation.
-            Default is the upper left pixel.
-        resampling_mode: str
-            Set the resampling method used during the rotation.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
-        """
-
-        self.image[self.mask] = np.nan
-        self.image = rotate_image(self.image,
-                                  degrees=rotation_angle_deg,
-                                  rotation_center=rotation_center,
-                                  resampling_mode=resampling_mode)
-        self.reset_mask()
-
-
 class DataQdyQdx(Data2D):
     """
     Attributes
@@ -535,6 +129,7 @@ class DataQdyQdx(Data2D):
             image: NDArray[np.floating],
             name: str = None,
             mask: NDArray[np.bool] = None,
+            hide_q_warnings=False,
             **kwargs
     ):
         """
@@ -574,6 +169,9 @@ class DataQdyQdx(Data2D):
             for all operations.
             All pixels that are nan, inf, or -inf will be masked by
             default.
+        hide_q_warnings : bool, optional
+            Hide any warnings that may occur during init.
+            Default value is False.
 
         Other Parameters
         ----------------
@@ -601,10 +199,9 @@ class DataQdyQdx(Data2D):
         self.qdx = None
 
         # calculate the q vectors if all required metadata is present
-        try:
-            self.calculate_q(suppress_errors=False)
-        except ValueError as e:
-            print(f"WARNING: insufficient metadata for q calculation:\n{e}")
+        # we will suppress the warning here but will give a single warning
+        # at the end of this init if we can't calculate q
+        self.calculate_q(suppress_errors=True)
 
         self.name = name if name is not None else\
             self.metadata['name'] if 'name' in self.metadata.keys() else\
@@ -612,12 +209,24 @@ class DataQdyQdx(Data2D):
             else 'name'
 
         # set required default metadata values not required by user
-        self.update_metadata({'sample_phi_offset_deg': 0}, overwrite=False)
-        self.update_metadata({'center_px': (0, 0)}, overwrite=False)
+        self.update_metadata(
+            {'sample_phi_offset_deg': 0},
+            overwrite=False, hide_q_warnings=True)
+        self.update_metadata(
+            {'center_px': (0, 0)},
+            overwrite=False, hide_q_warnings=True)
 
         self.data_transformations = []
 
-    def update_metadata(self, metadata: dict, overwrite: bool = True):
+        if not hide_q_warnings and self.qdy is None:
+            warnings.warn(
+                "Insufficient metadata to calculate q. "
+                "Check your metadata to ensure the correct center "
+                "position, wavelength, sample to detector distance, and "
+                "pixel size are provided.")
+
+    def update_metadata(self, metadata: dict, overwrite: bool = True,
+                        hide_q_warnings=False):
         """
         Add accepted metadata to the class instance. Existing metadata
         parameters can be updated by keeping the overwrite argument
@@ -633,6 +242,11 @@ class DataQdyQdx(Data2D):
             overwrite the existing value in the instance if it already
             exists in self.metadata.
             Default value is True.
+        hide_q_warnings : bool, optional
+            Hide errors and warnings from the q calculation in the case
+            that insufficient metadata is available to calculate q.
+            Default is False.
+
         """
         if check_metadata(metadata):
             for key, value in metadata.items():
@@ -649,9 +263,9 @@ class DataQdyQdx(Data2D):
                             calculators.energy_to_wavelength(value)
             if len([x for x in metadata.keys() if x in UPDATE_Q_TRIGGERS]) > 0:
                 try:
-                    self.calculate_q(suppress_errors=False)
+                    self.calculate_q(suppress_errors=hide_q_warnings)
                 except ValueError as e:
-                    print(f"WARNING: insufficient metadata for q calculation:\n{e}")
+                    warnings.warn(f"{e}")
 
     def update_user_params(self, params: dict, overwrite: bool = True):
         """
@@ -844,12 +458,12 @@ class DataQdyQdx(Data2D):
         for key in scale_by:
             if type(key) is float or type(key) is int:
                 value = float(key)
-            if key in METADATA_KEYWORDS:
+            elif key in METADATA_KEYWORDS:
                 value = self.metadata[key]
             elif key in self.user_params.keys():
                 value = float(self.user_params[key])
             else:
-                warnings.warn(f"Did not recognize {key} as an available "
+                warnings.warn(f"Did not recognize {key} as an available"
                               "parameter in either metadata or user_params.")
                 value = None
             if type(key) is str:
@@ -857,9 +471,8 @@ class DataQdyQdx(Data2D):
                     if key == keyword and transform == "scale":
                         warnings.warn(
                             f"{key} was already used in a scaling data "
-                            "transformation. Skipping for now."
-                        )
-                    value = None
+                            "transformation. Skipping for now.")
+                        value = None
             if value is not None:
                 self.scale_data(value, keyword=key)
 
@@ -892,6 +505,8 @@ class DataQdyQdx(Data2D):
 
         # do the rotation
         k = int(np.round(steps, 0))
+        while k < 0:
+            k += 4
         super().rotate_image_ccw(steps=k)
 
         if k == 1:
@@ -918,20 +533,20 @@ class DataQdyQdx(Data2D):
     def flip_horizontally(self):
         super().flip_horizontally()
         center_px = self.metadata['center_px']
-        self.metadata['center_px'] = [
+        self.metadata['center_px'] = (
             center_px[0],
             self.image.shape[1] - center_px[1] - 1
-        ]
+        )
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
 
     def flip_vertically(self):
         super().flip_vertically()
         center_px = self.metadata['center_px']
-        self.metadata['center_px'] = [
+        self.metadata['center_px'] = (
             self.image.shape[0] - center_px[0] - 1,
             center_px[1]
-        ]
+        )
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
 
@@ -1115,7 +730,7 @@ class DataQdyQdx(Data2D):
                 raise ValueError(f"Invalid integration axis of {axis}.")
 
         # access parent method of box integration
-        integrated_i, image_box = super().slice_box(
+        integrated_i, image_box, mask_box = super().slice_box(
             limits_axis0=limits_qdy_px,
             limits_axis1=limits_qdx_px,
             axis=axis,
@@ -1126,13 +741,11 @@ class DataQdyQdx(Data2D):
         if axis == 0:
             q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]
             q_int = np.mean(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
-            dq_int = np.std(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
             q_axis = 'qdx'
             q_int_axis = 'qdy'
         elif axis == 1:
             q = self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
             q_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
-            dq_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
             q_axis = 'qdy'
             q_int_axis = 'qdx'
 
@@ -1142,7 +755,7 @@ class DataQdyQdx(Data2D):
             if type(subtract_background_offset) is int:
                 subtract_background_offset = [subtract_background_offset]
             for offset in subtract_background_offset:
-                if offset < image_box.shape[axis]:
+                if np.abs(offset) < image_box.shape[axis]:
                     warnings.warn(
                         f"A background subtraction offset of {offset} "
                         "is less than the integrated axis width and so"
@@ -1156,7 +769,7 @@ class DataQdyQdx(Data2D):
                         limits_qdx_px[0] + (offset if axis == 1 else 0),
                         limits_qdy_px[1] + (offset if axis == 1 else 0)
                     )
-                    background_i, _ = super().sum_box(
+                    background_i, _, _ = super().sum_box(
                         limits_axis0=limits_qdy_px_sub,
                         limits_axis1=limits_qdx_px_sub,
                         axis=axis
@@ -1166,6 +779,8 @@ class DataQdyQdx(Data2D):
 
             background_i_avg = np.array([
                 background_i for background_i, _, _ in backgrounds])
+            # even if some points in background are masked, we will take
+            # values from the available pixels for background subtraction
             background_i_avg = np.nanmean(background_i_avg, axis=0)
 
             integrated_i -= background_i_avg
@@ -1178,27 +793,26 @@ class DataQdyQdx(Data2D):
             q=q,
             Iq=integrated_i,
             q_axis=q_axis,
-            name=self.name,
+            data2d=self,
             limits_axis0=limits_qdy_px,
             limits_axis1=limits_qdx_px,
-            mode=mode,
-            axis=axis,
-            image_box=image_box,
-            q_int=q_int,
-            dq_int=dq_int,
-            q_int_axis=q_int_axis,
+            integration_mode=mode,
+            integration_axis=axis,
+            image_roi=image_box,
+            image_mask=mask_box,
             background=background_i_avg
         )
+        integrated_q_slice.__setattr__(q_int_axis, q_int)
 
-        if show_plot:
-            fig, fig_slice = plotting.plot_QdyQdx_integration(
-                self,
-                integrated_q_slice=integrated_q_slice,
-                log_scale=log_scale,
-                background_subtractions=backgrounds
-            )
-            iplot(fig)
-            iplot(fig_slice)
+        # if show_plot:
+        #     fig, fig_slice = plotting.plot_QdyQdx_integration(
+        #         self,
+        #         integrated_q_slice=integrated_q_slice,
+        #         log_scale=log_scale,
+        #         background_subtractions=backgrounds
+        #     )
+        #     iplot(fig)
+        #     iplot(fig_slice)
 
         return integrated_q_slice
 
@@ -1274,6 +888,7 @@ class DataQdyQdx(Data2D):
             self.image[min0:max0, min1:max1],
             log_scale=log_scale,
             refinement_size=refinement_size,
+            mask=self.mask[min0:max0, min1:max1],
             **kwargs)
 
         if self.qdy is not None and self.qdx is not None:
@@ -1422,6 +1037,7 @@ class DataQdyQdx(Data2D):
             integration_mode=integration_mode,
             log_scale=log_scale,
             refinement_size=refinement_size,
+            mask=self.mask[min0:max0, min1:max1],
             algorithm=algorithm,
             **kwargs)
 
@@ -1500,9 +1116,9 @@ class DataQdyQdx(Data2D):
             self,
             size_qdy_px,
             size_qdx_px,
-            update=True,
             beam_center_guess=None,
             peak_axis=None,
+            show_plot=True,
             **kwargs):
         """
         Attempt to locate the beam center position using the
@@ -1572,7 +1188,7 @@ class DataQdyQdx(Data2D):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, peaks_q = self.find_peaks2D_one_axis(
+        peaks, _ = self.find_peaks2D_one_axis(
             box_dims=box_dims,
             peak_axis=peak_axis,
             **kwargs
@@ -1590,8 +1206,8 @@ class DataQdyQdx(Data2D):
         symmetric_warning = False
         if peaks.shape[0] == 0:
             no_peak_warning = True
-        elif peaks.shape[0] % 2 != 0 or len(low_peaks) != len(high_peaks):
-            symemtric_warning = True
+        elif len(low_peaks) != len(high_peaks):
+            symmetric_warning = True
 
         # determine the slope and intercept if more than 1 peak
         if peaks.shape[0] > 1:
@@ -1610,28 +1226,37 @@ class DataQdyQdx(Data2D):
                 center_qdy = center
                 if np.isnan(slope):
                     # this means the peaks form perfectly vertical line
-                    center_qdx = np.array(peaks_px)[0, 0]
+                    center_qdx = np.nanmean(peaks)[:, 1]
                 else:
                     center_qdx = (center_qdy-intercept)/slope
 
         if show_plot:
-            fig, fig_slice = plotting.plot_find_beam_center(
-                self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q),
-                [center_qdy, center_qdx])
-            iplot(fig)
-            iplot(fig_slice)
+            pass
+            # fig, fig_slice = plotting.plot_find_beam_center(
+            #     self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q),
+            #     [center_qdy, center_qdx])
+            # iplot(fig)
+            # iplot(fig_slice)
 
         # move this check to after the plots so even if we didn't find
         # the right peaks we can see the visualization
-        if len(low_peaks) != len(high_peaks):
+        if symmetric_warning:
             raise ValueError(
-                "Found peaks were not symmetric about the beam center.")
+                "Found peaks were not symmetric about the beam center. "
+                "Try changing the peak finding keyword arguments "
+                "or check to make sure your beam center guess is "
+                "reasonable close to the actual position.")
+        if no_peak_warning:
+            raise ValueError(
+                "No peaks detected. Try changing the peak finding "
+                "keyword arguments."
+            )
 
         return center_qdy, center_qdx
 
     def find_sdd_from_reference_peaks(
             self,
-            pitch,
+            pitch_nm,
             size_qdy_px,
             size_qdx_px,
             peak_axis,
@@ -1846,4 +1471,3 @@ class DataQdyQdx(Data2D):
             angle = np.nan
 
         return angle
-

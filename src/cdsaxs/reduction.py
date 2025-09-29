@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from cdsaxs.data1d import Data1D, ReducedData
-from cdsaxs.dataset import Dataset
+from cdsaxs.data.data1d import Data1D
+from cdsaxs.data.reduced_data1d import ReducedData1D
+from cdsaxs.data.dataset import Dataset
 import cdsaxs.plotting as plotting
 import cdsaxs.diffraction as diffraction
 
@@ -374,7 +375,7 @@ def create_reduced_QszQsx(
                 samplethetaoffset=data.metadata['sample_phi_offset_deg']
             )
 
-            reduced_dataset[key] = ReducedData(
+            reduced_dataset[key] = ReducedData1D(
                 Iq=np.copy(integrated_q_slice.Iq),
                 qsx=qsx,
                 qsz=qsz,

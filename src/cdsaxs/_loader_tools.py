@@ -78,6 +78,43 @@ def extract_pixel_size_pilatus(header):
         return None
 
 
+def pilatus_header_to_metadata(header):
+    """
+    Extract exposure time and pixel size from a pilatus detector file
+    header.
+
+    Parameters
+    ----------
+    header : dict
+        Dictionary of tag.name: tag.value pairs from a tiff file from
+        a Pilatus detector.
+
+    Returns
+    -------
+    dict
+        Metadata dictionary with accepted metadata keywords extracted
+        from the tiff file header.
+    """
+    metadata = {}
+
+    # exposure time
+    exposure_time_s = extract_exposure_time_pilatus(header)
+    if exposure_time_s is not None:
+        metadata["exposure_time_s"] = exposure_time_s
+
+    # pixel size
+    pixel_size_um = extract_pixel_size_pilatus(header)
+    if pixel_size_um is not None:
+        metadata["pixel_size_um"] = pixel_size_um
+    else:
+        metadata["pixel_size_um"] = 172
+        warnings.warn(
+            "Assuming a pixel size of 172 micron for Pilatus."
+            "Please confirm this is correct before proceeding.")
+
+    return metadata
+
+
 def filter_filenames_by_filetype(filenames, filetype):
     """
     Accepted filtypes:

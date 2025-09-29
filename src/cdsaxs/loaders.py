@@ -7,7 +7,6 @@ dataset.
 
 from __future__ import annotations
 import os
-import re
 import warnings
 
 import numpy as np
@@ -16,8 +15,8 @@ from PIL.TiffTags import TAGS
 import tifffile
 from tqdm import tqdm
 
-from cdsaxs.data2d import DataQdyQdx
-from cdsaxs.dataset import Dataset
+from cdsaxs.data.data_qdy_qdx import DataQdyQdx
+from cdsaxs.data.dataset import Dataset
 from cdsaxs.metadata import METADATA_KEYWORDS
 from cdsaxs.metadata import check_metadata, correct_metadata_dtype
 import cdsaxs._loader_tools as lt
@@ -188,7 +187,7 @@ def read_nist_bin(filepath):
     return image, filepath, metadata
 
 
-def read_pilatus(filepath=None, header=None):
+def read_pilatus(filepath=None):
     """
     Read a tiff file from a Pilatus detector, returning the image and
     the formatted header as metadata. If only the header is provided as
@@ -197,11 +196,8 @@ def read_pilatus(filepath=None, header=None):
 
     Parameters
     ----------
-    filepath : str, optional
+    filepath : str
         Filepath to the tiff file from a Pilatus detector.
-    header : dict, optional
-        Dictionary of tag.name: tag.value pairs from a tiff file from a
-        Pilatus detector.
 
     Returns
     -------
@@ -215,45 +211,8 @@ def read_pilatus(filepath=None, header=None):
         Metadata dictionary with accepted metadata keywords extracted
         from the tiff file header.
     """
-    if filepath is None and header is None:
-        warnings.warn(
-            "No inputs provided; returning None. Please provide either"
-            "the filepath or the header dictionary."
-        )
-        image = None
-        filepath = None
-        metadata = None
-
-    elif filepath is not None and header is not None:
-        warnings.warn(
-            "One one of either filepath or header should be provided.")
-        image = None
-        filepath = None
-        metadata = None
-
-    else:
-        if filepath is not None:
-            image, filepath, header = read_tiff(filepath=filepath)
-        else:
-            image = None
-            filepath = None
-
-        metadata = {}
-
-        # exposure time
-        exposure_time_s = lt.extract_exposure_time_pilatus(header)
-        if exposure_time_s is not None:
-            metadata["exposure_time_s"] = exposure_time_s
-
-        # pixel size
-        pixel_size_um = lt.extract_pixel_size_pilatus(header)
-        if pixel_size_um is not None:
-            metadata["pixel_size_um"] = pixel_size_um
-        else:
-            metadata["pixel_size_um"] = 172
-            warnings.warn(
-                "Assuming a pixel size of 172 micron!"
-                "Please confirm this is correct before proceeding.")
+    image, filepath, header = read_tiff(filepath=filepath)
+    metadata = lt.pilatus_header_to_metadata(header)
 
     return image, filepath, metadata
 
@@ -285,8 +244,10 @@ def LoadData(
         of the code's standard metadata.
     name : str, optional
         Name for the two-dimensional data instance.
-    filetype : str
-        Specify the filetype so that the proper reader is used.
+    filetype : str, optional
+        Specify the filetype so that the proper reader is used. If not
+        provided, the loader will try to determine the file type based
+        on the extension. This can result in unexpected behavior.
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
@@ -322,7 +283,22 @@ def LoadData(
 
     # try to use the right loader based on filetype
     if filetype.lower() in ['tiff', 'tif']:
-        image, data_filepath, header = read_tiff(filepath=filepath)
+        if detector_type is not None and detector_type.lower() in ["pilatus"]:
+            image, data_filepath, metadata_add = read_pilatus(filepath)
+            for key, value in metadata_add.items():
+                if key in metadata.keys():
+                    warnings.warn(
+                        f"Metadata for {key} was provided by the user or"
+                        " already extracted from reading the file."
+                        " I will not overwrite the existing metadadta with"
+                        " the value extracted by knowing the detector type."
+                    )
+                else:
+                    metadata[key] = value
+            # handle negative values between detector panels in the images as nan
+            image[image < 0] = np.nan
+        else:
+            image, data_filepath, _ = read_tiff(filepath)
 
     elif filetype.lower() in ['nist-bin', 'nist_bin']:
         image, data_filepath, metadata_add = read_nist_bin(filepath=filepath)
@@ -336,7 +312,8 @@ def LoadData(
                 )
             else:
                 metadata[key] = value
-        check_metadata(metadata=metadata)
+        # handle negative values between detector panels in the images as nan
+        image[image < 0] = np.nan
 
     else:
         raise ValueError(
@@ -346,30 +323,11 @@ def LoadData(
     metadata['data_directory'] = os.path.dirname(data_filepath)
     metadata['filename'] = os.path.basename(data_filepath)
 
-    # try to extract more information based on detector type
-    if detector_type is not None:
-        if detector_type.lower() in ["pilatus"]:
-            _, _, metadata_add = read_pilatus(header=header)
-            for key, value in metadata_add.items():
-                if key in metadata.keys():
-                    warnings.warn(
-                        f"Metadata for {key} was provided by the user or"
-                        " already extracted from reading the file."
-                        " I will not overwrite the existing metadadta with"
-                        " the value extracted by knowing the detector type."
-                    )
-                else:
-                    metadata[key] = value
-
-    if 'center_px' not in metadata.keys():
-        metadata['center_px'] = [
-                image.shape[0]-1, image.shape[1]-1]
-
-    # handle negative values in the images as nan
-    image[image < 0] = np.nan
+    if name is not None:
+        metadata['name'] = name
 
     return DataQdyQdx(
-        image, metadata=metadata, user_params=user_params, name=name)
+        image, **metadata, **user_params)
 
 
 def LoadDataset(
@@ -379,6 +337,8 @@ def LoadDataset(
     metadata_pattern=None,
     metadata_scales=None,
     data_name_pattern=None,
+    metadata=None,
+    user_params=None,
     verbose=True,
     filetype=None,
     detector_type=None
@@ -444,6 +404,14 @@ def LoadDataset(
         The data name would be for a sample at a phi rotation angle
         of 20 degrees:
             "Sample 4, Angle: 20 deg"
+    metadata : dict, optional
+        Dictionary of metadata keyword, value pairs to be added to
+        the metadata attribute of all the 2D data instances.
+        See metadata.py for full list of accepted keywords.
+    user_params : dict, optional
+        Dictionary of user specified keyword, value pairs that provide
+        additional parameters about the data that are outside the scope
+        of the code's standard metadata.
     verbose : bool, optional
         If set to True, a progress bar will be displayed during the
         loading process. Set to False to turn off this feature.
@@ -476,22 +444,50 @@ def LoadDataset(
     with warnings.catch_warnings(record=True) as warnings_output:
         for filename in filenames:
             filepath = os.path.join(directory_path, filename)
-            metadata = {}
-            user_params = {}
+            if metadata is not None:
+                metadata_i = {key: value for key, value in metadata.items()}
+            else:
+                metadata_i = {}
+            if user_params is not None:
+                user_params_i = {key: value for key, value in user_params.items()}
+            else:
+                user_params_i = {}
 
             # extract information from the metadata filename pattern
-            metadata, user_params = lt.extract_metadata_from_pattern(
-                metadata, user_params, filename, metadata_pattern, metadata_scales
+            metadata_extract, user_params_extract = lt.extract_metadata_from_pattern(
+                {}, {}, filename, metadata_pattern, metadata_scales
             )
-
+            for key, value in metadata_extract.items():
+                if key in metadata_i.keys():
+                    warnings.warn(
+                        f"Metadata for {key} was provided by the user but "
+                        "also extracted from the filename using metadata pattern."
+                        " I will use the data provided by the user rather than "
+                        "the value extracted from the name but please ensure "
+                        "this is correct."
+                    )
+                else:
+                    metadata_i[key] = value
+            for key, value in user_params_extract.items():
+                if key in user_params_i.keys():
+                    warnings.warn(
+                        f"User params for {key} was provided by the user but "
+                        "also extracted from the filename using metadata pattern."
+                        " I will use the data provided by the user rather than "
+                        "the value extracted from the name but please ensure "
+                        "this is correct."
+                    )
+                else:
+                    user_params_i[key] = value
+            print("METADATA", metadata_i, user_params_i)
             # generate the name for the two-dimensional data
             new_name = lt.generate_data_name_from_pattern(
-                data_name_pattern, metadata, user_params)
+                data_name_pattern, metadata_i, user_params_i)
 
             data = LoadData(
                 filepath=filepath,
-                metadata=metadata,
-                user_params=user_params,
+                metadata=metadata_i,
+                user_params=user_params_i,
                 filetype=filetype,
                 detector_type=detector_type,
                 name=new_name

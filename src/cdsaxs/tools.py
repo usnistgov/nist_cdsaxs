@@ -12,6 +12,18 @@ from skimage.feature import peak_local_max
 from cdsaxs.calculators import gaussian
 
 
+def default_mask(image):
+
+    """
+    Generate a default mask of points that are nan, inf, or -inf.
+    """
+    mask = np.isnan(image)
+    mask += np.isinf(image)
+    mask += np.isneginf(image)
+
+    return mask
+
+
 def find_gaussian_peakloc(x, y, p0=None):
     """
     Find the peak location of a one-dimensional spectra using a Gaussian
@@ -217,7 +229,7 @@ def rotate_image(image,
     return image
 
 
-def find_peaks_1D(data, log_scale=True, refinement_size=7,
+def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
                   algorithm='scikit', **kwargs):
     """
     Find peaks across one-dimensional data using scikit-image.feature
@@ -240,6 +252,9 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7,
         Define the pixel range centered on the peaks in which to peform
         Gaussian refinement.
         Default value is 7. Minimum value is 4.
+    mask : NDArray, list
+        One-dimensional boolean array or list of points to mask during
+        the peak finding operation.
     algorithm: str
         Specify which peak finding algorithm is used. Default value is
         'scikit' which uses scikit-image.feature peak_local_max() to
@@ -303,6 +318,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7,
             kwargs["threshold_abs"] = 0
 
     data_fed = np.array(data)
+    data_fed[mask] = np.nan
     if log_scale:
         data_fed = np.log10(data_fed)
 
@@ -352,7 +368,8 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7,
     return coordinates
 
 
-def find_peaks_2D(image, log_scale=True, refinement_size=7, **kwargs):
+def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
+                  **kwargs):
     """
     Find peaks across a two-dimensional image using scikit-image.feature
     peak_local_max() function and then further refined with local
@@ -374,6 +391,9 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, **kwargs):
         Define the box size around the peaks in which to peform the
         Gaussian refinement.
         Default value is 7. Minimum value is 4.
+    mask : NDArray
+        Two-dimensional boolean array of pixels to mask during the
+        peak finding operation.
 
     Other Parameters
     ----------------
@@ -407,6 +427,7 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, **kwargs):
         kwargs["threhold_abs"] = 0
 
     image_fed = np.copy(image)
+    image_fed[mask] = np.nan
     if log_scale:
         image_fed = np.log10(image_fed)
 
@@ -454,7 +475,7 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, **kwargs):
 
 def find_peaks_2D_one_axis(
         image, peak_axis, integration_mode='sum', log_scale=True,
-        refinement_size=7, algorithm='scikit', **kwargs):
+        refinement_size=7, mask=None, algorithm='scikit', **kwargs):
     """
     Find peaks along one axis of a two-dimensional image using the
     scikit-image.feature peak_local_max() function. The peaks are
