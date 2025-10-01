@@ -1116,8 +1116,8 @@ class DataQdyQdx(Data2D):
             self,
             size_qdy_px,
             size_qdx_px,
+            update=True,
             beam_center_guess=None,
-            peak_axis=None,
             show_plot=True,
             **kwargs):
         """
@@ -1160,7 +1160,6 @@ class DataQdyQdx(Data2D):
             Any additional keyword arguments for the find_peaks2D_one_axis()
             method can be passed through to the underlying function.
             This includes:
-                box_dims
                 peak_axis
                 integration_mode
                 log_scale
@@ -1183,7 +1182,9 @@ class DataQdyQdx(Data2D):
         )
 
         (min0, max0), (min1, max1) = box_dims
-        if peak_axis is None:
+        try:
+            peak_axis = kwargs.pop('peak_axis')
+        except KeyError:
             if (max0 - min0) > (max1 - min1):
                 peak_axis = 0
             else:
@@ -1251,6 +1252,10 @@ class DataQdyQdx(Data2D):
                 "No peaks detected. Try changing the peak finding "
                 "keyword arguments."
             )
+        
+        if update:
+            self.update_metadata({'center_px': (center_qdy, center_qdx)},
+                                 overwrite=True)
 
         return center_qdy, center_qdx
 
@@ -1259,59 +1264,47 @@ class DataQdyQdx(Data2D):
             pitch_nm,
             size_qdy_px,
             size_qdx_px,
-            peak_axis,
-            peak_params: dict = {},
-            peak_find_scale='linear',
-            peak_orders: list = None,
-            show_plot=True):
+            update=True,
+            show_plot=True,
+            peak_orders=None,
+            **kwargs
+    )
         """
-        Calculate the sample to detector distance (SDD) from the
-        known pitch of reference sample using simple 1D peak finding.
-        See DataQdyQdx.find_peaks1D for a more detailed description of
-        the peak finding process.
-        For this method, only an integration box of size can be used
-        and it must be centered on the beam center as determined by
-        the user or the find_beam_center_from_peaks method.
+        Attempt to calculate the sample to detector distance using the
+        find_peaks2D_one_axis() method. Please refer to the method
+        doc string for more information about the required arguments.
 
-        Only the 1st order peaks will be compared to the expected pitch of
-        the SRM sample to determine the SDD.
-        TODO: implement error handling when determining the SDD
-        TODO: use provided error to filter out non-reference peaks,
-        currently this is set to a 5% window as the accepted range
+        For this method, the box dimensions are found internally for
+        a box with specific widths along each axis centered around the
+        starting beam center guess.
 
-        In many cases the beam center position is likely to fall on
-        an integer pixel value. This is because the peak finding
-        algorithm only returns the pixel on which the peak is and does
-        not perform any additional fit of the local intensity to determine
-        a float pixel location of the peak.
-        TODO: implement local gaussian fits for more accurate positions
-
-
+        The algorithm will assume that each order peak is found on
+        either side of the beam center position, orders 1, 2, 3, etc.
+        They don't have to be symmetric on both sides, just continuous,
+        so finding orders -2, -1, 1, 2, 3, 4 would be acceptable. If
+        not all order peaks are available, the peak_orders can be
+        provided as a list of integers. In this example, if only orders
+        -2, 1, 2, 3 were located then you would provide [-2, 1, 2, 3]
+        for the peak_orders keyword argument.
 
         Parameters
         ----------
-        pitch : float
+        pitch_nm : float
             Known pitch of a reference sample in nanometers.
         size_qdy_px : int
             Box size in pixels along the qdy axis.
         size_qdx_px : int
             Box size in pixels along the qdx axis.
-        peak_axis : str, int
-            Axis along which the peaks are present, either 'qdy' or 'qdx'.
-            The axis indices can also be used, 0 for 'qdy' or 1 for 'qdx'.
-            For example, if peak_axis is set to 'qdx', peaks will be
-            detected along the qdx axis.
-        peak_params : dict
-            Dictionary of keyword arguments for the scipy.find_peaks
-            algorithm; see scipy documentation for more information.
-        peak_find_scale = 'linear'
-            The scale of the intesity data to use for peak finding.
-            Can be set to 'linear' or 'log'.
-            Default value is 'linear'.
+        update : bool
+            If set to True, the found sdd will be updated in
+            the data metadata as well as returned. If set to False,
+            the sdd will only be returned and the data metadata will
+            remain at the last sdd value.
         peak_orders : list
             A list of integers that specfies the peak orders found.
             Default behavior is orders will start at n=1 and increase
-            by one order for every peak found.
+            by one order for every peak found on either side of beam
+            center.
         show_plot : bool
             If set to True, a first figure will display the scattering
             image overlaid with the integration box and markers on each
@@ -1320,154 +1313,172 @@ class DataQdyQdx(Data2D):
             peak position. The determiend beam center will be shown
             with dashed red lines.
 
+        Other Parameters
+        ----------------
+        **kwargs
+            Any additional keyword arguments for the find_peaks2D_one_axis()
+            method can be passed through to the underlying function.
+            This includes:
+                peak_axis
+                integration_mode
+                log_scale
+                refinement_size
+                algorithm
+                any keyword arguments for the fitting algorithm
+        
         Returns
         -------
-        calculated_sdd : float
-            Sample detector distance (SDD) in the units of cm.
+        float
+            Sample detector distance (SDD) in the units of cm. This is
+            the average SDD calculated using all found peak orders.
+        float
+            Standard deviation of the average sample detector distance
+            returned in units of cm.
         """
 
-        if isinstance(peak_axis, str):
-            if peak_axis == 'qdy' or peak_axis == 0:
+        box_dims = self.get_box_dims_size(
+            size_qdy_px=size_qdy_px,
+            size_qdx_px=size_qdx_px
+        )
+
+        (min0, max0), (min1, max1) = box_dims
+        try:
+            peak_axis = kwargs.pop('peak_axis')
+        except KeyError:
+            if (max0 - min0) > (max1 - min1):
                 peak_axis = 0
-            elif peak_axis == 'qdx' or peak_axis == 1:
-                peak_axis = 1
             else:
-                raise ValueError(
-                    f"Invalid integration peak axis of {peak_axis}.")
+                peak_axis = 1
+        peaks, peaks_q = self.find_peaks2D_one_axis(
+            box_dims=box_dims,
+            peak_axis=peak_axis,
+            **kwargs
+        )
+        # sort the peaks by index along peak_axis
+        peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
+        peaks_q = peaks_q[np.argsort(peaks[:, peak_axis]), :]
 
-        box_params = {
-            "size_qdy_px": size_qdy_px,
-            "size_qdx_px": size_qdx_px,
-            "axis": 1 - peak_axis,
-            "mode": 'sum',
-        }
-
-        # Find peaks in the 1D slice
-        peaks_q, peaks_px, peaks_px_int, integrated_q_slice =\
-            self.find_peaks1D(
-                box_mode='box_size',
-                box_params=box_params,
-                peak_params=peak_params,
-                peak_find_scale=peak_find_scale,
-                show_plot=False
-            )
+        # figure out peak orders unless otherwise provided
+        low_peaks = peaks[
+            peaks[:, peak_axis] < self.metadata['center_px'][peak_axis],
+            peak_axis
+            ].reshape(-1)
+        high_peaks = peaks[
+            peaks[:, peak_axis] > self.metadata['center_px'][peak_axis],
+            peak_axis
+            ].reshape(-1)
+        if peak_orders is None:
+            peak_orders = np.concatenate([
+                np.flip(np.arange(0, len(low_peaks)))+1,
+                np.arange(0, len(high_peaks))+1
+            ])
 
         if show_plot:
-            fig, fig_slice = plotting.plot_find_beam_center(
-                self, integrated_q_slice, np.array(peaks_px),
-                np.array(peaks_q),
-                self.metadata['center_px'])
-            iplot(fig)
-            iplot(fig_slice)
+            pass
+            # fig, fig_slice = plotting.plot_find_beam_center(
+            #     self, integrated_q_slice, np.array(peaks_px),
+            #     np.array(peaks_q),
+            #     self.metadata['center_px'])
+            # iplot(fig)
+            # iplot(fig_slice)
 
-        # convert to pixel distances relative to beam center
-        peaks = np.array(peaks_px)
-        peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
-        low_peaks = peaks[
-            peaks[:, peak_axis] < self.metadata['center_px'][peak_axis]
-            ] - self.metadata['center_px']
-        high_peaks = peaks[
-            peaks[:, peak_axis] > self.metadata['center_px'][peak_axis]
-            ] - self.metadata['center_px']
-        if len(low_peaks[:, 0]) != len(high_peaks[:, 0]):
-            raise ValueError(
-                "Found peaks were not symmetric about the beam center.")
-
-        # assume peak orders start at 1 unless told otherwise
-        if peak_orders is None:
-            peak_orders = np.arange(0, len(low_peaks[:, 0])) + 1
-
-        sin_theta = peak_orders * self.metadata['wavelength_nm'] / (2 * pitch)
-        theta = np.arcsin(sin_theta)
-
-        # calculate magnitude of vector from beam center to peak in cm
-        r_low_px = np.sqrt(low_peaks[:, 0]**2 + low_peaks[:, 1]**2)
-        r_low = r_low_px * self.metadata["pixel_size_um"]/10000
-        r_low = np.flip(r_low)  # flip to match order of peak orders
-        r_high_px = np.sqrt(high_peaks[:, 0]**2 + high_peaks[:, 1]**2)
-        r_high = r_high_px * self.metadata["pixel_size_um"]/10000
-
-        sdd_low = r_low/np.tan(2*theta)
-        sdd_high = r_high/np.tan(2*theta)
+        pixel_distances_cm = np.sqrt(np.sum(
+            (peaks - self.metadata['center_px'])**2, axis=1
+            )) * self.metadata['pixel_size_um'] / 10000
+        q_orders = 2*np.pi*peak_orders/(pitch_nm) # keep in inverse nm
+        theta_rad = np.arcsin(
+            q_orders * self.metadata['wavelength_nm'] / (4 * np.pi)) * 2
+        sdd_cm_orders = pixel_distances_cm / np.tan(theta_rad)
 
         # calculate average SDD from all peaks
-        average_sdd = np.mean(np.concatenate((sdd_low, sdd_high)))
+        average_sdd = np.mean(sdd_cm_orders)
+        std_sdd = np.std(sdd_cm_orders)
 
-        return average_sdd
+        if update:
+            self.update_metadata({'sdd_cm': average_sdd}, overwrite=True)
+
+        return average_sdd, std_sdd
 
     def find_detector_rotation_correction_from_peaks(
         self,
-        peak_find_box_mode: str,
-        peak_find_box_params: dict,
-        peak_params: dict,
-        peak_find_scale: str,
+        size_qdy_px,
+        size_qdx_px,
         show_plot=True,
+        **kwargs
     ):
         """
-        Wrapper function that just pulls the rotation from the find_peaks1D
-        function. This function is designed to make the more complicated
-        find_peaks1D function accesible to users when performing a rotation
-        correction during the integration step.
-        TODO: this assumes there is no rotation of the detector with
-        respect to the beam coordinate system. Update in the future
-        to include a different position of the detector.
+        Find the rotation angle of the sample coordinates x and y about the
+        primary beam axis (qz).
+
+        For this method, the box dimensions are found internally for
+        a box with specific widths along each axis centered around the
+        starting beam center guess.
 
         Parameters
         ----------
-        peak_find_box_mode : str
-            Type of box to use for the peak finding function. The box
-            is defined the same way as the integrators:
-                'box' : index ranges as in DataQdyQdx.integrate_box
-                'box_size' : box size centered or offset from the beam
-                    center as in DataQdyQdx.integrate_box_of_size
-                'q_range' : scattering vector ranges as in
-                    DataQdyQdx.integrate_box_of_q_range
-        peak_find_box_params : dict
-            Dictionary of keyword arguments for the selected
-            integration method (peak_find_box_mode). See the docstring
-            for the corresponding integration method for more details
-            of available arguments and their definitions.
-        peak_params : dict
-            Dictionary of keyword arguments for the scipy.find_peaks
-            algorithm; see scipy documentation for more information.
-        peak_find_scale : str
-            The scale of the intensity data to use for peak finding.
-            Can be set to 'linear' or 'log'.
-            Default value is 'linear'.
+        size_qdy_px : int
+            Box size in pixels along the qdy axis.
+        size_qdx_px : int
+            Box size in pixels along the qdx axis.
+        peak_orders : list
+            A list of integers that specfies the peak orders found.
+            Default behavior is orders will start at n=1 and increase
+            by one order for every peak found on either side of beam
+            center.
         show_plot : bool
-            If set to True, the first figure will display the
-            scattring image overlaid with the peak finding box and
-            markers on each detected peak. The second figure will show
-            the rotated image and overlaid integration box. The third
-            figure will show the 1D slice extracted from the
-            integration and vertical lines at each peak position.
+            If set to True, a first figure will display the scattering
+            image overlaid with the integration box and markers on each
+            detected peak while a second figure will show the 1D slice
+            extracted from the integration and vertical lines at each
+            peak position. The determiend beam center will be shown
+            with dashed red lines.
 
+        Other Parameters
+        ----------------
+        **kwargs
+            Any additional keyword arguments for the find_peaks2D_one_axis()
+            method can be passed through to the underlying function.
+            This includes:
+                peak_axis
+                integration_mode
+                log_scale
+                refinement_size
+                algorithm
+                any keyword arguments for the fitting algorithm
+        
         Returns
         -------
         float
             Angle kappa in degrees. This angle is a counterclockwise rotation
-            about the primary beam path (qbz). It can be used to align the
-            detector x and y coordinates with the sample x and y coordinates.
+            about the primary beam path (qbz) from alignment along qdx. It can
+            be used to align the detector x and y coordinates with the sample 
+            x and y coordinates.
         """
 
-        _, peaks_px, _, _ = self.find_peaks1D(
-            box_mode=peak_find_box_mode,
-            box_params=peak_find_box_params,
-            peak_params=peak_params,
-            peak_find_scale=peak_find_scale,
-            show_plot=show_plot
+        box_dims = self.get_box_dims_size(
+            size_qdy_px=size_qdy_px,
+            size_qdx_px=size_qdx_px
         )
 
-        # fit a line to the peaks
-        peaks_array = np.array(peaks_px)
-        if peaks_array.shape[0] > 1:
-            angle, _, _ = line_fit(peaks_array[:, 1], peaks_array[:, 0])
-        else:
-            warnings.warn(
-                "WARNING: Only one peak found for:\n"
-                + f"{self.metadata['filename']}"
-                + "\n Setting angle, slope, and intercept to nan."
-                )
-            angle = np.nan
+        (min0, max0), (min1, max1) = box_dims
+        try:
+            peak_axis = kwargs.pop('peak_axis')
+        except KeyError:
+            if (max0 - min0) > (max1 - min1):
+                peak_axis = 0
+            else:
+                peak_axis = 1
+        peaks, _ = self.find_peaks2D_one_axis(
+            box_dims=box_dims,
+            peak_axis=peak_axis,
+            **kwargs
+        )
 
-        return angle
+        # determine whether the right number of peaks was found
+        if peaks.shape[0] < 2:
+            warnings.warn(
+                "Insuffient peaks found to determine rotation angle.")
+            return np.nan
+        else:
+            angle, _, _ = line_fit(peaks[:, 1], peaks[:, 0])
+            return angle
