@@ -15,7 +15,7 @@ from PIL.TiffTags import TAGS
 import tifffile
 from tqdm import tqdm
 
-from cdsaxs.data.data_qdy_qdx import DataQdyQdx
+from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.dataset import Dataset
 from cdsaxs.metadata import METADATA_KEYWORDS
 from cdsaxs.metadata import check_metadata, correct_metadata_dtype
@@ -226,7 +226,7 @@ def LoadData(
     detector_type=None,
 ):
     """
-    Create an instance of DataQdyQdx from a single data file.
+    Create an instance of Data2D from a single data file.
 
     Parameters
     ----------
@@ -326,7 +326,7 @@ def LoadData(
     if name is not None:
         metadata['name'] = name
 
-    return DataQdyQdx(
+    return Data2D(
         image, **metadata, **user_params)
 
 
@@ -511,7 +511,8 @@ def LoadDataset_MetadataCSV(
     metadata_csv_filepath,
     verbose=True,
     filetype=None,
-    detector_type=None
+    detector_type=None,
+    data_name_pattern=None
 ):
     """
     General data loader to create a dataset from a CD-SAXS angle scan
@@ -563,6 +564,18 @@ def LoadDataset_MetadataCSV(
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+    data_name_pattern : str, optional
+        Provide a pattern to create a unique name for each data in
+        the dataset. Unless the name is provided in the csv file,
+        the default behavior is that the filename is used as the
+        data name. Alternatively, a pattern can be provided that
+        pulls information from helpful metadata. Keep in mind that
+        the name needs to be unique in the dataset.
+        An example is:
+            "Sample 4, Angle: {sample_phi_deg} deg"
+        The data name would be for a sample at a phi rotation angle
+        of 20 degrees:
+            "Sample 4, Angle: 20 deg"
     """
 
     dataset = Dataset(name=dataset_name)
@@ -593,12 +606,16 @@ def LoadDataset_MetadataCSV(
             else:
                 user_params[str(csv_header[ii])] = value
 
+        new_name = lt.generate_data_name_from_pattern(
+                data_name_pattern, metadata, user_params)
+
         data = LoadData(
             filepath=filepath,
             metadata=metadata,
             user_params=user_params,
             filetype=filetype,
             detector_type=detector_type,
+            name=new_name
         )
 
         dataset.add_data(data)

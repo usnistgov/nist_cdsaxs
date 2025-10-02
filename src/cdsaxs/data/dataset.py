@@ -9,7 +9,7 @@ import warnings
 
 import numpy as np
 
-from cdsaxs.data.data_qdy_qdx import DataQdyQdx
+from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.qslice import QSlice
 from cdsaxs.sample import Sample
 import cdsaxs.plotting as plotting
@@ -17,14 +17,14 @@ import cdsaxs.plotting as plotting
 
 class Dataset():
     """
-    A container class for a set of DataQdyQdx instances that make up a
+    A container class for a set of Data2D instances that make up a
     single CD-SAXS measurement for a sample.
 
     Attributes
     ----------
     datas : dict
-        Dictionary containing the DataQdyQdx objects. The key for each
-        instance is DataQdyQdx.name. Be cautious if the name attribute
+        Dictionary containing the Data2D objects. The key for each
+        instance is Data2D.name. Be cautious if the name attribute
         was kept as default (filename) as it may result in non-unique
         keys. If you are pulling all data from the same data directory,
         however, this will not be a problem.
@@ -54,7 +54,7 @@ class Dataset():
 
     def __init__(
             self,
-            datas: list[DataQdyQdx] = None,
+            datas: list[Data2D] = None,
             name: str = None,
             sample: str = None
     ):
@@ -69,28 +69,28 @@ class Dataset():
         self.reduced_datasets = {}
         self.reduced_slices = {}
 
-    def add_data(self, datas: DataQdyQdx | list[DataQdyQdx]):
-        """Add one or more DataQdyQdx instances to the dataset."""
-        datas = [datas] if isinstance(datas, DataQdyQdx) else datas
+    def add_data(self, datas: Data2D | list[Data2D]):
+        """Add one or more Data2D instances to the dataset."""
+        datas = [datas] if isinstance(datas, Data2D) else datas
         for data in datas:
             if data.name in self.datas.keys():
                 raise ValueError(
-                    "You do not have unique names for DataQdyQdx instances."
+                    "You do not have unique names for Data2D instances."
                 )
             else:
                 self.datas[data.name] = data
 
     def remove_data(self,
-                    datas: DataQdyQdx | list[DataQdyQdx] | str | list[str]):
+                    datas: Data2D | list[Data2D] | str | list[str]):
         """
-        Remove one or more DataQdyQdx instances from the dataset.
-        One or more isntances of DataQdyQdx can be provided or a list
+        Remove one or more Data2D instances from the dataset.
+        One or more isntances of Data2D can be provided or a list
         of keys to the datas dictionary.
         """
         if type(datas) is not list:
             datas = [datas]
         for data in datas:
-            if isinstance(data, DataQdyQdx):
+            if isinstance(data, Data2D):
                 name = data.name
             else:
                 name = data
@@ -112,7 +112,7 @@ class Dataset():
                             overwrite: bool = True,
                             keys: list = None):
         """
-        Add or update metadata for all DataQdyQdx stored in this Dataset.
+        Add or update metadata for all Data2D stored in this Dataset.
         Existing metadata parameters can be updated by keeping the
         overwrite argument to True.
 
@@ -120,7 +120,7 @@ class Dataset():
         ----------
         metadata : dict
             Key : value pairs of accepted metadata (key) and their
-            values. See DataQdyQdx class docstring for list of accepted
+            values. See Data2D class docstring for list of accepted
             keywords.
         overwrite : bool
             If set to True, any metadata provided to this method will
@@ -141,7 +141,7 @@ class Dataset():
             self, params: dict, overwrite: bool = True,
             keys: list = None):
         """
-        Add key: value pairs to the user params for all DataQdyQdx.
+        Add key: value pairs to the user params for all Data2D.
         Existing parameters can be updated by keeping the overwrite
         argument as True.
 
@@ -167,7 +167,7 @@ class Dataset():
 
     def plot_datas(self, keys: list = None):
         """
-        Plot one or more DataQdyQdx in the dataset.
+        Plot one or more Data2D in the dataset.
 
         Parameters
         ----------

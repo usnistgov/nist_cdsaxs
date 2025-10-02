@@ -21,19 +21,20 @@ class TestTools(unittest.TestCase):
         ]
         y = np.array(y)
         mean = 1.4
-        std_dev = 0.5
-        scale = 3
-        offset = 2
+        # std_dev = 0.5
+        # scale = 3
+        # offset = 2
 
-        peak_x, peak_index, popt = find_gaussian_peakloc(x, y)
+        peak_x, peak_index = find_gaussian_peakloc(x, y)
 
         self.assertAlmostEqual(peak_x, mean)
         self.assertEqual(peak_index, 6)
 
-        self.assertAlmostEqual(popt[0], mean)
-        self.assertAlmostEqual(popt[1], std_dev)
-        self.assertAlmostEqual(popt[2], scale)
-        self.assertAlmostEqual(popt[3], offset)
+        # no longer returning popt
+        # self.assertAlmostEqual(popt[0], mean)
+        # self.assertAlmostEqual(popt[1], std_dev)
+        # self.assertAlmostEqual(popt[2], scale)
+        # self.assertAlmostEqual(popt[3], offset)
 
     def test_line_fit(self):
 
@@ -72,14 +73,14 @@ class TestTools(unittest.TestCase):
 
         image0 = np.array([6.8269, 7.2390, 6.7417, 8.0276, 10.8963, 14.4239,
                            24.1923, 64.5114, 19.3250, 14.1517])
-        a_opt, _, _ = find_gaussian_peakloc(
+        a_opt, _ = find_gaussian_peakloc(
             np.arange(0, len(image0)), image0
         )
 
         image1 = np.array([3.1556, 4.3351, 5.6614, 9.1637, 13.8071, 23.6793,
                            58.0274, 19.8895, 12.5953, 4.2221, 4.1417, 4.3914,
                            3.8536, 5.2852, 4.1272])
-        b_opt, _, _ = find_gaussian_peakloc(
+        b_opt, _ = find_gaussian_peakloc(
             np.arange(0, len(image1)), image1
         )
 
@@ -133,7 +134,8 @@ class TestTools(unittest.TestCase):
                                          refinement_size=5, threshold_abs=1)
 
         for actual, test in zip(peak_coordinates, test_coordinates):
-            self.assertListEqual(test, actual)
+            for x, y in zip(actual, test):
+                self.assertAlmostEqual(x, y, places=4)
 
     def test_find_peaks_2D_refinement_width_check(self):
         image = np.array(
@@ -162,7 +164,8 @@ class TestTools(unittest.TestCase):
                                          exclude_border=False)
 
         for actual, test in zip(peak_coordinates, test_coordinates):
-            self.assertListEqual(test, actual)
+            for x, y in zip(actual, test):
+                self.assertAlmostEqual(x, y, places=4)
 
     def test_find_peaks_1D(self):
         image = np.array(
@@ -190,7 +193,8 @@ class TestTools(unittest.TestCase):
                                          refinement_size=8, threshold_abs=1,
                                          exclude_border=False, min_distance=2)
 
-        self.assertListEqual(test_coordinates, peak_coordinates)
+        for x, y in zip(test_coordinates, peak_coordinates):
+            self.assertAlmostEqual(x, y, places=4)
 
     def test_find_peaks_1D_scipy(self):
         image = np.array(
@@ -217,7 +221,8 @@ class TestTools(unittest.TestCase):
         test_coordinates = find_peaks_1D(data, log_scale=False,
                                          refinement_size=8, algorithm='scipy')
 
-        self.assertListEqual(test_coordinates, peak_coordinates)
+        for x, y in zip(test_coordinates, peak_coordinates):
+            self.assertAlmostEqual(x, y, places=4)
 
     def test_find_peaks_2D_one_axis(self):
         image = np.array(
@@ -243,7 +248,8 @@ class TestTools(unittest.TestCase):
             exclude_border=False)
 
         for actual, test in zip(peak_coordinates, test_coordinates):
-            self.assertListEqual(test, actual)
+            for x, y in zip(actual, test):
+                self.assertAlmostEqual(x, y, places=4)
 
     def test_find_peaks_2D_one_axis_scipy(self):
         image = np.array(
@@ -268,4 +274,5 @@ class TestTools(unittest.TestCase):
             refinement_size=8, algorithm='scipy')
 
         for actual, test in zip(peak_coordinates, test_coordinates):
-            self.assertListEqual(test, actual)
+            for x, y in zip(actual, test):
+                self.assertAlmostEqual(x, y, places=4)

@@ -227,6 +227,8 @@ def generate_data_name_from_pattern(data_name_pattern,
             old_str = "{"+key+"}"
             new_str = str(value)
             new_name = new_name.replace(old_str, new_str)
+    elif 'filename' in metadata.keys():
+        new_name = metadata['filename']
     else:
         new_name = data_name_pattern
 

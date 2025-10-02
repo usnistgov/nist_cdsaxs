@@ -47,17 +47,24 @@ def find_gaussian_peakloc(x, y, p0=None):
         Optimized parameters mean, std_dev, scale, and offset from the
         Gaussian fit.
     """
-    popt, _ = curve_fit(
-        gaussian,
-        x, y,
-        p0=p0 if p0 is not None else [
-            x[np.nanargmax(y)], 1, np.max(y), 0
-        ]
-    )
+    if p0 is not None:
+        popt, _ = curve_fit(
+            gaussian,
+            x, y,
+            p0=p0,
+        )
+    else:
+        popt, _ = curve_fit(
+            gaussian,
+            x, y/np.nanmax(y),
+            p0=[
+                x[np.nanargmax(y)], 1, 2, 0
+            ]
+        )
     peak_x = popt[0]
     peak_index = np.argmin(np.abs(x-peak_x))
 
-    return float(peak_x), int(peak_index), popt
+    return float(peak_x), int(peak_index)
 
 
 def line_fit(x, y):
@@ -94,7 +101,7 @@ def gaussian_refine_peak_2D(image):
     """
 
     try:
-        a_opt, _, _ = find_gaussian_peakloc(
+        a_opt, _ = find_gaussian_peakloc(
             np.arange(0, image.shape[0]),
             np.nansum(image, axis=1))
     except RuntimeError:
@@ -104,7 +111,7 @@ def gaussian_refine_peak_2D(image):
         a_opt = int(np.nanargmax(np.nansum(image, axis=1)))
 
     try:
-        b_opt, _, _ = find_gaussian_peakloc(
+        b_opt, _ = find_gaussian_peakloc(
             np.arange(0, image.shape[1]),
             np.nansum(image, axis=0))
     except RuntimeError:
@@ -318,7 +325,8 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
             kwargs["threshold_abs"] = 0
 
     data_fed = np.array(data)
-    data_fed[mask] = np.nan
+    if mask is not None:
+        data_fed[mask] = np.nan
     if log_scale:
         data_fed = np.log10(data_fed)
 
@@ -353,7 +361,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         data_refine = data_fed[x_min:x_max]
 
         try:
-            x_opt, _, _ = find_gaussian_peakloc(
+            x_opt, _ = find_gaussian_peakloc(
                 np.arange(0, data_refine.shape[0]),
                 data_refine)
         except RuntimeError:
@@ -427,7 +435,8 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
         kwargs["threhold_abs"] = 0
 
     image_fed = np.copy(image)
-    image_fed[mask] = np.nan
+    if mask is not None:
+        image_fed[mask] = np.nan
     if log_scale:
         image_fed = np.log10(image_fed)
 

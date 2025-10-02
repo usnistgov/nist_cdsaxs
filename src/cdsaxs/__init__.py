@@ -1,6 +1,5 @@
-import cdsaxs.data.data1d
+import cdsaxs.data.data_image
 import cdsaxs.data.data2d
-import cdsaxs.data.data_qdy_qdx
 import cdsaxs.data.qslice
 import cdsaxs.data.reduced_data1d
 import cdsaxs.data.dataset

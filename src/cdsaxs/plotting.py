@@ -20,33 +20,45 @@ import cdsaxs._plotting_tools as plotting_tools
 import cdsaxs.diffraction as diffraction
 
 
-def plot2D(image: NDArray, axis0=None, axis1=None,
-           axis0_type=None, axis1_type=None, title=None,
-           log_scale=True, vmin=None, vmax=None):
+def plot2D(image: NDArray,
+           mask=None,
+           axis0=None,
+           axis1=None,
+           axis0_type=None,
+           axis1_type=None,
+           title=None,
+           log_scale=True,
+           vmin=None,
+           vmax=None,
+           cmap='viridis',
+           showcolorbar=True):
     # TODO axis not rendering in vs code notebook - KNOWN ISSUE VSCODE/PLOTLY
 
-    custom_vmin = True if vmin is not None else False
-    custom_vmax = True if vmax is not None else False
     plot_image = np.copy(image)
-    if log_scale:
-        with np.errstate(divide='ignore', invalid='ignore'):
-            plot_image = np.log10(plot_image)
-        vmin = np.max([np.nanmin(plot_image[plot_image > -np.inf]), -1]) if not\
-            custom_vmin else vmin
-        vmax = np.nanmax(plot_image) if not custom_vmax else vmax
-        # pixels with less than 'vmin' count will show up as black on the plots
-        # need to set them as a custom value to filter later
-        plot_image[image <= 0] = -10
-        plot_image[np.isnan(image)] = None
-        plot_image[(plot_image < vmin) & (image > 0)] = vmin
 
+    if mask is not None:
+        plot_image[mask] = np.nan
+
+    if not log_scale:
+        vmin = 0 if vmin is None else vmin
+        vmax = np.nanmax(plot_image) if vmax is None else vmax
+        custom_colorscale = cmap
+        overall_min = vmin
     else:
-        vmin = 0 if not custom_vmin else vmin
-        vmax = np.nanmax(plot_image) if not custom_vmax else vmax
+        vmin = np.log10(np.max([np.nanmin(plot_image[plot_image > 0]), 0.1]))\
+            if vmin is None else vmin
+        vmax = np.log10(np.nanmax(plot_image)) if vmax is None else vmax
+        with np.errstate(divide='ignore', invalid='ignore'):
+            plot_image_log = np.log10(plot_image)
+        plot_image_log[plot_image <= 0] = -10  # will make these points black
+        plot_image_log[np.isnan(plot_image)] = None  # will be transparent
+        plot_image = plot_image_log
 
-    if log_scale and not custom_vmin and not custom_vmax:
+        # modify the colorscale so that points lower than the range
+        # show up as black
+
         viridis_scale = plotly.colors.sample_colorscale(
-            'Viridis', samplepoints=list(np.linspace(0, 1, 101)))
+            cmap, samplepoints=list(np.linspace(0, 1, 101)))
         custom_colorscale = []
         custom_colorscale.append([0, 'black'])
 
@@ -56,10 +68,8 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
             scaled_val = vmin + val * (vmax - vmin)
             normalized_val = (scaled_val - overall_min) / (vmax - overall_min)
             custom_colorscale.append([normalized_val, color])
-    else:
-        custom_colorscale = 'viridis'
-        overall_min = vmin
 
+    # plot the image keeping the aspect ratio of equal for square pixels
     fig = px.imshow(plot_image, zmin=overall_min, zmax=vmax,
                     color_continuous_scale=custom_colorscale, aspect='equal')
 
@@ -81,7 +91,7 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
         ticks, labels = plotting_tools.create_even_q_ticks(axis1)
         fig.update_xaxes(tickvals=ticks, ticktext=labels)
 
-    if log_scale:
+    if log_scale and showcolorbar:
         colorbar_ticks = list(np.arange(
             vmin, np.ceil(vmax) if vmax%1>0 else np.ceil(vmax)+1, step=1))
         colorbar_labels = [10**x for x in colorbar_ticks]
@@ -92,59 +102,89 @@ def plot2D(image: NDArray, axis0=None, axis1=None,
                 'ticktext': colorbar_labels,
             })
     fig.update_layout(
-        width=500,
-        coloraxis_colorbar={
-            'title': {'text': 'Intensity', 'side': 'right'},
-            'ticks': 'outside',
-        })
+        width=750
+    )
+    if showcolorbar:
+        fig.update_layout(
+            coloraxis_colorbar={
+                'title': {'text': 'Intensity', 'side': 'right'},
+                'ticks': 'outside',
+            })
+    else:
+        fig.update_coloraxes(showscale=False)
 
     if title:
         fig.update_layout({'title': title})
 
+    fig.update_layout(legend=dict(x=1.5, y=1, yanchor="top"))
+
     return fig
 
 
-def plot_QdyQdx_integration(data, integrated_q_slice, log_scale=True,
-                            vmin=None, vmax=None,
-                            background_subtractions=None):
+def plot2D_add_ROI(
+    fig,
+    rois,
+    roi_colors=None,
+    name=None,
+    showlegend=False
+):
+    """
+    rois : list
+        List of rectangular regions of interest. Each ROI in the list
+        is defined by a tuple of two tuples that represent the limits
+        along each axis: 
+        ((min0, max0), (min1, max1))
+    """
 
-    image = np.copy(data.image)
-    if integrated_q_slice.box_angle_deg != 0:
-        image = integrated_q_slice.rotated_image
-    fig = plot2D(image, axis0=data.qdy, axis1=data.qdx,
-                 axis0_type='qdy', axis1_type='qdx', log_scale=log_scale,
-                 vmin=vmin, vmax=vmax)
+    for i, ((min0, max0), (min1, max1)) in enumerate(rois):
+        min0 -= 0.5
+        max0 -= 0.5
+        min1 -= 0.5
+        max1 -= 0.5
+        x = [min1, min1, max1, max1, min1]
+        y = [min0, max0, max0, min0, min0]
+        if roi_colors is not None:
+            color = roi_colors[i]
+        else:
+            color = 'red'
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode='lines', line=dict(color=color),
+            name=name, showlegend=showlegend
+        ))
 
-    # box limits, lines get drawn in the middle of pixels so offset
-    # half open range by 0.5 pixels
-    xmin, xmax = integrated_q_slice.limits_axis1
-    xmin -= 0.5
-    xmax -= 0.5
-    ymin, ymax = integrated_q_slice.limits_axis0
-    ymin -= 0.5
-    ymax -= 0.5
-    x = [xmin, xmin, xmax, xmax, xmin]
-    y = [ymin, ymax, ymax, ymin, ymin]
-    fig.add_trace(go.Scatter(
-        x=x, y=y, mode='lines', line=dict(color='red'), name=None, showlegend=False
-    ))
+        return fig
 
-    if background_subtractions is not None:
-        for background in background_subtractions:
-            # box limits, lines get drawn in the middle of pixels so offset
-            # half open range by 0.5 pixels
-            xmin, xmax = background[2]
-            xmin -= 0.5
-            xmax -= 0.5
-            ymin, ymax = background_subtractions[1]
-            ymin -= 0.5
-            ymax -= 0.5
-            x = [xmin, xmin, xmax, xmax, xmin]
-            y = [ymin, ymax, ymax, ymin, ymin]
-            fig.add_trace(go.Scatter(
-                x=x, y=y, mode='lines', line=dict(color='orange'), name=None, showlegend=False
-            ))
 
+def plot2D_add_points(
+    fig,
+    points,
+    point_colors=None,
+    name=None,
+    showlegend=False,
+):
+    """
+    points : list
+        List of tuples that contain x and y traces to add as scatter
+        points to a 2D image plot. The x and y can either be one value
+        as a single point or an iterable of points that will all get
+        plotted as the same trace.
+        (x, y) or [([x1, x2], [y1, y2]), (x3, y3)]
+    """
+
+    for i, (x, y) in points:
+        if point_colors is not None:
+            color = point_colors[i]
+        else:
+            color = 'red'
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode='markers',
+            marker=dict(color=color),
+            name=name, showlegend=showlegend
+        ))
+
+    return fig
+
+def something():
     # integrated 1D data
     fig_slice = go.Figure(data=go.Scatter(
         x=integrated_q_slice.q,

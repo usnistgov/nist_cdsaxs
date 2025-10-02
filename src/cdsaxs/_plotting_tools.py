@@ -56,6 +56,13 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
                     np.interp(val, np.flip(q), np.flip(ticks_index)))
             else:
                 ticks_interp.append(np.interp(val, q, ticks_index))
+
+        # make sure that the ticks are suffiently spaced in pixels
+        if np.min(np.diff(ticks_interp)) < 10:
+            print(np.diff(ticks_interp))
+            ticks_interp = [ticks_interp[0], ticks_interp[-1]]
+            ticks_q = [ticks_q[0], ticks_q[-1]]
+
         return ticks_interp, ticks_q
 
 
