@@ -123,6 +123,8 @@ def slice_reduced_dataset(
                     and not np.isnan(data.Iq[selection]).any():
                 q.append(np.nanmean(getattr(data, q_axis)))
                 Iq.append(np.nanmean(data.Iq[selection]))
+                # qsz.extend(list(data.qsz[selection]))
+                # Iq.extend(list(data.Iq[selection]))
 
         reduced_slice = ReducedData1DSlice(
             q=np.array(q),

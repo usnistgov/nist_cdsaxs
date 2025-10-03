@@ -312,42 +312,42 @@ def plot1D_add_trace(fig, x, y, error_y=None, mask=None,
     return fig
     
 
-def something():
+# def something():
 
-    # integrated 1D data
-    fig_slice = go.Figure(data=go.Scatter(
-        x=integrated_q_slice.q,
-        y=integrated_q_slice.Iq,
-        mode='lines+markers',
-        error_y=dict(
-            type='data',
-            array=integrated_q_slice.dIq,
-            visible=True
-        )
-    ))
+#     # integrated 1D data
+#     fig_slice = go.Figure(data=go.Scatter(
+#         x=integrated_q_slice.q,
+#         y=integrated_q_slice.Iq,
+#         mode='lines+markers',
+#         error_y=dict(
+#             type='data',
+#             array=integrated_q_slice.dIq,
+#             visible=True
+#         )
+#     ))
 
-    if background_subtractions is not None:
-        fig_slice.add_trace(go.Scatter(
-            x=integrated_q_slice.q,
-            y=integrated_q_slice.background_i,
-            mode='lines+markers',
-        ))
+#     if background_subtractions is not None:
+#         fig_slice.add_trace(go.Scatter(
+#             x=integrated_q_slice.q,
+#             y=integrated_q_slice.background_i,
+#             mode='lines+markers',
+#         ))
 
-    fig_slice.update_xaxes(
-        title=plotting_tools.generate_axis_label_units(
-            integrated_q_slice.q_axis
-        ),
-        ticks='outside'
-    )
+#     fig_slice.update_xaxes(
+#         title=plotting_tools.generate_axis_label_units(
+#             integrated_q_slice.q_axis
+#         ),
+#         ticks='outside'
+#     )
 
-    fig_slice.update_yaxes(
-        title='Total Intensity' if integrated_q_slice.mode == 'sum'
-        else 'Average Intensity' if integrated_q_slice.mode == 'mean'
-        else 'Intensity',
-        ticks='outside'
-    )
+#     fig_slice.update_yaxes(
+#         title='Total Intensity' if integrated_q_slice.mode == 'sum'
+#         else 'Average Intensity' if integrated_q_slice.mode == 'mean'
+#         else 'Intensity',
+#         ticks='outside'
+#     )
 
-    return fig, fig_slice
+#     return fig, fig_slice
 
 
 def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
@@ -534,7 +534,7 @@ def plot_reduced_dataset(dataset, index=None, log_scale=True,
 
         colors = np.array(colors)
 
-        ax.scatter(qsxs, qszs, s=plot_marker_size, marker='o', color=colors)
+        ax.scatter(qsxs,  qszs, s=plot_marker_size, marker='o', color=colors)
         ax.set_xlabel(plotting_tools.generate_axis_label_units('qsx'))
         ax.set_ylabel(plotting_tools.generate_axis_label_units('qsz'))
 

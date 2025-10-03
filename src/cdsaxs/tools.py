@@ -123,60 +123,6 @@ def gaussian_refine_peak_2D(image):
     return float(a_opt), float(b_opt)
 
 
-def find_peaks_2D_legacy(
-        image, integrated_slice, integrated_axis,
-        peak_params, peak_find_scale='linear',
-        opt_width=(7, 7)):
-    """
-    Performs a 2-dimensional peak finding algorithm that is optimized
-    with gaussian fits along both dimensions of the image.
-
-    If a gaussian fit fails to the data, try increasing the optimization
-    box width. Otherwise, the function will assume the peak location is
-    at the maximum value pixel.
-
-    Returns list of peak coordinates.
-    """
-
-    if peak_find_scale == 'linear':
-        peaks, _ = find_peaks(integrated_slice, **peak_params)
-    elif peak_find_scale == 'log':
-        peaks, _ = find_peaks(
-            np.log10(integrated_slice), **peak_params)
-    else:
-        raise ValueError(
-            f"The peak_find_scale {peak_find_scale} is not recognized."
-        )
-
-    if integrated_axis == 0:
-        peaks_other = np.argmax(image[:, peaks], axis=0)
-        peaks_px = [
-            (y, x) for x, y in zip(peaks, peaks_other)]
-    else:
-        peaks_other = np.argmax(image[peaks, :], axis=1)
-        peaks_px = [
-            (y, x) for y, x in zip(peaks, peaks_other)]
-
-    peaks_px_opt = []
-    for (a, b) in peaks_px:
-        a_min = max(0, a - int(opt_width[0]/2))
-        a_max = min(a + (opt_width[0] - int(opt_width[0]/2)), image.shape[0])
-        b_min = max(0, b - int(opt_width[1]/2))
-        b_max = min(b + (opt_width[1] - int(opt_width[1]/2)), image.shape[1])
-
-        image_box = image[a_min:a_max, b_min:b_max]
-        if peak_find_scale == 'log':
-            image_box = np.log10(image_box)
-
-        a_opt, b_opt = gaussian_refine_peak_2D(image_box)
-        a_opt += a_min
-        b_opt += b_min
-
-        peaks_px_opt.append((a_opt, b_opt))
-
-    return peaks_px_opt
-
-
 def rotate_image(image,
                  degrees, rotation_center, resampling_mode="bicubic",
                  fillcolor=-9999):
