@@ -3,8 +3,8 @@ import unittest
 
 import numpy as np
 
-import cdsaxs.loaders as loaders
-import cdsaxs._loader_tools as lt
+import cdsaxs.loaders.load_data as load_data
+import cdsaxs.loaders._loader_tools as lt
 import cdsaxs.calculators as calculators
 
 
@@ -23,7 +23,7 @@ class TestReadTiff(unittest.TestCase):
             [10, 11, 12]
         ]).astype(np.float64)
 
-        self.return_read = loaders.read_tiff(self.filepath)
+        self.return_read = load_data.read_tiff(self.filepath)
 
     def test_image(self):
         image = self.return_read[0]
@@ -44,7 +44,7 @@ class TestReadNistBin(unittest.TestCase):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.filepath = os.path.abspath(
             os.path.join(current_dir, image_file))
-        self.return_read = loaders.read_nist_bin(self.filepath)
+        self.return_read = load_data.read_nist_bin(self.filepath)
 
     def test_image(self):
         image = self.return_read[0]
@@ -78,11 +78,11 @@ class TestReadPilatus(unittest.TestCase):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.filepath = os.path.abspath(
             os.path.join(current_dir, image_file))
-        self.image, self.filepath, self.metadata = loaders.read_pilatus(
+        self.image, self.filepath, self.metadata = load_data.read_pilatus(
             filepath=self.filepath
         )
 
-        self.image_check, self.filepath_check, header = loaders.read_tiff(
+        self.image_check, self.filepath_check, header = load_data.read_tiff(
             self.filepath
         )
         self.metadata_check = lt.pilatus_header_to_metadata(header)
@@ -125,7 +125,7 @@ class TestFilterFilenames(unittest.TestCase):
         ]
 
     def test_or(self):
-        filenames = loaders.filter_filenames(
+        filenames = load_data.filter_filenames(
             self.directory_path,
             filter_substrings=["strawberry", "good"]
             )
@@ -141,7 +141,7 @@ class TestFilterFilenames(unittest.TestCase):
         )
 
     def test_and(self):
-        filenames = loaders.filter_filenames(
+        filenames = load_data.filter_filenames(
             self.directory_path,
             filter_substrings=[["strawberry", "bad"]]
             )
@@ -154,7 +154,7 @@ class TestFilterFilenames(unittest.TestCase):
         )
 
     def test_not(self):
-        filenames = loaders.filter_filenames(
+        filenames = load_data.filter_filenames(
             self.directory_path,
             filter_substrings=[["strawberry", ("NOT", "bad")]]
             )
@@ -167,7 +167,7 @@ class TestFilterFilenames(unittest.TestCase):
         )
 
     def test_complex(self):
-        filenames = loaders.filter_filenames(
+        filenames = load_data.filter_filenames(
             self.directory_path,
             filter_substrings=[["strawberry", ("NOT", "bad")],
                                ["red", "apple"]]
@@ -184,7 +184,7 @@ class TestFilterFilenames(unittest.TestCase):
         )
 
     def test_file_extension(self):
-        filenames = loaders.filter_filenames(
+        filenames = load_data.filter_filenames(
             self.directory_path,
             file_extension="txt"
             )
@@ -202,14 +202,14 @@ class TestLoadData(unittest.TestCase):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.filepath = os.path.abspath(
             os.path.join(current_dir, image_file))
-        self.data = loaders.LoadData(filepath=self.filepath,
+        self.data = load_data.LoadData(filepath=self.filepath,
                                      detector_type='Pilatus',
                                      metadata={'center_px': (100, 100)},
                                      user_params={'test': 'testvalue'},
                                      name='Test Load Data')
 
     def test_load_pilatus(self):
-        image, filepath, metadata = loaders.read_pilatus(
+        image, filepath, metadata = load_data.read_pilatus(
             self.filepath
         )
         image[image < 0] = np.nan
@@ -232,16 +232,16 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(self.data.name, 'Test Load Data')
 
     def test_default_name(self):
-        data = loaders.LoadData(filepath=self.filepath)
+        data = load_data.LoadData(filepath=self.filepath)
         self.assertEqual(data.name, os.path.basename(self.filepath))
 
     def test_metadata_name(self):
-        data = loaders.LoadData(filepath=self.filepath,
+        data = load_data.LoadData(filepath=self.filepath,
                                 metadata={'name': 'Test Load Data Name'})
         self.assertEqual(data.name, "Test Load Data Name")
 
     def test_metadata_name_and_name(self):
-        data = loaders.LoadData(filepath=self.filepath, name="new name",
+        data = load_data.LoadData(filepath=self.filepath, name="new name",
                                 metadata={'name': 'Test Load Data Name'})
         self.assertEqual(data.name, "new name")
 
@@ -252,7 +252,7 @@ class TestLoadDataset(unittest.TestCase):
         data_directory = "../data/test_load_dataset"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_directory = os.path.abspath(os.path.join(current_dir, data_directory))
-        self.dataset = loaders.LoadDataset(
+        self.dataset = load_data.LoadDataset(
             "test dataset", self.data_directory,
             metadata_pattern="{sample}measure1_{sdd_cm}m_{energy_ev}keV"
             + "_num{num}_{sample_phi_deg}deg_bpm{bpm}_id{id}_combined.tif",
@@ -396,7 +396,7 @@ class TestLoadDataset_MetadataCSV(unittest.TestCase):
         csv_path = "../data/test_load_dataset/metadata_load.csv"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.csv_path = os.path.abspath(os.path.join(current_dir, csv_path))
-        self.dataset = loaders.LoadDataset_MetadataCSV(
+        self.dataset = load_data.LoadDataset_MetadataCSV(
             "test dataset", self.csv_path)
 
     def test_dataset_name(self):

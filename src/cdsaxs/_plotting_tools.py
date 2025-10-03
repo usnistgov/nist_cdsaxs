@@ -58,8 +58,7 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
                 ticks_interp.append(np.interp(val, q, ticks_index))
 
         # make sure that the ticks are suffiently spaced in pixels
-        if np.min(np.diff(ticks_interp)) < 10:
-            print(np.diff(ticks_interp))
+        if np.min(np.abs(np.diff(ticks_interp))) < 10:
             ticks_interp = [ticks_interp[0], ticks_interp[-1]]
             ticks_q = [ticks_q[0], ticks_q[-1]]
 
@@ -80,7 +79,7 @@ def generate_axis_label_units(q_axis):
 
         label = r"$q"
         if len(q_axis)==1:
-            return label + r"\thinspace" + units
+            label = label + r"\thinspace" + units
         
         else:
             subscript = r"_{" + q_axis[1]
@@ -91,7 +90,10 @@ def generate_axis_label_units(q_axis):
 
             label = label + subscript + units
 
-            return label
+    elif q_axis == 'Iq':
 
+        label = 'I(q)'
     else:
-        return q_axis
+        label = q_axis
+
+    return label

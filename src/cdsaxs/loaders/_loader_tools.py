@@ -6,7 +6,7 @@ import re
 
 import warnings
 
-from cdsaxs.metadata import METADATA_KEYWORDS, correct_metadata_dtype
+from cdsaxs.data.metadata import METADATA_KEYWORDS, correct_metadata_dtype
 
 
 def clean_filepath(filepath):

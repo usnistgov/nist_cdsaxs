@@ -31,7 +31,9 @@ def plot2D(image: NDArray,
            vmin=None,
            vmax=None,
            cmap='viridis',
-           showcolorbar=True):
+           showcolorbar=True,
+           width=750,
+           aspect='equal'):
     # TODO axis not rendering in vs code notebook - KNOWN ISSUE VSCODE/PLOTLY
 
     plot_image = np.copy(image)
@@ -71,7 +73,7 @@ def plot2D(image: NDArray,
 
     # plot the image keeping the aspect ratio of equal for square pixels
     fig = px.imshow(plot_image, zmin=overall_min, zmax=vmax,
-                    color_continuous_scale=custom_colorscale, aspect='equal')
+                    color_continuous_scale=custom_colorscale, aspect=aspect)
 
     fig.update_yaxes(
         title=plotting_tools.generate_axis_label_units(axis0_type)
@@ -102,7 +104,7 @@ def plot2D(image: NDArray,
                 'ticktext': colorbar_labels,
             })
     fig.update_layout(
-        width=750
+        width=width
     )
     if showcolorbar:
         fig.update_layout(
@@ -125,6 +127,7 @@ def plot2D_add_ROI(
     fig,
     rois,
     roi_colors=None,
+    roi_line_style=None,
     name=None,
     showlegend=False
 ):
@@ -147,8 +150,12 @@ def plot2D_add_ROI(
             color = roi_colors[i]
         else:
             color = 'red'
+        if roi_line_style is not None:
+            linestyle = roi_line_style[i]
+        else:
+            linestyle = 'solid'
         fig.add_trace(go.Scatter(
-            x=x, y=y, mode='lines', line=dict(color=color),
+            x=x, y=y, mode='lines', line=dict(color=color, dash=linestyle),
             name=name, showlegend=showlegend
         ))
 
@@ -175,16 +182,138 @@ def plot2D_add_points(
         if point_colors is not None:
             color = point_colors[i]
         else:
-            color = 'red'
+            color = None
         fig.add_trace(go.Scatter(
             x=x, y=y, mode='markers',
-            marker=dict(color=color),
+            marker=dict(color=color) if color is not None else {},
             name=name, showlegend=showlegend
         ))
 
     return fig
 
+
+def plot1D(x, y, error_y=None, mask=None,
+           axis_x_type=None, axis_y_type=None,
+           axis_x_lims=None, axis_y_lims=None,
+           color=None, title=None, showlegend=False, name=None,
+           linestyle=None, width=500, log_scale=True):
+
+    if mask is not None:
+        y[mask] = np.nan
+        if error_y is not None:
+            error_y[mask] = None
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y,
+        mode=linestyle if linestyle is not None else "lines+markers",
+        error_y={} if error_y is None else dict(
+            type='data',
+            array=error_y,
+            visible=True,
+        ),
+        line=dict(color=color) if color is not None else {},
+        name=name,
+        showlegend=showlegend,
+        legendrank=200
+    ))
+
+    if axis_x_type is not None:
+        fig.update_xaxes(
+            title=plotting_tools.generate_axis_label_units(
+                axis_x_type
+            ),
+            ticks='outside'
+        )
+    else:
+        fig.update_xaxes(
+            title='x',
+            ticks='outside'
+        )
+
+    if axis_y_type is not None:
+        fig.update_yaxes(
+            title=plotting_tools.generate_axis_label_units(
+                axis_y_type
+            ),
+            ticks='outside'
+        )
+    else:
+        fig.update_yaxes(
+            title='y',
+            ticks='outside'
+        )
+
+    fig.update_layout(
+        width=width,
+    )
+
+    if log_scale:
+        fig.update_layout(
+            yaxis_type="log"
+        )
+
+    if axis_x_lims is not None:
+        fig.update_xaxes(
+            {'range': (axis_x_lims[0], axis_x_lims[1])}
+        )
+    if axis_y_lims is not None:
+        if log_scale:
+            fig.update_yaxes(
+                {'range': (np.log10(axis_y_lims[0]), np.log10(axis_y_lims[1]))}
+            )
+        else:
+            fig.update_yaxes(
+                {'range': (axis_y_lims[0], axis_y_lims[1])}
+            )
+    else:
+        if log_scale:
+            fig.update_yaxes(
+                {'range': (0, np.log10(np.nanmax(y)*10))}
+            )
+        else:
+            fig.update_yaxes(
+                {'range': (0, np.nanmax(y)*1.05)}
+            )
+
+    # fig.update_layout(legend=dict(x=1.5, y=1, yanchor="top"),
+    #                   showlegend=showlegend)
+
+    return fig
+
+
+def plot1D_add_trace(fig, x, y, error_y=None, mask=None,
+                     showlegend=False, name=None, linestyle=None):
+
+    if mask is not None:
+        y[mask] = np.nan
+        if error_y is not None:
+            error_y[mask] = None
+
+    # add trace behind
+    fig_data = [go.Scatter(
+        x=x,
+        y=y,
+        mode=linestyle if linestyle is not None else "lines+markers",
+        error_y={} if error_y is None else dict(
+            type='data',
+            array=error_y,
+            visible=True,
+        ),
+        name=name,
+        showlegend=showlegend,
+        legendrank=2000
+    ),] + list(fig.data)
+    fig.data = []
+    for trace in fig_data:
+        fig.add_trace(trace)
+
+    return fig
+    
+
 def something():
+
     # integrated 1D data
     fig_slice = go.Figure(data=go.Scatter(
         x=integrated_q_slice.q,
@@ -217,19 +346,6 @@ def something():
         else 'Intensity',
         ticks='outside'
     )
-
-    fig_slice.update_layout(
-        width=500,
-    )
-
-    if log_scale:
-        fig_slice.update_layout(
-            yaxis_type="log"
-        )
-    else:
-        fig_slice.update_yaxes(
-            {'range': (0, np.nanmax(integrated_q_slice.Iq)*1.05)}
-        )
 
     return fig, fig_slice
 

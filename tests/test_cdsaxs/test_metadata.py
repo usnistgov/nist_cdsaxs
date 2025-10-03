@@ -1,7 +1,7 @@
 import unittest
 
-from cdsaxs.metadata import correct_metadata_dtype, check_metadata
-from cdsaxs.metadata import METADATA_KEYWORDS, FLOATS, INTEGERS, STRINGS
+from cdsaxs.data.metadata import correct_metadata_dtype, check_metadata
+from cdsaxs.data.metadata import METADATA_KEYWORDS, FLOATS, INTEGERS, STRINGS
 
 
 class TestCorrectMetadataDtype(unittest.TestCase):

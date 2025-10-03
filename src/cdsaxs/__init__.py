@@ -4,8 +4,8 @@ import cdsaxs.data.qslice
 import cdsaxs.data.reduced_data1d
 import cdsaxs.data.dataset
 import cdsaxs.calculators
-import cdsaxs.loaders
-import cdsaxs.metadata
+import cdsaxs.loaders.load_data
+import cdsaxs.data.metadata
 import cdsaxs.plotting
 import cdsaxs.reduction
 import cdsaxs.sample

@@ -3,8 +3,8 @@ import itertools
 
 import unittest
 
-import cdsaxs._loader_tools as loader_tools
-import cdsaxs.loaders as loaders
+import cdsaxs.loaders._loader_tools as loader_tools
+import cdsaxs.loaders.load_data as load_data
 
 
 class TestPilatusHeader(unittest.TestCase):
@@ -15,7 +15,7 @@ class TestPilatusHeader(unittest.TestCase):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(current_dir, image_file)
 
-        self.image, self.filepath, self.header = loaders.read_tiff(image_path)
+        self.image, self.filepath, self.header = load_data.read_tiff(image_path)
 
     def test_exposure_time(self):
 

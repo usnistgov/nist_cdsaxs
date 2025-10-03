@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from cdsaxs.metadata import ACCEPTED_Q_AXES
+from cdsaxs.data.metadata import ACCEPTED_Q_AXES
 
 
 class Data1D():

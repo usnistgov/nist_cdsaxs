@@ -17,7 +17,7 @@ from plotly.offline import iplot
 import cdsaxs.calculators as calculators
 from cdsaxs.data.data_image import DataImage
 from cdsaxs.data.qslice import QSlice
-from cdsaxs.metadata import METADATA_KEYWORDS, check_metadata
+from cdsaxs.data.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
 from cdsaxs.tools import line_fit
 from cdsaxs.tools import find_peaks_2D, find_peaks_2D_one_axis
@@ -648,11 +648,13 @@ class Data2D(DataImage):
 
     def integrate_box(
         self,
-        limits_qdy_px: list | tuple,
-        limits_qdx_px: list | tuple,
+        limits_qdy_px: list | tuple | int,
+        limits_qdx_px: list | tuple | int,
         mode: str,
         axis: str | int,
-        show_plot=False,
+        shift_box_qdy_px=0,
+        shift_box_qdx_px=0,
+        show_plot=True,
         log_scale=True,
         vmin=None,
         vmax=None,
@@ -675,9 +677,17 @@ class Data2D(DataImage):
         limits_qdy_px : iterable of int
             Pixel range along qdy axis for integration box.
             Half open range of [min, max).
+            If an integer value is given instead, the box limits will
+            be determined internally for a box of that width centered
+            around the beam center and offset by shift_box_qdy_px.
         limits_qdx_px : iterable of int
             Pixel range along qdx axis for integration box.
             Half open range of [min, max).
+            If an integer value is given instead, the box limits will
+            be determined internally for a box of that width centered
+            around the beam center and offset by shift_box_qdx_px.
+            If an integer was given for qdy, an integer must be given
+            for qdx.
         mode : str
             Integration mode, either 'sum' or 'mean'.
         axis : str, int
@@ -688,11 +698,21 @@ class Data2D(DataImage):
             performed over all rows in each column and return I vs. qdx.
             If axis is set to 'qdx' or 1, this integration will be
             performed over all columns in each row and return I vs. qdy.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
             and the one-dimensional data will be shown in a second figure.
-            Default value is False.
+            Default value is True.
         log_scale : bool, optional
             If set to True, the plots will show the scattering intensity
             on a log scale. If set to False, intensity will be displayed
@@ -730,6 +750,12 @@ class Data2D(DataImage):
                 axis = 1
             else:
                 raise ValueError(f"Invalid integration axis of {axis}.")
+
+        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
+            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
+                limits_qdy_px, limits_qdx_px,
+                shift_box_qdy_px=shift_box_qdy_px,
+                shift_box_qdx_px=shift_box_qdx_px)
 
         # access parent method of box integration
         integrated_i, image_box, mask_box = super().slice_box(
@@ -769,7 +795,7 @@ class Data2D(DataImage):
                     )
                     limits_qdx_px_sub = (
                         limits_qdx_px[0] + (offset if axis == 1 else 0),
-                        limits_qdy_px[1] + (offset if axis == 1 else 0)
+                        limits_qdx_px[1] + (offset if axis == 1 else 0)
                     )
                     background_i, _, _ = super().sum_box(
                         limits_axis0=limits_qdy_px_sub,
@@ -785,6 +811,7 @@ class Data2D(DataImage):
             # values from the available pixels for background subtraction
             background_i_avg = np.nanmean(background_i_avg, axis=0)
 
+            before_background_i = np.copy(integrated_i)
             integrated_i -= background_i_avg
         else:
             background_i_avg = None
@@ -807,60 +834,18 @@ class Data2D(DataImage):
         integrated_q_slice.__setattr__(q_int_axis, q_int)
 
         if show_plot:
-            fig = plotting.plot2D(
-                self.image,
-                mask=self.mask,
-                axis0=self.qdy,
-                axis0_type='qdy',
-                axis1=self.qdx,
-                axis1_type='qdx',
-                title=f"Data Name: {self.name}",
-                log_scale=log_scale,
-                vmin=vmin,
-                vmax=vmax,
-                cmap=cmap,
+            self._plot_integrate_box(
+                log_scale,
+                vmin,
+                vmax,
+                cmap,
+                limits_qdy_px,
+                limits_qdx_px,
+                integrated_q_slice,
+                subtract_background_offset,
+                before_background_i,
+                backgrounds
             )
-            fig = plotting.plot2D_add_ROI(
-                fig,
-                rois=[
-                    (limits_qdy_px, limits_qdx_px)
-                ],
-                roi_colors=['red'],
-                name='Integration Box',
-                showlegend=True)
-            iplot(fig)
-
-            if vmin is None:
-                vmin = fig.layout.coloraxis.cmin
-                if log_scale:
-                    vmin += 1e-15 # correct for the negative value correction
-            if vmax is None:
-                vmax = fig.layout.coloraxis.cmax
-
-            fig_box = plotting.plot2D(
-                integrated_q_slice.image_roi,
-                mask=integrated_q_slice.image_mask,
-                axis0=self.qdy[limits_qdy_px[0]:limits_qdy_px[1]],
-                axis0_type='qdy',
-                axis1=self.qdx[limits_qdx_px[0]:limits_qdx_px[1]],
-                axis1_type='qdx',
-                title=f"Data Name: {self.name}",
-                log_scale=log_scale,
-                vmin=vmin,
-                vmax=vmax,
-                cmap=cmap,
-                showcolorbar=False,
-            )
-            iplot(fig_box)
-
-            # fig, fig_slice = plotting.plot_QdyQdx_integration(
-            #     self,
-            #     integrated_q_slice=integrated_q_slice,
-            #     log_scale=log_scale,
-            #     background_subtractions=backgrounds
-            # )
-            # iplot(fig)
-            # iplot(fig_slice)
 
         return integrated_q_slice
 
@@ -1304,7 +1289,7 @@ class Data2D(DataImage):
                 "No peaks detected. Try changing the peak finding "
                 "keyword arguments."
             )
-        
+
         if update:
             self.update_metadata({'center_px': (center_qdy, center_qdx)},
                                  overwrite=True)
@@ -1377,7 +1362,7 @@ class Data2D(DataImage):
                 refinement_size
                 algorithm
                 any keyword arguments for the fitting algorithm
-        
+
         Returns
         -------
         float
@@ -1534,3 +1519,109 @@ class Data2D(DataImage):
         else:
             angle, _, _ = line_fit(peaks[:, 1], peaks[:, 0])
             return angle
+
+    def _plot_integrate_box(
+        self,
+        log_scale,
+        vmin,
+        vmax,
+        cmap,
+        limits_qdy_px,
+        limits_qdx_px,
+        integrated_q_slice,
+        subtract_background_offset,
+        before_background_i,
+        backgrounds,
+    ):
+        fig = plotting.plot2D(
+            self.image,
+            mask=self.mask,
+            axis0=self.qdy,
+            axis0_type='qdy',
+            axis1=self.qdx,
+            axis1_type='qdx',
+            title=f"Data Name: {self.name}",
+            log_scale=log_scale,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+        )
+        fig = plotting.plot2D_add_ROI(
+            fig,
+            rois=[
+                (limits_qdy_px, limits_qdx_px)
+            ],
+            roi_colors=['red'],
+            name='Integration Box',
+            showlegend=True)
+
+        if vmin is None:
+            vmin = fig.layout.coloraxis.cmin
+            if log_scale:
+                vmin += 1e-15 # correct for the negative value correction
+        if vmax is None:
+            vmax = fig.layout.coloraxis.cmax
+
+        fig_box = plotting.plot2D(
+            integrated_q_slice.image_roi,
+            mask=integrated_q_slice.image_mask,
+            axis0=self.qdy[limits_qdy_px[0]:limits_qdy_px[1]],
+            axis0_type='qdy',
+            axis1=self.qdx[limits_qdx_px[0]:limits_qdx_px[1]],
+            axis1_type='qdx',
+            title=f"Integration Box",
+            log_scale=log_scale,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+            showcolorbar=True,
+            width=550,
+            aspect='auto'
+        )
+
+        fig_slice = plotting.plot1D(
+            integrated_q_slice.q,
+            integrated_q_slice.Iq,
+            mask=integrated_q_slice.mask,
+            axis_x_type=integrated_q_slice.q_axis,
+            axis_y_type="Sum I(q)"\
+            if integrated_q_slice.integration_mode == 'sum'\
+            else "Mean I(q)",
+            showlegend=True,
+            width=600,
+            name="Q Slice",
+            color='black'
+        )
+
+        if subtract_background_offset is not None:
+            fig_slice = plotting.plot1D_add_trace(
+                    fig_slice,
+                    integrated_q_slice.q,
+                    before_background_i,
+                    showlegend=True,
+                    name='Q Slice before Subtraction'
+                )
+            ci = 0
+            for offset, (bgi, limits0, limits1) in zip(
+                    subtract_background_offset, backgrounds):
+                fig = plotting.plot2D_add_ROI(
+                    fig,
+                    rois=[
+                        (limits0, limits1)
+                    ],
+                    roi_colors=['orange'],
+                    name='Background Box' if ci == 0 else None,
+                    showlegend=True if ci == 0 else False,
+                    roi_line_style=["dot"])
+                fig_slice = plotting.plot1D_add_trace(
+                    fig_slice,
+                    integrated_q_slice.q,
+                    bgi,
+                    showlegend=True,
+                    name=f'Background Offset {offset}'
+                )
+                ci += 1
+
+        iplot(fig)
+        iplot(fig_box)
+        iplot(fig_slice)

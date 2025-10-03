@@ -10,16 +10,13 @@ import os
 import warnings
 
 import numpy as np
-from PIL import Image
-from PIL.TiffTags import TAGS
-import tifffile
 from tqdm import tqdm
 
 from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.dataset import Dataset
-from cdsaxs.metadata import METADATA_KEYWORDS
-from cdsaxs.metadata import check_metadata, correct_metadata_dtype
-import cdsaxs._loader_tools as lt
+from cdsaxs.data.metadata import METADATA_KEYWORDS
+from cdsaxs.data.metadata import check_metadata, correct_metadata_dtype
+import cdsaxs.loaders._loader_tools as lt
 
 
 def filter_filenames(
@@ -101,120 +98,6 @@ def filter_filenames(
         filenames = list(set(or_filtered))
 
     return filenames
-
-
-def read_tiff(filepath):
-    """
-    Load an image and header from a tiff file.
-
-    Parameters
-    ----------
-    filepath : str, path
-        Path to the tiff file to be loaded.
-
-    Returns
-    -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary of the header information where the key: value paris
-        correpond to the tag.name: tag.value pairs of the header tags.
-    """
-    filepath = lt.clean_filepath(filepath=filepath)
-
-    try:
-        image = Image.open(filepath)
-        image = np.array(image).astype(np.float64)
-        header = {
-            TAGS[key]: image.tag[key] for key in image.tag_v2
-            if key in TAGS.keys()
-            }
-    except:
-        image = tifffile.imread(filepath).astype(np.float64)
-        with tifffile.TiffFile(filepath) as tif:
-            header = {
-                tag.name: tag.value
-                for tag in tif.pages[0].tags}
-
-    return image, filepath, header
-
-
-def read_nist_bin(filepath):
-    """
-    Load an image and metadata from a NIST-formatted bin/info file pair
-    from the CD-SAXS instrument in group 642.06.
-
-    Parameters
-    ----------
-    filepath : str, path
-        Path to the bin file to be loaded.
-        The paired info file should be in the same directory and have
-        the same filename (apart from the different extension).
-
-    Returns
-    -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary with metadata keyword: value pairs.
-    """
-
-    filepath = lt.clean_filepath(filepath=filepath)
-
-    # read the image from the .bin file first
-    image = np.fromfile(filepath, dtype=np.float64)[1:].reshape(195, 1475)
-
-    # read the .info file
-    infopath = os.path.join(
-        os.path.dirname(filepath),
-        os.path.basename(filepath)[:-4] + ".info"
-    )
-    file = open(infopath)
-    sample_meta = file.readlines()
-    sample_meta = {x.split('=')[0]: x.split('=')[1] for x in sample_meta}
-    file.close()
-
-    # extact required information and insert into clean dictionary
-    metadata = {}
-    metadata['wavelength_nm'] = float(sample_meta['Wavelength (nm) '])
-    metadata['exposure_time_s'] = float(sample_meta['LiveTime '])
-    metadata['pixel_size_um'] = float(sample_meta['Pixel Size '])
-
-    return image, filepath, metadata
-
-
-def read_pilatus(filepath=None):
-    """
-    Read a tiff file from a Pilatus detector, returning the image and
-    the formatted header as metadata. If only the header is provided as
-    a dictionary of tag.name: tag.value pairs, only the metadata
-    dictionary will be returned with None as the image.
-
-    Parameters
-    ----------
-    filepath : str
-        Filepath to the tiff file from a Pilatus detector.
-
-    Returns
-    -------
-    NDArray, None
-        Image from the tiff file if the filepath is provided.
-        Otherwise, this is None
-    str, None
-        Formatted filepath from which the image was loaded. If filepath
-        is not provided, this is None.
-    dict
-        Metadata dictionary with accepted metadata keywords extracted
-        from the tiff file header.
-    """
-    image, filepath, header = read_tiff(filepath=filepath)
-    metadata = lt.pilatus_header_to_metadata(header)
-
-    return image, filepath, metadata
 
 
 def LoadData(

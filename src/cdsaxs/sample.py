@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 
-from cdsaxs.metadata import check_metadata
+from cdsaxs.data.metadata import check_metadata
 # TODO: create special commonly used samples, such as AgBeh or empty
 
 
