@@ -19,6 +19,7 @@ from cdsaxs.data.data_image import DataImage
 from cdsaxs.data.qslice import QSlice
 from cdsaxs.data.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting as plotting
+import cdsaxs._plotting_tools as plotting_tools
 from cdsaxs.tools import line_fit
 from cdsaxs.tools import find_peaks_2D, find_peaks_2D_one_axis
 import cdsaxs.diffraction as diffraction
@@ -1135,7 +1136,7 @@ class Data2D(DataImage):
             axis0_type = 'qdy'
             axis1_type = 'qdx'
 
-        fig = plotting.plot2D(
+        fig = plotting_tools.plot2D_interactive(
             self.image,
             axis0=axis0, axis1=axis1,
             axis0_type=axis0_type, axis1_type=axis1_type,
@@ -1533,7 +1534,7 @@ class Data2D(DataImage):
         before_background_i,
         backgrounds,
     ):
-        fig = plotting.plot2D(
+        fig = plotting_tools.plot2D_interactive(
             self.image,
             mask=self.mask,
             axis0=self.qdy,
@@ -1546,7 +1547,7 @@ class Data2D(DataImage):
             vmax=vmax,
             cmap=cmap,
         )
-        fig = plotting.plot2D_add_ROI(
+        fig = plotting_tools.plot2D_add_ROI_interactive(
             fig,
             rois=[
                 (limits_qdy_px, limits_qdx_px)
@@ -1562,7 +1563,7 @@ class Data2D(DataImage):
         if vmax is None:
             vmax = fig.layout.coloraxis.cmax
 
-        fig_box = plotting.plot2D(
+        fig_box = plotting_tools.plot2D_interactive(
             integrated_q_slice.image_roi,
             mask=integrated_q_slice.image_mask,
             axis0=self.qdy[limits_qdy_px[0]:limits_qdy_px[1]],
@@ -1579,7 +1580,7 @@ class Data2D(DataImage):
             aspect='auto'
         )
 
-        fig_slice = plotting.plot1D(
+        fig_slice = plotting_tools.plot1D_interactive(
             integrated_q_slice.q,
             integrated_q_slice.Iq,
             mask=integrated_q_slice.mask,
@@ -1594,7 +1595,7 @@ class Data2D(DataImage):
         )
 
         if subtract_background_offset is not None:
-            fig_slice = plotting.plot1D_add_trace(
+            fig_slice = plotting_tools.plot1D_add_trace_interactive(
                     fig_slice,
                     integrated_q_slice.q,
                     before_background_i,
@@ -1604,7 +1605,7 @@ class Data2D(DataImage):
             ci = 0
             for offset, (bgi, limits0, limits1) in zip(
                     subtract_background_offset, backgrounds):
-                fig = plotting.plot2D_add_ROI(
+                fig = plotting_tools.plot2D_add_ROI_interactive(
                     fig,
                     rois=[
                         (limits0, limits1)
@@ -1613,7 +1614,7 @@ class Data2D(DataImage):
                     name='Background Box' if ci == 0 else None,
                     showlegend=True if ci == 0 else False,
                     roi_line_style=["dot"])
-                fig_slice = plotting.plot1D_add_trace(
+                fig_slice = plotting_tools.plot1D_add_trace_interactive(
                     fig_slice,
                     integrated_q_slice.q,
                     bgi,
@@ -1625,3 +1626,5 @@ class Data2D(DataImage):
         iplot(fig)
         iplot(fig_box)
         iplot(fig_slice)
+
+        return fig, fig_box, fig_slice

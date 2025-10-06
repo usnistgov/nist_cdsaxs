@@ -60,7 +60,9 @@ def reduce_dataset(dataset: IntegratedDataset) -> ReducedDataset:
             sample_omega_deg=sample_omega_deg,
             dIq=dIq,
             mask=mask,
-            qsz=qsz
+            qsz=qsz,
+            qdx=qdx,
+            qdy=qdy,
         )
 
         reduced_data.append(data)
@@ -133,7 +135,8 @@ def slice_reduced_dataset(
             integrated_axis=integrated_axis,
             slice_width=qmax-qmin
         )
-        setattr(reduced_slice, integrated_axis, np.mean([qmin, qmax]))
+        setattr(reduced_slice, integrated_axis,
+                np.round(np.mean([qmin, qmax]), 4))
         slices.append(reduced_slice)
 
     reduced_slices = ReducedSlices(slices=slices)

@@ -17,6 +17,8 @@ from cdsaxs.data.dataset import Dataset
 from cdsaxs.data.metadata import METADATA_KEYWORDS
 from cdsaxs.data.metadata import check_metadata, correct_metadata_dtype
 import cdsaxs.loaders._loader_tools as lt
+from cdsaxs.loaders.detectors import *
+from cdsaxs.loaders.filetypes import *
 
 
 def filter_filenames(

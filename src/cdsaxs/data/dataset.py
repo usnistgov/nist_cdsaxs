@@ -15,6 +15,9 @@ from cdsaxs.data.reduced_data1d import ReducedData1D
 from cdsaxs.data.reduced_data1d import ReducedData1DSlice
 from cdsaxs.sample import Sample
 import cdsaxs.plotting as plotting
+import cdsaxs._plotting_tools as plotting_tools
+from plotly.offline import iplot
+
 
 
 class Dataset():
@@ -67,13 +70,10 @@ class Dataset():
 
         self.name = name
         self.sample = sample
-        self.integrated_datasets = {}
-        self.reduced_datasets = {}
-        self.reduced_slices = {}
 
     def add_data(self, datas: Data2D | list[Data2D]):
         """Add one or more Data2D instances to the dataset."""
-        datas = [datas] if isinstance(datas, Data2D) else datas
+        datas = [datas] if not isinstance(datas, list) else datas
         for data in datas:
             if data.name in self.datas.keys():
                 raise ValueError(
@@ -675,6 +675,40 @@ class IntegratedDataset():
                 f"{type(qslices)}"
             )
 
+    def plot_data(self,
+                  q_axis='qdx',
+                  y_axis='sample_phi_deg',
+                  interactive_plot=True,
+                  log_scale=True,
+                  filter_q=None,
+                  filter_range=None,
+                  marker_size=5):
+
+        if interactive_plot:
+            fig = plotting.plot_integrated_dataset_interactive(
+                self,
+                q_axis=q_axis,
+                y_axis=y_axis,
+                log_scale=log_scale,
+                filter_q=filter_q,
+                filter_range=filter_range,
+                marker_size=marker_size
+            )
+            iplot(fig)
+
+        else:
+            fig = plotting.plot_integrated_dataset(
+                self,
+                q_axis=q_axis,
+                y_axis=y_axis,
+                log_scale=log_scale,
+                filter_q=filter_q,
+                filter_range=filter_range,
+                marker_size=marker_size
+            )
+
+        return fig
+
 
 class ReducedDataset():
 
@@ -730,6 +764,35 @@ class ReducedDataset():
                 f"{type(data)}"
             )
 
+    def plot_data(self,
+                  interpolated_image=False,
+                  interactive_plot=True,
+                  log_scale=True,
+                  plot_marker_size=5,
+                  filter_q=None,
+                  filter_range=None,):
+
+        if interactive_plot:
+            fig = plotting.plot_reduced_dataset_interactive(
+                self,
+                log_scale=log_scale,
+                interpolated_image=interpolated_image,
+                filter_q=filter_q,
+                filter_range=filter_range,
+            )
+            iplot(fig)
+        else:
+            fig = plotting.plot_reduced_dataset(
+                self,
+                log_scale=log_scale,
+                interpolated_image=interpolated_image,
+                plot_marker_size=plot_marker_size,
+                filter_q=filter_q,
+                filter_range=filter_range,
+            )
+        
+        return fig
+
 
 class ReducedSlices():
 
@@ -784,3 +847,40 @@ class ReducedSlices():
                 " or a list of any combination of those types. Not: "
                 f"{type(slices)}"
             )
+
+    def plot_data(self,
+                  q_axis='qsz',
+                  slice_axis='qsx',
+                  filter_q=None,
+                  filter_range=None,
+                  log_scale=True,
+                  offset_order=0,
+                  offset_value=0,
+                  interactive_plot=True,
+                  ):
+
+        if interactive_plot:
+            fig = plotting.plot_reduced_slices_interactive(
+                self,
+                q_axis=q_axis,
+                slice_axis=slice_axis,
+                filter_q=filter_q,
+                filter_range=filter_range,
+                log_scale=log_scale,
+                offset_order=offset_order,
+                offset_value=offset_value,
+            )
+            iplot(fig)
+        else:
+            fig = plotting.plot_reduced_slices(
+                self,
+                q_axis=q_axis,
+                slice_axis=slice_axis,
+                filter_q=filter_q,
+                filter_range=filter_range,
+                log_scale=log_scale,
+                offset_order=offset_order,
+                offset_value=offset_value,
+            )
+
+        return fig

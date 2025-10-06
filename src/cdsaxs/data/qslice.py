@@ -117,7 +117,6 @@ class QSlice(Data1D):
             q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, mask=mask, **kwargs
         )
 
-
         self.data2d = data2d
 
         # define limits of roi
