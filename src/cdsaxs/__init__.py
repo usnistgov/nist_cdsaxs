@@ -7,6 +7,7 @@ import cdsaxs.calculators
 import cdsaxs.loaders.load_data
 import cdsaxs.data.metadata
 import cdsaxs.plotting
+import cdsaxs.plotting.plotting
 import cdsaxs.reduction
 import cdsaxs.sample
 import cdsaxs.tools

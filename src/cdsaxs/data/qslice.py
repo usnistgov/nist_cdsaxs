@@ -30,7 +30,8 @@ class QSlice(Data1D):
             integration_axis: int,
             image_roi: NDArray,
             image_mask: NDArray,
-            background=None,
+            background_Iq=None,
+            background_boxes=None,
             mask: NDArray = None,
             dIq: NDArray = None,
             **kwargs
@@ -172,15 +173,18 @@ class QSlice(Data1D):
                 "The image mask should have same dimensions as image roi."
             )
 
-        if background is not None:
-            background = np.array(background).reshape(-1).astype(float)
-            if len(background) == 1 or len(background) == len(self.Iq):
-                self.background = background
+        if background_Iq is not None:
+            background_Iq = np.array(background_Iq).reshape(-1).astype(float)
+            if len(background_Iq) == 1 or len(background_Iq) == len(self.Iq):
+                self.background_Iq = background_Iq
             else:
                 raise ValueError(
                     "The background should be a single float value or"
                     "an array of same length as Iq."
                 )
+        else:
+            self.background_Iq = None
+        self.background_boxes = background_boxes
 
     def mirror_q(self, q_axis=None, resort=True):
         """

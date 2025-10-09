@@ -145,6 +145,12 @@ class Data1D():
             )
         setattr(self, self.q_axis, new_q)
 
+    @property
+    def Iq_masked(self):
+        masked = np.array(self.Iq)
+        masked[self.mask] = np.nan
+        return masked
+
     def linear_interpolation(
             self,
             q_points: NDArray,

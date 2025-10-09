@@ -14,8 +14,8 @@ from cdsaxs.data.qslice import QSlice
 from cdsaxs.data.reduced_data1d import ReducedData1D
 from cdsaxs.data.reduced_data1d import ReducedData1DSlice
 from cdsaxs.sample import Sample
-import cdsaxs.plotting as plotting
-import cdsaxs._plotting_tools as plotting_tools
+import cdsaxs.plotting.plotting as plotting
+import cdsaxs.plotting._plotting_tools as plotting_tools
 from plotly.offline import iplot
 
 
@@ -680,8 +680,7 @@ class IntegratedDataset():
                   y_axis='sample_phi_deg',
                   interactive_plot=True,
                   log_scale=True,
-                  filter_q=None,
-                  filter_range=None,
+                  filters={},
                   marker_size=5):
 
         if interactive_plot:
@@ -690,8 +689,7 @@ class IntegratedDataset():
                 q_axis=q_axis,
                 y_axis=y_axis,
                 log_scale=log_scale,
-                filter_q=filter_q,
-                filter_range=filter_range,
+                filters=filters,
                 marker_size=marker_size
             )
             iplot(fig)
@@ -702,8 +700,7 @@ class IntegratedDataset():
                 q_axis=q_axis,
                 y_axis=y_axis,
                 log_scale=log_scale,
-                filter_q=filter_q,
-                filter_range=filter_range,
+                filters=filters,
                 marker_size=marker_size
             )
 
@@ -769,16 +766,14 @@ class ReducedDataset():
                   interactive_plot=True,
                   log_scale=True,
                   plot_marker_size=5,
-                  filter_q=None,
-                  filter_range=None,):
+                  filters={}):
 
         if interactive_plot:
             fig = plotting.plot_reduced_dataset_interactive(
                 self,
                 log_scale=log_scale,
                 interpolated_image=interpolated_image,
-                filter_q=filter_q,
-                filter_range=filter_range,
+                filters=filters,
             )
             iplot(fig)
         else:
@@ -787,10 +782,9 @@ class ReducedDataset():
                 log_scale=log_scale,
                 interpolated_image=interpolated_image,
                 plot_marker_size=plot_marker_size,
-                filter_q=filter_q,
-                filter_range=filter_range,
+                filters=filters,
             )
-        
+
         return fig
 
 
@@ -851,8 +845,7 @@ class ReducedSlices():
     def plot_data(self,
                   q_axis='qsz',
                   slice_axis='qsx',
-                  filter_q=None,
-                  filter_range=None,
+                  filters={},
                   log_scale=True,
                   offset_order=0,
                   offset_value=0,
@@ -864,8 +857,7 @@ class ReducedSlices():
                 self,
                 q_axis=q_axis,
                 slice_axis=slice_axis,
-                filter_q=filter_q,
-                filter_range=filter_range,
+                filters=filters,
                 log_scale=log_scale,
                 offset_order=offset_order,
                 offset_value=offset_value,
@@ -876,8 +868,7 @@ class ReducedSlices():
                 self,
                 q_axis=q_axis,
                 slice_axis=slice_axis,
-                filter_q=filter_q,
-                filter_range=filter_range,
+                filters=filters,
                 log_scale=log_scale,
                 offset_order=offset_order,
                 offset_value=offset_value,

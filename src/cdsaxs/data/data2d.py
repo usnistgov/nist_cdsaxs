@@ -18,8 +18,8 @@ import cdsaxs.calculators as calculators
 from cdsaxs.data.data_image import DataImage
 from cdsaxs.data.qslice import QSlice
 from cdsaxs.data.metadata import METADATA_KEYWORDS, check_metadata
-import cdsaxs.plotting as plotting
-import cdsaxs._plotting_tools as plotting_tools
+import cdsaxs.plotting.plotting as plotting
+import cdsaxs.plotting._plotting_tools as plotting_tools
 from cdsaxs.tools import line_fit
 from cdsaxs.tools import find_peaks_2D, find_peaks_2D_one_axis
 import cdsaxs.diffraction as diffraction
@@ -652,15 +652,12 @@ class Data2D(DataImage):
         limits_qdy_px: list | tuple | int,
         limits_qdx_px: list | tuple | int,
         mode: str,
-        axis: str | int,
+        axis: str | int = None,
         shift_box_qdy_px=0,
         shift_box_qdx_px=0,
         show_plot=True,
-        log_scale=True,
-        vmin=None,
-        vmax=None,
-        cmap='viridis',
         subtract_background_offset: int | list[int] = None,
+        plotting_kwargs={},
         # interactive_plot=True
     ) -> QSlice:
         """
@@ -699,6 +696,8 @@ class Data2D(DataImage):
             performed over all rows in each column and return I vs. qdx.
             If axis is set to 'qdx' or 1, this integration will be
             performed over all columns in each row and return I vs. qdy.
+            If no axis is provided, the function will assume the data
+            should be integrated over the shorter box edge.
         shift_box_qdy_px : int, optional
             Number of pixels to shift the box by in the positive qdy
             direction. A negative value will shift the box in the
@@ -744,6 +743,18 @@ class Data2D(DataImage):
             One-dimensional I vs. q data extracted from the integration.
 
         """
+        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
+            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
+                limits_qdy_px, limits_qdx_px,
+                shift_box_qdy_px=shift_box_qdy_px,
+                shift_box_qdx_px=shift_box_qdx_px)
+
+        if axis is None:
+            if np.diff(limits_qdy_px) <= np.diff(limits_qdx_px):
+                axis = 0
+            else:
+                axis = 1
+
         if isinstance(axis, str):
             if axis == 'qdy':
                 axis = 0
@@ -752,11 +763,8 @@ class Data2D(DataImage):
             else:
                 raise ValueError(f"Invalid integration axis of {axis}.")
 
-        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
-            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
-                limits_qdy_px, limits_qdx_px,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px)
+        if axis not in [0, 1]:
+            raise ValueError("Invalid integration axis of {axis}")
 
         # access parent method of box integration
         integrated_i, image_box, mask_box = super().slice_box(
@@ -772,7 +780,7 @@ class Data2D(DataImage):
             q_int = np.mean(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
             q_axis = 'qdx'
             q_int_axis = 'qdy'
-        elif axis == 1:
+        else:
             q = self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
             q_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
             q_axis = 'qdy'
@@ -830,28 +838,34 @@ class Data2D(DataImage):
             integration_axis=axis,
             image_roi=image_box,
             image_mask=mask_box,
-            background=background_i_avg
+            background_Iq=background_i_avg,
+            background_boxes=backgrounds
         )
         integrated_q_slice.__setattr__(q_int_axis, q_int)
 
         if show_plot:
-            self._plot_integrate_box(
-                log_scale,
-                vmin,
-                vmax,
-                cmap,
-                limits_qdy_px,
-                limits_qdx_px,
+            fig = plotting.plot_data2d_integrate_box(
                 integrated_q_slice,
-                subtract_background_offset,
-                before_background_i,
-                backgrounds
+                **plotting_kwargs
             )
+        else:
+            fig = None
 
-        return integrated_q_slice
+        return integrated_q_slice, fig
 
     def find_peaks2D(
-            self, box_dims=None, log_scale=True, refinement_size=7, **kwargs):
+            self,
+            limits_qdy_px=None,
+            limits_qdx_px=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
+            log_scale=True,
+            refinement_size=7,
+            show_plot=True,
+            zoom_plot=True,
+            plotting_kwargs={},
+            **kwargs
+        ):
         """
         Find peaks across a two-dimensional image or region of interest
         using the scikit-image.feature peak_local_max() function and
@@ -909,14 +923,18 @@ class Data2D(DataImage):
             scattering vector has not yet been calculated, this will be
             None.
         """
+        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
+            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
+                limits_qdy_px, limits_qdx_px,
+                shift_box_qdy_px=shift_box_qdy_px,
+                shift_box_qdx_px=shift_box_qdx_px)
 
-        if box_dims is not None:
-            (min0, max0), (min1, max1) = box_dims
-        else:
-            min0 = 0
-            max0 = self.image.shape[0]
-            min1 = 0
-            max1 = self.image.shape[1]
+        if limits_qdx_px is None:
+            limits_qdy_px = (0, self.image.shape[0])
+            limits_qdx_px = (0, self.image.shape[1])
+
+        min0, max0 = limits_qdy_px
+        min1, max1 = limits_qdx_px
 
         peaks = find_peaks_2D(
             self.image[min0:max0, min1:max1],
@@ -925,24 +943,47 @@ class Data2D(DataImage):
             mask=self.mask[min0:max0, min1:max1],
             **kwargs)
 
+        if len(peaks.shape) < 2:
+            peaks = np.empty((0, 2))
+        peaks[:, 0] = peaks[:, 0] + min0
+        peaks[:, 1] = peaks[:, 1] + min1
+
         if self.qdy is not None and self.qdx is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 
             sort_qdy = np.argsort(self.qdy)
             peaks_q[:, 0] = np.interp(
-                peaks[:, 0], np.arange(0, len(self.qdy)), self.qdy[sort_qdy])
+                peaks[:, 0],
+                np.arange(0, len(self.qdy))[sort_qdy],
+                self.qdy[sort_qdy])
 
             sort_qdx = np.argsort(self.qdx)
             peaks_q[:, 1] = np.interp(
-                peaks[:, 1], np.arange(0, len(self.qdx)), self.qdx[sort_qdx])
-        else:
-            peaks_q = None
+                peaks[:, 1],
+                np.arange(0, len(self.qdx))[sort_qdx],
+                self.qdx[sort_qdx])
 
-        return peaks, peaks_q
+        if show_plot:
+            fig = plotting.plot_data2d_find_peaks2d(
+                self,
+                peaks=peaks,
+                limits_axis0=limits_qdy_px,
+                limits_axis1=limits_qdx_px,
+                zoom_plot=zoom_plot,
+                **plotting_kwargs
+            )
+        else:
+            fig = None
+
+        return peaks, peaks_q, fig
 
     def find_peaks2D_one_axis(
-            self, box_dims=None, peak_axis=None, integration_mode='sum',
-            log_scale=True, refinement_size=7, algorithm='scikit', **kwargs):
+            self, limits_qdy_px=None, limits_qdx_px=None,
+            peak_axis=None, integration_mode='sum',
+            shift_box_qdy_px=0, shift_box_qdx_px=0,
+            log_scale=True, refinement_size=7, algorithm='scikit',
+            zoom_plot=True,
+            show_plot=True, plotting_kwargs={}, **kwargs):
         """
         Find peaks along one axis of a two-dimensional image using
         the scikit-image.feature peak_local_max() function. The peaks
@@ -1051,13 +1092,18 @@ class Data2D(DataImage):
             None.
         """
 
-        if box_dims is not None:
-            (min0, max0), (min1, max1) = box_dims
-        else:
-            min0 = 0
-            max0 = self.image.shape[0]
-            min1 = 0
-            max1 = self.image.shape[1]
+        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
+            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
+                limits_qdy_px, limits_qdx_px,
+                shift_box_qdy_px=shift_box_qdy_px,
+                shift_box_qdx_px=shift_box_qdx_px)
+
+        if limits_qdx_px is None:
+            limits_qdy_px = (0, self.image.shape[0])
+            limits_qdx_px = (0, self.image.shape[1])
+
+        min0, max0 = limits_qdy_px
+        min1, max1 = limits_qdx_px
 
         if peak_axis is None:
             if (max0 - min0) > (max1 - min1):
@@ -1075,80 +1121,55 @@ class Data2D(DataImage):
             algorithm=algorithm,
             **kwargs)
 
+        if len(peaks.shape) < 2:
+            peaks = np.empty((0, 2))
+        peaks[:, 0] = peaks[:, 0] + min0
+        peaks[:, 1] = peaks[:, 1] + min1
+
         if self.qdy is not None and self.qdx is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 
             sort_qdy = np.argsort(self.qdy)
             peaks_q[:, 0] = np.interp(
-                peaks[:, 0], np.arange(0, len(self.qdy)), self.qdy[sort_qdy])
+                peaks[:, 0],
+                np.arange(0, len(self.qdy))[sort_qdy],
+                self.qdy[sort_qdy])
 
             sort_qdx = np.argsort(self.qdx)
             peaks_q[:, 1] = np.interp(
-                peaks[:, 1], np.arange(0, len(self.qdx)), self.qdx[sort_qdx])
+                peaks[:, 1],
+                np.arange(0, len(self.qdx))[sort_qdx],
+                self.qdx[sort_qdx])
         else:
             peaks_q = None
 
-        return peaks, peaks_q
+        if show_plot:
+            fig = plotting.plot_data2d_find_peaks2d(
+                self,
+                peaks=peaks,
+                limits_axis0=limits_qdy_px,
+                limits_axis1=limits_qdx_px,
+                zoom_plot=zoom_plot,
+                **plotting_kwargs
+            )
+        else:
+            fig = None
+
+        return peaks, peaks_q, fig
 
     def plot_data(
             self,
-            show_pixels=False,
-            log_scale=True,
-            vmin=None,
-            vmax=None,
-            cmap='viridis',
+            **kwargs
     ):
         """
         Plot the scattering image.
-
-        Parameters
-        ----------
-        show_pixels : bool
-            If set to True, instead of the scattering vector, pixel
-            indices will be shown along the qdy and qdx axes.
-            Default value is False.
-        log_scale : bool
-            If set to True, the scattering intensity will be displayed
-            on a log sale. If set to False, the scattering intensity
-            will be displayed on a linear scale.
-            Default value is True
-        vmin : float
-            Manually set the minimum of the color bar range for
-            plotting intensity.
-        vmax : float
-            Manually set the maximum of the color bar range for
-            plotting intensity.
-        interactive_plot : bool
-            If set to True, an interactive plot built with Plotly will
-            TODO: currently this is disabled and only accepts True.
-        cmap : str
-            Colormap to use for the image display.
         """
-
-        if show_pixels or self.qdy is None:
-            axis0 = None
-            axis1 = None
-            axis0_type = 'px_dy'
-            axis1_type = 'px_dx'
-        else:
-            axis0 = self.qdy
-            axis1 = self.qdx
-            axis0_type = 'qdy'
-            axis1_type = 'qdx'
-
-        fig = plotting_tools.plot2D_interactive(
-            self.image,
-            axis0=axis0, axis1=axis1,
-            axis0_type=axis0_type, axis1_type=axis1_type,
-            title=self.name,
-            log_scale=log_scale,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
-            mask=self.mask
+        fig = plotting.plot_data2d(
+            self,
+            **kwargs
         )
 
-        iplot(fig)
+        return fig
 
     def find_beam_center_from_peaks(
             self,
@@ -1157,6 +1178,9 @@ class Data2D(DataImage):
             update=True,
             beam_center_guess=None,
             show_plot=True,
+            zoom_plot=True,
+            plotting_kwargs={},
+            ignore_peaks=[],
             **kwargs):
         """
         Attempt to locate the beam center position using the
@@ -1227,18 +1251,27 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, _ = self.find_peaks2D_one_axis(
-            box_dims=box_dims,
+        peaks, _, _ = self.find_peaks2D_one_axis(
+            limits_qdy_px=box_dims[0],
+            limits_qdx_px=box_dims[1],
             peak_axis=peak_axis,
+            show_plot=False,
             **kwargs
         )
+
+        peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
+        if len(ignore_peaks) > 0:
+            keep_index = [x for x in np.arange(0, peaks.shape[0])
+                          if x not in ignore_peaks]
+            peaks = peaks[keep_index, :]
 
         # check to make sure we found equal number of peaks on either
         # side of the guessed beam center position
         peaks_peak_axis = peaks[:, peak_axis]
-        peaks_peak_axis = peaks_peak_axis[np.argsort(peaks_peak_axis)]
-        low_peaks = peaks[peaks < self.metadata['center_px'][peak_axis]]
-        high_peaks = peaks[peaks > self.metadata['center_px'][peak_axis]]
+        low_peaks = peaks_peak_axis[
+            peaks_peak_axis < self.metadata['center_px'][peak_axis]]
+        high_peaks = peaks_peak_axis[
+            peaks_peak_axis > self.metadata['center_px'][peak_axis]]
 
         # determine whether the right number of peaks was found
         no_peak_warning = False
@@ -1269,16 +1302,25 @@ class Data2D(DataImage):
                 else:
                     center_qdx = (center_qdy-intercept)/slope
 
-        if show_plot:
-            pass
-            # fig, fig_slice = plotting.plot_find_beam_center(
-            #     self, integrated_q_slice, np.array(peaks_px), np.array(peaks_q),
-            #     [center_qdy, center_qdx])
-            # iplot(fig)
-            # iplot(fig_slice)
+        if update and not symmetric_warning and not no_peak_warning:
+            self.update_metadata({'center_px': (center_qdy, center_qdx)},
+                                 overwrite=True)
 
-        # move this check to after the plots so even if we didn't find
-        # the right peaks we can see the visualization
+        if show_plot:
+            fig = plotting.plot_data2d_find_beam_center(
+                self,
+                peaks=peaks,
+                limits_axis0=box_dims[0],
+                limits_axis1=box_dims[1],
+                zoom_plot=zoom_plot,
+                **plotting_kwargs,
+                show_beam_center=False\
+                if symmetric_warning or no_peak_warning else (
+                    True if update else (center_qdy, center_qdx))
+            )
+        else:
+            fig = None
+
         if symmetric_warning:
             raise ValueError(
                 "Found peaks were not symmetric about the beam center. "
@@ -1295,7 +1337,7 @@ class Data2D(DataImage):
             self.update_metadata({'center_px': (center_qdy, center_qdx)},
                                  overwrite=True)
 
-        return center_qdy, center_qdx
+        return (center_qdy, center_qdx), fig
 
     def find_sdd_from_reference_peaks(
             self,
@@ -1305,6 +1347,9 @@ class Data2D(DataImage):
             update=True,
             show_plot=True,
             peak_orders=None,
+            zoom_plot=True,
+            plotting_kwargs={},
+            ignore_orders=[],
             **kwargs
     ):
         """
@@ -1387,14 +1432,16 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, peaks_q = self.find_peaks2D_one_axis(
-            box_dims=box_dims,
+        peaks, peaks_q, _ = self.find_peaks2D_one_axis(
+            limits_qdy_px=box_dims[0],
+            limits_qdx_px=box_dims[1],
             peak_axis=peak_axis,
+            show_plot=False,
             **kwargs
         )
         # sort the peaks by index along peak_axis
         peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
-        peaks_q = peaks_q[np.argsort(peaks[:, peak_axis]), :]
+        # peaks_q = peaks_q[np.argsort(peaks[:, peak_axis]), :]
 
         # figure out peak orders unless otherwise provided
         low_peaks = peaks[
@@ -1411,14 +1458,12 @@ class Data2D(DataImage):
                 np.arange(0, len(high_peaks))+1
             ])
 
-        if show_plot:
-            pass
-            # fig, fig_slice = plotting.plot_find_beam_center(
-            #     self, integrated_q_slice, np.array(peaks_px),
-            #     np.array(peaks_q),
-            #     self.metadata['center_px'])
-            # iplot(fig)
-            # iplot(fig_slice)
+        if len(ignore_orders) > 0:
+            keep_index = [y for x, y in
+                          zip(peak_orders, np.arange(0, len(peak_orders)))
+                          if x not in ignore_orders]
+            peaks = peaks[keep_index, :]
+            peak_orders = peak_orders[keep_index]
 
         pixel_distances_cm = np.sqrt(np.sum(
             (peaks - self.metadata['center_px'])**2, axis=1
@@ -1429,13 +1474,26 @@ class Data2D(DataImage):
         sdd_cm_orders = pixel_distances_cm / np.tan(theta_rad)
 
         # calculate average SDD from all peaks
-        average_sdd = np.mean(sdd_cm_orders)
-        std_sdd = np.std(sdd_cm_orders)
+        average_sdd = np.round(np.mean(sdd_cm_orders), 2)
+        std_sdd = np.round(np.std(sdd_cm_orders), 2)
 
         if update:
             self.update_metadata({'sdd_cm': average_sdd}, overwrite=True)
 
-        return average_sdd, std_sdd
+        if show_plot:
+            fig = plotting.plot_data2d_find_sdd(
+                self,
+                peaks=peaks,
+                limits_axis0=box_dims[0],
+                limits_axis1=box_dims[1],
+                zoom_plot=zoom_plot,
+                sdd_cm=(average_sdd, std_sdd),
+                **plotting_kwargs,
+            )
+        else:
+            fig = None
+
+        return average_sdd, std_sdd, fig
 
     def find_detector_rotation_correction_from_peaks(
         self,
@@ -1520,111 +1578,3 @@ class Data2D(DataImage):
         else:
             angle, _, _ = line_fit(peaks[:, 1], peaks[:, 0])
             return angle
-
-    def _plot_integrate_box(
-        self,
-        log_scale,
-        vmin,
-        vmax,
-        cmap,
-        limits_qdy_px,
-        limits_qdx_px,
-        integrated_q_slice,
-        subtract_background_offset,
-        before_background_i,
-        backgrounds,
-    ):
-        fig = plotting_tools.plot2D_interactive(
-            self.image,
-            mask=self.mask,
-            axis0=self.qdy,
-            axis0_type='qdy',
-            axis1=self.qdx,
-            axis1_type='qdx',
-            title=f"Data Name: {self.name}",
-            log_scale=log_scale,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
-        )
-        fig = plotting_tools.plot2D_add_ROI_interactive(
-            fig,
-            rois=[
-                (limits_qdy_px, limits_qdx_px)
-            ],
-            roi_colors=['red'],
-            name='Integration Box',
-            showlegend=True)
-
-        if vmin is None:
-            vmin = fig.layout.coloraxis.cmin
-            if log_scale:
-                vmin += 1e-15 # correct for the negative value correction
-        if vmax is None:
-            vmax = fig.layout.coloraxis.cmax
-
-        fig_box = plotting_tools.plot2D_interactive(
-            integrated_q_slice.image_roi,
-            mask=integrated_q_slice.image_mask,
-            axis0=self.qdy[limits_qdy_px[0]:limits_qdy_px[1]],
-            axis0_type='qdy',
-            axis1=self.qdx[limits_qdx_px[0]:limits_qdx_px[1]],
-            axis1_type='qdx',
-            title=f"Integration Box",
-            log_scale=log_scale,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
-            showcolorbar=True,
-            width=550,
-            aspect='auto'
-        )
-
-        fig_slice = plotting_tools.plot1D_interactive(
-            integrated_q_slice.q,
-            integrated_q_slice.Iq,
-            mask=integrated_q_slice.mask,
-            axis_x_type=integrated_q_slice.q_axis,
-            axis_y_type="Sum I(q)"\
-            if integrated_q_slice.integration_mode == 'sum'\
-            else "Mean I(q)",
-            showlegend=True,
-            width=600,
-            name="Q Slice",
-            color='black'
-        )
-
-        if subtract_background_offset is not None:
-            fig_slice = plotting_tools.plot1D_add_trace_interactive(
-                    fig_slice,
-                    integrated_q_slice.q,
-                    before_background_i,
-                    showlegend=True,
-                    name='Q Slice before Subtraction'
-                )
-            ci = 0
-            for offset, (bgi, limits0, limits1) in zip(
-                    subtract_background_offset, backgrounds):
-                fig = plotting_tools.plot2D_add_ROI_interactive(
-                    fig,
-                    rois=[
-                        (limits0, limits1)
-                    ],
-                    roi_colors=['orange'],
-                    name='Background Box' if ci == 0 else None,
-                    showlegend=True if ci == 0 else False,
-                    roi_line_style=["dot"])
-                fig_slice = plotting_tools.plot1D_add_trace_interactive(
-                    fig_slice,
-                    integrated_q_slice.q,
-                    bgi,
-                    showlegend=True,
-                    name=f'Background Offset {offset}'
-                )
-                ci += 1
-
-        iplot(fig)
-        iplot(fig_box)
-        iplot(fig_slice)
-
-        return fig, fig_box, fig_slice

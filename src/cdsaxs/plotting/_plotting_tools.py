@@ -8,14 +8,13 @@ import plotly.colors
 import plotly.express as px
 import plotly.graph_objects as go
 
-import cdsaxs._plotting_tools as plotting_tools
+import cdsaxs.plotting._plotting_tools as plotting_tools
 from scipy.interpolate import griddata
-
+import matplotlib.pyplot as plt
 import cdsaxs.diffraction as diffraction
 
 
-
-def create_even_q_ticks(q, num=6, includes_zero=True):
+def create_even_axis_ticks(data, num=6, includes_zero=True):
     """
     Produces evenly spaced indices and corresponding q values
     for scattering image axes.
@@ -28,54 +27,54 @@ def create_even_q_ticks(q, num=6, includes_zero=True):
 
     TODO: figure out what happens if includes_zero=True and 0 is not in q
     """
+    data = np.array(data).reshape(-1)
+    sort_data = np.argsort(data)
+    data = data[sort_data]
+
     if not includes_zero:
-        ticks_index = np.arange(0, len(q))
+        ticks_index = np.arange(0, len(data))[sort_data]
         ticks_index = np.linspace(ticks_index, num=num)
-        ticks_q = q[ticks_index]
-        return ticks_index, ticks_q
+        ticks_data = np.interp(ticks_index, np.arange(0, len(data)), data)
 
     else:
-        spacing_exp = np.ceil(np.log10((np.nanmax(q)-np.nanmin(q))/(num-1)))
+        spacing_exp = np.ceil(
+            np.log10((np.nanmax(data)-np.nanmin(data))/(num-1)))
         spacing = 10**spacing_exp
 
-        start = np.ceil(np.nanmin(q)/spacing)*spacing
-        stop = np.floor(np.nanmax(q)/spacing)*spacing + spacing
+        start = np.ceil(np.nanmin(data)/spacing)*spacing
+        stop = np.floor(np.nanmax(data)/spacing)*spacing + spacing
 
-        ticks_q = np.round(np.arange(start, stop, spacing),
-                           int(np.abs(min(0, spacing_exp))))
+        ticks_data = np.round(np.arange(start, stop, spacing),
+                              int(np.abs(min(0, spacing_exp))))
 
-        while len(ticks_q) < (num-1):
+        while len(ticks_data) < (num-1):
             spacing /= 2
             spacing_exp = np.floor(np.log10(spacing))
 
-            start = np.ceil(np.nanmin(q)/spacing)*spacing
-            stop = np.floor(np.nanmax(q)/spacing)*spacing
-            ticks_q = np.round(np.arange(start, stop+spacing, spacing),
-                               int(np.abs(min(0, spacing_exp))))
+            start = np.ceil(np.nanmin(data)/spacing)*spacing
+            stop = np.floor(np.nanmax(data)/spacing)*spacing + spacing
+            ticks_data = np.round(np.arange(start, stop, spacing),
+                                  int(np.abs(min(0, spacing_exp))))
 
         # confirm the last point from np.arange is correct with floating point
         # calculations (see numpy documentation)
-        if ticks_q[-1] > np.nanmax(q):
-            ticks_q = ticks_q[:-1]
+        if ticks_data[-1] > np.nanmax(data):
+            ticks_data = ticks_data[:-1]
 
-        ticks_interp = []
-        ticks_index = np.arange(0, len(q))
-        for val in ticks_q:
-            if q[0] > q[-1]:
-                ticks_interp.append(
-                    np.interp(val, np.flip(q), np.flip(ticks_index)))
-            else:
-                ticks_interp.append(np.interp(val, q, ticks_index))
+        ticks_index = np.interp(
+            ticks_data,
+            data,
+            np.arange(0, len(data))[sort_data])
 
         # make sure that the ticks are suffiently spaced in pixels
-        if np.min(np.abs(np.diff(ticks_interp))) < 10:
-            ticks_interp = [ticks_interp[0], ticks_interp[-1]]
-            ticks_q = [ticks_q[0], ticks_q[-1]]
+        if np.min(np.abs(np.diff(ticks_index))) < 10:
+            ticks_index = [ticks_index[0], ticks_index[-1]]
+            ticks_data = [ticks_data[0], ticks_data[-1]]
 
-        return ticks_interp, ticks_q
+        return ticks_index, ticks_data
 
 
-def generate_axis_label_units(q_axis):
+def generate_formatted_axis_label(q_axis):
     """
     Generate formatted axis label with units based on the axis string.
     This only does anything with q axes currently; everythign else it
@@ -84,13 +83,13 @@ def generate_axis_label_units(q_axis):
     """
 
     if q_axis[0] == 'q':
-    
+
         units = r"(\mathring{\text{A}}^{-1})$"
 
         label = r"$q"
         if len(q_axis)==1:
             label = label + r"\thinspace" + units
-        
+
         else:
             subscript = r"_{" + q_axis[1]
             if len(q_axis) > 2:
@@ -107,6 +106,197 @@ def generate_axis_label_units(q_axis):
         label = q_axis
 
     return label
+
+
+def plot_data1d_add_data(
+        fig,
+        x,
+        y,
+        **kwargs
+):
+    fig = plt.figure(fig)
+    plt.errorbar(x, y, **kwargs)
+    return fig
+
+
+def plot_data2d_add_roi(
+        fig,
+        limits_axis0,
+        limits_axis1,
+        color='red',
+        label=None,
+        fmt='-',
+        **kwargs
+):
+    xmin, xmax = limits_axis1
+    ymin, ymax = limits_axis0
+    xmin -= 0.5
+    xmax -= 0.5
+    ymin -= 0.5
+    ymax -= 0.5
+    x = [xmin, xmin, xmax, xmax, xmin]
+    y = [ymin, ymax, ymax, ymin, ymin]
+
+    fig = plt.figure(fig)
+    plt.errorbar(x, y, color=color, label=label, fmt=fmt, **kwargs, zorder=1000)
+
+    plt.legend(bbox_to_anchor=(1.75, 1), loc='upper left', bbox_transform=fig.axes[1].transAxes)
+
+    plt.tight_layout(rect=[0, 0.02, 1, 0.98])
+
+    return fig
+
+
+def plot_data2d_add_points(
+        fig,
+        x,
+        y,
+        color='red',
+        label=None,
+        fmt='o',
+        **kwargs
+):
+    fig = plt.figure(fig)
+    plt.errorbar(x, y, color=color, label=label, fmt=fmt, **kwargs, zorder=1000)
+
+    plt.legend(bbox_to_anchor=(1.75, 1), loc='upper left', bbox_transform=fig.axes[1].transAxes)
+
+    plt.tight_layout(rect=[0, 0.02, 1, 0.98])
+
+    return fig
+
+
+
+def plotly_update_axes(fig, x_axis=None, y_axis=None,
+                       x_range=None, y_range=None,
+                       x_data=None, y_data=None):
+
+    fig.update_xaxes(ticks='outside')
+    fig.update_yaxes(ticks='outside')
+
+    if x_axis is not None:
+        fig.update_xaxes(
+            title=plotting_tools.generate_formatted_axis_label(x_axis))
+    if x_range is not None:
+        fig.update_xaxes(
+            {'range': x_range}
+        )
+
+    if y_axis is not None:
+        fig.update_yaxes(
+            title=plotting_tools.generate_formatted_axis_label(y_axis))
+    if y_range is not None:
+        fig.update_yaxes(
+            {'range': y_range}
+        )
+
+    if x_data is not None:
+        ticks, labels = plotting_tools.create_even_q_ticks(x_data)
+        fig.update_xaxes(tickvals=ticks, ticktext=labels)
+
+    if y_data is not None:
+        ticks, labels = plotting_tools.create_even_q_ticks(y_data)
+        fig.update_yaxes(tickvals=ticks, ticktext=labels)
+
+    return fig
+
+
+def plotly_update_layout(fig, title=None, width=None,
+                         xscale=None, yscale=None):
+
+    if title is not None:
+        fig.update_layout({'title': title})
+
+    if width is not None:
+        fig.update_layout(width=width)
+
+    if xscale is not None:
+        fig.update_layout(
+            xaxis_type=xscale
+        )
+
+    if yscale is not None:
+        fig.update_layout(
+            yaxis_type=yscale
+        )
+
+    return fig
+
+
+def plotly_update_colorbar_ticks(fig, colorbar_ticks, colorbar_labels,
+                                 type='image', title=None):
+
+    if type == 'scatter':
+        fig.update_traces(
+            marker_colorbar_tickvals=colorbar_ticks,
+            marker_colorbar_ticktext=colorbar_labels,
+            selector=dict(type='scatter')
+        )
+    elif type == 'image':
+        fig.update_layout(
+            coloraxis_colorbar={
+                'tickvals': colorbar_ticks,
+                'ticktext': colorbar_labels,
+            })
+        fig.update_layout(
+            coloraxis_colorbar={
+                'ticks': 'outside'
+            }
+        )
+
+    if type == 'image' and title is not None:
+
+        fig.update_layout(
+            coloraxis_colorbar={
+                'title': {'text': title, 'side': 'right'}
+            }
+        )
+
+    return fig
+
+
+def get_vmin_vmax(data, log_scale, mask=None):
+    """
+    Determine the vmin and vmax value for either 'linear' or 'log' scale
+    of the provided data.
+    """
+    data = np.array(data)
+    if mask is not None:
+        data[mask] = np.nan
+
+    if log_scale:
+        vmin = np.log10(np.max([np.nanmin(data[data > 0]), 0.1]))
+        vmax = np.log10(np.nanmax(data))
+
+    else:
+        vmin = 0
+        vmax = np.nanmax(data)
+
+    return vmin, vmax
+
+
+def prepare_data_for_plotting(image, log_scale, vmin=0, mask=None):
+    """
+    Prepare the image for plotting. If log_scale is True, this will
+    apply the log and set any pixels that were less than or equal to 0
+    as -999 so that they can be flagged and set to the color black. Any
+    masked points will be set as np.nan so that they show as transparent.
+
+    For linear systems, the masked points will be set as np.nan.
+    """
+
+    plotting_image = np.copy(image)
+    if mask is not None:
+        plotting_image[mask] = np.nan
+    if log_scale:
+        mask_negative = plotting_image <= 0
+        with np.errstate(divide='ignore', invalid='ignore'):
+            plotting_image = np.log10(plotting_image)
+            set_to_vmin = (plotting_image > 0) & (plotting_image <= vmin)
+        plotting_image[mask_negative] = -999
+        plotting_image[set_to_vmin] = vmin
+
+    return plotting_image
 
 
 def plot2D_interactive(
@@ -126,73 +316,45 @@ def plot2D_interactive(
         aspect='equal'):
     # TODO axis not rendering in vs code notebook - KNOWN ISSUE VSCODE/PLOTLY
 
-    plot_image = np.copy(image)
+    vmin, vmax = get_vmin_vmax(image, log_scale=log_scale, mask=mask)
+    plot_image = prepare_data_for_plotly_colorbar(
+        image, log_scale=log_scale, mask=mask, vmin=vmin)
 
-    if mask is not None:
-        plot_image[mask] = np.nan
-
+    # setup custom colorscale
     if not log_scale:
-        vmin = 0 if vmin is None else vmin
-        vmax = np.nanmax(plot_image) if vmax is None else vmax
         custom_colorscale = cmap
-        overall_min = vmin
+        global_min = vmin
     else:
-        vmin = np.log10(np.max([np.nanmin(plot_image[plot_image > 0]), 0.1]))\
-            if vmin is None else vmin
-        vmax = np.log10(np.nanmax(plot_image)) if vmax is None else vmax
-        with np.errstate(divide='ignore', invalid='ignore'):
-            plot_image_log = np.log10(plot_image)
-        plot_image_log[plot_image <= 0] = -10  # will make these points black
-        plot_image_log[np.isnan(plot_image)] = None  # will be transparent
-        plot_image = plot_image_log
+        standard_scale = plotly.colors.sample_colorscale(
+            cmap, sample_points=list(np.linspace(0, 1, 101))
+        )
+        custom_colorscale = [[0, 'black']]  # -10 points will be black
+        global_min = vmin-1e-15
 
-        # modify the colorscale so that points lower than the range
-        # show up as black
-
-        viridis_scale = plotly.colors.sample_colorscale(
-            cmap, samplepoints=list(np.linspace(0, 1, 101)))
-        custom_colorscale = []
-        custom_colorscale.append([0, 'black'])
-
-        overall_min = vmin-1e-15
-
-        for val, color in zip(np.linspace(0, 1, 101), viridis_scale):
-            scaled_val = vmin + val * (vmax - vmin)
-            normalized_val = (scaled_val - overall_min) / (vmax - overall_min)
+        for val, color in zip(np.linspace(0, 1, 101), standard_scale):
+            scale_val = vmin + val * (vmax - vmin)
+            normalized_val = (scale_val - global_min) / (vmax - global_min)
             custom_colorscale.append([normalized_val, color])
 
     # plot the image keeping the aspect ratio of equal for square pixels
-    fig = px.imshow(plot_image, zmin=overall_min, zmax=vmax,
+    fig = px.imshow(plot_image, zmin=global_min, zmax=vmax,
                     color_continuous_scale=custom_colorscale, aspect=aspect)
 
-    fig.update_yaxes(
-        title=plotting_tools.generate_axis_label_units(axis0_type)
-        if axis0_type is not None else "",
-        ticks='outside'
+    fig = plotly_update_axes(
+        fig,
+        x_axis=axis1_type, y_axis=axis0_type,
+        x_data=axis1, y_data=axis0
     )
-    if axis0 is not None:
-        ticks, labels = plotting_tools.create_even_q_ticks(axis0)
-        fig.update_yaxes(tickvals=ticks, ticktext=labels)
-
-    fig.update_xaxes(
-        title=plotting_tools.generate_axis_label_units(axis1_type)
-        if axis1_type is not None else "",
-        ticks='outside'
-    )
-    if axis1 is not None:
-        ticks, labels = plotting_tools.create_even_q_ticks(axis1)
-        fig.update_xaxes(tickvals=ticks, ticktext=labels)
 
     if log_scale and showcolorbar:
         colorbar_ticks = list(np.arange(
             vmin, np.ceil(vmax) if vmax % 1 > 0 else np.ceil(vmax)+1, step=1))
         colorbar_labels = [10**x for x in colorbar_ticks]
         colorbar_labels = [f"{x:.{0}e}" for x in colorbar_labels]
-        fig.update_layout(
-            coloraxis_colorbar={
-                'tickvals': colorbar_ticks,
-                'ticktext': colorbar_labels,
-            })
+        fig = plotly_update_colorbar_ticks(
+            fig, colorbar_ticks=colorbar_ticks,
+            colorbar_labels=colorbar_labels, type='image')
+
     fig.update_layout(
         width=width
     )
@@ -311,7 +473,7 @@ def plot1D_interactive(x, y, error_y=None, mask=None,
 
     if axis_x_type is not None:
         fig.update_xaxes(
-            title=plotting_tools.generate_axis_label_units(
+            title=plotting_tools.generate_formatted_axis_label(
                 axis_x_type
             ),
             ticks='outside'
@@ -324,7 +486,7 @@ def plot1D_interactive(x, y, error_y=None, mask=None,
 
     if axis_y_type is not None:
         fig.update_yaxes(
-            title=plotting_tools.generate_axis_label_units(
+            title=plotting_tools.generate_formatted_axis_label(
                 axis_y_type
             ),
             ticks='outside'
