@@ -167,7 +167,7 @@ class Dataset():
             data = self.datas[key]
             data.update_user_params(params=params, overwrite=overwrite)
 
-    def filter_data_by_metadata(key, value):
+    def filter_data_by_metadata(self, key, value):
         """
         Get a list of keys to the datas dictionary based on a metadata
         or user param keyword.
@@ -182,7 +182,7 @@ class Dataset():
             filtered by. If a string, integer, or float, the metadata
             value for each data will need to match exactly to be returned.
             Otherwise, if a tuple is provided, the metadata keyword
-            should fall within the numerical range defined by [min, max).
+            should fall within the numerical range defined by [min, max].
             This range is inclusive at min and exclusive at max.
             Finally, if a list is provided, the metadata keyword value
             should be present in that list. For example, if value was
@@ -198,7 +198,7 @@ class Dataset():
 
         keys = []
 
-        for data_key, data in datas.items():
+        for data_key, data in self.datas.items():
             if key in data.metadata.keys():
                 test_value = data.metadata[key]
             elif key in data.user_params.keys():
@@ -210,7 +210,7 @@ class Dataset():
                 )
 
             if isinstance(value, tuple):
-                if test_value >= value[0] and test_value < value[1]:
+                if test_value >= value[0] and test_value <= value[1]:
                     keys.append(data_key)
             elif isinstance(value, list):
                 if test_value in value:
@@ -220,32 +220,6 @@ class Dataset():
                     keys.append(data_key)
 
         return keys
-
-
-    # def plot_datas(self, keys: list = None):
-    #     """
-    #     Plot one or more Data2D in the dataset.
-
-    #     Parameters
-    #     ----------
-    #     keys : list
-    #         List of keys to the datas dictionary to select which data
-    #         will be plotted.
-    #     """
-
-    #     figs = []
-
-    #     if keys is None:
-    #         keys = list(self.datas.keys())
-    #     elif isinstance(keys, str):
-    #         keys = [keys]
-    #     else:
-    #         pass
-
-    #     for key in keys:
-    #         figs.append(self.datas[key].plot_data(return_fig=True))
-
-    #     return figs
 
     def normalize_all_data_by_metadata(
             self, normalize_by, keys=None):
@@ -471,7 +445,7 @@ class Dataset():
         qslices = []
         for key in keys:
             data = self.datas[key]
-            qslice = data.integrate_box(
+            qslice, _ = data.integrate_box(
                 limits_qdy_px=limits_qdy_px,
                 limits_qdx_px=limits_qdx_px,
                 mode=mode,
@@ -655,7 +629,7 @@ class IntegratedDataset():
         if isinstance(qslices, QSlice):
             qslices = [qslices]
         elif isinstance(qslices, IntegratedDataset):
-            qslices = [IntegratedDataset]
+            qslices = [qslices]
 
         if isinstance(qslices, list):
             for qslice in qslices:
@@ -675,34 +649,31 @@ class IntegratedDataset():
                 f"{type(qslices)}"
             )
 
-    def plot_data(self,
-                  q_axis='qdx',
-                  y_axis='sample_phi_deg',
-                  interactive_plot=True,
-                  log_scale=True,
-                  filters={},
-                  marker_size=5):
+    def plot_data(
+        self,
+        q_axis='qdx',
+        y_axis='sample_phi_deg',
+        log_scale=True,
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        filter_by_q={},
+        filter_by_metadata={},
+        **kwargs
+    ):
 
-        if interactive_plot:
-            fig = plotting.plot_integrated_dataset_interactive(
-                self,
-                q_axis=q_axis,
-                y_axis=y_axis,
-                log_scale=log_scale,
-                filters=filters,
-                marker_size=marker_size
-            )
-            iplot(fig)
-
-        else:
-            fig = plotting.plot_integrated_dataset(
-                self,
-                q_axis=q_axis,
-                y_axis=y_axis,
-                log_scale=log_scale,
-                filters=filters,
-                marker_size=marker_size
-            )
+        fig = plotting.plot_integrated_dataset(
+            self,
+            q_axis=q_axis,
+            y_axis=y_axis,
+            log_scale=log_scale,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            filter_by_q=filter_by_q,
+            filter_by_metadata=filter_by_metadata,
+            **kwargs
+        )
 
         return fig
 
@@ -741,13 +712,13 @@ class ReducedDataset():
         if isinstance(data, ReducedData1D):
             data = [data]
         elif isinstance(data, ReducedDataset):
-            data = [ReducedDataset]
+            data = [data]
 
         if isinstance(data, list):
             for dat in data:
-                if isinstance(dat, QSlice):
+                if isinstance(dat, ReducedData1D):
                     self.data.append(dat)
-                elif isinstance(dat, IntegratedDataset):
+                elif isinstance(dat, ReducedDataset):
                     self.data.extend(dat.data)
                 else:
                     raise ValueError(
@@ -761,29 +732,29 @@ class ReducedDataset():
                 f"{type(data)}"
             )
 
-    def plot_data(self,
-                  interpolated_image=False,
-                  interactive_plot=True,
-                  log_scale=True,
-                  plot_marker_size=5,
-                  filters={}):
+    def plot_data(
+            self,
+            log_scale=True,
+            cmap='viridis',
+            vmin=None,
+            vmax=None,
+            filter_by_q={},
+            filter_by_metadata={},
+            interpolated_data=False,
+            **kwargs
+    ):
 
-        if interactive_plot:
-            fig = plotting.plot_reduced_dataset_interactive(
-                self,
-                log_scale=log_scale,
-                interpolated_image=interpolated_image,
-                filters=filters,
-            )
-            iplot(fig)
-        else:
-            fig = plotting.plot_reduced_dataset(
-                self,
-                log_scale=log_scale,
-                interpolated_image=interpolated_image,
-                plot_marker_size=plot_marker_size,
-                filters=filters,
-            )
+        fig = plotting.plot_reduced_dataset(
+            self,
+            log_scale=log_scale,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            filter_by_q=filter_by_q,
+            filter_by_metadata=filter_by_metadata,
+            interpolated_data=interpolated_data,
+            **kwargs
+        )
 
         return fig
 
@@ -811,7 +782,7 @@ class ReducedSlices():
         self.name = name
         self.data = []
         if slices is not None:
-            self.add_slices(data=slices)
+            self.add_slices(slices=slices)
 
     def add_slices(self, slices: ReducedData1DSlice | list | ReducedSlices):
         """
@@ -819,17 +790,17 @@ class ReducedSlices():
         You can also provide another instance of this class and the
         slices will get added to this instance.
         """
-        if isinstance(slices, ReducedData1D):
+        if isinstance(slices, ReducedData1DSlice):
             slices = [slices]
-        elif isinstance(slices, ReducedDataset):
-            slices = [ReducedDataset]
+        elif isinstance(slices, ReducedSlices):
+            slices = [slices]
 
         if isinstance(slices, list):
             for slice_i in slices:
-                if isinstance(slice_i, QSlice):
+                if isinstance(slice_i, ReducedData1DSlice):
                     self.data.append(slice_i)
-                elif isinstance(slice_i, IntegratedDataset):
-                    self.data.extend(slice_i.slices)
+                elif isinstance(slice_i, ReducedSlices):
+                    self.data.extend(slice_i.data)
                 else:
                     raise ValueError(
                         "Didn't recognize reduced data type "

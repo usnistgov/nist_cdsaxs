@@ -564,6 +564,22 @@ def plot1D_add_trace_interactive(fig, x, y, error_y=None, mask=None,
     return fig
 
 
+def generate_interpolated_integrated_data(
+        qd,
+        y,
+        Iq,
+        grid_size=1000,
+):
+
+    grid_x, grid_y = np.meshgrid(
+        np.linspace(np.min(qd), np.max(qd), grid_size),
+        np.linspace(np.min(y), np.max(y), grid_size)
+    )
+    grid_Iq = griddata((qd, y), Iq, (grid_x, grid_y), method='cubic')
+
+    return grid_x, grid_y, grid_Iq
+
+
 def generate_interpolated_reduced_data(
         qsx,
         qsz,
@@ -572,7 +588,12 @@ def generate_interpolated_reduced_data(
         sample_phi_deg_range,
         grid_size=1000,
 ):
-    
+
+    remove_nan = np.isnan(Iq)
+    qsx = qsx[~remove_nan]
+    qsz = qsz[~remove_nan]
+    Iq = Iq[~remove_nan]
+
     grid_x, grid_z = np.meshgrid(
         np.linspace(np.min(qsx), np.max(qsx), grid_size),
         np.linspace(np.min(qsz), np.max(qsz), grid_size)
@@ -591,5 +612,5 @@ def generate_interpolated_reduced_data(
 
     grid_Iq[filter_out] = np.nan
 
-    return grid_x, grid_z, grid_Iq
+    return grid_x, grid_z, grid_Iq, filter_out
 

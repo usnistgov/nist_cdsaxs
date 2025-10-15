@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 from PIL import Image
 from scipy.interpolate import griddata
 import matplotlib.colors as mcolors
+import matplotlib.ticker as ticker
 
 import cdsaxs.plotting._plotting_tools as plotting_tools
 import cdsaxs.diffraction as diffraction
@@ -60,9 +61,9 @@ def plot_image(
     # somehow did not get included in the standard mask
     mask_inf = ((np.isinf(plotting_image)
                  | np.isneginf(plotting_image))
-                & mask)
+                & ~mask)
     mask_nan = (np.isnan(plotting_image)
-                & mask)
+                & ~mask)
 
     # additional masked points also set to nan in the image for plotting
     plotting_image[mask_inf] = np.nan
@@ -389,13 +390,13 @@ def plot_qslice(
             ylim=ylim,
             **kwargs
         )
-        for bi, _, _ in qslice.background_boxes:
+        for i, (bi, _, _) in enumerate(qslice.background_boxes):
             fig_background = plot_errorbar(
                 qslice.q,
                 bi,
                 fig=fig_background,
                 show_legend=show_legend,
-                label="None",
+                label=f'Background {i}',
                 zorder=10,
                 fmt='o-',
                 **kwargs
@@ -552,6 +553,90 @@ def plot_data2d_find_peaks2d(
             max(limits_axis0[0]-20, 0))
     return fig
 
+
+def plot_data2d_find_detector_rotation_correction(
+        data2d,
+        peaks,
+        line,
+        limits_axis0,
+        limits_axis1,
+        log_scale=True,
+        zoom_plot=True,
+        cmap='viridis',
+        aspect='equal',
+        vmin=None,
+        vmax=None,
+        color_mask='transparent',
+        color_inf='black',
+        color_nan='red',
+        color_peaks='yellow',
+        color_integration_box='yellow',
+        **kwargs
+):
+
+    fig = plot_data2d(
+        data2d,
+        log_scale=log_scale,
+        cmap=cmap,
+        aspect=aspect,
+        vmin=vmin,
+        vmax=vmax,
+        color_mask=color_mask,
+        color_inf=color_inf,
+        color_nan=color_nan,
+        fig=None
+    )
+
+    fig = plot_image_add_roi(
+        limits_axis0=limits_axis0,
+        limits_axis1=limits_axis1,
+        fig=fig,
+        show_legend=False,
+        color=color_integration_box,
+        zorder=1000
+    )
+
+    if peaks.shape[0] > 0:
+        fig = plot_errorbar(
+            peaks[:, 1],
+            peaks[:, 0],
+            color=color_peaks,
+            fmt='o',
+            fig=fig,
+            show_legend=False,
+            **kwargs,
+            zorder=1000
+        )
+
+    angle, slope, intercept = line
+    if not np.isnan(angle):
+        if np.isnan(slope):  # vertical line
+            q_range = peaks[:, 1]
+            plot_line = peaks[:, 0]
+        else:
+            q_range = np.arange(min(limits_axis1), max(limits_axis1), 1)
+            plot_line = q_range*slope + intercept
+        fig = plot_errorbar(
+            q_range,
+            plot_line,
+            color=color_peaks,
+            fmt=':',
+            fig=fig,
+            show_legend=False,
+            **kwargs,
+            zorder=1000
+        )
+
+    if zoom_plot:
+        plt.xlim(
+            max(limits_axis1[0]-20, 0),
+            min(limits_axis1[1]+20, data2d.image.shape[1]))
+        plt.ylim(
+            min(limits_axis0[1]+20, data2d.image.shape[0]),
+            max(limits_axis0[0]-20, 0))
+    return fig
+
+
 def plot_data2d_find_beam_center(
         data2d,
         peaks,
@@ -658,392 +743,61 @@ def plot_data2d_find_sdd(
     return fig
 
 
-def plot_QdyQdx_find_peaks(data, integrated_q_slice, peak_coords_array,
-                           peak_coords_q, log_scale=True):
-
-    fig = plot2D(data.image, axis0=data.qdy, axis1=data.qdx,
-                 axis0_type='qdy', axis1_type='qdx', log_scale=log_scale)
-
-    # box limits, lines get drawn in the middle of pixels so offset
-    # half open range by 0.5 pixels
-    xmin, xmax = integrated_q_slice.limits_axis1
-    xmin -= 0.5
-    xmax -= 0.5
-    ymin, ymax = integrated_q_slice.limits_axis0
-    ymin -= 0.5
-    ymax -= 0.5
-    x = [xmin, xmin, xmax, xmax, xmin]
-    y = [ymin, ymax, ymax, ymin, ymin]
-    fig.add_trace(go.Scatter(
-        x=x, y=y, mode='lines', line=dict(color='red'), showlegend=False,
-    ))
-    fig.add_trace(go.Scatter(
-        x=peak_coords_array[:, 1], y=peak_coords_array[:, 0], mode='markers',
-        marker=dict(color='red'), showlegend=False
-    ))
-
-    # integrated 1D data
-
-    fig_slice = go.Figure()
-
-    if integrated_q_slice.q_axis == 'qdy':
-        for x in peak_coords_q[:, 0]:
-            fig_slice.add_trace(go.Scatter(
-                x=[x, x],
-                y=[np.nanmin(integrated_q_slice.Iq),
-                   np.nanmax(integrated_q_slice.Iq)*1.1],
-                mode='lines',
-                line={'color': 'red'},
-                showlegend=False
-            ))
-    else:
-        for x in peak_coords_q[:, 1]:
-            fig_slice.add_trace(go.Scatter(
-                x=[x, x],
-                y=[np.nanmin(integrated_q_slice.Iq),
-                   np.nanmax(integrated_q_slice.Iq)*1.1],
-                mode='lines',
-                line={'color': 'red'},
-                showlegend=False
-            ))
-
-    fig_slice.add_trace(go.Scatter(
-        x=integrated_q_slice.q,
-        y=integrated_q_slice.Iq,
-        mode='lines+markers',
-        marker={'color': 'darkcyan'},
-        error_y=dict(
-            type='data',
-            array=integrated_q_slice.dIq,
-            visible=True,
-        ),
-        showlegend=False
-    ))
-
-    if integrated_q_slice.mode == 'sum':
-        y_axis_label = 'Total Intensity'
-    elif integrated_q_slice.mode == 'mean':
-        y_axis_label = 'Average Intensity'
-    else:
-        y_axis_label = 'Intensity'
-
-    fig_slice = plotting_tools.plotly_update_axes(
-        x_axis=integrated_q_slice.q_axis,
-        y_axis=y_axis_label
-
-    )
-
-    fig_slice = plotting_tools.plotly_update_layout(width=500)
-
-    if log_scale:
-        fig_slice = plotting_tools.plotly_update_layout(yscale='log')
-    else:
-        fig_slice = plotting_tools.plotly_update_axes(
-            yrange=(0, np.nanmax(integrated_q_slice.Iq)*1.05)
-        )
-
-    return fig, fig_slice
-
-
-def plot_find_beam_center(data, integrated_q_slice, peak_coords_array,
-                          peaks_q_array,
-                          beam_center,
-                          log_scale=True):
-
-    fig, fig_slice = plot_QdyQdx_find_peaks(
-        data, integrated_q_slice, peak_coords_array, peaks_q_array, 
-        log_scale=log_scale
-    )
-
-    fig.add_vline(beam_center[1], line={'color': 'red', 'dash': 'dot'})
-    fig.add_hline(beam_center[0], line={'color': 'red', 'dash': 'dot'})
-
-    return fig, fig_slice
-
-
-def plot_reduced_dataset(
-    reduced_dataset,
-    log_scale=True,
-    interpolated_image=True,
-    plot_marker_size=5,
-    filters={},
-):
-    filtered_slices = reduced_dataset.data.copy()
-    for key, value in filters.items():
-        keep = []
-        for data in filtered_slices:
-            test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
-                keep.append(True)
-            else:
-                keep.append(False)
-        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
-
-    qszs = []
-    qsxs = []
-    Iqs = []
-    wavelengths = []
-    sample_phi_degs = []
-
-    for data in filtered_slices:
-        qsz = data.qsz
-        qsx = data.qsx
-        Iq = np.copy(data.Iq)
-        mask = data.mask
-        Iq[mask] = np.nan
-        qszs.extend(list(qsz))
-        qsxs.extend(list(qsx))
-        Iqs.extend(list(Iq))
-        wavelengths.append(data.wavelength_nm)
-        sample_phi_degs.append(data.sample_phi_deg)
-
-    qszs = np.array(qszs)
-    qsxs = np.array(qsxs)
-    Iqs = np.array(Iqs)
-
-    if len(list(set(wavelengths))) > 1:
-        warnings.warn(
-            "You are using multiple wavelengths in your"
-            "reduction, is that correct? For now we are showing data"
-            "under the assumption of a single wavelength!")
-
-    if log_scale:
-        vmin = np.nanmin(np.log10(Iqs[Iqs > 0]))
-        vmax = np.nanmax(np.log10(Iqs[Iqs > 0]))
-    else:
-        vmin = np.nanmin(0)
-        vmax = np.nanmax(Iqs)
-
-    fig, ax = plt.subplots()
-    fig.set_figheight(8)
-    fig.set_figwidth(9)
-
-    if not interpolated_image:
-        colors = []
-        cmap = mpl.colormaps['viridis']
-
-        for Iq in Iqs:
-            if np.isnan(Iq):
-                # nan points are transparent
-                colors.append((1, 1, 1, 0))
-            elif Iq <= 0:
-                if log_scale:
-                    # negative or 0 intensity on log scale is black
-                    colors.append((1, 1, 1, 1))
-                else:
-                    colors.append(cmap(0))
-            elif Iq > 0 and Iq <= vmin:
-                # intensity less than vmin are vmin color
-                colors.append(cmap(0))
-            elif Iq > vmin and Iq <= vmax:
-                # apply colormap
-                if log_scale:
-                    colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
-                else:
-                    colors.append(cmap((Iq-vmin)/(vmax-vmin)))
-            else:
-                # intensity higher than vmax are vmax color
-                colors.append(cmap(1))
-
-        colors = np.array(colors)
-
-        ax.scatter(qsxs,  qszs, s=plot_marker_size, marker='o', color=colors)
-        ax.set_xlabel(plotting_tools.generate_formatted_axis_label('qsx'))
-        ax.set_ylabel(plotting_tools.generate_formatted_axis_label('qsz'))
-
-    else:
-        wavelength_nm = wavelengths[0]
-        sample_phi_deg_range = (np.nanmax(sample_phi_degs),
-                                np.nanmin(sample_phi_degs))
-        grid_x, grid_z, grid_Iq = plotting_tools(
-            qsxs, qszs, Iqs, wavelength_nm, sample_phi_deg_range,
-            grid_size=1000,
-        )
-        plt.contour(grid_x, grid_z, np.log10(grid_Iq), 1000, cmap='viridis',
-                    vmin=vmin, vmax=vmax)
-        ax.set_xlabel(plotting_tools.generate_formatted_axis_label('qsx'))
-        ax.set_ylabel(plotting_tools.generate_formatted_axis_label('qsz'))
-
-    if log_scale:
-        norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)
-    else:
-        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-    cmap = mpl_cm.viridis
-    mappable = mpl_cm.ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(mappable, ax=ax)
-    cbar.set_label("Intensity")
-
-    plt.title(reduced_dataset.name)
-
-    plt.close()
-
-    return fig
-
-
-def plot_reduced_dataset_interactive(
-    reduced_dataset,
-    log_scale=True,
-    interpolated_image=True,
-    filters={}
-):
-    filtered_slices = reduced_dataset.data.copy()
-    for key, value in filters.items():
-        keep = []
-        for data in filtered_slices:
-            test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
-                keep.append(True)
-            else:
-                keep.append(False)
-        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
-
-    qszs = []
-    qsxs = []
-    Iqs = []
-    wavelengths = []
-    sample_phi_degs = []
-
-    for data in filtered_slices:
-        qsz = data.qsz
-        qsx = data.qsx
-        Iq = np.copy(data.Iq)
-        mask = data.mask
-        Iq[mask] = np.nan
-        qszs.extend(list(qsz))
-        qsxs.extend(list(qsx))
-        Iqs.extend(list(Iq))
-        wavelengths.append(data.wavelength_nm)
-        sample_phi_degs.append(data.sample_phi_deg)
-
-    qszs = np.array(qszs)
-    qsxs = np.array(qsxs)
-    Iqs = np.array(Iqs)
-
-    if len(list(set(wavelengths))) > 1:
-        warnings.warn(
-            "You are using multiple wavelengths in your"
-            "reduction, is that correct? For now we are showing data"
-            "under the assumption of a single wavelength!")
-
-    if log_scale:
-        vmin = np.nanmin(np.log10(Iqs[Iqs > 0]))
-        vmax = np.nanmax(np.log10(Iqs[Iqs > 0]))
-    else:
-        vmin = np.nanmin(0)
-        vmax = np.nanmax(Iqs)
-
-    if not interpolated_image:
-        colors = []
-        cmap = mpl.colormaps['viridis']
-
-        for Iq in Iqs:
-            if np.isnan(Iq):
-                # nan points are transparent
-                colors.append((1, 1, 1, 0))
-            elif Iq <= 0:
-                if log_scale:
-                    # negative or 0 intensity on log scale is black
-                    colors.append((1, 1, 1, 1))
-                else:
-                    colors.append(cmap(0))
-            elif Iq > 0 and Iq <= vmin:
-                # intensity less than vmin are vmin color
-                colors.append(cmap(0))
-            elif Iq > vmin and Iq <= vmax:
-                # apply colormap
-                if log_scale:
-                    colors.append(cmap((np.log10(Iq)-vmin)/(vmax-vmin)))
-                else:
-                    colors.append(cmap((Iq-vmin)/(vmax-vmin)))
-            else:
-                # intensity higher than vmax are vmax color
-                colors.append(cmap(1))
-
-        colors = np.array(colors)
-
-        fig = go.Figure(data=go.Scatter(
-            x=qsxs, y=qszs, mode='markers',
-            marker=dict(color=colors)
-        ))
-
-    else:
-        wavelength_nm = wavelengths[0]
-        sample_phi_deg_range = (np.nanmax(sample_phi_degs),
-                                np.nanmin(sample_phi_degs))
-        grid_x, grid_z, grid_Iq = plotting_tools(
-            qsxs, qszs, Iqs, wavelength_nm, sample_phi_deg_range,
-            grid_size=1000,
-        )
-        fig = go.Figure(data=go.Contour(
-            x=grid_x, y=grid_z, z=grid_Iq
-        ))
-
-    fig.update_xaxes(
-        title=plotting_tools.generate_formatted_axis_label('qsx'),
-        ticks='outside')
-    fig.update_yaxes(
-        title=plotting_tools.generate_formatted_axis_label('qsz'),
-        ticks='outside')
-
-    if log_scale:
-        colorbar_ticks = list(np.arange(
-            vmin, np.ceil(vmax) if vmax % 1 > 0 else np.ceil(vmax)+1, step=1))
-        colorbar_labels = [10**x for x in colorbar_ticks]
-        colorbar_labels = [f"{x:.{0}e}" for x in colorbar_labels]
-        fig.update_layout(
-            coloraxis_colorbar={
-                'tickvals': colorbar_ticks,
-                'ticktext': colorbar_labels,
-            })
-    fig.update_layout(
-        width=500
-    )
-
-    fig.update_layout(
-        coloraxis_colorbar={
-            'title': {'text': 'Intensity', 'side': 'right'},
-            'ticks': 'outside',
-        })
-
-    fig.update_layout({'title': reduced_dataset.name})
-
-    return fig
-
-
 def plot_integrated_dataset(
         integrated_dataset,
         q_axis='qdx',
         y_axis='sample_phi_deg',
         log_scale=True,
-        filter_q=None,
-        filters={}):
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        filter_by_q={},
+        filter_by_metadata={},
+        **kwargs):
 
     filtered_slices = integrated_dataset.qslices.copy()
-    for key, value in filters.items():
+
+    for key, value in filter_by_metadata.items():
         keep = []
         for data in filtered_slices:
             if key in METADATA_KEYWORDS:
                 test = data.data2d.metadata[key]
+            elif key in data.data2d.user_params.keys():
+                test = data.data2d.user_params[key]
             else:
-                test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
+                keep.append(False)
+                continue
+            if isinstance(value, tuple):
+                if np.nanmin(test) >= np.nanmin(value)\
+                        and np.nanmax(test) <= np.nanmax(value):
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
+                if value == test:
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            elif isinstance(value, list):
+                if test in value:
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            else:
+                # could not interpret filter
+                keep.append(False)
+        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+
+    for q, qrange in filter_by_q.items():
+        keep = []
+        for data in filtered_slices:
+            test = getattr(data, q)
+            if np.nanmin(test) >= qrange[0]\
+                    and np.nanmax(test) <= qrange[1]:
                 keep.append(True)
             else:
                 keep.append(False)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
-
-    filtered_slices = []
-    if filter_q is not None:
-        for data in integrated_dataset.qslices:
-            test = getattr(data, filter_q)
-            if np.nanmin(test) >= filter_range[0]\
-                    and np.nanmax(test) <= filter_range[1]:
-                filtered_slices.append(data)
-    else:
-        filtered_slices = integrated_dataset.qslices
 
     x_vals = []
     y_vals = []
@@ -1051,148 +805,195 @@ def plot_integrated_dataset(
     order_vals = []
 
     for data in filtered_slices:
-        x_vals.append(getattr(data, q_axis))
+        x_vals.extend(list(getattr(data, q_axis)))
         order_vals.append(data.data2d.metadata[y_axis]
                           if y_axis in data.data2d.metadata.keys()
                           else data.data2d.user_params[y_axis])
-        y_vals.append(np.ones_like(x_vals[-1])*order_vals[-1])
-        color_vals.append(data.Iq)
+        y_vals.extend(list(np.ones_like(getattr(data, q_axis))*order_vals[-1]))
+        color_vals.extend(list(data.Iq))
 
-    sort_arrays = np.argsort(order_vals)
-    x_vals = np.array(x_vals)[sort_arrays]
-    y_vals = np.array(y_vals)[sort_arrays]
-    color_vals = np.array(color_vals)[sort_arrays]
-    order_vals = np.array(order_vals)[sort_arrays]
-
-    if log_scale:
-        vmin = np.log10(np.nanmin(color_vals[color_vals > 0]))
-        vmax = np.log10(np.nanmax(color_vals))
-    else:
-        vmin = np.nanmin(color_vals[color_vals > 0])
+    if vmin is None:
+        vmin = np.max(
+            [np.nanmin(color_vals), 0.1]
+            ) if log_scale else 0
+    if vmax is None:
         vmax = np.nanmax(color_vals)
-    cmap = mpl.colormaps['viridis']
 
-    fig, ax = plt.subplots()
-    fig.set_figheight(8)
-    fig.set_figwidth(9)
-
-    for x, y, cs, o in zip(x_vals, y_vals, color_vals, order_vals):
-        if log_scale:
-            colors = [cmap((np.log10(c)-vmin)/(vmax-vmin)) for c in cs]
-        else:
-            colors = [cmap((c-vmin)/(vmax-vmin)) for c in cs]
-
-        ax.scatter(x, y, s=marker_size, marker='o', color=colors)
-
-    ax.set_xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
-    ax.set_ylabel(plotting_tools.generate_formatted_axis_label(y_axis))
-
+    fig = plt.figure()
     if log_scale:
-        norm = mpl_colors.LogNorm(vmin=10**vmin, vmax=10**vmax)
+        norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
     else:
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-    cmap = mpl_cm.viridis
-    mappable = mpl_cm.ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(mappable, ax=ax)
-    cbar.set_label('Intensity')
+
+    data_plot = plt.scatter(x_vals, y_vals, c=color_vals,
+                            cmap=cmap, norm=norm, **kwargs)
+    colorbar = plt.colorbar(data_plot)
+    colorbar.set_label('Intensity')
 
     plt.title(integrated_dataset.name)
-    plt.close()
+    plt.xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
+    plt.ylabel(plotting_tools.generate_formatted_axis_label(y_axis))
 
     return fig
 
 
-def plot_integrated_dataset_interactive(
-        integrated_dataset,
-        q_axis='qdx',
-        y_axis='sample_phi_deg',
+def plot_reduced_dataset(
+        reduced_dataset,
         log_scale=True,
-        filters={},
-        marker_size=5):
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        filter_by_q={},
+        filter_by_metadata={},
+        interpolated_data=False,
+        **kwargs):
 
-    filtered_slices = integrated_dataset.qslices.copy()
-    for key, value in filters.items():
+    filtered_slices = reduced_dataset.data.copy()
+
+    for key, value in filter_by_metadata.items():
         keep = []
         for data in filtered_slices:
-            if key in METADATA_KEYWORDS:
-                test = data.data2d.metadata[key]
-            else:
+            try:
                 test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
+            except:
+                keep.append(False)
+                continue
+            if isinstance(value, tuple):
+                if np.nanmin(test) >= np.nanmin(value)\
+                        and np.nanmax(test) <= np.nanmax(value):
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
+                if value == test:
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            elif isinstance(value, list):
+                if test in value:
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            else:
+                # could not interpret filter
+                keep.append(False)
+        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+
+    for q, qrange in filter_by_q.items():
+        keep = []
+        for data in filtered_slices:
+            test = getattr(data, q)
+            if np.nanmin(test) >= qrange[0]\
+                    and np.nanmax(test) <= qrange[1]:
                 keep.append(True)
             else:
                 keep.append(False)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    x_vals = []
-    y_vals = []
-    color_vals = []
-    order_vals = []
-    masks = []
+    q_xaxis = []
+    q_yaxis = []
+    Iqs = []
+    wavelengths = []
+    sample_phi_degs = []
 
     for data in filtered_slices:
-        x_vals.append(getattr(data, q_axis))
-        order_vals.append(data.data2d.metadata[y_axis]
-                          if y_axis in data.data2d.metadata.keys()
-                          else data.data2d.user_params[y_axis])
-        y_vals.append(np.ones_like(x_vals[-1])*order_vals[-1])
-        color_vals.append(data.Iq)
-        masks.append(data.mask)
+        q_xaxis.extend(list(getattr(data, 'qsx')))
+        q_yaxis.extend(list(getattr(data, 'qsz')))
+        Iq = np.copy(data.Iq)
+        Iq[data.mask] = np.nan
+        Iqs.extend(list(Iq))
+        wavelengths.append(data.wavelength_nm)
+        sample_phi_degs.append(data.sample_phi_deg)
 
-    sort_arrays = np.argsort(order_vals)
-    x_vals = np.array(x_vals)[sort_arrays]
-    y_vals = np.array(y_vals)[sort_arrays]
-    masks = np.array(masks)[sort_arrays]
-    color_vals = np.array(color_vals)[sort_arrays]
-    order_vals = np.array(order_vals)[sort_arrays]
+    q_xaxis = np.array(q_xaxis)
+    q_yaxis = np.array(q_yaxis)
+    Iqs = np.array(Iqs)
 
+    if len(list(set(wavelengths))) > 1:
+        warnings.warn(
+            "You are using multiple wavelengths in your"
+            "reduction, is that correct? For now we are showing data"
+            "under the assumption of a single wavelength!")
+
+    if vmin is None:
+        vmin = np.max(
+            [np.nanmin(Iqs), 0.1]
+            ) if log_scale else 0
+    if vmax is None:
+        vmax = np.nanmax(Iqs)
+
+    fig = plt.figure()
     if log_scale:
-        vmin = np.log10(np.nanmin(color_vals[color_vals > 0]))
-        vmax = np.log10(np.nanmax(color_vals))
+        norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
     else:
-        vmin = np.nanmin(color_vals[color_vals > 0])
-        vmax = np.nanmax(color_vals)
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
 
-    x_vals = x_vals.reshape(-1)
-    y_vals = y_vals.reshape(-1)
-    masks = masks.reshape(-1)
-    color_vals = color_vals.reshape(-1)
-    if log_scale:
-        color_vals = np.log10(color_vals)
-
-    color_vals[masks] = np.nan
-
-    fig = go.Figure(data=go.Scatter(
-        x=x_vals,
-        y=y_vals,
-        mode='markers',
-        marker=dict(
-            size=marker_size,
-            color=color_vals,
-            colorscale='Viridis',
-            colorbar=dict(title=dict(text='Intensity', side='right'),
-                          ticks='outside'),
-            showscale=True,
-            cmin=vmin,
-            cmax=vmax
+    if interpolated_data:
+        x_interp, y_interp, Iq_interp, filter_out =\
+            plotting_tools.generate_interpolated_reduced_data(
+                qsx=q_xaxis,
+                qsz=q_yaxis,
+                Iq=Iqs,
+                wavelength_nm=wavelengths[0],
+                sample_phi_deg_range=sample_phi_degs,
+            )
+        if log_scale:
+            levels = np.logspace(np.log10(vmin), np.log10(vmax), 100)
+        else:
+            levels = np.linspace(vmin, vmax, 100)
+        data_plot = plt.contourf(
+            x_interp, y_interp, Iq_interp,
+            cmap=cmap, norm=norm,
+            levels=levels,
+            # locator=ticker.LogLocator(base=10, subs='all') if log_scale\
+            # else ticker.MaxNLocator(),
+            **kwargs
         )
-    ))
+    else:
+        data_plot = plt.scatter(q_xaxis, q_yaxis, c=Iqs,
+                                cmap=cmap, norm=norm, **kwargs)
+    cbar_ticks = np.power(10, np.arange(
+        np.ceil(np.log10(vmin)), np.floor(np.log10(vmax))+1, 1))
+    colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)
+    colorbar.set_label('Intensity')
 
-    # fix how the tick labels look on the colorbar for log scale plots
-    if log_scale:
-        colorbar_ticks = list(np.arange(
-            vmin, np.ceil(vmax) if vmax % 1 > 0 else np.ceil(vmax)+1, step=1))
-        colorbar_labels = [10**x for x in colorbar_ticks]
-        colorbar_labels = [f"{x:.{0}e}" for x in colorbar_labels]
-        fig = plotting_tools.plotly_update_colorbar_ticks(
-            fig, colorbar_ticks, colorbar_labels, type='scatter'
-        )
+    plt.title(reduced_dataset.name)
+    plt.xlabel(plotting_tools.generate_formatted_axis_label('qsx'))
+    plt.ylabel(plotting_tools.generate_formatted_axis_label('qsz'))
 
-    fig = plotting_tools.plotly_update_layout(
-        width=500, title=integrated_dataset.name
+    plt.tight_layout()
+
+    return fig
+
+
+def plot_slice_reduced_dataset(
+        reduced_dataset,
+        q_bins,
+        log_scale=True,
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        interpolated_data=False,
+        slice_color='red',
+        slice_lw=2,
+        **kwargs):
+
+    fig = plot_reduced_dataset(
+        reduced_dataset=reduced_dataset,
+        log_scale=log_scale,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        interpolated_data=interpolated_data,
+        **kwargs
     )
-    fig = plotting_tools.plotly_update_axes(x_axis=q_axis, y_axis=y_axis)
+
+    min_y, max_y = fig.axes[0].get_ylim()
+    for (min_q, q, max_q) in q_bins:
+        plt.axvspan(xmin=min_q, xmax=max_q,
+                    facecolor=slice_color, alpha=0.3, zorder=1000)
+        plt.vlines(q, min_y, max_y, color=slice_color,
+                   linestyles='dashed', zorder=10000, lw=slice_lw)
 
     return fig
 
@@ -1220,15 +1021,17 @@ def plot_reduced_slices(
 
     sort_axis = [getattr(data, slice_axis) for data in filtered_slices]
     sort_by_slice_axis = np.argsort(sort_axis)
-    filtered_slices = filtered_slices[sort_by_slice_axis]
+    # filtered_slices = filtered_slices[sort_by_slice_axis]
 
     fig, ax = plt.subplots()
-    for i, data in enumerate(filtered_slices):
+    for i, sort_i in enumerate(sort_by_slice_axis):
+        data = filtered_slices[sort_i]
+    # for i, data in enumerate(filtered_slices):
         q = np.copy(getattr(data, q_axis))
         Iq = np.copy(data.Iq)
         sort_q = np.argsort(q)
         ax.errorbar(q[sort_q],
-                    Iq[sort_q]*10**(i*offset_order) + offset_value*i,
+                    Iq[sort_q]*10**(i*-1*offset_order) + offset_value*i,
                     label=getattr(data, slice_axis),
                     fmt='o-')
 
@@ -1242,56 +1045,4 @@ def plot_reduced_slices(
     ax.set_xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
 
     plt.close()
-    return fig
-
-
-def plot_reduced_slices_interactive(
-        reduced_slices,
-        q_axis='qsz',
-        slice_axis='qsx',
-        filters=None,
-        log_scale=True,
-        offset_order=0,
-        offset_value=0):
-
-    filtered_slices = reduced_slices.data.copy()
-    for key, value in filters.items():
-        keep = []
-        for data in filtered_slices:
-            test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
-                keep.append(True)
-            else:
-                keep.append(False)
-        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
-
-    sort_axis = [getattr(data, slice_axis) for data in filtered_slices]
-    sort_by_slice_axis = np.argsort(sort_axis)
-    filtered_slices = filtered_slices[sort_by_slice_axis]
-
-    fig = None
-    for i, data in enumerate(filtered_slices):
-        q = np.copy(getattr(data, q_axis))
-        Iq = np.copy(data.Iq)
-        sort_q = np.argsort(q)
-        if i == 0:
-            fig = plotting_tools.plot1D_interactive(
-                q[sort_q],
-                Iq[sort_q]*10**(i*offset_order) + offset_value*i,
-                axis_x_type=q_axis,
-                axis_y_type="Intensity",
-                name=getattr(data, slice_axis),
-                showlegend=True,
-                log_scale=log_scale
-            )
-        else:
-            fig = plotting_tools.plot1D_add_trace_interactive(
-                fig,
-                q[sort_q],
-                Iq[sort_q]*10**(i*offset_order) + offset_value*i,
-                showlegend=True,
-                name=getattr(data, slice_axis),
-            )
-
     return fig

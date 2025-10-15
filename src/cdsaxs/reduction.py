@@ -9,6 +9,7 @@ from cdsaxs.data.reduced_data1d import ReducedData1D, ReducedData1DSlice
 from cdsaxs.data.dataset import IntegratedDataset
 from cdsaxs.data.dataset import ReducedDataset, ReducedSlices
 import cdsaxs.diffraction as diffraction
+import cdsaxs.plotting.plotting as plotting
 
 
 def reduce_dataset(dataset: IntegratedDataset) -> ReducedDataset:
@@ -77,7 +78,7 @@ def slice_reduced_dataset(
     q_axis='qsx',
     slice_axis='qsz',
     show_plot=True,
-    interpolated_image=False,
+    plotting_kwargs={}
 ) -> ReducedSlices:
     """
     Extracts 1D data slices from a reduced dataset.
@@ -123,7 +124,7 @@ def slice_reduced_dataset(
             if len(selection) > 0\
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
-                q.append(np.nanmean(getattr(data, q_axis)))
+                q.append(np.nanmean(getattr(data, q_axis)[selection]))
                 Iq.append(np.nanmean(data.Iq[selection]))
                 # qsz.extend(list(data.qsz[selection]))
                 # Iq.extend(list(data.Iq[selection]))
@@ -141,7 +142,16 @@ def slice_reduced_dataset(
 
     reduced_slices = ReducedSlices(slices=slices)
 
-    return reduced_slices
+    if show_plot:
+        fig = plotting.plot_slice_reduced_dataset(
+            reduced_dataset=dataset,
+            q_bins=[(x, z, y) for (x, y), z in zip(q_ranges, q_values)],
+            **plotting_kwargs
+        )
+    else:
+        fig = None
+
+    return reduced_slices, fig
 
     # if show_plot:
 

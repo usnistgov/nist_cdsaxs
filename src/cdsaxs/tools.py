@@ -8,6 +8,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from scipy.stats import linregress
 from skimage.feature import peak_local_max
+from sklearn.linear_model import LinearRegression
 
 from cdsaxs.calculators import gaussian
 
@@ -77,14 +78,18 @@ def find_gaussian_peakloc(x, y, p0=None):
     return float(peak_x), int(peak_index)
 
 
-def line_fit(x, y):
+def line_fit(x, y, force_intercept=None):
     """
     Fit a line to the x, y data and return angle, slope, intercept.
     The angle is defined counterclockwise from the x-axis.
     In the case of a vertical line, slope and intercept are returned as nan.
     """
-    x = np.array(x).reshape(-1)
-    y = np.array(y).reshape(-1)
+    x = np.array(x).reshape(-1, 1)
+    y = np.array(y).reshape(-1, 1)
+
+    if force_intercept is not None:
+        x = x - force_intercept[0]
+        y = y - force_intercept[1]
 
     if len(x) == 1:
         warnings.warn(
@@ -92,9 +97,15 @@ def line_fit(x, y):
             "are required. Assuming a horizontal line."
         )
     try:
-        fit = linregress(x, y)
-        angle = np.rad2deg(np.arctan(fit.slope))
-        slope, intercept = (fit.slope, fit.intercept)
+        # fit = linregress(x, y)
+        model = LinearRegression(
+            fit_intercept=False if force_intercept is not None else True)
+        model.fit(x, y)
+        slope = float(model.coef_[0][0])
+        intercept = float(model.intercept_)
+        if force_intercept is not None:
+            intercept = force_intercept[1] - slope * force_intercept[0]
+        angle = np.rad2deg(np.arctan(slope))
     except ValueError:
         # vertical line
         angle = 90

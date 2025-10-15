@@ -14,6 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from cdsaxs.data.metadata import ACCEPTED_Q_AXES
+from cdsaxs.plotting import plotting
 
 
 class Data1D():
@@ -112,7 +113,9 @@ class Data1D():
             self.q = q
 
         for key, q_key in kwargs.items():
-            if len(q_key) != len(self.Iq):
+            if isinstance(q_key, float) or isinstance(q_key, int):
+                q_key = np.array(q_key).reshape(-1)
+            if len(q_key) != len(self.Iq) and len(q_key) != 1:
                 raise ValueError(
                     f"'{key}' and 'I(q)' need to be of the same length."
                     f"They were provided with lengths {len(q_key)} and {len(Iq)}."
@@ -362,3 +365,25 @@ class Data1D():
         Reset the mask to only mask out pixels with values of nan.
         """
         self.mask = np.isnan(self.Iq)  # mask out nan
+
+    def plot_data(
+            self,
+            q_axis=None,
+            log_scale=True,
+            show_legend=True,
+            xlim=None,
+            ylim=None,
+            **kwargs
+    ):
+
+        fig = plotting.plot_data1d(
+            self,
+            q_axis=q_axis,
+            log_scale=log_scale,
+            show_legend=show_legend,
+            xlim=xlim,
+            ylim=ylim,
+            **kwargs
+        )
+
+        return fig

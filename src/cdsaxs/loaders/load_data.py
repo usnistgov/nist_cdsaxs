@@ -364,7 +364,7 @@ def LoadDataset(
                     )
                 else:
                     user_params_i[key] = value
-            print("METADATA", metadata_i, user_params_i)
+            # print("METADATA", metadata_i, user_params_i)
             # generate the name for the two-dimensional data
             new_name = lt.generate_data_name_from_pattern(
                 data_name_pattern, metadata_i, user_params_i)
@@ -382,7 +382,8 @@ def LoadDataset(
             if verbose:
                 pbar.update(1)
 
-    print(warnings_output)
+    for warning in warnings_output:
+        print(warning.message)
 
     if verbose:
         pbar.close()
@@ -477,36 +478,40 @@ def LoadDataset_MetadataCSV(
         pbar = tqdm(range(csv_data.shape[0]), desc="Loading files: ",
                     position=0, leave=True)
 
-    for i, row in enumerate(csv_data):
-        metadata = {}
-        user_params = {}
-        filepath = None
-        for ii, value in enumerate(row):
-            if csv_header[ii] in METADATA_KEYWORDS:
-                if csv_header[ii] == 'filename':
-                    filepath = os.path.join(directory_path, value)
+    with warnings.catch_warnings(record=True) as warnings_output:
+        for i, row in enumerate(csv_data):
+            metadata = {}
+            user_params = {}
+            filepath = None
+            for ii, value in enumerate(row):
+                if csv_header[ii] in METADATA_KEYWORDS:
+                    if csv_header[ii] == 'filename':
+                        filepath = os.path.join(directory_path, value)
+                    else:
+                        metadata[str(csv_header[ii])]\
+                            = correct_metadata_dtype(csv_header[ii], value)
                 else:
-                    metadata[str(csv_header[ii])]\
-                        = correct_metadata_dtype(csv_header[ii], value)
-            else:
-                user_params[str(csv_header[ii])] = value
+                    user_params[str(csv_header[ii])] = value
 
-        new_name = lt.generate_data_name_from_pattern(
-                data_name_pattern, metadata, user_params)
+            new_name = lt.generate_data_name_from_pattern(
+                    data_name_pattern, metadata, user_params)
 
-        data = LoadData(
-            filepath=filepath,
-            metadata=metadata,
-            user_params=user_params,
-            filetype=filetype,
-            detector_type=detector_type,
-            name=new_name
-        )
+            data = LoadData(
+                filepath=filepath,
+                metadata=metadata,
+                user_params=user_params,
+                filetype=filetype,
+                detector_type=detector_type,
+                name=new_name
+            )
 
-        dataset.add_data(data)
+            dataset.add_data(data)
 
-        if verbose:
-            pbar.update(1)
+            if verbose:
+                pbar.update(1)
+
+    for warning in warnings_output:
+        print(warning.message)
 
     if verbose:
         pbar.close()

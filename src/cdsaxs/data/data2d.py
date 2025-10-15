@@ -32,7 +32,7 @@ UPDATE_Q_TRIGGERS = [
 ]
 
 
-def combine_dataqdyqdx(*data2d: Data2D, name=None):
+def combine_data2d(*data2d: Data2D, name=None):
     """
     Combine two or more instances of Data2D into a single instance
     of Data2D. This operation is not sensitive to any data
@@ -530,6 +530,43 @@ class Data2D(DataImage):
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
 
+    def rotate_image(self,
+                     rotation_angle_deg,
+                     rotation_center=None,
+                     resampling_mode="bicubic"):
+
+        """
+        Rotate the image counterclockwise by the specified angle about
+        the rotation center.
+        NOTE: This operation will convert any masked points in your
+        array to nan prior to the image rotation so they are not used
+        in the resampling algorithms. The mask will then be reset to
+        mask out any nan pixels after the rotation.
+
+        Parameters
+        ----------
+        rotation_angle_deg : float
+            Angle in degrees by which to rotate the image
+            counterclockwise.
+        rotation_center : tuple
+            Center of rotatation.
+            Default is the beam center if available, otherwise (0, 0).
+        resampling_mode: str
+            Set the resampling method used during the rotation.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
+        """
+
+        if rotation_center is None:
+            rotation_center = self.metadata.get('center_px', (0, 0))
+
+        super().rotate_image(rotation_angle_deg=rotation_angle_deg,
+                             rotation_center=rotation_center,
+                             resampling_mode=resampling_mode)
+
     def flip_horizontally(self):
         super().flip_horizontally()
         center_px = self.metadata['center_px']
@@ -639,11 +676,13 @@ class Data2D(DataImage):
 
         qdy_indices = np.where((self.qdy >= range_qdy[0])
                                & (self.qdy < range_qdy[1]))[0]
-        limits_qdy_px = (np.min(qdy_indices), np.max(qdy_indices)+1)
+        limits_qdy_px = (int(np.min(qdy_indices)),
+                         int(np.max(qdy_indices)+1))
 
         qdx_indices = np.where((self.qdx >= range_qdx[0])
                                & (self.qdx < range_qdx[1]))[0]
-        limits_qdx_px = (np.min(qdx_indices), np.max(qdx_indices)+1)
+        limits_qdx_px = (int(np.min(qdx_indices)),
+                         int(np.max(qdx_indices)+1))
 
         return limits_qdy_px, limits_qdx_px
 
@@ -865,7 +904,7 @@ class Data2D(DataImage):
             zoom_plot=True,
             plotting_kwargs={},
             **kwargs
-        ):
+    ):
         """
         Find peaks across a two-dimensional image or region of interest
         using the scikit-image.feature peak_local_max() function and
@@ -1110,6 +1149,10 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
+        elif peak_axis == 'qdx':
+            peak_axis = 1
+        elif peak_axis == 'qdy':
+            peak_axis = 0
 
         peaks = find_peaks_2D_one_axis(
             self.image[min0:max0, min1:max1],
@@ -1292,13 +1335,13 @@ class Data2D(DataImage):
             center = np.mean(peaks_peak_axis)
 
             if peak_axis == 1:
-                center_qdx = center
+                center_qdx = float(center)
                 center_qdy = slope*center_qdx + intercept
             elif peak_axis == 0:
-                center_qdy = center
+                center_qdy = float(center)
                 if np.isnan(slope):
                     # this means the peaks form perfectly vertical line
-                    center_qdx = np.nanmean(peaks)[:, 1]
+                    center_qdx = float(np.nanmean(peaks)[:, 1])
                 else:
                     center_qdx = (center_qdy-intercept)/slope
 
@@ -1337,7 +1380,7 @@ class Data2D(DataImage):
             self.update_metadata({'center_px': (center_qdy, center_qdx)},
                                  overwrite=True)
 
-        return (center_qdy, center_qdx), fig
+        return (round(center_qdy, 2), round(center_qdx, 2)), fig
 
     def find_sdd_from_reference_peaks(
             self,
@@ -1468,7 +1511,7 @@ class Data2D(DataImage):
         pixel_distances_cm = np.sqrt(np.sum(
             (peaks - self.metadata['center_px'])**2, axis=1
             )) * self.metadata['pixel_size_um'] / 10000
-        q_orders = 2*np.pi*peak_orders/(pitch_nm) # keep in inverse nm
+        q_orders = 2*np.pi*peak_orders/(pitch_nm)  # keep in inverse nm
         theta_rad = np.arcsin(
             q_orders * self.metadata['wavelength_nm'] / (4 * np.pi)) * 2
         sdd_cm_orders = pixel_distances_cm / np.tan(theta_rad)
@@ -1495,11 +1538,13 @@ class Data2D(DataImage):
 
         return average_sdd, std_sdd, fig
 
-    def find_detector_rotation_correction_from_peaks(
+    def find_detector_rotation_correction(
         self,
         size_qdy_px,
         size_qdx_px,
         show_plot=True,
+        zoom_plot=True,
+        plotting_kwargs={},
         **kwargs
     ):
         """
@@ -1541,7 +1586,7 @@ class Data2D(DataImage):
                 refinement_size
                 algorithm
                 any keyword arguments for the fitting algorithm
-        
+
         Returns
         -------
         float
@@ -1555,6 +1600,7 @@ class Data2D(DataImage):
             size_qdy_px=size_qdy_px,
             size_qdx_px=size_qdx_px
         )
+        limits_qdy_px, limits_qdx_px = box_dims
 
         (min0, max0), (min1, max1) = box_dims
         try:
@@ -1564,9 +1610,11 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, _ = self.find_peaks2D_one_axis(
-            box_dims=box_dims,
+        peaks, _, _ = self.find_peaks2D_one_axis(
+            limits_qdy_px=limits_qdy_px,
+            limits_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
+            show_plot=False,
             **kwargs
         )
 
@@ -1574,7 +1622,24 @@ class Data2D(DataImage):
         if peaks.shape[0] < 2:
             warnings.warn(
                 "Insuffient peaks found to determine rotation angle.")
-            return np.nan
+            angle, slope, intercept = np.nan, np.nan, np.nan
         else:
-            angle, _, _ = line_fit(peaks[:, 1], peaks[:, 0])
-            return angle
+            angle, slope, intercept = line_fit(
+                peaks[:, 1], peaks[:, 0],
+                force_intercept=(self.metadata['center_px'][1],
+                                 self.metadata['center_px'][0]))
+
+        if show_plot:
+            fig = plotting.plot_data2d_find_detector_rotation_correction(
+                self,
+                peaks=peaks,
+                line=(angle, slope, intercept),
+                limits_axis0=limits_qdy_px,
+                limits_axis1=limits_qdx_px,
+                zoom_plot=zoom_plot,
+                **plotting_kwargs
+            )
+        else:
+            fig = None
+
+        return angle, fig
