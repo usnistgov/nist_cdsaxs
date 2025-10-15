@@ -23,6 +23,7 @@ import cdsaxs.plotting._plotting_tools as plotting_tools
 from cdsaxs.tools import line_fit
 from cdsaxs.tools import find_peaks_2D, find_peaks_2D_one_axis
 import cdsaxs.diffraction as diffraction
+from scipy.special import erf
 
 
 # any changes to these metadata values should update calculated q values
@@ -475,6 +476,121 @@ class Data2D(DataImage):
                         value = None
             if value is not None:
                 self.scale_data(value, keyword=key)
+
+    def apply_footprint_correction(self):
+        """
+        Apply a footprint correction to the scattering intensity as a
+        scaling parameter. The footprint factor will be stored in the
+        metadata as "footprint_factor" and will be recalculated every
+        time this correction is called.
+
+        The footprint correction requires the sample phi angle be
+        known. It will also apply the offset to this angle, so any
+        offset angle should be determined prior to applying this
+        correction.
+        """
+        # check that the proper metadata has been provided
+        required_metadata = ["sample_phi_deg",
+                             "sample_phi_offset_deg"]
+        self._check_for_keywords_in_metadata(required_metadata)
+
+        sample_phi_deg = self.metadata["sample_phi_deg"]
+        sample_phi_deg += self.metadata["sample_phi_offset_deg"]
+        footprint_factor = calculators.footprint_correction(sample_phi_deg)
+
+        self.update_metadata({"footprint_factor": float(footprint_factor)},
+                             overwrite=True)
+        self.scale_by_metadata("footprint_factor")
+
+    def apply_sample_size_correction(self):
+        """
+        Apply a sample size correction to the scattering intensity as a
+        scaling parameter. The scaling factor will be stored in the
+        metadata as "sample_size_factor" and will be recalculated every
+        time this correction is called.
+
+        The sample size correction requires the following metadata:
+            "sample_size_mm"
+            "beam_center_mm"
+            "beam_fwhm_mm"
+            "sample_phi_deg"
+        """
+        # check that the proper metadata has been provided
+        required_metadata = ["sample_size_mm", "beam_center_mm",
+                             "beam_fwhm_mm", "sample_phi_deg"]
+        self._check_for_keywords_in_metadata(required_metadata)
+
+        fwhm_mm = self.metadata["beam_fwhm_mm"]
+        center_mm = self.metadata["beam_center_mm"]
+        sample_size_mm = self.metadata["sample_size_mm"]
+
+        sample_phi_deg = self.metadata["sample_phi_deg"]
+        sample_phi_deg += self.metadata["sample_phi_offset_deg"]
+
+        sample_size_factor = calculators.sample_size_correction(
+            sample_phi_deg=sample_phi_deg,
+            fwhm_mm=fwhm_mm,
+            center_mm=center_mm,
+            sample_size_mm=sample_size_mm
+        )
+
+        self.update_metadata({
+            "sample_size_factor": float(sample_size_factor)},
+            overwrite=True)
+        self.scale_by_metadata("sample_size_factor")
+
+    def apply_substrate_absorption_correction(self):
+        """
+        Applies a correction due to substrate absorption as a scaling
+        factor to the scattering intensity. The scaling factor will be
+        stored in the metadata as "substracte_absorption_factor" and
+        will be recalculated every time this correction is called.
+
+        The substrate absorption correction requires the following
+        metadata:
+            "substrate_thickness_um"
+            "substrate_attenuation_coeff_um-1"
+            "sample_phi_deg"
+        """
+        required_metadata = ["substrate_thickness_um",
+                             "substrate_attenuation_coeff_um-1",
+                             "sample_phi_deg"]
+        self._check_for_keywords_in_metadata(required_metadata)
+
+        thickness = self.metadata["substrate_thickness_um"]
+        atten_coeff = self.metadata["substrate_attenuation_coeff_um-1"]
+
+        sample_phi_deg = self.metadata["sample_phi_deg"]
+        sample_phi_deg += self.metadata["sample_phi_offset_deg"]
+
+        substrate_absorption_factor =\
+            calculators.substrate_absorption_correction(
+                sample_phi_deg=sample_phi_deg,
+                substrate_thickness_um=thickness,
+                substrate_attenuation_coeff_um_m1=atten_coeff
+            )
+
+        self.update_metadata({
+            "substrate_absorption_factor":
+            float(substrate_absorption_factor)},
+            overwrite=True)
+        self.scale_by_metadata("substrate_absorption_factor")
+
+    # def apply_sample_absorption_correction(self):
+    #     TODO: implement the sample absorption correction
+    #     """
+    #     Applies a correction due to sample absorption as a scaling
+    #     factor to the scattering intensity. The scaling factor will be
+    #     stored in the metadata as "sample_absorption_factor" and
+    #     will be recalculated every time this correction is called.
+
+    #     The substrate absorption correction requires the following
+    #     metadata:
+    #         "sample_thickness_um"
+    #         "sample_attenuation_coeff_um-1"
+    #         "sample_phi_deg"
+    #     """
+    #     pass
 
     def reset_intensity(self):
         """
@@ -1643,3 +1759,21 @@ class Data2D(DataImage):
             fig = None
 
         return angle, fig
+
+    def _check_for_keywords_in_metadata(self, keywords):
+        """
+        Check that the list of keywords provided are all present in
+        the metadata.
+        """
+        missing_keywords = [
+            x for x in keywords if x not in self.metadata.keys()
+        ]
+        if len(missing_keywords) > 0:
+            raise ValueError(
+                "The following metadata is missing for:\n" +
+                f"{missing_keywords}\n" +
+                "The following metadata are all required:\n" +
+                f"{keywords}"
+            )
+
+        return True

@@ -13,6 +13,11 @@ METADATA_KEYWORDS = [
     "data_directory", "filename",
     "name", "center_px", 'sample_phi_offset_deg',
     "image_rotation_angle",
+    "sample_size_mm", "beam_center_mm", "beam_fwhm_mm",
+    "substrate_thickness_um", "substrate_attenuation_coeff_um-1",
+    "footprint_factor", "sample_size_factor",
+    "substrate_absorption_factor",
+
 ]
 
 SAMPLE_METADATA_KEYWORDS = [

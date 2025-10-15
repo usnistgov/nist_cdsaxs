@@ -320,6 +320,30 @@ class Dataset():
             data = self.datas[key]
             data.subtract_from_data(value)
 
+    def apply_footprint_correction(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_footprint_correction()
+
+    def apply_sample_size_correction(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_sample_size_correction()
+
+    def apply_substrate_absorption_correction(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_substrate_absorption_correction()
+
     def reset_all_data_intensity(self, keys=None):
         """
         Reset all normalization, scaling, adding and subtracting.
