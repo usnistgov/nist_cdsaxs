@@ -6,7 +6,6 @@ import numpy as np
 from PIL import Image
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
-from scipy.stats import linregress
 from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 

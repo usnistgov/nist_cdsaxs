@@ -1,20 +1,9 @@
 from __future__ import annotations
 
-
 import numpy as np
 from numpy.typing import NDArray
-from plotly.offline import iplot
 
-from cdsaxs.tools import rotate_image
-
-from cdsaxs.tools import default_mask
-
-
-# any changes to these metadata values should update calculated q values
-UPDATE_Q_TRIGGERS = [
-    "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
-    "detector_phi_deg", "detector_phi_omega"
-]
+from cdsaxs.tools import default_mask, rotate_image
 
 
 class DataImage():

@@ -4,20 +4,18 @@ This module includes container classes for datasets, i.e. many of 1D or
 """
 
 from __future__ import annotations
-
 import warnings
-
-import numpy as np
 
 from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.qslice import QSlice
-from cdsaxs.data.reduced_data1d import ReducedData1D
-from cdsaxs.data.reduced_data1d import ReducedData1DSlice
-from cdsaxs.sample import Sample
+from cdsaxs.data.reduced_data1d import (
+    ReducedData1D,
+    ReducedData1DSlice
+)
 import cdsaxs.plotting.plotting as plotting
 import cdsaxs.plotting._plotting_tools as plotting_tools
+from cdsaxs.sample import Sample
 from plotly.offline import iplot
-
 
 
 class Dataset():
@@ -839,34 +837,20 @@ class ReducedSlices():
 
     def plot_data(self,
                   q_axis='qsz',
-                  slice_axis='qsx',
-                  filters={},
+                  integrated_axis='qsx',
+                  filter_by_q={},
                   log_scale=True,
                   offset_order=0,
                   offset_value=0,
-                  interactive_plot=True,
                   ):
 
-        if interactive_plot:
-            fig = plotting.plot_reduced_slices_interactive(
-                self,
-                q_axis=q_axis,
-                slice_axis=slice_axis,
-                filters=filters,
-                log_scale=log_scale,
-                offset_order=offset_order,
-                offset_value=offset_value,
-            )
-            iplot(fig)
-        else:
-            fig = plotting.plot_reduced_slices(
-                self,
-                q_axis=q_axis,
-                slice_axis=slice_axis,
-                filters=filters,
-                log_scale=log_scale,
-                offset_order=offset_order,
-                offset_value=offset_value,
-            )
+        fig = plotting.plot_reduced_slices(
+            self,
+            q_axis=q_axis,
+            integrated_axis=integrated_axis,
+            filter_by_q=filter_by_q,
+            log_scale=log_scale,
+            offset_order=offset_order,
+            offset_value=offset_value)
 
         return fig

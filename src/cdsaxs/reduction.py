@@ -6,8 +6,11 @@ from __future__ import annotations
 import numpy as np
 
 from cdsaxs.data.reduced_data1d import ReducedData1D, ReducedData1DSlice
-from cdsaxs.data.dataset import IntegratedDataset
-from cdsaxs.data.dataset import ReducedDataset, ReducedSlices
+from cdsaxs.data.dataset import (
+    IntegratedDataset,
+    ReducedDataset,
+    ReducedSlices
+)
 import cdsaxs.diffraction as diffraction
 import cdsaxs.plotting.plotting as plotting
 

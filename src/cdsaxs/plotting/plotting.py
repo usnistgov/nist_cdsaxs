@@ -4,23 +4,12 @@ Plotting functions for cdsaxs data classes.
 
 import warnings
 
-import matplotlib as mpl
 import matplotlib.colors as mpl_colors
-import matplotlib.cm as mpl_cm
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import NDArray
-import plotly.colors
-import plotly.express as px
-import plotly.graph_objects as go
-from PIL import Image
-from scipy.interpolate import griddata
-import matplotlib.colors as mcolors
-import matplotlib.ticker as ticker
 
-import cdsaxs.plotting._plotting_tools as plotting_tools
-import cdsaxs.diffraction as diffraction
 from cdsaxs.data.metadata import METADATA_KEYWORDS
+import cdsaxs.plotting._plotting_tools as plotting_tools
 
 
 def plot_image(
@@ -95,8 +84,8 @@ def plot_image(
     fig = plt.figure(fig)
 
     # plot the data image
-    norm = mcolors.LogNorm(vmin=vmin, vmax=vmax) if log_scale\
-        else mcolors.Normalize(vmin=vmin, vmax=vmax)
+    norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax) if log_scale\
+        else mpl_colors.Normalize(vmin=vmin, vmax=vmax)
     cmap = getattr(plt.cm, cmap)
     cmap.set_bad((0, 0, 0, 0))  # all nan's are transparent in plotting image
     im = plt.imshow(plotting_image, cmap=cmap,
@@ -106,7 +95,7 @@ def plot_image(
                     )
 
     # plot the mask/inf/nan image
-    custom_cmap = mcolors.ListedColormap(custom_colors)
+    custom_cmap = mpl_colors.ListedColormap(custom_colors)
     custom_cmap.set_bad((0, 0, 0, 0))  # points not masked are transparent
     im_masks = plt.imshow(
         mask_image,
@@ -1001,14 +990,14 @@ def plot_slice_reduced_dataset(
 def plot_reduced_slices(
         reduced_slices,
         q_axis='qsz',
-        slice_axis='qsx',
-        filters={},
+        integrated_axis='qsx',
+        filter_by_q={},
         log_scale=True,
         offset_order=0,
         offset_value=0):
 
     filtered_slices = reduced_slices.data.copy()
-    for key, value in filters.items():
+    for key, value in filter_by_q.items():
         keep = []
         for data in filtered_slices:
             test = getattr(data, key)
@@ -1019,7 +1008,7 @@ def plot_reduced_slices(
                 keep.append(False)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    sort_axis = [getattr(data, slice_axis) for data in filtered_slices]
+    sort_axis = [getattr(data, integrated_axis) for data in filtered_slices]
     sort_by_slice_axis = np.argsort(sort_axis)
     # filtered_slices = filtered_slices[sort_by_slice_axis]
 
@@ -1032,7 +1021,7 @@ def plot_reduced_slices(
         sort_q = np.argsort(q)
         ax.errorbar(q[sort_q],
                     Iq[sort_q]*10**(i*-1*offset_order) + offset_value*i,
-                    label=getattr(data, slice_axis),
+                    label=getattr(data, integrated_axis),
                     fmt='o-')
 
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1),

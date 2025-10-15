@@ -7,24 +7,25 @@ DataQdyQdx(Data2D) : Child class of Data2D for detector images.
 """
 
 from __future__ import annotations
-
 import warnings
 
 import numpy as np
 from numpy.typing import NDArray
-from plotly.offline import iplot
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data.data_image import DataImage
+from cdsaxs.data.metadata import (
+    METADATA_KEYWORDS,
+    check_metadata
+)
 from cdsaxs.data.qslice import QSlice
-from cdsaxs.data.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting.plotting as plotting
-import cdsaxs.plotting._plotting_tools as plotting_tools
-from cdsaxs.tools import line_fit
-from cdsaxs.tools import find_peaks_2D, find_peaks_2D_one_axis
 import cdsaxs.diffraction as diffraction
-from scipy.special import erf
-
+from cdsaxs.tools import (
+    find_peaks_2D,
+    find_peaks_2D_one_axis,
+    line_fit
+)
 
 # any changes to these metadata values should update calculated q values
 UPDATE_Q_TRIGGERS = [
