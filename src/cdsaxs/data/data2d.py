@@ -950,7 +950,7 @@ class Data2D(DataImage):
                 if np.abs(offset) < image_box.shape[axis]:
                     warnings.warn(
                         f"A background subtraction offset of {offset} "
-                        "is less than the integrated axis width and so"
+                        "is less than the integrated axis width and so "
                         "it will be skipped in the subtraction.")
                 else:
                     limits_qdy_px_sub = (

@@ -175,7 +175,7 @@ def LoadData(
                     warnings.warn(
                         f"Metadata for {key} was provided by the user or"
                         " already extracted from reading the file."
-                        " I will not overwrite the existing metadadta with"
+                        " I will not overwrite the existing metadata with"
                         " the value extracted by knowing the detector type."
                     )
                 else:
