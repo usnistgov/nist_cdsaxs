@@ -23,6 +23,7 @@ class TestDataImage(unittest.TestCase):
 
     def test_init(self):
         np.testing.assert_array_equal(self.data2d.image, self.image)
+        np.testing.assert_array_equal(self.data2d._raw_image, self.image)
         np.testing.assert_array_equal(self.data2d.mask,
                                       self.custom_mask + np.isnan(self.image))
 
@@ -36,7 +37,7 @@ class TestDataImage(unittest.TestCase):
 
     def test_overwrite_mask(self):
         mask = self.image == 99999
-        self.data2d.overwrite_mask(mask)
+        self.data2d._overwrite_mask(mask)
 
         np.testing.assert_array_equal(self.data2d.mask, mask)
 
@@ -157,7 +158,7 @@ class TestDataImage(unittest.TestCase):
              [44386., 64811.,  4701., 60019., 18439., 10592., 15954.]]
         ).astype(np.float64)
 
-        self.data2d.rotate_image_ccw(-7)
+        self.data2d.rotate_image_ccw(-630/90)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
@@ -333,7 +334,7 @@ class TestDataImage(unittest.TestCase):
         np.testing.assert_array_equal(self.data2d.image, new_image)
         self.assertTupleEqual(self.data2d._data_transformations[-1],
                               ("normalize", value))
- 
+
     def test_normalize_data_array(self):
         value = 2
         value = np.ones_like(self.data2d.image, dtype=float)*value

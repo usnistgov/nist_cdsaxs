@@ -12,14 +12,15 @@ from sklearn.linear_model import LinearRegression
 from cdsaxs.calculators import gaussian
 
 
-def default_mask(image):
+def default_mask(data):
 
     """
     Generate a default mask of points that are nan, inf, or -inf.
     """
-    mask = np.isnan(image)
-    mask += np.isinf(image)
-    mask += np.isneginf(image)
+    data = np.array(data)
+    mask = np.isnan(data)
+    mask += np.isinf(data)
+    mask += np.isneginf(data)
 
     return mask
 
