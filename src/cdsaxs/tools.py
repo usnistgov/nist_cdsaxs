@@ -1,5 +1,5 @@
 """General tools for the code."""
-
+import inspect
 import warnings
 
 import numpy as np
@@ -308,11 +308,31 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         data_fed = np.log10(data_fed)
 
     if algorithm == 'scikit':
-        coordinates_px = peak_local_max(data_fed, **kwargs)
+        accepted_kwargs = [
+            param.name for param in inspect.signature(
+                peak_local_max).parameters.values()
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY)
+            and param.default is not inspect.Parameter.empty
+        ]
+        coordinates_px = peak_local_max(
+            data_fed,
+            **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
         coordinates_px = coordinates_px.tolist()
         coordinates_px = [x[0] for x in coordinates_px]
     elif algorithm == 'scipy':
-        coordinates_px, _ = find_peaks(data_fed, **kwargs)
+        accepted_kwargs = [
+            param.name for param in inspect.signature(
+                find_peaks).parameters.values()
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY)
+            and param.default is not inspect.Parameter.empty
+        ]
+        coordinates_px, _ = find_peaks(
+            data_fed,
+            **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
 
     coordinates = []
 
@@ -419,7 +439,16 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
     if log_scale:
         image_fed = np.log10(image_fed)
 
-    coordinates_px = peak_local_max(image_fed, **kwargs)
+    accepted_kwargs = [
+        param.name for param in inspect.signature(peak_local_max).parameters.values()
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY)
+        and param.default is not inspect.Parameter.empty
+    ]
+    coordinates_px = peak_local_max(
+        image_fed,
+        **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
     coordinates_px = coordinates_px.tolist()
 
     coordinates = []

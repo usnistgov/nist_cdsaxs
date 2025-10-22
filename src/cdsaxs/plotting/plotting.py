@@ -10,6 +10,11 @@ import numpy as np
 
 from cdsaxs.data.metadata import METADATA_KEYWORDS
 import cdsaxs.plotting._plotting_tools as plotting_tools
+from cdsaxs.plotting._plotting_kwargs import (
+    ERRORBAR_KWARGS,
+    SCATTER_KWARGS,
+    IMSHOW_KWARGS
+)
 
 
 def plot_image(
@@ -29,6 +34,7 @@ def plot_image(
         color_mask='transparent',
         color_inf='black',
         color_nan='red',
+        **kwargs
         ):
 
     # determine colorbar range
@@ -91,7 +97,8 @@ def plot_image(
     im = plt.imshow(plotting_image, cmap=cmap,
                     # alpha=image_alpha,
                     aspect=aspect, zorder=10,
-                    norm=norm
+                    norm=norm,
+                    **{x: y for x, y in kwargs.items() if x in IMSHOW_KWARGS}
                     )
 
     # plot the mask/inf/nan image
@@ -142,12 +149,14 @@ def plot_image_add_roi(
         fig,
         show_legend=True,
         zorder=1000,
+        fmt='-',
         **kwargs
 ):
     fig = plt.figure(fig)
 
     xmin, xmax = limits_axis1
     ymin, ymax = limits_axis0
+    # adjust pixel indices so lines are drawn surrounding included pixels
     xmin -= 0.5
     xmax -= 0.5
     ymin -= 0.5
@@ -155,17 +164,20 @@ def plot_image_add_roi(
     x = [xmin, xmin, xmax, xmax, xmin]
     y = [ymin, ymax, ymax, ymin, ymin]
 
-    # fig = plt.figure(fig)
-    # plt.errorbar(x, y, zorder=zorder, **kwargs)
     fig = plot_errorbar(
-        x, y, zorder=zorder, show_legend=show_legend, fig=fig,
-        **kwargs, fmt='-')
+        x, y,
+        zorder=zorder,
+        show_legend=show_legend,
+        fig=fig,
+        fmt=fmt,
+        **kwargs)
 
     if show_legend:
-        plt.legend(bbox_to_anchor=(1, -0.2),
-                loc='upper right',
-                #bbox_transform=fig.axes[-1].transAxes
-                )
+        plt.legend(
+            bbox_to_anchor=(1, -0.2),
+            loc='upper right',
+            # bbox_transform=fig.axes[-1].transAxes
+        )
 
     plt.tight_layout()
 
@@ -193,7 +205,9 @@ def plot_errorbar(
 
     fig = plt.figure(fig)
 
-    plt.errorbar(x, y, **kwargs)
+    plt.errorbar(
+        x, y,
+        **{x: y for x, y in kwargs.items() if x in ERRORBAR_KWARGS})
 
     if log_scale_y:
         plt.yscale('log')
@@ -237,6 +251,7 @@ def plot_data2d(
         color_inf='black',
         color_nan='red',
         fig=None,
+        **kwargs
         ):
 
     fig = plot_image(
@@ -256,6 +271,7 @@ def plot_data2d(
         color_inf=color_inf,
         color_nan=color_nan,
         fig=fig,
+        **kwargs
     )
 
     return fig
@@ -282,7 +298,7 @@ def plot_data1d(
 
         plot_errorbar(
             x=getattr(data, q_axis),
-            y=data.Iq_masked,
+            y=data._masked_Iq,
             fig=fig,
             log_scale_y=log_scale,
             show_legend=show_legend,
@@ -310,7 +326,7 @@ def plot_qslice(
         aspect='auto',
         show_backgrounds=True,
         show_legend=True,
-        color_slice='black',
+        color_slice='darkcyan',
         color_avg_background='grey',
         **kwargs):
 
@@ -333,6 +349,7 @@ def plot_qslice(
         color_mask=color_mask,
         color_inf=color_inf,
         color_nan=color_nan,
+        **kwargs
     )
 
     # plot the 1D slice from the integration with or without background
@@ -379,10 +396,10 @@ def plot_qslice(
             ylim=ylim,
             **kwargs
         )
-        for i, (bi, _, _) in enumerate(qslice.background_boxes):
+        for i, b_slice in enumerate(qslice.background_qslices):
             fig_background = plot_errorbar(
-                qslice.q,
-                bi,
+                b_slice.q,
+                b_slice.Iq,
                 fig=fig_background,
                 show_legend=show_legend,
                 label=f'Background {i}',
@@ -446,11 +463,11 @@ def plot_data2d_integrate_box(
     )
 
     # add any existing background boxes
-    if qslice.background_boxes is not None and show_backgrounds:
-        for i, (_, limits0, limits1) in enumerate(qslice.background_boxes):
+    if qslice.background_qslices is not None and show_backgrounds:
+        for i, b_slice in enumerate(qslice.background_qslices):
             fig_image = plot_image_add_roi(
-                limits0,
-                limits1,
+                b_slice.limits_axis0,
+                b_slice.limits_axis1,
                 fig=fig_image,
                 color=color_background_box,
                 label="Background" if i == 0 else None,
@@ -814,8 +831,10 @@ def plot_integrated_dataset(
     else:
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
 
-    data_plot = plt.scatter(x_vals, y_vals, c=color_vals,
-                            cmap=cmap, norm=norm, **kwargs)
+    data_plot = plt.scatter(
+        x_vals, y_vals, c=color_vals,
+        cmap=cmap, norm=norm,
+        **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
     colorbar = plt.colorbar(data_plot)
     colorbar.set_label('Intensity')
 
@@ -939,8 +958,13 @@ def plot_reduced_dataset(
             **kwargs
         )
     else:
-        data_plot = plt.scatter(q_xaxis, q_yaxis, c=Iqs,
-                                cmap=cmap, norm=norm, **kwargs)
+        data_plot = plt.scatter(
+            q_xaxis,
+            q_yaxis,
+            c=Iqs,
+            cmap=cmap,
+            norm=norm,
+            **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
     cbar_ticks = np.power(10, np.arange(
         np.ceil(np.log10(vmin)), np.floor(np.log10(vmax))+1, 1))
     colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)

@@ -70,7 +70,7 @@ class Data1D():
         qby : Scattering vector component along y axis of the lab frame
         qbx : Scattering vector component along x axis of the lab frame
         qbz : Scattering vector comopnent along z axis of the lab frame; in
-            the lab frame the beam path is aligned to the z-axis 
+            the lab frame the beam path is aligned to the z-axis
         qb  : Scattering vector in the beam/lab frame; when the detector is
             positioned normal to the incident beam, the lab and detector
             coordinates will align
@@ -149,8 +149,8 @@ class Data1D():
         setattr(self, self.q_axis, new_q)
 
     @property
-    def Iq_masked(self):
-        masked = np.array(self.Iq)
+    def _masked_Iq(self):
+        masked = np.copy(self.Iq)
         masked[self.mask] = np.nan
         return masked
 
