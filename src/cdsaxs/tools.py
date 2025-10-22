@@ -306,6 +306,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         data_fed[mask] = np.nan
     if log_scale:
         data_fed = np.log10(data_fed)
+        data_fed[np.isneginf(data_fed)] = np.nan
 
     if algorithm == 'scikit':
         accepted_kwargs = [
@@ -438,6 +439,8 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
         image_fed[mask] = np.nan
     if log_scale:
         image_fed = np.log10(image_fed)
+        image_fed[np.isneginf(image_fed)] = np.nan
+
 
     accepted_kwargs = [
         param.name for param in inspect.signature(peak_local_max).parameters.values()
@@ -588,8 +591,9 @@ def find_peaks_2D_one_axis(
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
     """
-    # check the threshold_abs
     image_fed = np.copy(image)
+    if mask is not None:
+        image_fed[mask] = np.nan
     if integration_mode == 'sum':
         image_fed = np.nansum(image_fed, axis=1-peak_axis)
     elif integration_mode == 'mean':
@@ -599,7 +603,7 @@ def find_peaks_2D_one_axis(
             f"Integration mode {integration_mode} not recognized."
             "Use 'mean' or 'sum'."
         )
-    image_fed[mask.any(axis=1-peak_axis)] = np.nan
+    image_fed[np.isnan(image_fed).any(axis=1-peak_axis)] = np.nan
 
     refinement_size = max(refinement_size, 4)
     coordinates_peak_axis = find_peaks_1D(image_fed, log_scale=log_scale,
@@ -635,6 +639,7 @@ def find_peaks_2D_one_axis(
     coordinates = []
     if log_scale:
         image = np.log10(image)
+        image[np.isneginf(image)] = np.nan
     else:
         image = np.array(image)
 
