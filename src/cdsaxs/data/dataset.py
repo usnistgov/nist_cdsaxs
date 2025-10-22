@@ -802,7 +802,6 @@ class ReducedSlices():
     def export_reduced_slices(
             self,
             filepath,
-            index=None,
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
@@ -842,7 +841,7 @@ class ReducedSlices():
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
 
-            #sort by q
+            # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]
             Iq = Iq[sorted_indexes]

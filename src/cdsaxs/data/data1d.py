@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from cdsaxs.tools import default_mask
 from cdsaxs.data.metadata import ACCEPTED_Q_AXES
 from cdsaxs.plotting import plotting
 
@@ -93,14 +94,10 @@ class Data1D():
         # check q axes with length of Iq
         self.Iq = np.array(Iq).reshape(-1).astype(float)
         self._raw_Iq = np.copy(Iq)
-        self.mask = np.isnan(self.Iq)
+
+        self.mask = default_mask(self.Iq)
         if mask is not None:
-            if len(mask) != len(self.Iq):
-                raise ValueError(
-                    "The mask and Iq should be of same length."
-                )
-            else:
-                self.mask += mask
+            self.mask_points(mask)
 
         q = np.array(q).reshape(-1).astype(float)
         if len(q) != len(self.Iq):
@@ -342,6 +339,11 @@ class Data1D():
             all data operations. This will NOT unmask any previously
             masked points.
         """
+        mask = mask.reshape(-1)
+        if len(mask) != len(self.Iq):
+            raise ValueError(
+                "Mask does not match shape of Iq."
+            )
         self.mask += mask
 
     def overwrite_mask(self, mask):

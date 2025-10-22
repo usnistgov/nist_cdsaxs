@@ -56,7 +56,7 @@ class DataImage():
         self._raw_image = np.copy(self.image)
         self.mask = default_mask(self.image)
         if mask is not None:
-            self.mask += mask  # apply user-provided mask
+            self.mask_points(mask)
         self._data_transformations = []
 
     @property
@@ -78,6 +78,10 @@ class DataImage():
             all data operations. This will NOT unmask any previously
             masked points.
         """
+        if mask.shape != self.image.shape:
+            raise ValueError(
+                "Mask does not match shape of image."
+            )
         self.mask += mask
 
     def _overwrite_mask(self, mask):
