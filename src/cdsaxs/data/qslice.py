@@ -31,7 +31,7 @@ class QSlice(Data1D):
             image_roi: NDArray,
             image_mask: NDArray,
             background_Iq=None,
-            background_boxes=None,
+            background_qslices=None,
             mask: NDArray = None,
             dIq: NDArray = None,
             **kwargs
@@ -184,7 +184,7 @@ class QSlice(Data1D):
                 )
         else:
             self.background_Iq = None
-        self.background_boxes = background_boxes
+        self.background_qslices = background_qslices
 
     def mirror_q(self, q_axis=None, resort=True):
         """

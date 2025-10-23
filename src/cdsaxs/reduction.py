@@ -6,8 +6,11 @@ from __future__ import annotations
 import numpy as np
 
 from cdsaxs.data.reduced_data1d import ReducedData1D, ReducedData1DSlice
-from cdsaxs.data.dataset import IntegratedDataset
-from cdsaxs.data.dataset import ReducedDataset, ReducedSlices
+from cdsaxs.data.dataset import (
+    IntegratedDataset,
+    ReducedDataset,
+    ReducedSlices
+)
 import cdsaxs.diffraction as diffraction
 import cdsaxs.plotting.plotting as plotting
 
@@ -152,32 +155,3 @@ def slice_reduced_dataset(
         fig = None
 
     return reduced_slices, fig
-
-    # if show_plot:
-
-    #     fig = plotting.plot_reduced_dataset(dataset,
-    #                                         index=reduced_index,
-    #                                         log_scale=True,
-    #                                         interpolated_image=interpolated_image,
-    #                                         plot_marker_size=plot_marker_size)
-
-    #     max_qsz = 0
-    #     min_qsz = 0
-
-    #     for data in dataset.reduced_datasets[reduced_index].values():
-    #         max_qsz = max(max_qsz, np.nanmax(data.qsz))
-    #         min_qsz = min(min_qsz, np.nanmin(data.qsz))
-
-    #     for q, q_range in zip(q_values, q_ranges):
-    #         fig.axes[0].vlines(q, min_qsz, max_qsz, color='red', linestyles='dashed', zorder=100)
-    #         fig.axes[0].axvspan(q_range[0], q_range[1], facecolor='red', alpha=0.3, zorder=100) 
-    # else:
-    #     fig = None
-
-    # if in_place:
-    #     if reduced_index not in dataset.reduced_slices.keys():
-    #         dataset.reduced_slices[reduced_index] = {}
-    #     dataset.reduced_slices[reduced_index][q_axis] = slices
-    #     return fig
-    # else:
-    #     return slices

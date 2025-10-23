@@ -5,6 +5,11 @@ from cdsaxs.calculators import wavelength_to_energy
 from cdsaxs.data.data2d import Data2D
 
 
+class TestCombineData2D(unittest.TestCase):
+    # TODO: implement a test for combining two instances of Data2D
+    pass
+
+
 class TestData2D(unittest.TestCase):
 
     def setUp(self):

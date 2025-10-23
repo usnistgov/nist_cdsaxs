@@ -1,30 +1,23 @@
-"""
-This module contains the following classes for two-dimensional
-scattering images.
-
-Data2D : Generic two-dimensional data class not tied to diffraction.
-DataQdyQdx(Data2D) : Child class of Data2D for detector images.
-"""
-
 from __future__ import annotations
-
 import warnings
 
 import numpy as np
 from numpy.typing import NDArray
-from plotly.offline import iplot
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data.data_image import DataImage
+from cdsaxs.data.metadata import (
+    METADATA_KEYWORDS,
+    check_metadata
+)
 from cdsaxs.data.qslice import QSlice
-from cdsaxs.data.metadata import METADATA_KEYWORDS, check_metadata
 import cdsaxs.plotting.plotting as plotting
-import cdsaxs.plotting._plotting_tools as plotting_tools
-from cdsaxs.tools import line_fit
-from cdsaxs.tools import find_peaks_2D, find_peaks_2D_one_axis
 import cdsaxs.diffraction as diffraction
-from scipy.special import erf
-
+from cdsaxs.tools import (
+    find_peaks_2D,
+    find_peaks_2D_one_axis,
+    line_fit
+)
 
 # any changes to these metadata values should update calculated q values
 UPDATE_Q_TRIGGERS = [
@@ -123,6 +116,17 @@ class Data2D(DataImage):
         in unique identifiers for each image. A custom name can be set
         by passing 'name' metadata. This name is used as a key in the
         dictionaries storing the data objects within the dataset class.
+
+    Protected Attributes
+    --------------------
+    _raw_image : NDArray
+        Original image provided during initialization of an
+        instance of this class. This enables the user to fully
+        reset to the original image regardless of any data
+        transformations performed.
+    _masked_image : NDArray
+        Retrieve the current image of the DataImage instance with
+        all masked points replaced with np.nan.
     """
 
     def __init__(
@@ -171,7 +175,8 @@ class Data2D(DataImage):
             All pixels that are nan, inf, or -inf will be masked by
             default.
         hide_q_warnings : bool, optional
-            Hide any warnings that may occur during init.
+            Hide any warnings that may occur attempting to
+            calculate the scattering vector during init.
             Default value is False.
 
         Other Parameters
@@ -191,10 +196,25 @@ class Data2D(DataImage):
         self.update_metadata(
             {x: y for x, y in kwargs.items() if x in METADATA_KEYWORDS})
 
+        # set required metadata defaults if not present
+        self.update_metadata(
+            {'sample_phi_offset_deg': 0},
+            overwrite=False, hide_q_warnings=True)
+        self.update_metadata(
+            {'center_px': (0, 0)},
+            overwrite=False, hide_q_warnings=True)
+
         self.user_params = {}
         self.update_user_params(
             {x: y for x, y in kwargs.items() if x not in METADATA_KEYWORDS}
         )
+
+        self.name = name if name is not None else\
+            self.metadata['name'] if 'name' in self.metadata.keys() else\
+            self.metadata['filename'] if 'filename' in self.metadata.keys()\
+            else 'name'
+
+        self.data_transformations = []
 
         self.qdy = None
         self.qdx = None
@@ -204,21 +224,6 @@ class Data2D(DataImage):
         # at the end of this init if we can't calculate q
         self.calculate_q(suppress_errors=True)
 
-        self.name = name if name is not None else\
-            self.metadata['name'] if 'name' in self.metadata.keys() else\
-            self.metadata['filename'] if 'filename' in self.metadata.keys()\
-            else 'name'
-
-        # set required default metadata values not required by user
-        self.update_metadata(
-            {'sample_phi_offset_deg': 0},
-            overwrite=False, hide_q_warnings=True)
-        self.update_metadata(
-            {'center_px': (0, 0)},
-            overwrite=False, hide_q_warnings=True)
-
-        self.data_transformations = []
-
         if not hide_q_warnings and self.qdy is None:
             warnings.warn(
                 "Insufficient metadata to calculate q. "
@@ -226,7 +231,9 @@ class Data2D(DataImage):
                 "position, wavelength, sample to detector distance, and "
                 "pixel size are provided.")
 
-    def update_metadata(self, metadata: dict, overwrite: bool = True,
+    def update_metadata(self,
+                        metadata: dict,
+                        overwrite: bool = True,
                         hide_q_warnings=False):
         """
         Add accepted metadata to the class instance. Existing metadata
@@ -268,7 +275,9 @@ class Data2D(DataImage):
                 except ValueError as e:
                     warnings.warn(f"{e}")
 
-    def update_user_params(self, params: dict, overwrite: bool = True):
+    def update_user_params(self,
+                           params: dict,
+                           overwrite: bool = True):
         """
         Add key: value pairs to the user params of this class instance.
         Existing parameters can be updated by keeping the overwrite
@@ -813,7 +822,6 @@ class Data2D(DataImage):
         show_plot=True,
         subtract_background_offset: int | list[int] = None,
         plotting_kwargs={},
-        # interactive_plot=True
     ) -> QSlice:
         """
         Integrate a region of interest defined by the limits along both
@@ -909,17 +917,14 @@ class Data2D(DataImage):
                 axis = 0
             else:
                 axis = 1
-
-        if isinstance(axis, str):
-            if axis == 'qdy':
-                axis = 0
-            elif axis == 'qdx':
-                axis = 1
-            else:
-                raise ValueError(f"Invalid integration axis of {axis}.")
-
-        if axis not in [0, 1]:
-            raise ValueError("Invalid integration axis of {axis}")
+        elif axis == 'qdy':
+            axis = 0
+        elif axis == 'qdx':
+            axis = 1
+        elif axis in [0, 1]:
+            pass
+        else:
+            raise ValueError(f"Invalid integration axis of {axis}.")
 
         # access parent method of box integration
         integrated_i, image_box, mask_box = super().slice_box(
@@ -944,6 +949,7 @@ class Data2D(DataImage):
         # extract background intensity
         if subtract_background_offset is not None:
             backgrounds = []
+            backgrounds_iq = []
             if type(subtract_background_offset) is int:
                 subtract_background_offset = [subtract_background_offset]
             for offset in subtract_background_offset:
@@ -961,22 +967,35 @@ class Data2D(DataImage):
                         limits_qdx_px[0] + (offset if axis == 1 else 0),
                         limits_qdx_px[1] + (offset if axis == 1 else 0)
                     )
-                    background_i, _, _ = super().sum_box(
+                    background_i, b_image, b_mask = super().slice_box(
                         limits_axis0=limits_qdy_px_sub,
                         limits_axis1=limits_qdx_px_sub,
-                        axis=axis
+                        axis=axis,
+                        mode=mode,
                     )
-                    backgrounds.append(
-                        [background_i, limits_qdy_px_sub, limits_qdx_px_sub])
 
-            background_i_avg = np.array([
-                background_i for background_i, _, _ in backgrounds])
-            # even if some points in background are masked, we will take
-            # values from the available pixels for background subtraction
+                    b_slice = QSlice(
+                        q=q,
+                        Iq=background_i,
+                        q_axis=q_axis,
+                        data2d=self,
+                        limits_axis0=limits_qdy_px_sub,
+                        limits_axis1=limits_qdx_px_sub,
+                        integration_mode=mode,
+                        integration_axis=axis,
+                        image_roi=b_image,
+                        image_mask=b_mask,
+                    )
+
+                    backgrounds_iq.append(background_i)
+                    backgrounds.append(b_slice)
+
+            background_i_avg = np.array(backgrounds_iq)
+            # even if some points are masked in some background offsets
+            # we will use the background points
             background_i_avg = np.nanmean(background_i_avg, axis=0)
-
-            before_background_i = np.copy(integrated_i)
             integrated_i -= background_i_avg
+
         else:
             background_i_avg = None
             backgrounds = None
@@ -994,8 +1013,9 @@ class Data2D(DataImage):
             image_roi=image_box,
             image_mask=mask_box,
             background_Iq=background_i_avg,
-            background_boxes=backgrounds
+            background_qslices=backgrounds,
         )
+        # set the q-axis that was integrated over to the mean value
         integrated_q_slice.__setattr__(q_int_axis, q_int)
 
         if show_plot:
@@ -1138,7 +1158,8 @@ class Data2D(DataImage):
             shift_box_qdy_px=0, shift_box_qdx_px=0,
             log_scale=True, refinement_size=7, algorithm='scikit',
             zoom_plot=True,
-            show_plot=True, plotting_kwargs={}, **kwargs):
+            show_plot=True,
+            **kwargs):
         """
         Find peaks along one axis of a two-dimensional image using
         the scikit-image.feature peak_local_max() function. The peaks
@@ -1309,7 +1330,7 @@ class Data2D(DataImage):
                 limits_axis0=limits_qdy_px,
                 limits_axis1=limits_qdx_px,
                 zoom_plot=zoom_plot,
-                **plotting_kwargs
+                **kwargs
             )
         else:
             fig = None
@@ -1338,7 +1359,6 @@ class Data2D(DataImage):
             beam_center_guess=None,
             show_plot=True,
             zoom_plot=True,
-            plotting_kwargs={},
             ignore_peaks=[],
             **kwargs):
         """
@@ -1472,7 +1492,7 @@ class Data2D(DataImage):
                 limits_axis0=box_dims[0],
                 limits_axis1=box_dims[1],
                 zoom_plot=zoom_plot,
-                **plotting_kwargs,
+                **kwargs,
                 show_beam_center=False\
                 if symmetric_warning or no_peak_warning else (
                     True if update else (center_qdy, center_qdx))
@@ -1507,7 +1527,6 @@ class Data2D(DataImage):
             show_plot=True,
             peak_orders=None,
             zoom_plot=True,
-            plotting_kwargs={},
             ignore_orders=[],
             **kwargs
     ):
@@ -1647,7 +1666,7 @@ class Data2D(DataImage):
                 limits_axis1=box_dims[1],
                 zoom_plot=zoom_plot,
                 sdd_cm=(average_sdd, std_sdd),
-                **plotting_kwargs,
+                **kwargs,
             )
         else:
             fig = None
@@ -1660,7 +1679,6 @@ class Data2D(DataImage):
         size_qdx_px,
         show_plot=True,
         zoom_plot=True,
-        plotting_kwargs={},
         **kwargs
     ):
         """
@@ -1753,7 +1771,7 @@ class Data2D(DataImage):
                 limits_axis0=limits_qdy_px,
                 limits_axis1=limits_qdx_px,
                 zoom_plot=zoom_plot,
-                **plotting_kwargs
+                **kwargs
             )
         else:
             fig = None

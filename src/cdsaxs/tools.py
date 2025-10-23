@@ -1,26 +1,26 @@
 """General tools for the code."""
-
+import inspect
 import warnings
 
 import numpy as np
 from PIL import Image
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
-from scipy.stats import linregress
 from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 
 from cdsaxs.calculators import gaussian
 
 
-def default_mask(image):
+def default_mask(data):
 
     """
     Generate a default mask of points that are nan, inf, or -inf.
     """
-    mask = np.isnan(image)
-    mask += np.isinf(image)
-    mask += np.isneginf(image)
+    data = np.array(data)
+    mask = np.isnan(data)
+    mask += np.isinf(data)
+    mask += np.isneginf(data)
 
     return mask
 
@@ -306,13 +306,34 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         data_fed[mask] = np.nan
     if log_scale:
         data_fed = np.log10(data_fed)
+        data_fed[np.isneginf(data_fed)] = np.nan
 
     if algorithm == 'scikit':
-        coordinates_px = peak_local_max(data_fed, **kwargs)
+        accepted_kwargs = [
+            param.name for param in inspect.signature(
+                peak_local_max).parameters.values()
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY)
+            and param.default is not inspect.Parameter.empty
+        ]
+        coordinates_px = peak_local_max(
+            data_fed,
+            **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
         coordinates_px = coordinates_px.tolist()
         coordinates_px = [x[0] for x in coordinates_px]
     elif algorithm == 'scipy':
-        coordinates_px, _ = find_peaks(data_fed, **kwargs)
+        accepted_kwargs = [
+            param.name for param in inspect.signature(
+                find_peaks).parameters.values()
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY)
+            and param.default is not inspect.Parameter.empty
+        ]
+        coordinates_px, _ = find_peaks(
+            data_fed,
+            **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
 
     coordinates = []
 
@@ -418,8 +439,19 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
         image_fed[mask] = np.nan
     if log_scale:
         image_fed = np.log10(image_fed)
+        image_fed[np.isneginf(image_fed)] = np.nan
 
-    coordinates_px = peak_local_max(image_fed, **kwargs)
+
+    accepted_kwargs = [
+        param.name for param in inspect.signature(peak_local_max).parameters.values()
+        if param.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY)
+        and param.default is not inspect.Parameter.empty
+    ]
+    coordinates_px = peak_local_max(
+        image_fed,
+        **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
     coordinates_px = coordinates_px.tolist()
 
     coordinates = []
@@ -559,8 +591,9 @@ def find_peaks_2D_one_axis(
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
     """
-    # check the threshold_abs
     image_fed = np.copy(image)
+    if mask is not None:
+        image_fed[mask] = np.nan
     if integration_mode == 'sum':
         image_fed = np.nansum(image_fed, axis=1-peak_axis)
     elif integration_mode == 'mean':
@@ -570,7 +603,7 @@ def find_peaks_2D_one_axis(
             f"Integration mode {integration_mode} not recognized."
             "Use 'mean' or 'sum'."
         )
-    image_fed[mask.any(axis=1-peak_axis)] = np.nan
+    image_fed[np.isnan(image_fed).any(axis=1-peak_axis)] = np.nan
 
     refinement_size = max(refinement_size, 4)
     coordinates_peak_axis = find_peaks_1D(image_fed, log_scale=log_scale,
@@ -606,6 +639,7 @@ def find_peaks_2D_one_axis(
     coordinates = []
     if log_scale:
         image = np.log10(image)
+        image[np.isneginf(image)] = np.nan
     else:
         image = np.array(image)
 

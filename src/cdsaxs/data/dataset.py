@@ -4,20 +4,18 @@ This module includes container classes for datasets, i.e. many of 1D or
 """
 
 from __future__ import annotations
-
 import warnings
 
 import numpy as np
 
 from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.qslice import QSlice
-from cdsaxs.data.reduced_data1d import ReducedData1D
-from cdsaxs.data.reduced_data1d import ReducedData1DSlice
-from cdsaxs.sample import Sample
+from cdsaxs.data.reduced_data1d import (
+    ReducedData1D,
+    ReducedData1DSlice
+)
 import cdsaxs.plotting.plotting as plotting
-import cdsaxs.plotting._plotting_tools as plotting_tools
-from plotly.offline import iplot
-
+from cdsaxs.sample import Sample
 
 
 class Dataset():
@@ -564,62 +562,6 @@ class Dataset():
 
     #     return fig
 
-    # def save_reduced_slices(self, filepath, index=None, q_slice_axis='qsx',
-    #                         decimals=5):
-    #     """
-    #     Returns the slected reduced slices set currently stored in the
-    #     dataset. The user must specify the index of the set of slices
-    #     as well as the q_slice_axis. The number of decimal places the
-    #     slice positions are rounded at can be changed with the
-    #     decimals keyword argument.
-
-    #     NOTE: currently only a q_slice_axis of 'qsx' is accepted or
-    #     formatted appropriately in the output file.
-    #     TODO: generalize this in the future.
-    #     """
-
-    #     if index is None:
-    #         index = max(self.reduced_slices.keys())
-    #     reduced_slices = self.reduced_slices[index][q_slice_axis]
-
-    #     length = 0
-    #     for key, val in reduced_slices.items():
-    #         length = np.max((length, val.q.shape[0]))
-
-    #     datas = []
-        
-    #     for key, val in reduced_slices.items():
-    #         q = val.q
-    #         Iq = val.Iq
-            
-    #         #sort by q
-    #         sorted_indexes = np.argsort(q)
-    #         q = q[sorted_indexes]
-    #         Iq = Iq[sorted_indexes]
-
-    #         select = Iq > 0
-
-    #         if len(q[select]) < length:
-    #             new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
-    #                                q.astype(str)[select],
-    #                                [""]*(length-len(q[select]))))
-    #         else:
-    #             new_q = np.hstack(([r'$q_z (\AA^{-1})$'],
-    #                                q.astype(str)[select]))
-
-    #         if len(q[select]) < length:
-    #             new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
-    #                                 Iq.astype(str)[select],
-    #                                 [""]*(length-len(Iq[select]))))
-    #         else:
-    #             new_Iq = np.hstack(([f'qx = {np.round(key, decimals)}'],
-    #                                 Iq.astype(str)[select]))
-
-    #         datas.append(new_q)
-    #         datas.append(new_Iq)
-
-    #     datas = np.array(datas).T
-    #     np.savetxt(filepath, datas, delimiter=',', fmt='%s')
 
 
 class IntegratedDataset():
@@ -839,34 +781,87 @@ class ReducedSlices():
 
     def plot_data(self,
                   q_axis='qsz',
-                  slice_axis='qsx',
-                  filters={},
+                  integrated_axis='qsx',
+                  filter_by_q={},
                   log_scale=True,
                   offset_order=0,
                   offset_value=0,
-                  interactive_plot=True,
                   ):
 
-        if interactive_plot:
-            fig = plotting.plot_reduced_slices_interactive(
-                self,
-                q_axis=q_axis,
-                slice_axis=slice_axis,
-                filters=filters,
-                log_scale=log_scale,
-                offset_order=offset_order,
-                offset_value=offset_value,
-            )
-            iplot(fig)
-        else:
-            fig = plotting.plot_reduced_slices(
-                self,
-                q_axis=q_axis,
-                slice_axis=slice_axis,
-                filters=filters,
-                log_scale=log_scale,
-                offset_order=offset_order,
-                offset_value=offset_value,
-            )
+        fig = plotting.plot_reduced_slices(
+            self,
+            q_axis=q_axis,
+            integrated_axis=integrated_axis,
+            filter_by_q=filter_by_q,
+            log_scale=log_scale,
+            offset_order=offset_order,
+            offset_value=offset_value)
 
         return fig
+
+    def export_reduced_slices(
+            self,
+            filepath,
+            filter_by_q={},
+            q_axis='qsz',
+            integrated_axis='qsx',
+            decimals=5):
+        """
+        Returns the slected reduced slices set currently stored in the
+        dataset. The user must specify the index of the set of slices
+        as well as the q_slice_axis. The number of decimal places the
+        slice positions are rounded at can be changed with the
+        decimals keyword argument.
+
+        NOTE: currently only a q_slice_axis of 'qsx' is accepted or
+        formatted appropriately in the output file.
+        TODO: generalize this in the future.
+        """
+
+        filtered_slices = self.data.copy()
+        for key, value in filter_by_q.items():
+            keep = []
+            for data in filtered_slices:
+                test = getattr(data, key)
+                if np.nanmin(test) >= np.nanmin(value)\
+                        and np.nanmax(test) <= np.nanmax(value):
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+
+        length = 0
+        for r_slice in filtered_slices:
+            length = np.max((length, len(getattr(r_slice, q_axis))))
+
+        datas = []
+
+        for r_slice in filtered_slices:
+            q = getattr(r_slice, q_axis)
+            Iq = getattr(r_slice, '_masked_Iq')
+            q_int = getattr(r_slice, integrated_axis)
+
+            # sort by q
+            sorted_indexes = np.argsort(q)
+            q = q[sorted_indexes]
+            Iq = Iq[sorted_indexes]
+
+            select = (~np.isnan(Iq)) & (Iq > 0)
+
+            new_q = np.hstack(
+                ([r'$q_z (\AA^{-1})$'],
+                    np.round(q, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(q[select])))
+                    )
+
+            new_Iq = np.hstack(
+                ([f'qx = {np.round(q_int, decimals)}'],
+                    np.round(Iq, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(Iq[select])))
+                    )
+
+            datas.append(new_q)
+            datas.append(new_Iq)
+
+        datas = np.array(datas).T
+        np.savetxt(filepath, datas, delimiter=',', fmt='%s')

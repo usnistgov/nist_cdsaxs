@@ -1,10 +1,3 @@
-"""
-This module contains dataset loaders. Each loader must create one
-instance of data.Dataset that contains one or more instances of
-data.DataQyQxz corresponding to each scattering file in the loaded
-dataset.
-"""
-
 from __future__ import annotations
 import os
 import warnings
@@ -14,11 +7,17 @@ from tqdm import tqdm
 
 from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.dataset import Dataset
-from cdsaxs.data.metadata import METADATA_KEYWORDS
-from cdsaxs.data.metadata import check_metadata, correct_metadata_dtype
-import cdsaxs.loaders._loader_tools as lt
-from cdsaxs.loaders.detectors import *
-from cdsaxs.loaders.filetypes import *
+from cdsaxs.data.metadata import (
+    METADATA_KEYWORDS,
+    check_metadata,
+    correct_metadata_dtype
+)
+import cdsaxs.loaders._loader_tools as loader_tools
+from cdsaxs.loaders.detectors import read_pilatus
+from cdsaxs.loaders.filetypes import (
+    read_tiff,
+    read_nist_bin
+)
 
 
 def filter_filenames(
@@ -75,7 +74,7 @@ def filter_filenames(
         filter_substrings keyword.
 
     """
-    directory_path = lt.clean_filepath(directory_path)
+    directory_path = loader_tools.clean_filepath(directory_path)
     if file_extension is None:
         file_extension = "."
     filenames = [x for x in os.listdir(directory_path) if file_extension in x]
@@ -145,7 +144,7 @@ def LoadData(
     """
 
     # clean the filepath and try to determine filetype if not provided
-    filepath = lt.clean_filepath(filepath)
+    filepath = loader_tools.clean_filepath(filepath)
     if filetype is None:
         extension = os.path.basename(filepath).split(".")[-1]
         if extension == 'tif' or extension == 'tiff':
@@ -316,11 +315,11 @@ def LoadDataset(
 
     dataset = Dataset(name=dataset_name)
 
-    directory_path = lt.clean_filepath(directory_path)
+    directory_path = loader_tools.clean_filepath(directory_path)
 
     if filenames is None:
         filenames = [x for x in os.listdir(directory_path)]
-    filenames = lt.filter_filenames_by_filetype(filenames, filetype)
+    filenames = loader_tools.filter_filenames_by_filetype(filenames, filetype)
 
     if verbose:
         pbar = tqdm(range(len(filenames)), desc="Loading files: ",
@@ -339,7 +338,7 @@ def LoadDataset(
                 user_params_i = {}
 
             # extract information from the metadata filename pattern
-            metadata_extract, user_params_extract = lt.extract_metadata_from_pattern(
+            metadata_extract, user_params_extract = loader_tools.extract_metadata_from_pattern(
                 {}, {}, filename, metadata_pattern, metadata_scales
             )
             for key, value in metadata_extract.items():
@@ -366,7 +365,7 @@ def LoadDataset(
                     user_params_i[key] = value
             # print("METADATA", metadata_i, user_params_i)
             # generate the name for the two-dimensional data
-            new_name = lt.generate_data_name_from_pattern(
+            new_name = loader_tools.generate_data_name_from_pattern(
                 data_name_pattern, metadata_i, user_params_i)
 
             data = LoadData(
@@ -467,7 +466,7 @@ def LoadDataset_MetadataCSV(
     dataset = Dataset(name=dataset_name)
 
     # load the csv metadata file
-    metadata_csv_filepath = lt.clean_filepath(filepath=metadata_csv_filepath)
+    metadata_csv_filepath = loader_tools.clean_filepath(filepath=metadata_csv_filepath)
     csv_data = np.loadtxt(metadata_csv_filepath, dtype='str', delimiter=',')
     csv_header = csv_data[0, :]
     csv_data = csv_data[1:, :]
@@ -493,7 +492,7 @@ def LoadDataset_MetadataCSV(
                 else:
                     user_params[str(csv_header[ii])] = value
 
-            new_name = lt.generate_data_name_from_pattern(
+            new_name = loader_tools.generate_data_name_from_pattern(
                     data_name_pattern, metadata, user_params)
 
             data = LoadData(

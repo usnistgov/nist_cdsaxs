@@ -5,7 +5,7 @@ from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
-import cdsaxs.loaders._loader_tools as lt
+import cdsaxs.loaders._loader_tools as loader_tools
 
 
 def read_tiff(filepath):
@@ -27,7 +27,7 @@ def read_tiff(filepath):
         Dictionary of the header information where the key: value paris
         correpond to the tag.name: tag.value pairs of the header tags.
     """
-    filepath = lt.clean_filepath(filepath=filepath)
+    filepath = loader_tools.clean_filepath(filepath=filepath)
 
     try:
         image = Image.open(filepath)
@@ -68,7 +68,7 @@ def read_nist_bin(filepath):
         Dictionary with metadata keyword: value pairs.
     """
 
-    filepath = lt.clean_filepath(filepath=filepath)
+    filepath = loader_tools.clean_filepath(filepath=filepath)
 
     # read the image from the .bin file first
     image = np.fromfile(filepath, dtype=np.float64)[1:].reshape(195, 1475)

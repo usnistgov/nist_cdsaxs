@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from cdsaxs.tools import default_mask
 from cdsaxs.data.metadata import ACCEPTED_Q_AXES
 from cdsaxs.plotting import plotting
 
@@ -70,7 +71,7 @@ class Data1D():
         qby : Scattering vector component along y axis of the lab frame
         qbx : Scattering vector component along x axis of the lab frame
         qbz : Scattering vector comopnent along z axis of the lab frame; in
-            the lab frame the beam path is aligned to the z-axis 
+            the lab frame the beam path is aligned to the z-axis
         qb  : Scattering vector in the beam/lab frame; when the detector is
             positioned normal to the incident beam, the lab and detector
             coordinates will align
@@ -93,14 +94,10 @@ class Data1D():
         # check q axes with length of Iq
         self.Iq = np.array(Iq).reshape(-1).astype(float)
         self._raw_Iq = np.copy(Iq)
-        self.mask = np.isnan(self.Iq)
+
+        self.mask = default_mask(self.Iq)
         if mask is not None:
-            if len(mask) != len(self.Iq):
-                raise ValueError(
-                    "The mask and Iq should be of same length."
-                )
-            else:
-                self.mask += mask
+            self.mask_points(mask)
 
         q = np.array(q).reshape(-1).astype(float)
         if len(q) != len(self.Iq):
@@ -149,8 +146,8 @@ class Data1D():
         setattr(self, self.q_axis, new_q)
 
     @property
-    def Iq_masked(self):
-        masked = np.array(self.Iq)
+    def _masked_Iq(self):
+        masked = np.copy(self.Iq)
         masked[self.mask] = np.nan
         return masked
 
@@ -342,6 +339,11 @@ class Data1D():
             all data operations. This will NOT unmask any previously
             masked points.
         """
+        mask = mask.reshape(-1)
+        if len(mask) != len(self.Iq):
+            raise ValueError(
+                "Mask does not match shape of Iq."
+            )
         self.mask += mask
 
     def overwrite_mask(self, mask):

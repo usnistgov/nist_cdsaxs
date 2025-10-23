@@ -3,10 +3,12 @@ Tools for the loader module.
 """
 import os
 import re
-
 import warnings
 
-from cdsaxs.data.metadata import METADATA_KEYWORDS, correct_metadata_dtype
+from cdsaxs.data.metadata import (
+    METADATA_KEYWORDS,
+    correct_metadata_dtype
+)
 
 
 def clean_filepath(filepath):
@@ -18,101 +20,6 @@ def clean_filepath(filepath):
             f"({len(filepath)} characters) and might result in"
             "this loader failing.")
     return filepath
-
-
-def extract_exposure_time_pilatus(header):
-    """
-    Extract exposure time in seconds from the TIFF file header"
-    of a Pilaturs detectr."
-    """
-
-    try:
-        if type(header["ImageDescription"]) is str:
-            image_desc = header["ImageDescription"]
-        else:
-            image_desc = header["ImageDescription"][0]
-        _, value, units = [
-            x for x in image_desc.split('#')
-            if 'Exposure_time' in x][0].split()
-        if units != 's':
-            warnings.warn(
-                "Exposure time is in wrong units; returning None.")
-            return None
-        else:
-            return float(value)
-    except:
-        warnings.warn(
-            "Count not extract count time from file; returning None.")
-        return None
-
-
-def extract_pixel_size_pilatus(header):
-
-    "Extract pixel time in um from the TIFF file header."
-
-    try:
-        if type(header["ImageDescription"]) is str:
-            image_desc = header["ImageDescription"]
-        else:
-            image_desc = header["ImageDescription"][0]
-
-        _, value0, units0, _, value1, units1 = [
-            x for x in image_desc.split('#')
-            if 'Pixel_size' in x][0].split()
-
-        if units0 != 'm' or units1 != 'm':
-            warnings.warn(
-                "Pixel size is in the wrong units; returning None."
-            )
-            return None
-        if float(value0) != float(value1):
-            raise ValueError(
-                "Pixel dimensions are not square. This is currently"
-                "not implemented in the code and requires consideration."
-            )
-        return float(value0) * 1e6
-    except:
-        warnings.warn(
-            "Could not extract pixel size from the header; returning None"
-        )
-        return None
-
-
-def pilatus_header_to_metadata(header):
-    """
-    Extract exposure time and pixel size from a pilatus detector file
-    header.
-
-    Parameters
-    ----------
-    header : dict
-        Dictionary of tag.name: tag.value pairs from a tiff file from
-        a Pilatus detector.
-
-    Returns
-    -------
-    dict
-        Metadata dictionary with accepted metadata keywords extracted
-        from the tiff file header.
-    """
-    metadata = {}
-
-    # exposure time
-    exposure_time_s = extract_exposure_time_pilatus(header)
-    if exposure_time_s is not None:
-        metadata["exposure_time_s"] = exposure_time_s
-
-    # pixel size
-    pixel_size_um = extract_pixel_size_pilatus(header)
-    if pixel_size_um is not None:
-        metadata["pixel_size_um"] = pixel_size_um
-    else:
-        metadata["pixel_size_um"] = 172
-        warnings.warn(
-            "Assuming a pixel size of 172 micron for Pilatus."
-            "Please confirm this is correct before proceeding.")
-
-    return metadata
 
 
 def filter_filenames_by_filetype(filenames, filetype):
