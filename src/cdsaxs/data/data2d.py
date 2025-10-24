@@ -20,9 +20,16 @@ from cdsaxs.tools import (
 )
 
 # any changes to these metadata values should update calculated q values
-UPDATE_Q_TRIGGERS = [
+UPDATE_QB_TRIGGERS = [
     "energy_ev", "wavelength_nm", "sdd_cm", "pixel_size_um", "center_px",
-    "detector_phi_deg", "detector_phi_omega"
+    "detector_phi_deg", "detector_phi0_deg", "detector_phi_scale",
+    "detector_y_mm", "detector_y0_mm"
+]
+
+UPDATE_QS_TRIGGERS = UPDATE_QB_TRIGGERS + [
+    "sample_phi_deg", "sample_phi_offset_deg",
+    "sample_omega_deg", "sample_omega_offset_deg",
+    "sample_chi_deg", "sample_chi_offset_deg",
 ]
 
 
@@ -91,10 +98,35 @@ class Data2D(DataImage):
         Scattering image as a two-dimensional numpy array. The first
         dimension corresponds to the y-axis (detector frame) and the
         second dimension corresponds to the x-axis (detector frame).
-    qdy : NDArray
-        Scattering vector for each pixel along the detector y-axis.
-    qdx : NDArray
-        Scattering vector for each pixel along the detector x-axis.
+    qby_1d : NDArray
+        Scattering vector for each pixel along the detector y-axis at
+        qdx = 0. Used for plotting detector image only.
+    qbx_1d : NDArray
+        Scattering vector for each pixel along the detector x-axis at
+        qdy = 0. Used for plotting detector image only.
+    qb : NDArray
+        Scattering vector for each pixel in beam coordinate space.
+    qby : NDArray
+        The y-component of qb.
+    qbx : NDArray
+        The x-component of qb.
+    qbz : NDArray
+        The z-component of qb.
+    qs : NDArray
+        Scattering vector for each pixel in sample corodinate space.
+    qsy : NDArray
+        The y-component of qs.
+    qsx : NDArray
+        The x-component of qs.
+    qsz : NDArray
+        The z-component of qs.
+    sample_rotation : dict
+        Metadata that describes the sample rotations in the CD-SAXS
+        experiment. Includes keys of:
+            rotation_type : 'extrinsic' or 'intrinsic'
+            first_axis : 'x', 'y', or 'z'; default is 'y'
+            second_axis : 'x', 'y', or 'z'; default is None
+            third_axis : 'x', 'y', or 'z'; default is None
     metadata : dict
         Relevant scattering metadata to the image acquisition. These are
         key : value paris where the key must be selected from the
@@ -135,6 +167,10 @@ class Data2D(DataImage):
             name: str = None,
             mask: NDArray[np.bool] = None,
             hide_q_warnings=False,
+            sample_rotation_type='extrinsic',
+            sample_rotation_first_axis='y',
+            sample_rotation_second_axis=None,
+            sample_rotation_third_axis=None,
             **kwargs
     ):
         """
@@ -198,7 +234,16 @@ class Data2D(DataImage):
 
         # set required metadata defaults if not present
         self.update_metadata(
-            {'sample_phi_offset_deg': 0},
+            {'sample_phi_offset_deg': 0,
+             'sample_chi_deg': 0,
+             'sample_chi_offset_deg': 0,
+             'sample_omega_deg': 0,
+             'sample_omega_offset_deg': 0,
+             "detector_phi_deg": 0,
+             "detector_phi0_deg": 0,
+             "detector_phi_scale": 0,
+             "detector_y_mm": 0,
+             "detector_y0_mm": 0},
             overwrite=False, hide_q_warnings=True)
         self.update_metadata(
             {'center_px': (0, 0)},
@@ -214,10 +259,22 @@ class Data2D(DataImage):
             self.metadata['filename'] if 'filename' in self.metadata.keys()\
             else 'name'
 
+        # set the sample rotation metadata
+        self.set_sample_rotation(
+            rotation_type=sample_rotation_type,
+            first_axis=sample_rotation_first_axis,
+            second_axis=sample_rotation_second_axis,
+            third_axis=sample_rotation_third_axis,
+        )
+
         self.data_transformations = []
 
-        self.qdy = None
-        self.qdx = None
+        # initialize all q attributes as None
+        q_attributes = ['qby_1d', 'qbx_1d',
+                        'qb', 'qby', 'qbx', 'qbz',
+                        'qs', 'qsy', 'qsx', 'qsz']
+        for q_key in q_attributes:
+            setattr(self, q_key, None)
 
         # calculate the q vectors if all required metadata is present
         # we will suppress the warning here but will give a single warning
@@ -230,6 +287,70 @@ class Data2D(DataImage):
                 "Check your metadata to ensure the correct center "
                 "position, wavelength, sample to detector distance, and "
                 "pixel size are provided.")
+
+    def set_sample_rotation(self,
+                            rotation_type='extrinsic',
+                            first_axis='y',
+                            second_axis=None,
+                            third_axis=None):
+        """
+        Set the self.sample_rotation dictionary with details of the
+        sample rotations.
+
+        Parameters
+        ----------
+        rotation_type : str
+            Define the series of sample rotations as 'extrinsic' or
+            'intrinsic'.
+            An 'intrinsic' rotation is performed on the
+            coordinate system after the previous rotation is performed.
+            An 'extrinsic' rotation is perfromed on the original
+            coordinate system prior to any rotations.
+            Default value is 'extrinsic'.
+        first_axis : str
+            Axis about which the first rotation is performed.
+            Options are 'x', 'y', or 'z'.
+            Default value is 'y' for standard CD-SAXS with one rotation
+            of sample_phi_deg about the positive y-axis at the sample.
+        second_axis : str, optional
+            Axis about which the second rotation is performed.
+            Options are 'x', 'y', or 'z'.
+            Default is None.
+        third_axis : str, optional
+            Axis about which the first rotation is performed.
+            Options are 'x', 'y', or 'z'.
+            Default is None.
+        """
+        accepted_axes = ['x', 'y', 'z']
+        if first_axis.lower() not in accepted_axes:
+            raise ValueError(
+                f"Did not recognize first_axis of {first_axis}. Use "
+                "'x', 'y', or 'z'."
+            )
+        if second_axis is not None and second_axis.lower() not in accepted_axes:
+            raise ValueError(
+                f"Did not recognize second_axis of {second_axis}. Use "
+                "'x', 'y', or 'z'."
+            )
+        if third_axis is not None and third_axis.lower() not in accepted_axes:
+            raise ValueError(
+                f"Did not recognize third_axis of {third_axis}. Use "
+                "'x', 'y', or 'z'."
+            )
+        if rotation_type.lower() not in ['intrinsic', 'extrinsic']:
+            raise ValueError(
+                f"Did not recognize rotation type of {rotation_type}. "
+                "Use 'intrinsic' or 'extrinsic'."
+            )
+
+        self.sample_rotation = {
+            'rotation_type': rotation_type,
+            'first_axis': first_axis,
+            'second_axis': second_axis,
+            'third_axis': third_axis,
+        }
+
+        self.calculate_q(suppress_errors=True)
 
     def update_metadata(self,
                         metadata: dict,
@@ -269,7 +390,7 @@ class Data2D(DataImage):
                     elif key == 'energy_ev':
                         self.metadata['wavelength_nm'] =\
                             calculators.energy_to_wavelength(value)
-            if len([x for x in metadata.keys() if x in UPDATE_Q_TRIGGERS]) > 0:
+            if len([x for x in metadata.keys() if x in UPDATE_QS_TRIGGERS]) > 0:
                 try:
                     self.calculate_q(suppress_errors=hide_q_warnings)
                 except ValueError as e:
@@ -300,11 +421,22 @@ class Data2D(DataImage):
             else:
                 self.user_params[key] = value
 
+    def _reset_q_attributes(self):
+        """
+        Reset all q_attributes to None.
+        """
+        q_attributes = ['qby_1d', 'qbx_1d',
+                        'qb', 'qby', 'qbx', 'qbz',
+                        'qs', 'qsy', 'qsx', 'qsz']
+        for q_key in q_attributes:
+            setattr(self, q_key, None)
+
     def calculate_q(self,
                     suppress_errors: bool = False):
         """
-        Calculate the qdy and qdx vectors along the image axes if
-        all required metadata is available.
+        Calculate the scattering vectors qb and qs in the beam and
+        sample coordinate spaces, respectively, as well as their
+        y-axis, x-axis, and z-axis components.
 
         Parameters
         ----------
@@ -314,40 +446,96 @@ class Data2D(DataImage):
             will not raise an error if the parameters are not available.
             Default value is False.
         """
-        required_keywords = ["center_px", "sdd_cm", "wavelength_nm",
-                             "pixel_size_um"]
-        missing_keywords = []
-        for word in required_keywords:
-            if word not in self.metadata.keys():
-                missing_keywords.append(word)
+        # first reset all the q attributes and calculate only those we can
+        self._reset_q_attributes()
+
+        # first check if we can calculate beam coordinate q
+        missing_keywords = [x for x in UPDATE_QB_TRIGGERS
+                            if x not in self.metadata.keys()]
         if len(missing_keywords) > 0 and not suppress_errors:
-            self.qdy = None
-            self.qdx = None
             raise ValueError(
-                "The following metadta is missing to calculate q: "
-                f"{missing_keywords}"
-            )
-        elif len(missing_keywords) > 0:
-            self.qdy = None
-            self.qdx = None
+                "The following metadata is missing to calculate the "
+                "beam coordinate scattering vector: "
+                f"{missing_keywords}. Therefore, the sample coordinate"
+                "scattering vector also could not be calculated"
+                )
         else:
-            # TODO: update this when diffraction.py is refactored
-            qdy = diffraction.qy_pixels_to_qy(
-                -1*np.arange(0, self.image.shape[0])
-                + self.metadata['center_px'][0],
-                self.metadata["wavelength_nm"],
-                self.metadata["pixel_size_um"],
-                self.metadata["sdd_cm"],
+            qb, qby, qbx, qbz = diffraction.detector_px_to_qbyxz(
+                center_px=self.metadata['center_px'],
+                detector_shape_px=self.image.shape,
+                pixel_size_um=self.metadata['pixel_size_um'],
+                wavelength_nm=self.metadata['wavelength_nm'],
+                sdd_cm=self.metadata['sdd_cm'],
+                center_coordinate_space='beam',
+                detector_phi_deg=self.metadata['detector_phi_deg'],
+                detector_y_mm=self.metadata['detector_y_mm'],
+                detector_phi0_deg=self.metadata['detector_phi0_deg'],
+                detector_y0_mm=self.metadata['detector_y0_mm'],
+                detector_phiscale=self.metadata['detector_phiscale'],
             )
-            qdx = diffraction.qxz_pixels_to_qxz(
-                -1*np.arange(0, self.image.shape[1])
-                + self.metadata['center_px'][1],
-                self.metadata["wavelength_nm"],
-                self.metadata["pixel_size_um"],
-                self.metadata["sdd_cm"],
+            self.qb = qb
+            self.qby = qby
+            self.qbx = qbx
+            self.qbz = qbz
+
+            _, qby_1d, _, _ = diffraction.detector_px_to_qbyxz(
+                center_px=(self.metadata['center_px'][0], 0),
+                detector_shape_px=(self.image.shape[0], 1),
+                pixel_size_um=self.metadata['pixel_size_um'],
+                wavelength_nm=self.metadata['wavelength_nm'],
+                sdd_cm=self.metadata['sdd_cm'],
+                center_coordinate_space='beam',
+                detector_phi_deg=self.metadata['detector_phi_deg'],
+                detector_y_mm=self.metadata['detector_y_mm'],
+                detector_phi0_deg=self.metadata['detector_phi0_deg'],
+                detector_y0_mm=self.metadata['detector_y0_mm'],
+                detector_phiscale=self.metadata['detector_phiscale'],
             )
-            self.qdy = qdy
-            self.qdx = qdx
+            self.qby_1d.reshape(-1)
+
+            _, qbx_1d, _, _ = diffraction.detector_px_to_qbyxz(
+                center_px=(0, self.metadata['center_px'][1]),
+                detector_shape_px=(1, self.image.shape[1]),
+                pixel_size_um=self.metadata['pixel_size_um'],
+                wavelength_nm=self.metadata['wavelength_nm'],
+                sdd_cm=self.metadata['sdd_cm'],
+                center_coordinate_space='beam',
+                detector_phi_deg=self.metadata['detector_phi_deg'],
+                detector_y_mm=self.metadata['detector_y_mm'],
+                detector_phi0_deg=self.metadata['detector_phi0_deg'],
+                detector_y0_mm=self.metadata['detector_y0_mm'],
+                detector_phiscale=self.metadata['detector_phiscale'],
+            )
+            self.qbx_1d.reshape(-1)
+
+        missing_keywords = [x for x in UPDATE_QS_TRIGGERS
+                            if x not in self.metadata.keys()]
+        if len(missing_keywords) > 0 and not suppress_errors:
+            raise ValueError(
+                "The following metadata is missing to calculate the "
+                "sample coordinate scattering vector: "
+                f"{missing_keywords}."
+                )
+        else:
+            qs, qsy, qsx, qsz = diffraction.calculate_q_beam_to_sample(
+                qby=self.qby,
+                qbx=self.qbx,
+                qbz=self.qbz,
+                sample_phi_deg=self.metadata['sample_phi_deg']\
+                    + self.metadata['sample_phi_offset_deg'],
+                sample_chi_deg=self.metadata['sample_chi_deg']\
+                    + self.metadata['sample_chi_offset_deg'],
+                sample_omega_deg=self.metadata['sample_omega_deg']\
+                    + self.metadata['sample_omega_offset_deg'],
+                rotation=self.sample_rotation['rotation_type'],
+                first_axis=self.sample_rotation['first_axis'],
+                second_axis=self.sample_rotation['second_axis'],
+                third_axis=self.sample_rotation['third_axis'],
+            )
+            self.qs = qs
+            self.qsy = qsy
+            self.qsx = qsx
+            self.qsz = qsz
 
     def scale_data(self, value, keyword=None):
         """

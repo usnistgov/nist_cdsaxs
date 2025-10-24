@@ -6,7 +6,8 @@ import warnings
 
 METADATA_KEYWORDS = [
     "sample_phi_deg", "sample_phi_offset_deg",
-    "sample_omega_deg", "sample_chi_deg",
+    "sample_omega_deg", "sample_omega_offset_deg",
+    "sample_chi_deg", "sample_chi_offset_deg",
     "energy_ev", "wavelength_nm",
     "exposure_time_s", "sdd_cm", "pixel_size_um",
     "scaling_factor", "I0", "beam_current",
@@ -17,6 +18,8 @@ METADATA_KEYWORDS = [
     "substrate_thickness_um", "substrate_attenuation_coeff_um-1",
     "footprint_factor", "sample_size_factor",
     "substrate_absorption_factor",
+    "detector_phi_deg", "detector_phi0_deg", "detector_phi_scale",
+    "detector_y_mm", "detector_y0_mm"
 
 ]
 
@@ -36,13 +39,16 @@ ACCEPTED_Q_AXES = [
 
 FLOATS = [
     "sample_phi_deg", "sample_phi_offset_deg",
-    "sample_omega_deg", "sample_chi_deg",
+    "sample_omega_deg", "sample_omega_offset_deg",
+    "sample_chi_deg", "sample_chi_offset_deg",
     "energy_ev", "wavelength_nm",
     "exposure_time_s", "sdd_cm", "pixel_size_um",
     "scaling_factor", "I0", "beam_current",
     "sample_size_mm", "substrate_thickness_um",
     "substrate_attenuation_coeff_um-1",
-    "pitch_nm", "image_rotation_angle"
+    "pitch_nm", "image_rotation_angle",
+    "detector_phi_deg", "detector_phi0_deg", "detector_phi_scale",
+    "detector_y_mm", "detector_y0_mm",
 ]
 
 INTEGERS = [

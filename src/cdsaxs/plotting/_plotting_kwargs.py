@@ -74,8 +74,8 @@ SCATTER_KWARGS.extend([
     and param.default is not inspect.Parameter.empty
 ])
 # kwargs for matplotlib.axes.Axes.plot go to matplotlib.lines.Line2D properties
-SCATTER_KWARGS.extend([
+SCATTER_KWARGS.extend(
     [x[4:]if x[:4] == 'set_' else x[5:]
      for x, y in matplotlib.collections.Collection.__dict__.items() if 'set_' in x]
-])
+)
 SCATTER_KWARGS = list(set(SCATTER_KWARGS))
