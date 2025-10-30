@@ -1435,210 +1435,482 @@ class TestCalculateQBeamToSample(unittest.TestCase):
 
     def test_passive_extrinsic_zyx(self):
 
-        rot = np.array([
-            [0.995587843198,	0.091868824161,	-0.019104073484],
-            [-0.087102649824,	0.980532077995,	0.175982875352],
-            [0.034899496703,	-0.173542395889,	0.984207834738],
+        qsx = np.array([
+            [2.18677392504E-02,	2.17426224171E-02],
+            [2.18561943595E-02,	2.17310775258E-02],
+
+        ])
+
+        qsy = np.array([
+            [-8.63894736585E-04,	-8.52872422814E-04],
+            [-9.87108494433E-04,	-9.76086180701E-04],
+
+        ])
+
+        qsz = np.array([
+            [5.40187914067E-04,	5.36231504621E-04],
+            [5.62015684846E-04,	5.58059275400E-04],
+
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
             first_axis='z',
-            first_angle_deg=5,
             second_axis='y',
-            second_angle_deg=2,
             third_axis='x',
-            third_angle_deg=10,
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_extrinsic_yxz(self):
 
-        rot = np.array([
-            [0.995059659002,	0.093139822808,	-0.034369294929],
-            [-0.085831651177,	0.981060262190,	0.173648177667],
-            [0.049891909993,	-0.169840323122,	0.984207834738],
+        qsx = np.array([
+            2.18581300824E-02	2.17330729658E-02
+            2.18464251661E-02	2.17213680491E-02
+
+        ])
+
+        qsy = np.array([
+            -8.35450687349E-04	-8.24589109060E-04
+            -9.58730865630E-04	-9.47869287380E-04
+
+        ])
+
+        qsz = np.array([
+            8.71956692921E-04	8.66116292630E-04
+            8.93319248582E-04	8.87478848286E-04
+
+        ])
+
+        qs = np.array([
+            2.18914626515E-02	2.17659496730E-02
+            2.18856911403E-02	2.17601448713E-02
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='y',
-            first_angle_deg=2,
-            second_axis='x',
-            second_angle_deg=10,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
+            second_axis='y',
             third_axis='z',
-            third_angle_deg=5,
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_extrinsic_yzx(self):
 
-        rot = np.array([
-            [0.995587843198,	0.091839598859,	-0.019244078517],
-            [-0.087155742748,	0.981060262190,	0.172987393925],
-            [0.034766693581,	-0.170546914462,	0.984736018934],
+        qsx = np.array([
+            2.18677133729E-02	2.17425964786E-02
+            2.18561721518E-02	2.17310552570E-02
+
+        ])
+
+        qsy = np.array([
+            -8.64377219887E-04	-8.53349540484E-04
+            -9.87657411546E-04	-9.76629732182E-04
+
+        ])
+
+        qsz = np.array([
+            5.40463581590E-04	5.36524090892E-04
+            5.61914939696E-04	5.57975448998E-04
+
+        ])
+
+        qs = np.array([
+            2.18914626515E-02	2.17659496730E-02
+            2.18856911403E-02	2.17601448713E-02
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='y',
-            first_angle_deg=2,
-            second_axis='z',
-            second_angle_deg=5,
-            third_axis='x',
-            third_angle_deg=10,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
+            second_axis='y',
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_extrinsic_xzy(self):
 
-        rot = np.array([
-            [0.995587843198,	0.087155742748,	-0.034766693581],
-            [-0.079719130851,	0.981060262190,	0.176537877316],
-            [0.049494511341,	-0.172987393925,	0.983679650542],
+        qsx = np.array([
+            2.18633023286E-02	2.17381786656E-02
+            2.18523493860E-02	2.17272257226E-02
+
+        ])
+
+        qsy = np.array([
+            -7.01908462206E-04	-6.91813741185E-04
+            -8.25188581959E-04	-8.15093860980E-04
+
+        ])
+
+        qsz = np.array([
+            8.59926056408E-04	8.54135364086E-04
+            8.81684073987E-04	8.75893381660E-04
+
+        ])
+
+        qs = np.array([
+            2.18914626515E-02	2.17659496730E-02
+            2.18856911403E-02	2.17601448713E-02
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
             first_axis='x',
-            first_angle_deg=10,
-            second_axis='z',
-            second_angle_deg=5,
-            third_axis='y',
-            third_angle_deg=2,
+            second_axis='y',
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_extrinsic_zxy(self):
 
-        rot = np.array([
-            [0.996116027394,	0.085831651177,	-0.019641477169],
-            [-0.081065476840,	0.981060262190,	0.175923706235],
-            [0.034369294929,	-0.173648177667,	0.984207834738],
+        qsx = np.array([
+            2.18728601252E-02	2.17476766843E-02
+            2.18620738770E-02	2.17368904357E-02
+
+        ])
+
+        qsy = np.array([
+            -7.31323373164E-04	-7.21059734146E-04
+            -8.54603505360E-04	-8.44339866383E-04
+
+        ])
+
+        qsz = np.array([
+            5.28481874073E-04	5.24592091344E-04
+            5.50322937744E-04	5.46433155016E-04
+
+        ])
+
+        qs = np.array([
+            2.18914626515E-02	2.17659496730E-02
+            2.18856911403E-02	2.17601448713E-02
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='z',
-            first_angle_deg=5,
-            second_axis='x',
-            second_angle_deg=10,
-            third_axis='y',
-            third_angle_deg=2,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
+            second_axis='y',
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_intrinsic_xyz(self):
 
-        rot = np.array([
-            [0.99558784319795,	0.09186882416129,	-0.01910407348393],
-            [-0.08710264982405,	0.98053207799457,	0.17598287535233],
-            [0.03489949670250,	-0.17354239588891,	0.98420783473769],
+        qsx = np.array([
+            [2.18632506825E-02,	2.17381269615E-02],
+            [2.18523044091E-02,	2.17271806877E-02],
+        ])
+
+        qsy = np.array([
+            [-7.02877546288E-04,	-6.92774663078E-04],
+            [-8.26224099855E-04,	-8.16121216686E-04],
+        ])
+
+        qsz = np.array([
+            [8.60447426397E-04,	8.54672240741E-04],
+            [8.81829031304E-04,	8.76053845643E-04],
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
             first_axis='x',
-            first_angle_deg=10,
             second_axis='y',
-            second_angle_deg=2,
             third_axis='z',
-            third_angle_deg=5,
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_intrinsic_zyx(self):
 
-        rot = np.array([
-            [0.99558784319795,	0.08710264982405,	-0.03489949670250],
-            [-0.07979447819357,	0.98158844638624,	0.17354239588891],
-            [0.04937294528661,	-0.16999191249785,	0.98420783473769],
+        qsx = np.array([
+            [2.18632506825E-02,	2.17381269615E-02],
+            [2.18523044091E-02,	2.17271806877E-02],
+        ])
+
+        qsy = np.array([
+            [-7.02877546288E-04,	-6.92774663078E-04],
+            [-8.26224099855E-04,	-8.16121216686E-04],
+        ])
+
+        qsz = np.array([
+            [8.60447426397E-04,	8.54672240741E-04],
+            [8.81829031304E-04,	8.76053845643E-04],
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='z',
-            first_angle_deg=5,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
             second_axis='y',
-            second_angle_deg=2,
-            third_axis='x',
-            third_angle_deg=10,
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_intrinsic_yxz(self):
 
-        rot = np.array([
-            [0.99611602739378,	0.08583165117743,	-0.01964147716920],
-            [-0.08106547684018,	0.98106026219041,	0.17592370623530],
-            [0.03436929492885,	-0.17364817766693,	0.98420783473769],
+        qsx = np.array([
+            [2.18632506825E-02,	2.17381269615E-02],
+            [2.18523044091E-02,	2.17271806877E-02],
+        ])
+
+        qsy = np.array([
+            [-7.02877546288E-04,	-6.92774663078E-04],
+            [-8.26224099855E-04,	-8.16121216686E-04],
+        ])
+
+        qsz = np.array([
+            [8.60447426397E-04,	8.54672240741E-04],
+            [8.81829031304E-04,	8.76053845643E-04],
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='y',
-            first_angle_deg=2,
-            second_axis='x',
-            second_angle_deg=10,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
+            second_axis='y',
             third_axis='z',
-            third_angle_deg=5,
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_intrinsic_yzx(self):
 
-        rot = np.array([
-            [0.99558784319795,	0.08715574274766,	-0.03476669358110],
-            [-0.07971913085075,	0.98106026219041,	0.17653787731615],
-            [0.04949451134075,	-0.17298739392509,	0.98367965054186],
+        qsx = np.array([
+            [2.18632506825E-02,	2.17381269615E-02],
+            [2.18523044091E-02,	2.17271806877E-02],
+        ])
+
+        qsy = np.array([
+            [-7.02877546288E-04,	-6.92774663078E-04],
+            [-8.26224099855E-04,	-8.16121216686E-04],
+        ])
+
+        qsz = np.array([
+            [8.60447426397E-04,	8.54672240741E-04],
+            [8.81829031304E-04,	8.76053845643E-04],
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='y',
-            first_angle_deg=2,
-            second_axis='z',
-            second_angle_deg=5,
-            third_axis='x',
-            third_angle_deg=10,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
+            second_axis='y',
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_intrinsic_xzy(self):
 
-        rot = np.array([
-            [0.99558784319795,	0.09183959885851,	-0.01924407851694],
-            [-0.08715574274766,	0.98106026219041,	0.17298739392509],
-            [0.03476669358110,	-0.17054691446168,	0.98473601893352],
+        qsx = np.array([
+            [2.18632506825E-02,	2.17381269615E-02],
+            [2.18523044091E-02,	2.17271806877E-02],
+        ])
+
+        qsy = np.array([
+            [-7.02877546288E-04,	-6.92774663078E-04],
+            [-8.26224099855E-04,	-8.16121216686E-04],
+        ])
+
+        qsz = np.array([
+            [8.60447426397E-04,	8.54672240741E-04],
+            [8.81829031304E-04,	8.76053845643E-04],
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
             first_axis='x',
-            first_angle_deg=10,
-            second_axis='z',
-            second_angle_deg=5,
-            third_axis='y',
-            third_angle_deg=2,
+            second_axis='y',
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
     def test_passive_intrinsic_zxy(self):
 
-        rot = np.array([
-            [0.99505965900212,	0.09313982280791,	-0.03436929492885],
-            [-0.08583165117743,	0.98106026219041,	0.17364817766693],
-            [0.04989190999301,	-0.16984032312205,	0.98420783473769],
+        qsx = np.array([
+            [2.18632506825E-02,	2.17381269615E-02],
+            [2.18523044091E-02,	2.17271806877E-02],
+        ])
+
+        qsy = np.array([
+            [-7.02877546288E-04,	-6.92774663078E-04],
+            [-8.26224099855E-04,	-8.16121216686E-04],
+        ])
+
+        qsz = np.array([
+            [8.60447426397E-04,	8.54672240741E-04],
+            [8.81829031304E-04,	8.76053845643E-04],
+        ])
+
+        qs = np.array([
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
-            first_axis='z',
-            first_angle_deg=5,
-            second_axis='x',
-            second_angle_deg=10,
-            third_axis='y',
-            third_angle_deg=2,
+            qby=self.qby,
+            qbx=self.qbx,
+            qbz=self.qbz,
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
+            rotation='extrinsic',
+            first_axis='x',
+            second_axis='y',
+            third_axis='z',
         )
 
-        np.testing.assert_almost_equal(actual, rot)
+        np.testing.assert_almost_equal(actual[0][:2, :2], qs)
+        np.testing.assert_almost_equal(actual[1][:2, :2], qsy)
+        np.testing.assert_almost_equal(actual[2][:2, :2], qsx)
+        np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
+        # q magnitude should equal in both coordinate spaces qb = qs
+        np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
 
