@@ -469,7 +469,7 @@ def calculate_q(theta_deg, wavelength_nm):
 
     Parameters
     ----------
-    theta_deg : float
+    theta_deg : float | NDArray
         Scattering angle in degrees.
     wavelength_nm : float
         Source wavelength in nanometers.
@@ -1059,7 +1059,7 @@ def calculate_q_beam_to_sample(
         )
 
     # create qb matrix
-    qb = np.array([qbx, qby, qbz]).reshape((3, -1))
+    qb = np.array([qbx, qby, qbz]).reshape(3, -1)
 
     # assign rotation angles to proper order variables
     rot_angles = {
@@ -1091,10 +1091,10 @@ def calculate_q_beam_to_sample(
             third_angle_deg=third_angle_deg,
         )
 
-    qs = np.matmul(rot, qb).reshape(-1)
+    qs = np.matmul(rot, qb).reshape(3, qbx.shape[0], qbx.shape[1])
 
     # return in order of qs, qsy, qsx, qsz to match all cd-saxs code
-    return np.linalg.norm(qs, ord='fro'), qs[1], qs[0], qs[2]
+    return np.linalg.norm(qs, axis=0), qs[1, :, :], qs[0, :, :], qs[2, :, :]
 
 
 def detector_px_to_q(
