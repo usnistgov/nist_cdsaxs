@@ -16,6 +16,7 @@ def gen_grid_points_yx(region_of_interest_yx, center_yx, beam_size_yx, grid_poin
 
     x_space = region_of_interest_yx[1]/(grid_points_yx[1])
     y_space = region_of_interest_yx[0]/(grid_points_yx[0])
+    print('x_space', x_space, 'y_space', y_space)
 
     positions = []
     positions.append(center_yx)
@@ -464,7 +465,7 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
 def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
     """
     If you need to restart this sample set at a sample other than the
-    first one, change the 'start_at' variable. 
+    first one, change the 'start_at' variable.
     Samples are indexed starting at 0, so if 'start_at' is equal to 0,
     all samples in this set will be run with this function call.
 
@@ -472,7 +473,7 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
     images each with an expsoure time of t at each position during
     the cd-saxs scan.
     """
-    det = [pil2M]
+    # det = [pil2M]
 
     phi_offset = 0
     start_phi = -60
@@ -483,12 +484,13 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
     repeats = 1
 
     # x, y, z should be the center position for each sample
-    names = [ 'RR50C', 'RR23C', 'RR80E', 'RR50G', 'RR23D', 'RR80D', 'RR50F', 'RRAgBeh', 'RR80C', 'RR50E', 'SRM_W204_H11', 'SRM_W204_F2', 'RR23G', 'RR80G', 'RR50D', 'RR23F', 'RR80F']
-    x =     [   -350, 550, 1450]
-    y=      [    3450, 3450, 3450]
-    z=      [    -4600, -4600, -4600]
-    chi=    [    -1.6, -1.6, -1.6]
-    th =    [  3.5, 3.5, 3.5]
+    # names = [ 'RR50C', 'RR23C', 'RR80E', 'RR50G', 'RR23D', 'RR80D', 'RR50F', 'RRAgBeh', 'RR80C', 'RR50E', 'SRM_W204_H11', 'SRM_W204_F2', 'RR23G', 'RR80G', 'RR50D', 'RR23F', 'RR80F']
+    names = ['testA', 'testB', 'testC']
+    x =     [   1000, 2000, 3000]
+    y=      [    4000, 5000, 6000]
+    z=      [    -5000, -5000, -5000]
+    chi=    [    1, 1, 1]
+    th =    [   2, 2, 2]
 
     range_x = 4500 # um, or same units as x, y, z
     range_y = 3000 # um, or same units as x, y, z
@@ -497,10 +499,10 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
         region_of_interest_yx=(range_y, range_x),
         center_yx=(0, 0),
         beam_size_yx=(25, 250),
-        grid_points_yx=(4, 2)
+        grid_points_yx=(2, 4)
     )
 
-    print(f"========= Measuring at relative grid positions: {rel_positions}.")
+    print(f"========= Measuring at relative grid positions (y, x): {rel_positions}.")
 
     assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
     assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
@@ -509,32 +511,37 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
     assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
 
     for i in range(1):
-        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z, chi, th)):
 
             if nn>=start_at:
-                yield from bps.mv(piezo.ch, chis)
-                yield from bps.mv(piezo.th, ths)
-                yield from bps.mv(piezo.z, zs)
-                yield from bps.mv(piezo.x, xs)
-                yield from bps.mv(piezo.y, ys)
+                print(name)
+                print('center positions phi, chi, th, z, x, y', phi_offset, chis, ths, zs, xs, ys)
+                # yield from bps.mv(prs, phi_offset)
+                # yield from bps.mv(piezo.ch, chis)
+                # yield from bps.mv(piezo.th, ths)
+                # yield from bps.mv(piezo.z, zs)
+                # yield from bps.mv(piezo.x, xs)
+                # yield from bps.mv(piezo.y, ys)
 
                 # make sure that the y motor actually reaches position
-                while abs(piezo.y.position - ys) >= 1:
-                    print('y-motor did not reach position; requesting again')
-                    yield from bps.mv(piezo.y, ys)
-                    yield from bps.sleep(5)
+                # while abs(piezo.y.position - ys) >= 1:
+                #     print('y-motor did not reach position; requesting again')
+                #     yield from bps.mv(piezo.y, ys)
+                #     yield from bps.sleep(5)
 
                 for ii, (rel_y, rel_x) in enumerate(rel_positions):
 
-                    yield from bps.mv(piezo.x, xs+rel_x)
-                    yield from bps.mv(piezo.y, ys+rel_y)
+                    # yield from bps.mv(piezo.x, xs+rel_x)
+                    # yield from bps.mv(piezo.y, ys+rel_y)
+
+                    print('moving to x, y', xs+rel_x, ys+rel_y)
 
                     # make sure that the y motor actually reaches position
-                    while abs(piezo.y.position - ys + rel_y) >= 1:
-                        print('y-motor did not reach position; requesting again')
-                        yield from bps.mv(piezo.y, ys + rel_y)
-                        yield from bps.sleep(5)
+                    # while abs(piezo.y.position - ys + rel_y) >= 1:
+                    #     print('y-motor did not reach position; requesting again')
+                    #     yield from bps.mv(piezo.y, ys + rel_y)
+                    #     yield from bps.sleep(5)
 
-                    yield from measure_single_position(
-                        phi_offset, exp_t=t, sample='name'+f'_grid'+'%s'%(ii+1), nume=repeats
-                    )
+                    # yield from measure_single_position(
+                    #     phi_offset, exp_t=t, sample='name'+f'_grid'+'%s'%(ii+1), nume=repeats
+                    # )
