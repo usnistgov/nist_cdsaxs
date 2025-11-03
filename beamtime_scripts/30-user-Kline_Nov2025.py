@@ -462,7 +462,7 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
                         )
 
 
-def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
+def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=10):
     """
     If you need to restart this sample set at a sample other than the
     first one, change the 'start_at' variable.
@@ -473,24 +473,22 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
     images each with an expsoure time of t at each position during
     the cd-saxs scan.
     """
-    # det = [pil2M]
+    det = [pil2M]
 
-    phi_offset = 0
-    start_phi = -60
-    stop_phi = 60
-    phi_steps = int(abs(start_phi-stop_phi) + 1)
+    phi_offset = -6
+    # start_phi = -60
+    # stop_phi = 60
+    # phi_steps = int(abs(start_phi-stop_phi) + 1)
 
     start_at = 0
     repeats = 1
 
     # x, y, z should be the center position for each sample
     # names = [ 'RR50C', 'RR23C', 'RR80E', 'RR50G', 'RR23D', 'RR80D', 'RR50F', 'RRAgBeh', 'RR80C', 'RR50E', 'SRM_W204_H11', 'SRM_W204_F2', 'RR23G', 'RR80G', 'RR50D', 'RR23F', 'RR80F']
-    names = ['testA', 'testB', 'testC']
-    x =     [   1000, 2000, 3000]
-    y=      [    4000, 5000, 6000]
-    z=      [    -5000, -5000, -5000]
-    chi=    [    1, 1, 1]
-    th =    [   2, 2, 2]
+    names = ['RR80C',  'RR50E', 'RR23G','RR80G', 'RR50D', 'RR23F', 'RR80F', 'RR50F', 'RR80D', 'RR23D', 'RR50G', 'RR80E', 'RR23C', 'RR50C']
+    x =     [   -45270, -32270, -11470, 1530,    14530,     27330,  40329,   33330 ,  20131,     6631,   -6369,  -19670,  -32670, -45469]
+    y=      [     7020,   7020,   7320, 7620,     7620,     7620,   7820,    -7480 ,  -7480,    -7480,   -7480,  -7680,   -7880,   -7880]
+
 
     range_x = 4500 # um, or same units as x, y, z
     range_y = 3000 # um, or same units as x, y, z
@@ -506,20 +504,13 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
 
     assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
     assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
-    assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
-    assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
-    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
 
     for i in range(1):
-        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z, chi, th)):
+        for nn, (name, xs, ys) in enumerate(zip(names, x, y)):
 
             if nn>=start_at:
                 print(name)
-                print('center positions phi, chi, th, z, x, y', phi_offset, chis, ths, zs, xs, ys)
-                # yield from bps.mv(prs, phi_offset)
-                # yield from bps.mv(piezo.ch, chis)
-                # yield from bps.mv(piezo.th, ths)
-                # yield from bps.mv(piezo.z, zs)
+                print('center positions x, y', xs, ys)
                 # yield from bps.mv(piezo.x, xs)
                 # yield from bps.mv(piezo.y, ys)
 
