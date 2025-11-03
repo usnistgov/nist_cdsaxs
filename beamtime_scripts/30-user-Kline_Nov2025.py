@@ -133,7 +133,7 @@ def cd_saxs(th_ini, th_fin, th_st, exp_t=1, sample='test', nume=1, det=[pil2M], 
         write_to_log_file(
             log_filepath=log_filepath,
             sample_filename=sample_name,
-            sample_phi_deg=th,
+            sample_phi_deg=theta,
             exposure_time_s=exp_t
         )
         yield from bp.count(det, num=1)
@@ -578,7 +578,7 @@ def cdsaxs_Nov2025_misalignment_scan_CaitlynRoundRobin1():
     y=      [7820,          2600,             7620,     7620,   7820,    -7280] #, -7480 ,  -7480,    -7480,   -7480,  -7680,   -7880,   -7880]
     z=      [533,          633,                533,      533,      533,    533]
     chi=    [-1.3,            -3,               0,          0,       0,       0]
-    th =    [4,               3.2,               0,          0,       0,       0]
+    th =    [4,              3.2,               0,          0,       0,       0]
 
     assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
     assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
@@ -664,4 +664,120 @@ def cdsaxs_Nov2025_misalignment_scan_CaitlynRoundRobin1():
         
                         # yield from measure_single_position(
                         #     exp_t=t, sample=f'{name}_{scan_motor}-scan'+'%s'%(ii+1), nume=repeats, log_filename='log_roundrobin1_misalignments_KlineNov25.csv'
-                        # )
+                        # ) 
+
+def cdsaxs_Nov2025_itri(t=0.5):
+    """
+    If you need to restart this sample set at a sample other than the
+    first one, change the 'start_at' variable. 
+    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
+    all samples in this set will be run with this function call.
+
+    The repeats parameter is used to collect multiple
+    images each with an expsoure time of t at each position during
+    the cd-saxs scan.
+    """
+    det = [pil2M]
+    
+    phi_offset = -6
+    start_phi = -60
+    stop_phi = 60
+    phi_steps = int(abs(start_phi-stop_phi) + 1)
+
+    start_at = 0
+    repeats = 1
+
+    names = [ 'itri_nsh10', 'itri_nsh20', 'itri_nsh30', 'itri_nsh00']#, 'chicago_Set1_SM26', 'chicago_Set1_ABC26', 'chicago_Set2_0.8L0_24', 'chicago_Set2_1.25L0_54']
+    x =     [       43750,       -36450,       -48900,        46100]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    y=      [       -8380,       -10000,       7150,          6000]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    z=      [        -167,       533,          833,           133]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    chi=    [       -1.8,       -0.95,         0.9,           -1.2]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    th =    [       1.2,        1.2,            2,            2]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+
+    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
+
+    for i in range(1):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+
+            if nn>=start_at:
+                print(f'====== SCANNING {name} WITH EXPOSURE TIME {t}=======')
+                print(f'moving to phi {phi_offset}, chi {chis}, th {ths}, z {zs}, x {xs}, y {ys}')
+                yield from bps.mv(piezo.ch, chis)
+                yield from bps.mv(piezo.th, ths)
+                yield from bps.mv(piezo.z, zs)
+                yield from bps.mv(piezo.x, xs)
+                yield from bps.mv(piezo.y, ys)
+
+                # make sure that the y motor actually reaches position
+                while abs(piezo.y.position - ys) >= 1:
+                    print('y-motor did not reach position; requesting again')
+                    yield from bps.mv(piezo.y, ys)
+                    yield from bps.sleep(5)
+                
+            
+                # yield from bp
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1, log_filepath='log_itri_chicago_KlineNov25.csv')
+                yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath='log_itri_chicago_KlineNov25.csv')
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath='log_itri_chicago_KlineNov25.csv')
+
+def cdsaxs_Nov2025_chicago(t=1):
+    """
+    If you need to restart this sample set at a sample other than the
+    first one, change the 'start_at' variable. 
+    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
+    all samples in this set will be run with this function call.
+
+    The repeats parameter is used to collect multiple
+    images each with an expsoure time of t at each position during
+    the cd-saxs scan.
+    """
+    det = [pil2M]
+    
+    phi_offset = -6
+    start_phi = -60
+    stop_phi = 60
+    phi_steps = int(abs(start_phi-stop_phi) + 1)
+
+    start_at = 0
+    repeats = 1
+
+    names = ['chicago_Set1_SM26', 'chicago_Set1_ABC26', 'chicago_Set2_0.8L0_24', 'chicago_Set2_1.25L0_54']
+    x =     [             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    y=      [             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    z=      [             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    chi=    [             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    th =    [             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+
+    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
+
+    for i in range(1):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+
+            if nn>=start_at:
+                print(f'====== SCANNING {name} WITH EXPOSURE TIME {t}=======')
+                print(f'moving to phi {phi_offset}, chi {chis}, th {ths}, z {zs}, x {xs}, y {ys}')
+                yield from bps.mv(piezo.ch, chis)
+                yield from bps.mv(piezo.th, ths)
+                yield from bps.mv(piezo.z, zs)
+                yield from bps.mv(piezo.x, xs)
+                yield from bps.mv(piezo.y, ys)
+
+                # make sure that the y motor actually reaches position
+                while abs(piezo.y.position - ys) >= 1:
+                    print('y-motor did not reach position; requesting again')
+                    yield from bps.mv(piezo.y, ys)
+                    yield from bps.sleep(5)
+                
+            
+                # yield from bp
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1, log_filepath='log_itri_chicago_KlineNov25.csv')
+                yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath='log_itri_chicago_KlineNov25.csv')
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath='log_itri_chicago_KlineNov25.csv')
