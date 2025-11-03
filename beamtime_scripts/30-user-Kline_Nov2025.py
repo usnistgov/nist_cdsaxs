@@ -2,7 +2,7 @@ def gen_grid_points_yx(region_of_interest_yx, center_yx, beam_size_yx, grid_poin
 
     """
     NOTE: all parameters should be provided in the same units. If your motor position for center_yx is based in um, then your region_of_interest_yx and beam_size_yx should also be based in um.
-    
+
     region_of_interest_yx : tuple
         Available measurement area.
     center_yx : tuple
@@ -82,7 +82,7 @@ def measure_single_position(theta, exp_t=1, sample='test', nume=1, det=[pil2M], 
 
     sample_name = name_fmt.format(
         sample=sample, 
-        num="%2.2d"%num, 
+        num="%2.2d"%num,
         th="%2.2d"%theta,
         bpm="%1.3f"%xbpm3.sumX.get(),
         et = "%2.2f"%exp_t,
@@ -536,3 +536,132 @@ def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=10):
                     # yield from measure_single_position(
                     #     phi_offset, exp_t=t, sample='name'+f'_grid'+'%s'%(ii+1), nume=repeats
                     # )
+
+
+def cdsaxs_Nov2025_misalignment_scan_CaitlynRoundRobin1():
+    """
+    If you need to restart this sample set at a sample other than the
+    first one, change the 'start_at' variable. 
+    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
+    all samples in this set will be run with this function call.
+
+    The repeats parameter is used to collect multiple
+    images each with an expsoure time of t at each position during
+    the cd-saxs scan.
+
+    """
+    det = [pil2M]
+
+    phi_offset = -6
+
+    start_at = 0
+    repeats = 1
+
+    scans = ['x', 'y', 'z', 'phi'], #'chi', 'th', 'phi']  # make list of one or more motors in this list: ['x', 'y', 'z', 'chi', 'th', 'phi']
+    scan_ranges = {
+        # for each motor give a (start, stop, step_size)
+        # or give a list of values
+        # any motors listed here but not in 'scans' won't be used
+        'x': (-0.3, 0.3, 0.05),
+        'y': (-0.3, 0.3, 0.05),
+        'z': [-20000, -10000,  -9000,  -8000,  -7000,  -6000,  -5000,  -4000,  -3000,
+            -2000,  -1000,   -500, -400, -300, -200, -100,    0,  100,  200,  300,  400,  500,
+                1000,   2000,   3000,   4000,   5000,
+            6000,   7000,   8000,   9000, 10000, 20000],
+        'chi': (-1, 1, 0.1),
+        'th': (-1, 1, 0.1),
+        'phi': (-1, 1, 0.1),
+    }
+
+    names = ['SRM_W204_F2', 'SRM_W204_H11', 'RR50D',  'RR23F', 'RR80F', 'AgBeh']# 'RR50F', 'RR80D', 'RR23D', 'RR50G', 'RR80E', 'RR23C', 'RR50C']
+    x =     [-22470,        -22570,          14530,     27330,  40329,   48000] #, 33330 ,  20131,     6631,   -6369,  -19670,  -32670, -45469]
+    y=      [7820,          2600,             7620,     7620,   7820,    -7280] #, -7480 ,  -7480,    -7480,   -7480,  -7680,   -7880,   -7880]
+    z=      [533,          633,                533,      533,      533,    533]
+    chi=    [-1.3,            -3,               0,          0,       0,       0]
+    th =    [4,               3.2,               0,          0,       0,       0]
+
+    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
+    
+    ### reformat scan_ranges dictionary for easy scans
+    for key, value in scan_ranges.items():
+        if isinstance(value, tuple):
+            new_positions = list(np.arange(value[0], value[1]+value[2]/10, value[2]))
+            scan_ranges[key] = new_positions
+    
+    print(scan_ranges)
+    for i in range(1):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z, chi, th)):
+
+            if nn>=start_at:
+                if 'RR' in name:
+                    t = 1
+                elif 'Ag' in name:
+                    t = 0.5
+                else:
+                    t = 0.1
+                print(f'====== SCANNING {name} WITH EXPOSURE TIME {t}=======')
+                print(f'moving to phi {phi_offset}, chi {chis}, th {ths}, z {zs}, x {xs}, y {ys}')
+                # yield from bps.mv(prs, phi_offset)
+                # yield from bps.mv(piezo.ch, chis)
+                # yield from bps.mv(piezo.th, ths)
+                # yield from bps.mv(piezo.z, zs)
+                # yield from bps.mv(piezo.x, xs)
+                # yield from bps.mv(piezo.y, ys)
+
+                # while abs(piezo.y.position - ys) >= 1:
+                #     print('y-motor did not reach position; requesting again')
+                #     yield from bps.mv(piezo.y, ys)
+                #     yield from bps.sleep(10)
+            
+            
+                for scan_motor in scans:
+                    print(f'====== SCANNING {scan_motor} =======')
+                    print(f'moving to phi {phi_offset}, chi {chis}, th {ths}, z {zs}, x {xs}, y {ys}')
+                    # yield from bps.mv(prs, phi_offset)
+                    # yield from bps.mv(piezo.ch, chis)
+                    # yield from bps.mv(piezo.th, ths)
+                    # yield from bps.mv(piezo.z, zs)
+                    # yield from bps.mv(piezo.x, xs)
+                    # yield from bps.mv(piezo.y, ys)
+
+                    # while abs(piezo.y.position - ys) >= 1:
+                    #     print('y-motor did not reach position; requesting again')
+                    #     yield from bps.mv(piezo.y, ys)
+                    #     yield from bps.sleep(10)
+
+                    positions = scan_ranges[scan_motor]
+                    for ii, position in enumerate(positions):
+                        if scan_motor == 'x':
+                            print('moving x', position+xs)
+                            # yield from bps.mv(piezo.x, position + xs)
+                        elif scan_motor == 'y':
+                            print('moving y', position+ys)
+                            # yield from bps.mv(piezo.y, position + ys)
+                            # while abs(piezo.y.position - (position + ys)) >= 1:
+                            #     print('y-motor did not reach position; requesting again')
+                            #     yield from bps.mv(piezo.y, position + ys)
+                            #     yield from bps.sleep(5)
+                        elif scan_motor == 'z':
+                            print('moving z', position+zs)
+                            # yield from bps.mv(piezo.z, position + zs)
+                        elif scan_motor == 'chi':
+                            print('moving chi', position+chis)
+                            # yield from bps.mv(piezo.ch, position + chis)
+                        elif scan_motor == 'th':
+                            print('moving th', position+ths)
+                            # yield from bps.mv(piezo.th, position + ths)
+                        elif scan_motor == 'phi':
+                            print('moving prs', position+phi_offset)
+                            # yield from bps.mv(prs, position + phi_offset)
+                        else:
+                            print("!!!!!!!! DIDN'T RECOGNIZE SCAN MOTOR !!!!!!!!")
+                            continue
+
+        
+                        # yield from measure_single_position(
+                        #     exp_t=t, sample=f'{name}_{scan_motor}-scan'+'%s'%(ii+1), nume=repeats, log_filename='log_roundrobin1_misalignments_KlineNov25.csv'
+                        # )
