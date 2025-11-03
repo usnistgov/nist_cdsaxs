@@ -18,6 +18,7 @@ def gen_grid_points_yx(region_of_interest_yx, center_yx, beam_size_yx, grid_poin
     y_space = region_of_interest_yx[0]/(grid_points_yx[0])
 
     positions = []
+    positions.append(center_yx)
     for x in range(0, grid_points_yx[1]):
         for y in range(0, grid_points_yx[0]):
             positions.append(((y+0.5)*y_space + center_yx[0] - region_of_interest_yx[0]/2, (x+0.5)*x_space + center_yx[1] - region_of_interest_yx[1]/2))
@@ -71,7 +72,7 @@ def measure(det=[pil2M], sample='test',  t=1):
     yield from bp.count(det, num=1)
 
 
-def measure_single_position(exp_t=1, sample='test', nume=1, det=[pil2M], log_filepath="./log_SMI_Kline_Nov2025.csv"):
+def measure_single_position(theta, exp_t=1, sample='test', nume=1, det=[pil2M], log_filepath="./log_SMI_Kline_Nov2025.csv"):
 
     det_exposure_time(exp_t, exp_t*nume)
 
@@ -97,7 +98,7 @@ def measure_single_position(exp_t=1, sample='test', nume=1, det=[pil2M], log_fil
     write_to_log_file(
         log_filepath=log_filepath,
         sample_filename=sample_name,
-        sample_phi_deg=th,
+        sample_phi_deg=theta,
         exposure_time_s=exp_t
     )
     yield from bp.count(det, num=1)
@@ -149,7 +150,7 @@ def cdsaxs_Nov2025_template(t=1):
     """
     det = [pil2M]
     
-    phi_offest = 0
+    phi_offset = 0
     start_phi = -60
     stop_phi = 60
     phi_steps = int(abs(start_phi-stop_phi) + 1)
@@ -169,7 +170,7 @@ def cdsaxs_Nov2025_template(t=1):
     assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
     assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
     assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
-    
+
     for i in range(1):
         for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
 
@@ -189,9 +190,9 @@ def cdsaxs_Nov2025_template(t=1):
                 # number = 1              
             
                 # yield from bp
-                yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1)
-                yield from cd_saxs(start_phi+phi_offest, stop_phi+phi_offest, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats)
-                yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1)
+                yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1)
 
 def cdsaxs_Nov2025_template_odds_evens(t=1):
     """
@@ -207,7 +208,7 @@ def cdsaxs_Nov2025_template_odds_evens(t=1):
     
     det = [pil2M]
     
-    phi_offest = 0
+    phi_offset = 0
     min_phi = -45 # pick an integer value
     max_phi = 45 # pick an integer value
 
@@ -251,11 +252,11 @@ def cdsaxs_Nov2025_template_odds_evens(t=1):
                 
                 # number = 1              
             
-                yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'measure_ref-A%s'%(i+1), nume=1)
-                yield from cd_saxs(min_even+phi_offest, max_even+phi_offest, int(((max_even - min_even)/2)+1), exp_t=t, sample=name+'measure1%s'%(i+1), nume=repeats)
-                yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'measure_ref-B%s'%(i+1), nume=1)
-                yield from cd_saxs(min_odd+phi_offest, max_odd+phi_offest, int(((max_odd - min_odd)/2)+1), exp_t=t, sample=name+'measure2%s'%(i+1), nume=repeats)
-                yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'measure_ref-C%s'%(i+1), nume=1)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'measure_ref-A%s'%(i+1), nume=1)
+                yield from cd_saxs(min_even+phi_offset, max_even+phi_offset, int(((max_even - min_even)/2)+1), exp_t=t, sample=name+'measure1%s'%(i+1), nume=repeats)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'measure_ref-B%s'%(i+1), nume=1)
+                yield from cd_saxs(min_odd+phi_offset, max_odd+phi_offset, int(((max_odd - min_odd)/2)+1), exp_t=t, sample=name+'measure2%s'%(i+1), nume=repeats)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'measure_ref-C%s'%(i+1), nume=1)
 
 def cdsaxs_Nov2025_template_grid_scans(t=1):
     """
@@ -270,7 +271,7 @@ def cdsaxs_Nov2025_template_grid_scans(t=1):
     """
     det = [pil2M]
     
-    phi_offest = 0
+    phi_offset = 0
     start_phi = -60
     stop_phi = 60
     phi_steps = int(abs(start_phi-stop_phi) + 1)
@@ -349,7 +350,7 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
     """
     det = [pil2M]
 
-    phi_offest = 0
+    phi_offset = 0
     # start_phi = -60
     # stop_phi = 60
     # this will give steps every 1 degree
@@ -399,7 +400,7 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
         for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
 
             if nn>=start_at:
-                yield from bps.mv(prs, phi_offest)
+                yield from bps.mv(prs, phi_offset)
                 yield from bps.mv(piezo.ch, chis)
                 yield from bps.mv(piezo.th, ths)
                 yield from bps.mv(piezo.z, zs)
@@ -414,13 +415,13 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
                 # number = 1              
             
                 # # yield from bp
-                # yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1)
-                # yield from cd_saxs(start_phi+phi_offest, stop_phi+phi_offest, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats)
-                # yield from cd_saxs(phi_offest, phi_offest, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1)
+                # yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1)
+                # yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats)
+                # yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1)
 
                 for scan_motor in scans:
                     print (f'====== SCANNING {scan_motor} =======')
-                    yield from bps.mv(prs, phi_offest)
+                    yield from bps.mv(prs, phi_offset)
                     yield from bps.mv(piezo.ch, chis)
                     yield from bps.mv(piezo.th, ths)
                     yield from bps.mv(piezo.z, zs)
@@ -450,7 +451,7 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
                         elif scan_motor == 'th':
                             yield from bps.mv(piezo.th, position + ths)
                         elif scan_motor == 'phi':
-                            yield from bps.mv(prs, position + phi_offest)
+                            yield from bps.mv(prs, position + phi_offset)
                         else:
                             print("!!!!!!!! DIDN'T RECOGNIZE SCAN MOTOR !!!!!!!!")
                             continue
@@ -458,3 +459,82 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
                         yield from measure_single_position(
                             exp_t=t, sample=f'{scan_motor}-scan'+'%s'%(ii+1), nume=repeats
                         )
+
+
+def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=1):
+    """
+    If you need to restart this sample set at a sample other than the
+    first one, change the 'start_at' variable. 
+    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
+    all samples in this set will be run with this function call.
+
+    The repeats parameter is used to collect multiple
+    images each with an expsoure time of t at each position during
+    the cd-saxs scan.
+    """
+    det = [pil2M]
+
+    phi_offset = 0
+    start_phi = -60
+    stop_phi = 60
+    phi_steps = int(abs(start_phi-stop_phi) + 1)
+
+    start_at = 0
+    repeats = 1
+
+    # x, y, z should be the center position for each sample
+    names = [ 'RR50C', 'RR23C', 'RR80E', 'RR50G', 'RR23D', 'RR80D', 'RR50F', 'RRAgBeh', 'RR80C', 'RR50E', 'SRM_W204_H11', 'SRM_W204_F2', 'RR23G', 'RR80G', 'RR50D', 'RR23F', 'RR80F']
+    x =     [   -350, 550, 1450]
+    y=      [    3450, 3450, 3450]
+    z=      [    -4600, -4600, -4600]
+    chi=    [    -1.6, -1.6, -1.6]
+    th =    [  3.5, 3.5, 3.5]
+
+    range_x = 4500 # um, or same units as x, y, z
+    range_y = 3000 # um, or same units as x, y, z
+
+    rel_positions = gen_grid_points_yx(
+        region_of_interest_yx=(range_y, range_x),
+        center_yx=(0, 0),
+        beam_size_yx=(25, 250),
+        grid_points_yx=(4, 2)
+    )
+
+    print(f"========= Measuring at relative grid positions: {rel_positions}.")
+
+    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
+
+    for i in range(1):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+
+            if nn>=start_at:
+                yield from bps.mv(piezo.ch, chis)
+                yield from bps.mv(piezo.th, ths)
+                yield from bps.mv(piezo.z, zs)
+                yield from bps.mv(piezo.x, xs)
+                yield from bps.mv(piezo.y, ys)
+
+                # make sure that the y motor actually reaches position
+                while abs(piezo.y.position - ys) >= 1:
+                    print('y-motor did not reach position; requesting again')
+                    yield from bps.mv(piezo.y, ys)
+                    yield from bps.sleep(5)
+
+                for ii, (rel_y, rel_x) in enumerate(rel_positions):
+
+                    yield from bps.mv(piezo.x, xs+rel_x)
+                    yield from bps.mv(piezo.y, ys+rel_y)
+
+                    # make sure that the y motor actually reaches position
+                    while abs(piezo.y.position - ys + rel_y) >= 1:
+                        print('y-motor did not reach position; requesting again')
+                        yield from bps.mv(piezo.y, ys + rel_y)
+                        yield from bps.sleep(5)
+
+                    yield from measure_single_position(
+                        phi_offset, exp_t=t, sample='name'+f'_grid'+'%s'%(ii+1), nume=repeats
+                    )
