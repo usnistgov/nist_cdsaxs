@@ -687,12 +687,12 @@ def cdsaxs_Nov2025_itri(t=0.5):
     start_at = 0
     repeats = 1
 
-    names = [ 'itri_nsh10', 'itri_nsh20', 'itri_nsh30', 'itri_nsh00']#, 'chicago_Set1_SM26', 'chicago_Set1_ABC26', 'chicago_Set2_0.8L0_24', 'chicago_Set2_1.25L0_54']
-    x =     [       43750,       -36450,       -48900,        46100]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
-    y=      [       -8380,       -10000,       7150,          6000]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
-    z=      [        -167,       533,          833,           133]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
-    chi=    [       -1.8,       -0.95,         0.9,           -1.2]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
-    th =    [       1.2,        1.2,            2,            2]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    names = ['itri_nsh30', 'itri_nsh00', 'itri_nsh10', 'itri_nsh20' ]#, 'chicago_Set1_SM26', 'chicago_Set1_ABC26', 'chicago_Set2_0.8L0_24', 'chicago_Set2_1.25L0_54']
+    x =     [      -48900,        46100,        43750,       -36450 ]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    y=      [        7150,         6000,        -8380,       -10000 ]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    z=      [         833,          133,         -167,          533 ]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    chi=    [         0.9,         -1.2,         -1.8,        -0.95 ]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
+    th =    [           2,            2,          1.2,          1.2 ]#,             'xxxx',               'xxxx',                   'xxxx',                  'xxxx']
 
     assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
     assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
