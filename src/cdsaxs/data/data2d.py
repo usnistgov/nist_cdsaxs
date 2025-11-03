@@ -491,7 +491,7 @@ class Data2D(DataImage):
                 detector_y0_mm=self.metadata['detector_y0_mm'],
                 detector_phiscale=self.metadata['detector_phiscale'],
             )
-            self.qby_1d.reshape(-1)
+            self.qby_1d .reshape(-1)
 
             _, qbx_1d, _, _ = diffraction.detector_px_to_qbyxz(
                 center_px=(0, self.metadata['center_px'][1]),
