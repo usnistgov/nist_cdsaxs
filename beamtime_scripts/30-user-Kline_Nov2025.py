@@ -833,7 +833,7 @@ def cdsaxs_Nov2025_dupont_1(t=10):
     assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
 
     for i in range(1):
-        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z, chi, th)):
 
             if nn>=start_at:
                 print(f'====== SCANNING {name} WITH EXPOSURE TIME {t}=======')
@@ -877,12 +877,14 @@ def cdsaxs_Nov2025_dupont_2(t=10):
     start_at = 0
     repeats = 1
 
-    names = ['EUVD_BD2_BF0', 'EUVD_BDm2_BF0', 'EUVD_BD0_BF3', 'EUVD_BD0_BF1',]
-    x =     [         00000,           00000,          00000,          00000,]
-    y=      [           000,            0000,           0000,           0000,]
-    z=      [           000,             000,            000,             00,]
-    chi=    [            00,              00,            000,            000,]
-    th =    [            00,              00,             00,             00,]
+    # positions from facing back
+    #          bottom left     bottom right      top right     top left           
+    names = ['EUVC_BD0_BFm2', 'EUVC_BD0_BF0', 'EUVA_BD0_BF0', 'EUVA_BD0_BFm2',]
+    x =     [          32470,          48370,          44770,           32170,]
+    y=      [           6000,           6000,          -4100,           -4100,]
+    z=      [           -680,           -980,           -880,            -580,]
+    chi=    [            0.7,           -0.6,           -1.6,              -2,]
+    th =    [            1.3,            2.0,            2.3,             2.8,]
 
     print(names)
     print(x)
@@ -897,7 +899,7 @@ def cdsaxs_Nov2025_dupont_2(t=10):
     assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
 
     for i in range(1):
-        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z, chi, th)):
 
             if nn>=start_at:
                 print(f'====== SCANNING {name} WITH EXPOSURE TIME {t}=======')
@@ -914,10 +916,9 @@ def cdsaxs_Nov2025_dupont_2(t=10):
                     yield from bps.mv(piezo.y, ys)
                     yield from bps.sleep(5)
                 
-                log_filename_string='log_dupont1_KlineNov25.csv'
+                log_filename_string='log_dupont2_KlineNov25.csv'
                 # yield from bp
                 yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1, log_filepath=log_filename_string)
                 yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath=log_filename_string)
                 yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath=log_filename_string)
-
 
