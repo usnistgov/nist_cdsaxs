@@ -922,3 +922,8 @@ def cdsaxs_Nov2025_dupont_2(t=10):
                 yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath=log_filename_string)
                 yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath=log_filename_string)
 
+# from the front bottom left start naming
+# from the back start aligning from top right and move to bottom right
+names = ['RR23B',  'RR50B',  'RR80A',  'RR80H',  'RR23H',  'RR50H',  'RR23A',  'RR50A',  'RR80B']
+x =     [ 000000,   000000,   000000,   000000,    00000,    00000,    00000,    00000,   000000]
+y=      [ 000000,   000000,   000000,   000000,    00000,    00000,    00000,    00000,   000000]
