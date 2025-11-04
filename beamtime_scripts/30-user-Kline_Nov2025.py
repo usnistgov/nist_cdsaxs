@@ -756,7 +756,7 @@ def cdsaxs_Nov2025_chicago(t=5):
     assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
     assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
     assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
-    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(th), f"len of th ({len(th)})  is different from number of samples ({len(names)})"
 
     for i in range(1):
         for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z, chi, th)):
@@ -804,19 +804,21 @@ def cdsaxs_Nov2025_dupont_1(t=10):
     start_at = 0
     repeats = 1
 
-    names = ['EUVD_BD2_BF0', 'EUVD_BDm2_BF0', 'EUVD_BD0_BF3', 'EUVD_BD0_BF1', 'EUVD_BD0_BF0', 'EUVD_BD0_BFm1', 'EUVD_BD0_BFm3']
-    x =     [         00000,           00000,          00000,          00000,          00000,           00000,          00000 ]
-    y=      [           000,            0000,           0000,           0000,           0000,            0000,           0000 ]
-    z=      [           000,             000,            000,             00,             00,              00,             00 ]
-    chi=    [            00,              00,            000,            000,            000,             000,            000 ]
-    th =    [            00,              00,             00,             00,             00,              00,             00 ]
+    names = ['EUVB_BD2_BF0', 'EUVB_BDm2_BF0', 'EUVB_BD0_BF2',  'EUVB_BD0_BF1', 'EUVB_BD0_BF0', 'EUVB_BD0_BFm1', 'EUVB_BD0_BFm2']
+    x =     [        -40850,          -27950,         -12550,            2200,          19000,           37700,          52300 ]
+    y=      [          6000,            5300,           5300,            5300,           5500,            4700,           4700 ]
+    z=      [           720,             220,           -280,            -880,          -1480,           -2280,          -2780 ]
+    chi=    [          -0.2,             2.5,           -1.2,            -2.2,           -1.5,            -4.5,           -3.5 ]
+    th =    [           2.1,               1,              2,               1,            1.5,             1.8,            2.5 ]
 
-    names = names + ['EUVB_BD2_BF0', 'EUVB_BDm2_BF0', 'EUVB_BD0_BF2', 'EUVB_BD0_BF1', 'EUVB_BD0_BF0', 'EUVB_BD0_BFm1', 'EUVB_BD0_BFm2']
-    x =     x +     [         00000,           00000,          00000,          00000,          00000,           00000,          00000 ]
-    y=      y +     [           000,            0000,           0000,           0000,           0000,            0000,           0000 ]
-    z=      z +     [           000,             000,            000,             00,             00,              00,             00 ]
-    chi=    chi +   [            00,              00,            000,            000,            000,             000,            000 ]
-    th =    th +    [            00,              00,             00,             00,             00,              00,             00 ]
+    names = names + ['EUVD_BD2_BF0', 'EUVD_BDm2_BF0', 'EUVD_BD0_BF3',  'EUVD_BD0_BF1', 'EUVD_BD0_BF0', 'EUVD_BD0_BFm1', 'EUVD_BD0_BFm3']
+    x =     x     + [        -40150,          -25900,         -10900,            3000,          18200,           33200,          46770 ]
+    y=      y     + [         -4000,           -5000,          -4900,           -4900,          -4700,           -4600,          -4100 ]
+    z=      z     + [           920,             320,             20,            -680,          -1380,           -1980,          -2580 ]
+    chi=    chi   + [          -7.3,               1,           -0.5,            -1.9,           -1.9,            -1.9,           -2.5 ]
+    th =    th    + [           3.5,               3,            3.2,             3.5,            2.5,             2.5,            2.0 ]  
+
+
 
     print(names)
     print(x)
@@ -848,9 +850,74 @@ def cdsaxs_Nov2025_dupont_1(t=10):
                     yield from bps.mv(piezo.y, ys)
                     yield from bps.sleep(5)
                 
-            
+                log_filename_string='log_dupont1_KlineNov25.csv'
                 # yield from bp
-                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1, log_filepath='log_dupont1_KlineNov25.csv')
-                yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath='log_dupont1_KlineNov25.csv')
-                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath='log_dupont1_KlineNov25.csv')
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1, log_filepath=log_filename_string)
+                yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath=log_filename_string)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath=log_filename_string)
+
+def cdsaxs_Nov2025_dupont_2(t=10):
+    """
+    If you need to restart this sample set at a sample other than the
+    first one, change the 'start_at' variable. 
+    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
+    all samples in this set will be run with this function call.
+
+    The repeats parameter is used to collect multiple
+    images each with an expsoure time of t at each position during
+    the cd-saxs scan.
+    """
+    det = [pil2M]
+    
+    phi_offset = -6
+    start_phi = -60
+    stop_phi = 60
+    phi_steps = int(abs(start_phi-stop_phi) + 1)
+
+    start_at = 0
+    repeats = 1
+
+    names = ['EUVD_BD2_BF0', 'EUVD_BDm2_BF0', 'EUVD_BD0_BF3', 'EUVD_BD0_BF1',]
+    x =     [         00000,           00000,          00000,          00000,]
+    y=      [           000,            0000,           0000,           0000,]
+    z=      [           000,             000,            000,             00,]
+    chi=    [            00,              00,            000,            000,]
+    th =    [            00,              00,             00,             00,]
+
+    print(names)
+    print(x)
+    print(y)
+    print(z)
+    print(chi)
+    print(th)
+    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(z), f"len of z ({len(z)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(chi), f"len of chi ({len(chi)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(th), f"len of th ({len(th)}) is different from number of samples ({len(names)})"
+
+    for i in range(1):
+        for nn, (name, xs, ys, zs, chis, ths) in enumerate(zip(names, x, y, z)):
+
+            if nn>=start_at:
+                print(f'====== SCANNING {name} WITH EXPOSURE TIME {t}=======')
+                print(f'moving to phi {phi_offset}, chi {chis}, th {ths}, z {zs}, x {xs}, y {ys}')
+                yield from bps.mv(piezo.ch, chis)
+                yield from bps.mv(piezo.th, ths)
+                yield from bps.mv(piezo.z, zs)
+                yield from bps.mv(piezo.x, xs)
+                yield from bps.mv(piezo.y, ys)
+
+                # make sure that the y motor actually reaches position
+                while abs(piezo.y.position - ys) >= 1:
+                    print('y-motor did not reach position; requesting again')
+                    yield from bps.mv(piezo.y, ys)
+                    yield from bps.sleep(5)
+                
+                log_filename_string='log_dupont1_KlineNov25.csv'
+                # yield from bp
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-A%s'%(i+1), nume=1, log_filepath=log_filename_string)
+                yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath=log_filename_string)
+                yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath=log_filename_string)
+
 
