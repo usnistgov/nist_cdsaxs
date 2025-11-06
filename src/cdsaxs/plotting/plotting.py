@@ -96,7 +96,7 @@ def plot_image(
     cmap.set_bad((0, 0, 0, 0))  # all nan's are transparent in plotting image
     im = plt.imshow(plotting_image, cmap=cmap,
                     # alpha=image_alpha,
-                    aspect=aspect, zorder=10,
+                    aspect=aspect, zorder=1,
                     norm=norm,
                     **{x: y for x, y in kwargs.items() if x in IMSHOW_KWARGS}
                     )
@@ -110,7 +110,7 @@ def plot_image(
         aspect=aspect,
         vmin=0, vmax=1,
         interpolation=None,
-        zorder=1
+        zorder=-1
     )
 
     # colorbars
@@ -124,7 +124,13 @@ def plot_image(
                        rotation=90, ha='right', va='center', labelpad=10)
 
     # format the overall plot and axes
-    plt.title(f"{title}")
+    max_figure_chars = 30
+    if title is not None and len(title) > max_figure_chars:
+        i = max_figure_chars
+        while i < len(title):
+            title = title[:i] + '\n' + title[i:]
+            i = i + max_figure_chars + 2
+    plt.title(f"{title}", wrap=True)
     # if hasattr(fig.canvas, 'header_visible'):
     #     fig.canvas.header_visible = False
 
@@ -228,7 +234,7 @@ def plot_errorbar(
         plt.ylabel(ylabel)
 
     if title is not None:
-        plt.title(title)
+        plt.title(title, wrap=True)
 
     if xticks is not None:
         plt.xticks(xticks, labels=xticks_labels)
@@ -449,7 +455,7 @@ def plot_data2d_integrate_box(
         vmax=vmax,
         color_mask=color_mask,
         color_inf=color_inf,
-        color_nan=color_nan)
+        color_nan=color_nan,)
 
     # add integration box
     fig_image = plot_image_add_roi(
@@ -459,6 +465,7 @@ def plot_data2d_integrate_box(
         color=color_integration_box,
         show_legend=show_legend,
         label="Integration",
+        zorder=1000,
         **kwargs
     )
 
@@ -838,7 +845,7 @@ def plot_integrated_dataset(
     colorbar = plt.colorbar(data_plot)
     colorbar.set_label('Intensity')
 
-    plt.title(integrated_dataset.name)
+    plt.title(integrated_dataset.name, wrap=True)
     plt.xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
     plt.ylabel(plotting_tools.generate_formatted_axis_label(y_axis))
 
@@ -970,7 +977,7 @@ def plot_reduced_dataset(
     colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)
     colorbar.set_label('Intensity')
 
-    plt.title(reduced_dataset.name)
+    plt.title(reduced_dataset.name, wrap=True)
     plt.xlabel(plotting_tools.generate_formatted_axis_label('qsx'))
     plt.ylabel(plotting_tools.generate_formatted_axis_label('qsz'))
 
