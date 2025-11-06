@@ -167,10 +167,6 @@ class Data2D(DataImage):
             name: str = None,
             mask: NDArray[np.bool] = None,
             hide_q_warnings=False,
-            sample_rotation_type='extrinsic',
-            sample_rotation_first_axis='y',
-            sample_rotation_second_axis=None,
-            sample_rotation_third_axis=None,
             **kwargs
     ):
         """
@@ -190,6 +186,21 @@ class Data2D(DataImage):
             originating at the sample position in the x-z plane (lab frame).
         detector_omega : Rotation counterclockwise about the x-axis
             originating at the sample position in the y-z plane (lab frame).
+
+        This class assumes that the sample rotation that occurs during
+        a CD-SAXS experiment is primarily a counterclockwise rotation
+        about the positive y-axis in sample coordinate space by
+        'sample_phi_deg' + 'sample_phi_offset' degrees from normal
+        incidence. If chi and omega rotations are present, this class
+        assumes that the series of rotation is extrinsic in the order
+        of omega (rotationa about x-axis), chi (rotation about z-axis),
+        and phi (rotation about y-axis).
+
+        If the sample undergoes a different series of rotaiton, this
+        can be changed using _set_sample_rotation method, but we caution
+        the user to only use this with a full understanding of its
+        implications on the conversion from detector/beam-based
+        coordinate system q to the sample coordinate system q.
 
         Parameters
         ----------
@@ -260,11 +271,11 @@ class Data2D(DataImage):
             else 'name'
 
         # set the sample rotation metadata
-        self.set_sample_rotation(
-            rotation_type=sample_rotation_type,
-            first_axis=sample_rotation_first_axis,
-            second_axis=sample_rotation_second_axis,
-            third_axis=sample_rotation_third_axis,
+        self._set_sample_rotation(
+            rotation_type='extrinsic',
+            first_axis='x',
+            second_axis='z',
+            third_axis='y',
         )
 
         self.data_transformations = []
@@ -288,14 +299,20 @@ class Data2D(DataImage):
                 "position, wavelength, sample to detector distance, and "
                 "pixel size are provided.")
 
-    def set_sample_rotation(self,
-                            rotation_type='extrinsic',
-                            first_axis='y',
-                            second_axis=None,
-                            third_axis=None):
+    def _set_sample_rotation(self,
+                             rotation_type=None,
+                             first_axis=None,
+                             second_axis=None,
+                             third_axis=None):
         """
         Set the self.sample_rotation dictionary with details of the
-        sample rotations.
+        sample rotations. Carefully consider if changing the default
+        settings that the selected rotation type and order matches the
+        experimental conditions.
+
+        If all keyword arguments are left as default values of None,
+        the system will assume an extrinsic rotation type with the
+        first, second, and third axes of x, z, y, respectively.
 
         Parameters
         ----------
@@ -306,22 +323,47 @@ class Data2D(DataImage):
             coordinate system after the previous rotation is performed.
             An 'extrinsic' rotation is perfromed on the original
             coordinate system prior to any rotations.
-            Default value is 'extrinsic'.
         first_axis : str
             Axis about which the first rotation is performed.
             Options are 'x', 'y', or 'z'.
-            Default value is 'y' for standard CD-SAXS with one rotation
-            of sample_phi_deg about the positive y-axis at the sample.
         second_axis : str, optional
             Axis about which the second rotation is performed.
             Options are 'x', 'y', or 'z'.
-            Default is None.
         third_axis : str, optional
             Axis about which the first rotation is performed.
             Options are 'x', 'y', or 'z'.
-            Default is None.
         """
         accepted_axes = ['x', 'y', 'z']
+
+        if rotation_type is None:
+            rotation_type = 'extrinsic'
+            if first_axis is not None or second_axis is not None or third_axis is not None:
+                raise ValueError(
+                    "The rotation type is required if any axes have been"
+                    "assigned."
+                )
+            # the conditions to assume default has been reached
+            first_axis = 'x'
+            second_axis = 'z'
+            third_axis = 'y'
+
+        if first_axis is None:
+            if second_axis is not None or third_axis is not None:
+                raise ValueError(
+                    "Axes should be assigned in order. Currently the first"
+                    "axis is set to None but the second or third axis is"
+                    "assigned. If there is only a second and/or third axis,"
+                    "please assign the first axis keyword argument first."
+                )
+
+        if second_axis is None and third_axis is not None:
+            raise ValueError(
+                "Axes should be assigned in order. Currently the second"
+                "axis is set to None but the third axis is assigned. Please"
+                "reasign the second axis with the third axis value."
+            )
+
+        # check that the axes provided are accepted
         if first_axis.lower() not in accepted_axes:
             raise ValueError(
                 f"Did not recognize first_axis of {first_axis}. Use "
@@ -343,11 +385,11 @@ class Data2D(DataImage):
                 "Use 'intrinsic' or 'extrinsic'."
             )
 
-        self.sample_rotation = {
-            'rotation_type': rotation_type,
-            'first_axis': first_axis,
-            'second_axis': second_axis,
-            'third_axis': third_axis,
+        self._sample_rotation = {
+            'rotation_type': rotation_type.lower(),
+            'first_axis': first_axis.lower(),
+            'second_axis': second_axis.lower(),
+            'third_axis': third_axis.lower(),
         }
 
         self.calculate_q(suppress_errors=True)
@@ -491,7 +533,7 @@ class Data2D(DataImage):
                 detector_y0_mm=self.metadata['detector_y0_mm'],
                 detector_phiscale=self.metadata['detector_phiscale'],
             )
-            self.qby_1d .reshape(-1)
+            self.qby_1d = qby_1d.reshape(-1)
 
             _, qbx_1d, _, _ = diffraction.detector_px_to_qbyxz(
                 center_px=(0, self.metadata['center_px'][1]),
@@ -506,7 +548,7 @@ class Data2D(DataImage):
                 detector_y0_mm=self.metadata['detector_y0_mm'],
                 detector_phiscale=self.metadata['detector_phiscale'],
             )
-            self.qbx_1d.reshape(-1)
+            self.qbx_1d = qbx_1d.reshape(-1)
 
         missing_keywords = [x for x in UPDATE_QS_TRIGGERS
                             if x not in self.metadata.keys()]
@@ -527,10 +569,10 @@ class Data2D(DataImage):
                     + self.metadata['sample_chi_offset_deg'],
                 sample_omega_deg=self.metadata['sample_omega_deg']\
                     + self.metadata['sample_omega_offset_deg'],
-                rotation=self.sample_rotation['rotation_type'],
-                first_axis=self.sample_rotation['first_axis'],
-                second_axis=self.sample_rotation['second_axis'],
-                third_axis=self.sample_rotation['third_axis'],
+                rotation=self._sample_rotation['rotation_type'],
+                first_axis=self._sample_rotation['first_axis'],
+                second_axis=self._sample_rotation['second_axis'],
+                third_axis=self._sample_rotation['third_axis'],
             )
             self.qs = qs
             self.qsy = qsy
