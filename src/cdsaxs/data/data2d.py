@@ -240,8 +240,15 @@ class Data2D(DataImage):
         super().__init__(image=image, mask=mask)
 
         self.metadata = {}
+        self._sample_rotation = {}
+
+
         self.update_metadata(
             {x: y for x, y in kwargs.items() if x in METADATA_KEYWORDS})
+
+        # set the sample rotation metadata at default
+        # default rotations are extrinsic in order of x, z, y
+        self._set_sample_rotation()
 
         # set required metadata defaults if not present
         self.update_metadata(
@@ -270,14 +277,6 @@ class Data2D(DataImage):
             self.metadata['filename'] if 'filename' in self.metadata.keys()\
             else 'name'
 
-        # set the sample rotation metadata
-        self._set_sample_rotation(
-            rotation_type='extrinsic',
-            first_axis='x',
-            second_axis='z',
-            third_axis='y',
-        )
-
         self.data_transformations = []
 
         # initialize all q attributes as None
@@ -292,7 +291,7 @@ class Data2D(DataImage):
         # at the end of this init if we can't calculate q
         self.calculate_q(suppress_errors=True)
 
-        if not hide_q_warnings and self.qdy is None:
+        if not hide_q_warnings and self.qby_1d is None:
             warnings.warn(
                 "Insufficient metadata to calculate q. "
                 "Check your metadata to ensure the correct center "
@@ -494,13 +493,16 @@ class Data2D(DataImage):
         # first check if we can calculate beam coordinate q
         missing_keywords = [x for x in UPDATE_QB_TRIGGERS
                             if x not in self.metadata.keys()]
-        if len(missing_keywords) > 0 and not suppress_errors:
-            raise ValueError(
-                "The following metadata is missing to calculate the "
-                "beam coordinate scattering vector: "
-                f"{missing_keywords}. Therefore, the sample coordinate"
-                "scattering vector also could not be calculated"
-                )
+        if len(missing_keywords) > 0:
+            if not suppress_errors:
+                raise ValueError(
+                    "The following metadata is missing to calculate the "
+                    "beam coordinate scattering vector: "
+                    f"{missing_keywords}. Therefore, the sample coordinate"
+                    "scattering vector also could not be calculated"
+                    )
+            else:
+                pass
         else:
             qb, qby, qbx, qbz = diffraction.detector_px_to_qbyxz(
                 center_px=self.metadata['center_px'],
@@ -513,7 +515,7 @@ class Data2D(DataImage):
                 detector_y_mm=self.metadata['detector_y_mm'],
                 detector_phi0_deg=self.metadata['detector_phi0_deg'],
                 detector_y0_mm=self.metadata['detector_y0_mm'],
-                detector_phiscale=self.metadata['detector_phiscale'],
+                detector_phi_scale=self.metadata['detector_phi_scale'],
             )
             self.qb = qb
             self.qby = qby
@@ -531,11 +533,11 @@ class Data2D(DataImage):
                 detector_y_mm=self.metadata['detector_y_mm'],
                 detector_phi0_deg=self.metadata['detector_phi0_deg'],
                 detector_y0_mm=self.metadata['detector_y0_mm'],
-                detector_phiscale=self.metadata['detector_phiscale'],
+                detector_phi_scale=self.metadata['detector_phi_scale'],
             )
             self.qby_1d = qby_1d.reshape(-1)
 
-            _, qbx_1d, _, _ = diffraction.detector_px_to_qbyxz(
+            _, _, qbx_1d, _ = diffraction.detector_px_to_qbyxz(
                 center_px=(0, self.metadata['center_px'][1]),
                 detector_shape_px=(1, self.image.shape[1]),
                 pixel_size_um=self.metadata['pixel_size_um'],
@@ -546,38 +548,55 @@ class Data2D(DataImage):
                 detector_y_mm=self.metadata['detector_y_mm'],
                 detector_phi0_deg=self.metadata['detector_phi0_deg'],
                 detector_y0_mm=self.metadata['detector_y0_mm'],
-                detector_phiscale=self.metadata['detector_phiscale'],
+                detector_phi_scale=self.metadata['detector_phi_scale'],
             )
             self.qbx_1d = qbx_1d.reshape(-1)
 
-        missing_keywords = [x for x in UPDATE_QS_TRIGGERS
-                            if x not in self.metadata.keys()]
-        if len(missing_keywords) > 0 and not suppress_errors:
-            raise ValueError(
-                "The following metadata is missing to calculate the "
-                "sample coordinate scattering vector: "
-                f"{missing_keywords}."
-                )
-        else:
-            qs, qsy, qsx, qsz = diffraction.calculate_q_beam_to_sample(
-                qby=self.qby,
-                qbx=self.qbx,
-                qbz=self.qbz,
-                sample_phi_deg=self.metadata['sample_phi_deg']\
-                    + self.metadata['sample_phi_offset_deg'],
-                sample_chi_deg=self.metadata['sample_chi_deg']\
-                    + self.metadata['sample_chi_offset_deg'],
-                sample_omega_deg=self.metadata['sample_omega_deg']\
-                    + self.metadata['sample_omega_offset_deg'],
-                rotation=self._sample_rotation['rotation_type'],
-                first_axis=self._sample_rotation['first_axis'],
-                second_axis=self._sample_rotation['second_axis'],
-                third_axis=self._sample_rotation['third_axis'],
-            )
-            self.qs = qs
-            self.qsy = qsy
-            self.qsx = qsx
-            self.qsz = qsz
+            missing_keywords = [x for x in UPDATE_QS_TRIGGERS
+                                if x not in self.metadata.keys()]
+            if len(missing_keywords) > 0:
+                if not suppress_errors:
+                    raise ValueError(
+                        "The following metadata is missing to calculate the "
+                        "sample coordinate scattering vector: "
+                        f"{missing_keywords}."
+                        )
+                else:
+                    pass
+            else:
+                # check that the rotation information is present
+                # this check is most relevant during the init
+                if 'rotation_type' not in self._sample_rotation.keys() or\
+                 'first_axis' not in self._sample_rotation.keys() or\
+                 'second_axis' not in self._sample_rotation.keys() or\
+                 'third_axis' not in self._sample_rotation.keys():
+                    if not suppress_errors:
+                        raise ValueError(
+                            "Sample rotation information is missing"
+                        )
+                    else:
+                        pass
+
+                else:
+                    qs, qsy, qsx, qsz = diffraction.calculate_q_beam_to_sample(
+                        qby=self.qby,
+                        qbx=self.qbx,
+                        qbz=self.qbz,
+                        sample_phi_deg=self.metadata['sample_phi_deg']\
+                            + self.metadata['sample_phi_offset_deg'],
+                        sample_chi_deg=self.metadata['sample_chi_deg']\
+                            + self.metadata['sample_chi_offset_deg'],
+                        sample_omega_deg=self.metadata['sample_omega_deg']\
+                            + self.metadata['sample_omega_offset_deg'],
+                        rotation=self._sample_rotation['rotation_type'],
+                        first_axis=self._sample_rotation['first_axis'],
+                        second_axis=self._sample_rotation['second_axis'],
+                        third_axis=self._sample_rotation['third_axis'],
+                    )
+                    self.qs = qs
+                    self.qsy = qsy
+                    self.qsx = qsx
+                    self.qsz = qsz
 
     def scale_data(self, value, keyword=None):
         """

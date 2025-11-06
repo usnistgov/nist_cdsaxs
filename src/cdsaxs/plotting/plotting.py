@@ -265,9 +265,9 @@ def plot_data2d(
         mask=data2d.mask,
         log_scale=log_scale,
         title=f"Data2D: {data2d.name}",
-        axis0_vals=data2d.qdy,
+        axis0_vals=data2d.qby_1d,
         axis0_type='qdy',
-        axis1_vals=data2d.qdx,
+        axis1_vals=data2d.qbx_1d,
         axis1_type='qdx',
         cmap=cmap,
         aspect=aspect,
@@ -342,10 +342,10 @@ def plot_qslice(
         mask=qslice.image_mask,
         log_scale=log_scale,
         title="Integration Box",
-        axis0_vals=qslice.data2d.qdy[
+        axis0_vals=qslice.data2d.qby_1d[
             qslice.limits_axis0[0]:qslice.limits_axis0[1]],
         axis0_type='qdy',
-        axis1_vals=qslice.data2d.qdx[
+        axis1_vals=qslice.data2d.qbx_1d[
             qslice.limits_axis1[0]:qslice.limits_axis1[1]],
         axis1_type='qdx',
         cmap=cmap,

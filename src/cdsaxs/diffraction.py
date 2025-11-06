@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 def _detector_phi_corr(
         detector_phi_deg: float,
         detector_phi0_deg: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Calculates the angle of rotation of the detector about the sample
@@ -30,7 +30,7 @@ def _detector_phi_corr(
         incidence position.
         Units are degrees.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -41,7 +41,7 @@ def _detector_phi_corr(
         position.
         Units are radians.
     """
-    det_corr = detector_phiscale * (detector_phi_deg - detector_phi0_deg)
+    det_corr = detector_phi_scale * (detector_phi_deg - detector_phi0_deg)
     det_corr_rad = np.deg2rad(det_corr)
 
     return det_corr_rad
@@ -55,7 +55,7 @@ def center_px_beam_to_detector(
         detector_y_mm: float = 0,
         detector_phi0_deg: float = 0,
         detector_y0_mm: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Converts the beam center position from beam coordinate space (which
@@ -89,7 +89,7 @@ def center_px_beam_to_detector(
         space matches the beam center position y in beam coordinate
         space.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -101,7 +101,7 @@ def center_px_beam_to_detector(
     det_phi_rad = _detector_phi_corr(
         detector_phi_deg=detector_phi_deg,
         detector_phi0_deg=detector_phi0_deg,
-        detector_phiscale=detector_phiscale
+        detector_phi_scale=detector_phi_scale
     )
 
     offset_x_cm = sdd_cm * np.tan(det_phi_rad)
@@ -126,7 +126,7 @@ def center_px_detector_to_beam(
         detector_y_mm: float = 0,
         detector_phi0_deg: float = 0,
         detector_y0_mm: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Converts the beam center position from detector coordinate space to
@@ -160,7 +160,7 @@ def center_px_detector_to_beam(
         space matches the beam center position y in beam coordinate
         space.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -172,7 +172,7 @@ def center_px_detector_to_beam(
     det_phi_rad = _detector_phi_corr(
         detector_phi_deg=detector_phi_deg,
         detector_phi0_deg=detector_phi0_deg,
-        detector_phiscale=detector_phiscale
+        detector_phi_scale=detector_phi_scale
     )
 
     offset_x_cm = sdd_cm * np.tan(det_phi_rad)
@@ -196,7 +196,7 @@ def _detector_px_to_gamma_rad(
         sdd_cm: float,
         detector_phi_deg: float = 0,
         detector_phi0_deg: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Calculate gamma, the horizontal scattering angle component, for
@@ -222,7 +222,7 @@ def _detector_px_to_gamma_rad(
         incidence position.
         Units are degrees.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -243,7 +243,7 @@ def _detector_px_to_gamma_rad(
     det_phi_corr = _detector_phi_corr(
         detector_phi_deg=detector_phi_deg,
         detector_phi0_deg=detector_phi0_deg,
-        detector_phiscale=detector_phiscale
+        detector_phi_scale=detector_phi_scale
     )
     gamma = np.arctan2(x_px * pixel_size_um * 1e-4, sdd_cm) + det_phi_corr
 
@@ -258,7 +258,7 @@ def _detector_px_gamma_to_delta_rad(
         sdd_cm: float,
         detector_phi_deg: float = 0,
         detector_phi0_deg: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Calculate delta, the vertical scattering angle component, for
@@ -287,7 +287,7 @@ def _detector_px_gamma_to_delta_rad(
         incidence position.
         Units are degrees.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -304,7 +304,7 @@ def _detector_px_gamma_to_delta_rad(
     det_phi_corr = _detector_phi_corr(
         detector_phi_deg=detector_phi_deg,
         detector_phi0_deg=detector_phi0_deg,
-        detector_phiscale=detector_phiscale
+        detector_phi_scale=detector_phi_scale
     )
 
     # for each pixel calculate the distance in the y direction from the
@@ -334,7 +334,7 @@ def detector_px_to_qbyxz(
         detector_y_mm: float = 0,
         detector_phi0_deg: float = 0,
         detector_y0_mm: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Calculates qb, qby, qbx, and qbz (beam coordinate space) at all
@@ -382,7 +382,7 @@ def detector_px_to_qbyxz(
         space matches the beam center position y in beam coordinate
         space.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -410,7 +410,7 @@ def detector_px_to_qbyxz(
             detector_y_mm=detector_y_mm,
             detector_phi0_deg=detector_phi0_deg,
             detector_y0_mm=detector_y0_mm,
-            detector_phiscale=detector_phiscale
+            detector_phi_scale=detector_phi_scale
         )
     elif center_coordinate_space.lower() == 'detector':
         center_px_detector = center_px
@@ -422,7 +422,7 @@ def detector_px_to_qbyxz(
             detector_y_mm=detector_y_mm,
             detector_phi0_deg=detector_phi0_deg,
             detector_y0_mm=detector_y0_mm,
-            detector_phiscale=detector_phiscale
+            detector_phi_scale=detector_phi_scale
         )
     else:
         raise ValueError(
@@ -437,7 +437,7 @@ def detector_px_to_qbyxz(
         sdd_cm=sdd_cm,
         detector_phi_deg=detector_phi_deg,
         detector_phi0_deg=detector_phi0_deg,
-        detector_phiscale=detector_phiscale,
+        detector_phi_scale=detector_phi_scale,
     )
 
     delta = _detector_px_gamma_to_delta_rad(
@@ -448,7 +448,7 @@ def detector_px_to_qbyxz(
         sdd_cm=sdd_cm,
         detector_phi_deg=detector_phi_deg,
         detector_phi0_deg=detector_phi0_deg,
-        detector_phiscale=detector_phiscale,
+        detector_phi_scale=detector_phi_scale,
     )
 
     # calculate the q components in the beam coordinate space
@@ -1115,7 +1115,7 @@ def detector_px_to_q(
         detector_y_mm: float = 0,
         detector_phi0_deg: float = 0,
         detector_y0_mm: float = 0,
-        detector_phiscale: float = 1,
+        detector_phi_scale: float = 1,
 ):
     """
     Calculates the scattering vectors in both beam coordinate space and
@@ -1163,7 +1163,7 @@ def detector_px_to_q(
         space matches the beam center position y in beam coordinate
         space.
         Default value is 0.
-    detector_phiscale : float
+    detector_phi_scale : float
         Scaling factor applied to the corrected detector theta.
 
     Returns
@@ -1190,7 +1190,7 @@ def detector_px_to_q(
         detector_y_mm=detector_y_mm,
         detector_phi0_deg=detector_phi0_deg,
         detector_y0_mm=detector_y0_mm,
-        detector_phiscale=detector_phiscale
+        detector_phi_scale=detector_phi_scale
     )
 
     qs, qsy, qsx, qsz = calculate_q_beam_to_sample(
