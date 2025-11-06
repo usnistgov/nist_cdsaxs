@@ -1481,26 +1481,26 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_extrinsic_yxz(self):
 
         qsx = np.array([
-            2.18581300824E-02	2.17330729658E-02
-            2.18464251661E-02	2.17213680491E-02
+            [2.18581300824E-02,	2.17330729658E-02],
+            [2.18464251661E-02,	2.17213680491E-02],
 
         ])
 
         qsy = np.array([
-            -8.35450687349E-04	-8.24589109060E-04
-            -9.58730865630E-04	-9.47869287380E-04
+            [-8.35450687349E-04,	-8.24589109060E-04],
+            [-9.58730865630E-04,	-9.47869287380E-04],
 
         ])
 
         qsz = np.array([
-            8.71956692921E-04	8.66116292630E-04
-            8.93319248582E-04	8.87478848286E-04
+            [8.71956692921E-04,	8.66116292630E-04],
+            [8.93319248582E-04,	8.87478848286E-04],
 
         ])
 
         qs = np.array([
-            2.18914626515E-02	2.17659496730E-02
-            2.18856911403E-02	2.17601448713E-02
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
 
         ])
 
@@ -1512,8 +1512,8 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
             rotation='extrinsic',
-            first_axis='x',
-            second_axis='y',
+            first_axis='y',
+            second_axis='x',
             third_axis='z',
         )
 
@@ -1527,26 +1527,26 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_extrinsic_yzx(self):
 
         qsx = np.array([
-            2.18677133729E-02	2.17425964786E-02
-            2.18561721518E-02	2.17310552570E-02
+            [2.18677133729E-02,	2.17425964786E-02],
+            [2.18561721518E-02,	2.17310552570E-02],
 
         ])
 
         qsy = np.array([
-            -8.64377219887E-04	-8.53349540484E-04
-            -9.87657411546E-04	-9.76629732182E-04
+            [-8.64377219887E-04,	-8.53349540484E-04],
+            [-9.87657411546E-04,	-9.76629732182E-04],
 
         ])
 
         qsz = np.array([
-            5.40463581590E-04	5.36524090892E-04
-            5.61914939696E-04	5.57975448998E-04
+            [5.40463581590E-04,	5.36524090892E-04],
+            [5.61914939696E-04,	5.57975448998E-04],
 
         ])
 
         qs = np.array([
-            2.18914626515E-02	2.17659496730E-02
-            2.18856911403E-02	2.17601448713E-02
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
 
         ])
 
@@ -1558,9 +1558,9 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
             rotation='extrinsic',
-            first_axis='x',
-            second_axis='y',
-            third_axis='z',
+            first_axis='y',
+            second_axis='z',
+            third_axis='x',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1573,26 +1573,26 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_extrinsic_xzy(self):
 
         qsx = np.array([
-            2.18633023286E-02	2.17381786656E-02
-            2.18523493860E-02	2.17272257226E-02
+            [2.18633023286E-02,	2.17381786656E-02],
+            [2.18523493860E-02,	2.17272257226E-02],
 
         ])
 
         qsy = np.array([
-            -7.01908462206E-04	-6.91813741185E-04
-            -8.25188581959E-04	-8.15093860980E-04
+            [-7.01908462206E-04,	-6.91813741185E-04],
+            [-8.25188581959E-04,	-8.15093860980E-04],
 
         ])
 
         qsz = np.array([
-            8.59926056408E-04	8.54135364086E-04
-            8.81684073987E-04	8.75893381660E-04
+            [8.59926056408E-04,	8.54135364086E-04],
+            [8.81684073987E-04,	8.75893381660E-04],
 
         ])
 
         qs = np.array([
-            2.18914626515E-02	2.17659496730E-02
-            2.18856911403E-02	2.17601448713E-02
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
 
         ])
 
@@ -1605,8 +1605,8 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_omega_deg=self.sample_omega_deg,
             rotation='extrinsic',
             first_axis='x',
-            second_axis='y',
-            third_axis='z',
+            second_axis='z',
+            third_axis='y',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1619,26 +1619,26 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_extrinsic_zxy(self):
 
         qsx = np.array([
-            2.18728601252E-02	2.17476766843E-02
-            2.18620738770E-02	2.17368904357E-02
+            [2.18728601252E-02,	2.17476766843E-02],
+            [2.18620738770E-02,	2.17368904357E-02],
 
         ])
 
         qsy = np.array([
-            -7.31323373164E-04	-7.21059734146E-04
-            -8.54603505360E-04	-8.44339866383E-04
+            [-7.31323373164E-04,	-7.21059734146E-04],
+            [-8.54603505360E-04,	-8.44339866383E-04],
 
         ])
 
         qsz = np.array([
-            5.28481874073E-04	5.24592091344E-04
-            5.50322937744E-04	5.46433155016E-04
+            [5.28481874073E-04,	5.24592091344E-04],
+            [5.50322937744E-04,	5.46433155016E-04],
 
         ])
 
         qs = np.array([
-            2.18914626515E-02	2.17659496730E-02
-            2.18856911403E-02	2.17601448713E-02
+            [2.18914626515E-02,	2.17659496730E-02],
+            [2.18856911403E-02,	2.17601448713E-02],
 
         ])
 
@@ -1650,9 +1650,9 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
             rotation='extrinsic',
-            first_axis='x',
-            second_axis='y',
-            third_axis='z',
+            first_axis='z',
+            second_axis='x',
+            third_axis='y',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1665,23 +1665,27 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_intrinsic_xyz(self):
 
         qsx = np.array([
-            [2.18632506825E-02,	2.17381269615E-02],
-            [2.18523044091E-02,	2.17271806877E-02],
+            [2.18677392504E-02,	2.17426224171E-02],
+            [2.18561943595E-02,	2.17310775258E-02],
+
         ])
 
         qsy = np.array([
-            [-7.02877546288E-04,	-6.92774663078E-04],
-            [-8.26224099855E-04,	-8.16121216686E-04],
+            [-8.63894736585E-04, -8.52872422814E-04],
+            [-9.87108494433E-04, -9.76086180701E-04],
+
         ])
 
         qsz = np.array([
-            [8.60447426397E-04,	8.54672240741E-04],
-            [8.81829031304E-04,	8.76053845643E-04],
+            [5.40187914067E-04,	5.36231504621E-04],
+            [5.62015684846E-04,	5.58059275400E-04],
+
         ])
 
         qs = np.array([
             [2.18914626515E-02,	2.17659496730E-02],
             [2.18856911403E-02,	2.17601448713E-02],
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
@@ -1691,7 +1695,7 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_phi_deg=self.sample_phi_deg,
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
-            rotation='extrinsic',
+            rotation='intrinsic',
             first_axis='x',
             second_axis='y',
             third_axis='z',
@@ -1709,21 +1713,25 @@ class TestCalculateQBeamToSample(unittest.TestCase):
         qsx = np.array([
             [2.18632506825E-02,	2.17381269615E-02],
             [2.18523044091E-02,	2.17271806877E-02],
+
         ])
 
         qsy = np.array([
             [-7.02877546288E-04,	-6.92774663078E-04],
             [-8.26224099855E-04,	-8.16121216686E-04],
+
         ])
 
         qsz = np.array([
             [8.60447426397E-04,	8.54672240741E-04],
             [8.81829031304E-04,	8.76053845643E-04],
+
         ])
 
         qs = np.array([
             [2.18914626515E-02,	2.17659496730E-02],
             [2.18856911403E-02,	2.17601448713E-02],
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
@@ -1733,10 +1741,10 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_phi_deg=self.sample_phi_deg,
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
-            rotation='extrinsic',
-            first_axis='x',
+            rotation='intrinsic',
+            first_axis='z',
             second_axis='y',
-            third_axis='z',
+            third_axis='x',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1749,23 +1757,27 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_intrinsic_yxz(self):
 
         qsx = np.array([
-            [2.18632506825E-02,	2.17381269615E-02],
-            [2.18523044091E-02,	2.17271806877E-02],
+            [2.18728601252E-02,	2.17476766843E-02],
+            [2.18620738770E-02,	2.17368904357E-02],
+
         ])
 
         qsy = np.array([
-            [-7.02877546288E-04,	-6.92774663078E-04],
-            [-8.26224099855E-04,	-8.16121216686E-04],
+            [-7.31323373164E-04,	-7.21059734146E-04],
+            [-8.54603505360E-04,	-8.44339866383E-04],
+
         ])
 
         qsz = np.array([
-            [8.60447426397E-04,	8.54672240741E-04],
-            [8.81829031304E-04,	8.76053845643E-04],
+            [5.28481874073E-04,	5.24592091344E-04],
+            [5.50322937744E-04,	5.46433155016E-04],
+
         ])
 
         qs = np.array([
             [2.18914626515E-02,	2.17659496730E-02],
             [2.18856911403E-02,	2.17601448713E-02],
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
@@ -1775,9 +1787,9 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_phi_deg=self.sample_phi_deg,
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
-            rotation='extrinsic',
-            first_axis='x',
-            second_axis='y',
+            rotation='intrinsic',
+            first_axis='y',
+            second_axis='x',
             third_axis='z',
         )
 
@@ -1791,23 +1803,27 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_intrinsic_yzx(self):
 
         qsx = np.array([
-            [2.18632506825E-02,	2.17381269615E-02],
-            [2.18523044091E-02,	2.17271806877E-02],
+            [2.18633023286E-02,	2.17381786656E-02],
+            [2.18523493860E-02,	2.17272257226E-02],
+
         ])
 
         qsy = np.array([
-            [-7.02877546288E-04,	-6.92774663078E-04],
-            [-8.26224099855E-04,	-8.16121216686E-04],
+            [-7.01908462206E-04,	-6.91813741185E-04],
+            [-8.25188581959E-04,	-8.15093860980E-04],
+
         ])
 
         qsz = np.array([
-            [8.60447426397E-04,	8.54672240741E-04],
-            [8.81829031304E-04,	8.76053845643E-04],
+            [8.59926056408E-04,	8.54135364086E-04],
+            [8.81684073987E-04,	8.75893381660E-04],
+
         ])
 
         qs = np.array([
             [2.18914626515E-02,	2.17659496730E-02],
             [2.18856911403E-02,	2.17601448713E-02],
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
@@ -1817,10 +1833,10 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_phi_deg=self.sample_phi_deg,
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
-            rotation='extrinsic',
-            first_axis='x',
-            second_axis='y',
-            third_axis='z',
+            rotation='intrinsic',
+            first_axis='y',
+            second_axis='z',
+            third_axis='x',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1833,23 +1849,27 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_intrinsic_xzy(self):
 
         qsx = np.array([
-            [2.18632506825E-02,	2.17381269615E-02],
-            [2.18523044091E-02,	2.17271806877E-02],
+            [2.18677133729E-02,	2.17425964786E-02],
+            [2.18561721518E-02,	2.17310552570E-02],
+
         ])
 
         qsy = np.array([
-            [-7.02877546288E-04,	-6.92774663078E-04],
-            [-8.26224099855E-04,	-8.16121216686E-04],
+            [-8.64377219887E-04,	-8.53349540484E-04],
+            [-9.87657411546E-04,	-9.76629732182E-04],
+
         ])
 
         qsz = np.array([
-            [8.60447426397E-04,	8.54672240741E-04],
-            [8.81829031304E-04,	8.76053845643E-04],
+            [5.40463581590E-04,	5.36524090892E-04],
+            [5.61914939696E-04,	5.57975448998E-04],
+
         ])
 
         qs = np.array([
             [2.18914626515E-02,	2.17659496730E-02],
             [2.18856911403E-02,	2.17601448713E-02],
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
@@ -1859,10 +1879,10 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_phi_deg=self.sample_phi_deg,
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
-            rotation='extrinsic',
+            rotation='intrinsic',
             first_axis='x',
-            second_axis='y',
-            third_axis='z',
+            second_axis='z',
+            third_axis='y',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1875,23 +1895,27 @@ class TestCalculateQBeamToSample(unittest.TestCase):
     def test_passive_intrinsic_zxy(self):
 
         qsx = np.array([
-            [2.18632506825E-02,	2.17381269615E-02],
-            [2.18523044091E-02,	2.17271806877E-02],
+            [2.18581300824E-02, 2.17330729658E-02],
+            [2.18464251661E-02,	2.17213680491E-02],
+
         ])
 
         qsy = np.array([
-            [-7.02877546288E-04,	-6.92774663078E-04],
-            [-8.26224099855E-04,	-8.16121216686E-04],
+            [-8.35450687349E-04,	-8.24589109060E-04],
+            [-9.58730865630E-04,	-9.47869287380E-04],
+
         ])
 
         qsz = np.array([
-            [8.60447426397E-04,	8.54672240741E-04],
-            [8.81829031304E-04,	8.76053845643E-04],
+            [8.71956692921E-04,	8.66116292630E-04],
+            [8.93319248582E-04,	8.87478848286E-04],
+
         ])
 
         qs = np.array([
             [2.18914626515E-02,	2.17659496730E-02],
             [2.18856911403E-02,	2.17601448713E-02],
+
         ])
 
         actual = diffraction.calculate_q_beam_to_sample(
@@ -1901,10 +1925,10 @@ class TestCalculateQBeamToSample(unittest.TestCase):
             sample_phi_deg=self.sample_phi_deg,
             sample_chi_deg=self.sample_chi_deg,
             sample_omega_deg=self.sample_omega_deg,
-            rotation='extrinsic',
-            first_axis='x',
-            second_axis='y',
-            third_axis='z',
+            rotation='intrinsic',
+            first_axis='z',
+            second_axis='x',
+            third_axis='y',
         )
 
         np.testing.assert_almost_equal(actual[0][:2, :2], qs)
@@ -1913,4 +1937,3 @@ class TestCalculateQBeamToSample(unittest.TestCase):
         np.testing.assert_almost_equal(actual[3][:2, :2], qsz)
         # q magnitude should equal in both coordinate spaces qb = qs
         np.testing.assert_almost_equal(self.qb[:2, :2], actual[0][:2, :2])
-
