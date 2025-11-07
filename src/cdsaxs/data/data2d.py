@@ -242,7 +242,6 @@ class Data2D(DataImage):
         self.metadata = {}
         self._sample_rotation = {}
 
-
         self.update_metadata(
             {x: y for x, y in kwargs.items() if x in METADATA_KEYWORDS})
 
@@ -1027,7 +1026,7 @@ class Data2D(DataImage):
 
         return (min0, max0), (min1, max1)
 
-    def get_box_dims_qrange(self, range_qdy, range_qdx):
+    def get_box_dims_qdrange(self, range_qdy, range_qdx):
         """
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with set q ranges
@@ -1059,6 +1058,237 @@ class Data2D(DataImage):
                          int(np.max(qdx_indices)+1))
 
         return limits_qdy_px, limits_qdx_px
+
+    def get_pixels_qrange(self, **ranges):
+        """
+        Returns a selection mask that includes image pixels that have
+        q-components within the provided ranges. It will not return
+        any points that are currently masked.
+
+        Parameters
+        ----------
+        *ranges : tuple | list
+            Ranges for any of the q-component attributes of this class
+            can be provided as keyword arguments. For example,
+            providing qsy=(-0.01, 0.01) would select pixels that have
+            a qsy values >= -0.01 and <= 0.01.
+            Accepted q components include:
+                qb
+                qby
+                qbx
+                qbz
+                qs
+                qsy
+                qsx
+                qsz
+
+        Returns
+        -------
+        NDArray
+            Boolean array the same size as the current data image that
+            is True for pixels that meet all of the provided q ranges
+            and are not already masked by the instance of this class.
+        """
+
+        selected = ~self.mask
+
+        for q_comp, limits in ranges.items():
+            q_test = getattr(self, q_comp)
+            selected_q = (q_test >= min(limits)) & (q_test <= max(limits))
+            selected = selected * selected_q
+
+        return selected
+
+    def integrate_box_by_qs(
+        self,
+        qsy_range: list | tuple,
+        qsx_range: list | tuple,
+        mode: str,
+        axis: str | int = None,
+        bin_width: None,
+        show_plot=True,
+        subtract_background_offset: int | list[int] = None,
+        plotting_kwargs={},
+    ) -> QSlice:
+        """
+        Integrate a region of interest defined by the ranges in sample
+        coordinate based x- and y- components of q (qsy, qsx).
+
+
+        Parameters
+        ----------
+        qsy_range : iterable of float
+            Range in qsy that should be included in the integration
+            region of interest.
+            Pixels with qsy values that are >= min(qsy_range) and
+            <= max(qsy_range) will be selected.
+        qsx_range : iterable of float
+            Range in qsx that should be included in the integration
+            region of interest.
+            Pixels with qsx values that are >= min(qsx_range) and
+            <= max(qsx_range) will be selected.
+        mode : str
+            Integration mode, either 'sum' or 'mean'.
+            Note that if 'sum' is selected, there may be an unequal
+            number of pixels summed across the selected axis in each
+            bin.
+        axis : str, int
+            Axis over which the summation or mean will be
+            performed, either 'qsy' or 'qsx'.
+            If axis is set to 'qsy', the integration will be performed
+            along 'qsy' and data of I vs. qsx will be returned.
+            If axis is set to 'qsx', the integration will be perfromed
+            along 'qsx' and data of I vs. qsy will be returned.
+        bin_width : float
+            Set the bin width of the non-integrated axis for binning
+            the selected data from the defined region of interest.
+            The default bin_width is the average pixel width in q.
+        show_plot : bool, optional
+            If set to False, the scattering image overlaid with the
+            integration box boundaries will be shown in a first figure
+            and the one-dimensional data will be shown in a second figure.
+            Default value is True.
+        log_scale : bool, optional
+            If set to True, the plots will show the scattering intensity
+            on a log scale. If set to False, intensity will be displayed
+            on a linear scale. This only applies to the plots and does
+            not affect the data operation.
+            Default value is True.
+        subtract_background_offset: float, list[float], optional
+            If set to an offset than or equal to the
+            width of the region of interest to be integrated over, a
+            background subtraction will be performed by subtracting the
+            intensity of an integrated box offset by the set number of
+            pixels.
+            For example, if the integration is performed over
+            qsy of (-0.01, 0.01) and a background offset of 0.03 is
+            provided, the background region integration will be
+            performed over a qsy of (0.02, 0.04).
+            If a single float is provided, only one offset
+            box will be used in the subtraction. If multiple are
+            provided, the average signal from mulitple integrated offset
+            boxes will be used in the subtraction.
+            Note that the integration mode for these boxes will align
+            with the selected mode for this integration function.
+
+        Returns
+        -------
+        QSlice
+            One-dimensional I vs. q data extracted from the integration.
+
+        """
+
+        selected_pixels = np.where(self.get_pixels_qsrange(
+            qsy=qsy_range,
+            qsx=qsx_range,
+        ))
+
+        if axis is None:
+            if np.diff(qsy_range) <= np.diff(qsx_range):
+                axis = 'qsy'
+            else:
+                axis = 'qsx'
+        if axis == 'qsy':
+            slice_axis = 'qsx'
+        elif axis == 'qsx':
+            slice_axis = 'qsy'
+        else:
+            raise ValueError(f"Invalid integration axis of {axis}.")
+
+        pixels = {}
+        for ax in ['qb', 'qbx', 'qby', 'qbz', 'qs', 'qsx', 'qsy', 'qsz']:
+            pixels[ax] = getattr(self, ax)[selected_pixels].reshape(-1)
+        pixels['Iq'] = getattr(self, 'image')[selected_pixels].reshape(-1)
+
+        if bin_width is None:
+            bin_width = np.min(np.abs(np.diff(getattr(
+                self, 'qbx_1d' if slice_axis == 'qsx' else 'qby_1d'
+            ))))
+
+
+        # extract background intensity
+        if subtract_background_offset is not None:
+            backgrounds = []
+            backgrounds_iq = []
+            if type(subtract_background_offset) is int:
+                subtract_background_offset = [subtract_background_offset]
+            for offset in subtract_background_offset:
+                if np.abs(offset) < image_box.shape[axis]:
+                    warnings.warn(
+                        f"A background subtraction offset of {offset} "
+                        "is less than the integrated axis width and so "
+                        "it will be skipped in the subtraction.")
+                else:
+                    limits_qdy_px_sub = (
+                        limits_qdy_px[0] + (offset if axis == 0 else 0),
+                        limits_qdy_px[1] + (offset if axis == 0 else 0)
+                    )
+                    limits_qdx_px_sub = (
+                        limits_qdx_px[0] + (offset if axis == 1 else 0),
+                        limits_qdx_px[1] + (offset if axis == 1 else 0)
+                    )
+                    background_i, b_image, b_mask = super().slice_box(
+                        limits_axis0=limits_qdy_px_sub,
+                        limits_axis1=limits_qdx_px_sub,
+                        axis=axis,
+                        mode=mode,
+                    )
+
+                    b_slice = QSlice(
+                        q=q,
+                        Iq=background_i,
+                        q_axis=q_axis,
+                        data2d=self,
+                        limits_axis0=limits_qdy_px_sub,
+                        limits_axis1=limits_qdx_px_sub,
+                        integration_mode=mode,
+                        integration_axis=axis,
+                        image_roi=b_image,
+                        image_mask=b_mask,
+                    )
+
+                    backgrounds_iq.append(background_i)
+                    backgrounds.append(b_slice)
+
+            background_i_avg = np.array(backgrounds_iq)
+            # even if some points are masked in some background offsets
+            # we will use the background points
+            background_i_avg = np.nanmean(background_i_avg, axis=0)
+            integrated_i -= background_i_avg
+
+        else:
+            background_i_avg = None
+            backgrounds = None
+
+        # create instance of QSlice to hold integration metadata
+        integrated_q_slice = QSlice(
+            q=q,
+            Iq=integrated_i,
+            q_axis=q_axis,
+            data2d=self,
+            limits_axis0=limits_qdy_px,
+            limits_axis1=limits_qdx_px,
+            integration_mode=mode,
+            integration_axis=axis,
+            image_roi=image_box,
+            image_mask=mask_box,
+            background_Iq=background_i_avg,
+            background_qslices=backgrounds,
+        )
+        # set the q-axis that was integrated over to the mean value
+        integrated_q_slice.__setattr__(q_int_axis, q_int)
+
+        if show_plot:
+            fig = plotting.plot_data2d_integrate_box(
+                integrated_q_slice,
+                **plotting_kwargs
+            )
+        else:
+            fig = None
+
+        return integrated_q_slice, fig
+
+
 
     def integrate_box(
         self,
