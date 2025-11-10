@@ -7,6 +7,7 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+from tqdm import tqdm
 
 from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.qslice import QSlice
@@ -110,7 +111,8 @@ class Dataset():
     def update_all_metadata(self,
                             metadata: dict,
                             overwrite: bool = True,
-                            keys: list = None):
+                            keys: list = None,
+                            verbose: bool = True):
         """
         Add or update metadata for all Data2D stored in this Dataset.
         Existing metadata parameters can be updated by keeping the
@@ -130,12 +132,26 @@ class Dataset():
         keys : list
             List of keys to the datas dictionary to select which data
             the update should apply to.
+        verbose : bool
+            If set to True, a progress bar will appear as each data
+            metadata is updated. This can be helpful when the q
+            calcultation if being updated for relevant metadata
+            changes. 
+            Default value is True.
         """
         if keys is None:
             keys = list(self.datas.keys())
+
+        if verbose:
+            pbar = tqdm(range(len(keys)), desc="Updating datas: ",
+                        position=0, leave=True)
         for key in keys:
             data = self.datas[key]
             data.update_metadata(metadata=metadata, overwrite=overwrite)
+            if verbose:
+                pbar.update(1)
+        if verbose:
+            pbar.close()
 
     def update_all_user_params(
             self, params: dict, overwrite: bool = True,

@@ -627,8 +627,17 @@ def plot_data2d_find_detector_rotation_correction(
             q_range = peaks[:, 1]
             plot_line = peaks[:, 0]
         else:
-            q_range = np.arange(min(limits_axis1), max(limits_axis1), 1)
-            plot_line = q_range*slope + intercept
+            # negative x was used for line fit
+            qbx_box = -1*data2d.qbx_1d[limits_axis1[0]: limits_axis1[1]]
+            plot_line = slope*qbx_box + intercept
+            qbx_index = np.arange(min(limits_axis1), max(limits_axis1), 1)
+            qby_index = [np.round(
+                np.argmin(np.abs(data2d.qby[:, row]-val)), 0).astype(int)
+                for row, val in zip(qbx_index, plot_line)]
+            plot_line = qby_index
+            q_range = qbx_index
+            # q_range = np.arange(min(limits_axis1), max(limits_axis1), 1)
+            # plot_line = q_range*slope + intercept
         fig = plot_errorbar(
             q_range,
             plot_line,

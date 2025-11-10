@@ -13,10 +13,11 @@ from cdsaxs.data.metadata import (
 from cdsaxs.data.qslice import QSlice
 import cdsaxs.plotting.plotting as plotting
 import cdsaxs.diffraction as diffraction
+import cdsaxs.tools as tools
 from cdsaxs.tools import (
     find_peaks_2D,
     find_peaks_2D_one_axis,
-    line_fit
+    line_fit,
 )
 
 # any changes to these metadata values should update calculated q values
@@ -906,7 +907,8 @@ class Data2D(DataImage):
     def rotate_image(self,
                      rotation_angle_deg,
                      rotation_center=None,
-                     resampling_mode="bicubic"):
+                     resampling_mode="bilinear",
+                     resampling_mode_q="bilinear"):
 
         """
         Rotate the image counterclockwise by the specified angle about
@@ -931,14 +933,67 @@ class Data2D(DataImage):
             image intensities can be performed with the 'nearest',
             'bilinear', or 'bicubic' methods in the PILLOW package.
             Default value is 'bicubic'.
+        resampling_mode_q: str
+            Set the resampling method used during the rotation of the
+            scattering vector components in the sample coordinate
+            space.
+            The box rotation works by rotating the image underneath then
+            extracting the box for integration. Resampling of the
+            image intensities can be performed with the 'nearest',
+            'bilinear', or 'bicubic' methods in the PILLOW package.
+            Default value is 'bicubic'.
         """
 
         if rotation_center is None:
             rotation_center = self.metadata.get('center_px', (0, 0))
 
+        for q in ['qs', 'qsx', 'qsy', 'qsz']:
+            q_image = getattr(self, q)
+            if q_image is not None:
+                q_image_rot = tools.rotate_image(
+                    q_image, degrees=rotation_angle_deg,
+                    rotation_center=rotation_center,
+                    resampling_mode=resampling_mode_q
+                )
+            setattr(self, q, q_image_rot)
+
         super().rotate_image(rotation_angle_deg=rotation_angle_deg,
                              rotation_center=rotation_center,
                              resampling_mode=resampling_mode)
+
+    def calculate_omega(self, qsy0_angle):
+
+        """
+        Calculate the sample rotation angle omega with knowledge of
+        the sample rotation angles phi and chi, as well as the angle
+        at which the peaks along qsy appear in the detector image.
+
+        The angle should be calculated by fitting a line of:
+            qby = - slope * qbx + constant
+            angle = np.atan(slope)
+        The built in function for finding the peak angle can be used
+        to find the correct angle.
+        A positive angle will appear as if the detector image had
+        been rotated clockwise as this is a counterclockwise rotation
+        about the positive z-axis.
+        """
+
+        phi = np.deg2rad(
+            self.metadata['sample_phi_deg']
+            + self.metadata['sample_phi_offset_deg']
+        )
+        chi = np.deg2rad(
+            self.metadata['sample_chi_deg']
+            + self.metadata['sample_chi_offset_deg']
+        )
+
+        omega_rad = np.atan(
+            np.cos(chi)*(
+                np.tan(chi)*np.cos(phi)-np.tan(np.deg2rad(qsy0_angle))
+                )/np.sin(phi)
+        )
+
+        return np.rad2deg(omega_rad)
 
     def flip_horizontally(self):
         super().flip_horizontally()
@@ -1047,13 +1102,13 @@ class Data2D(DataImage):
         range_qdy = [min(range_qdy), max(range_qdy)]
         range_qdx = [min(range_qdx), max(range_qdx)]
 
-        qdy_indices = np.where((self.qdy >= range_qdy[0])
-                               & (self.qdy < range_qdy[1]))[0]
+        qdy_indices = np.where((self.qby_1d >= range_qdy[0])
+                               & (self.qby_1d < range_qdy[1]))[0]
         limits_qdy_px = (int(np.min(qdy_indices)),
                          int(np.max(qdy_indices)+1))
 
-        qdx_indices = np.where((self.qdx >= range_qdx[0])
-                               & (self.qdx < range_qdx[1]))[0]
+        qdx_indices = np.where((self.qbx_1d >= range_qdx[0])
+                               & (self.qbx_1d < range_qdx[1]))[0]
         limits_qdx_px = (int(np.min(qdx_indices)),
                          int(np.max(qdx_indices)+1))
 
@@ -1098,197 +1153,6 @@ class Data2D(DataImage):
             selected = selected * selected_q
 
         return selected
-
-    def integrate_box_by_qs(
-        self,
-        qsy_range: list | tuple,
-        qsx_range: list | tuple,
-        mode: str,
-        axis: str | int = None,
-        bin_width: None,
-        show_plot=True,
-        subtract_background_offset: int | list[int] = None,
-        plotting_kwargs={},
-    ) -> QSlice:
-        """
-        Integrate a region of interest defined by the ranges in sample
-        coordinate based x- and y- components of q (qsy, qsx).
-
-
-        Parameters
-        ----------
-        qsy_range : iterable of float
-            Range in qsy that should be included in the integration
-            region of interest.
-            Pixels with qsy values that are >= min(qsy_range) and
-            <= max(qsy_range) will be selected.
-        qsx_range : iterable of float
-            Range in qsx that should be included in the integration
-            region of interest.
-            Pixels with qsx values that are >= min(qsx_range) and
-            <= max(qsx_range) will be selected.
-        mode : str
-            Integration mode, either 'sum' or 'mean'.
-            Note that if 'sum' is selected, there may be an unequal
-            number of pixels summed across the selected axis in each
-            bin.
-        axis : str, int
-            Axis over which the summation or mean will be
-            performed, either 'qsy' or 'qsx'.
-            If axis is set to 'qsy', the integration will be performed
-            along 'qsy' and data of I vs. qsx will be returned.
-            If axis is set to 'qsx', the integration will be perfromed
-            along 'qsx' and data of I vs. qsy will be returned.
-        bin_width : float
-            Set the bin width of the non-integrated axis for binning
-            the selected data from the defined region of interest.
-            The default bin_width is the average pixel width in q.
-        show_plot : bool, optional
-            If set to False, the scattering image overlaid with the
-            integration box boundaries will be shown in a first figure
-            and the one-dimensional data will be shown in a second figure.
-            Default value is True.
-        log_scale : bool, optional
-            If set to True, the plots will show the scattering intensity
-            on a log scale. If set to False, intensity will be displayed
-            on a linear scale. This only applies to the plots and does
-            not affect the data operation.
-            Default value is True.
-        subtract_background_offset: float, list[float], optional
-            If set to an offset than or equal to the
-            width of the region of interest to be integrated over, a
-            background subtraction will be performed by subtracting the
-            intensity of an integrated box offset by the set number of
-            pixels.
-            For example, if the integration is performed over
-            qsy of (-0.01, 0.01) and a background offset of 0.03 is
-            provided, the background region integration will be
-            performed over a qsy of (0.02, 0.04).
-            If a single float is provided, only one offset
-            box will be used in the subtraction. If multiple are
-            provided, the average signal from mulitple integrated offset
-            boxes will be used in the subtraction.
-            Note that the integration mode for these boxes will align
-            with the selected mode for this integration function.
-
-        Returns
-        -------
-        QSlice
-            One-dimensional I vs. q data extracted from the integration.
-
-        """
-
-        selected_pixels = np.where(self.get_pixels_qsrange(
-            qsy=qsy_range,
-            qsx=qsx_range,
-        ))
-
-        if axis is None:
-            if np.diff(qsy_range) <= np.diff(qsx_range):
-                axis = 'qsy'
-            else:
-                axis = 'qsx'
-        if axis == 'qsy':
-            slice_axis = 'qsx'
-        elif axis == 'qsx':
-            slice_axis = 'qsy'
-        else:
-            raise ValueError(f"Invalid integration axis of {axis}.")
-
-        pixels = {}
-        for ax in ['qb', 'qbx', 'qby', 'qbz', 'qs', 'qsx', 'qsy', 'qsz']:
-            pixels[ax] = getattr(self, ax)[selected_pixels].reshape(-1)
-        pixels['Iq'] = getattr(self, 'image')[selected_pixels].reshape(-1)
-
-        if bin_width is None:
-            bin_width = np.min(np.abs(np.diff(getattr(
-                self, 'qbx_1d' if slice_axis == 'qsx' else 'qby_1d'
-            ))))
-
-
-        # extract background intensity
-        if subtract_background_offset is not None:
-            backgrounds = []
-            backgrounds_iq = []
-            if type(subtract_background_offset) is int:
-                subtract_background_offset = [subtract_background_offset]
-            for offset in subtract_background_offset:
-                if np.abs(offset) < image_box.shape[axis]:
-                    warnings.warn(
-                        f"A background subtraction offset of {offset} "
-                        "is less than the integrated axis width and so "
-                        "it will be skipped in the subtraction.")
-                else:
-                    limits_qdy_px_sub = (
-                        limits_qdy_px[0] + (offset if axis == 0 else 0),
-                        limits_qdy_px[1] + (offset if axis == 0 else 0)
-                    )
-                    limits_qdx_px_sub = (
-                        limits_qdx_px[0] + (offset if axis == 1 else 0),
-                        limits_qdx_px[1] + (offset if axis == 1 else 0)
-                    )
-                    background_i, b_image, b_mask = super().slice_box(
-                        limits_axis0=limits_qdy_px_sub,
-                        limits_axis1=limits_qdx_px_sub,
-                        axis=axis,
-                        mode=mode,
-                    )
-
-                    b_slice = QSlice(
-                        q=q,
-                        Iq=background_i,
-                        q_axis=q_axis,
-                        data2d=self,
-                        limits_axis0=limits_qdy_px_sub,
-                        limits_axis1=limits_qdx_px_sub,
-                        integration_mode=mode,
-                        integration_axis=axis,
-                        image_roi=b_image,
-                        image_mask=b_mask,
-                    )
-
-                    backgrounds_iq.append(background_i)
-                    backgrounds.append(b_slice)
-
-            background_i_avg = np.array(backgrounds_iq)
-            # even if some points are masked in some background offsets
-            # we will use the background points
-            background_i_avg = np.nanmean(background_i_avg, axis=0)
-            integrated_i -= background_i_avg
-
-        else:
-            background_i_avg = None
-            backgrounds = None
-
-        # create instance of QSlice to hold integration metadata
-        integrated_q_slice = QSlice(
-            q=q,
-            Iq=integrated_i,
-            q_axis=q_axis,
-            data2d=self,
-            limits_axis0=limits_qdy_px,
-            limits_axis1=limits_qdx_px,
-            integration_mode=mode,
-            integration_axis=axis,
-            image_roi=image_box,
-            image_mask=mask_box,
-            background_Iq=background_i_avg,
-            background_qslices=backgrounds,
-        )
-        # set the q-axis that was integrated over to the mean value
-        integrated_q_slice.__setattr__(q_int_axis, q_int)
-
-        if show_plot:
-            fig = plotting.plot_data2d_integrate_box(
-                integrated_q_slice,
-                **plotting_kwargs
-            )
-        else:
-            fig = None
-
-        return integrated_q_slice, fig
-
-
 
     def integrate_box(
         self,
@@ -1415,13 +1279,13 @@ class Data2D(DataImage):
 
         # extract scattering vector for this integration
         if axis == 0:
-            q = self.qdx[limits_qdx_px[0]:limits_qdx_px[1]]
-            q_int = np.mean(self.qdy[limits_qdy_px[0]:limits_qdy_px[1]])
+            q = self.qbx_1d[limits_qdx_px[0]:limits_qdx_px[1]]
+            q_int = np.mean(self.qby_1d[limits_qdy_px[0]:limits_qdy_px[1]])
             q_axis = 'qdx'
             q_int_axis = 'qdy'
         else:
-            q = self.qdy[limits_qdy_px[0]:limits_qdy_px[1]]
-            q_int = np.mean(self.qdx[limits_qdx_px[0]:limits_qdx_px[1]])
+            q = self.qby_1d[limits_qdy_px[0]:limits_qdy_px[1]]
+            q_int = np.mean(self.qbx_1d[limits_qdx_px[0]:limits_qdx_px[1]])
             q_axis = 'qdy'
             q_int_axis = 'qdx'
 
@@ -1602,20 +1466,20 @@ class Data2D(DataImage):
         peaks[:, 0] = peaks[:, 0] + min0
         peaks[:, 1] = peaks[:, 1] + min1
 
-        if self.qdy is not None and self.qdx is not None:
+        if self.qby_1d is not None and self.qbx_1d is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 
-            sort_qdy = np.argsort(self.qdy)
+            sort_qdy = np.argsort(self.qby_1d)
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
-                np.arange(0, len(self.qdy))[sort_qdy],
-                self.qdy[sort_qdy])
+                np.arange(0, len(self.qby_1d))[sort_qdy],
+                self.qby_1d[sort_qdy])
 
-            sort_qdx = np.argsort(self.qdx)
+            sort_qdx = np.argsort(self.qbx_1d)
             peaks_q[:, 1] = np.interp(
                 peaks[:, 1],
-                np.arange(0, len(self.qdx))[sort_qdx],
-                self.qdx[sort_qdx])
+                np.arange(0, len(self.qbx_1d))[sort_qdx],
+                self.qbx_1d[sort_qdx])
 
         if show_plot:
             fig = plotting.plot_data2d_find_peaks2d(
@@ -1785,20 +1649,20 @@ class Data2D(DataImage):
         peaks[:, 0] = peaks[:, 0] + min0
         peaks[:, 1] = peaks[:, 1] + min1
 
-        if self.qdy is not None and self.qdx is not None:
+        if self.qby_1d is not None and self.qbx_1d is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 
-            sort_qdy = np.argsort(self.qdy)
+            sort_qdy = np.argsort(self.qby_1d)
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
-                np.arange(0, len(self.qdy))[sort_qdy],
-                self.qdy[sort_qdy])
+                np.arange(0, len(self.qby_1d))[sort_qdy],
+                self.qby_1d[sort_qdy])
 
-            sort_qdx = np.argsort(self.qdx)
+            sort_qdx = np.argsort(self.qbx_1d)
             peaks_q[:, 1] = np.interp(
                 peaks[:, 1],
-                np.arange(0, len(self.qdx))[sort_qdx],
-                self.qdx[sort_qdx])
+                np.arange(0, len(self.qbx_1d))[sort_qdx],
+                self.qbx_1d[sort_qdx])
         else:
             peaks_q = None
 
@@ -2207,6 +2071,10 @@ class Data2D(DataImage):
             about the primary beam path (qbz) from alignment along qdx. It can
             be used to align the detector x and y coordinates with the sample 
             x and y coordinates.
+        matplotlib.pyplot.figure | None
+            If show_plot is set to True, the matplotlib pyplot figure
+            generated is returned as the second object. If set to
+            False, None is returned in its place.
         """
 
         box_dims = self.get_box_dims_size(
@@ -2237,10 +2105,14 @@ class Data2D(DataImage):
                 "Insuffient peaks found to determine rotation angle.")
             angle, slope, intercept = np.nan, np.nan, np.nan
         else:
+            rounded_center = np.round(
+                np.array(self.metadata['center_px']), 0).astype(int)
             angle, slope, intercept = line_fit(
-                peaks[:, 1], peaks[:, 0],
-                force_intercept=(self.metadata['center_px'][1],
-                                 self.metadata['center_px'][0]))
+                [-1*self.qbx[y, x] for [y, x] in np.round(peaks[:], 0).astype(int)],
+                [self.qby[y, x] for [y, x] in np.round(peaks[:], 0).astype(int)],
+                force_intercept=(
+                    self.qbx[rounded_center[0], rounded_center[1]],
+                    self.qby[rounded_center[0], rounded_center[1]]))
 
         if show_plot:
             fig = plotting.plot_data2d_find_detector_rotation_correction(
@@ -2255,7 +2127,10 @@ class Data2D(DataImage):
         else:
             fig = None
 
-        return angle, fig
+        # angle is defined as positive is a clockwise rotation
+        # this is because it is a counterclockwise rotation about the
+        # beam based z-axis
+        return -1*angle, fig
 
     def _check_for_keywords_in_metadata(self, keywords):
         """
