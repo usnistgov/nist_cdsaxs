@@ -1032,6 +1032,8 @@ class Data2D(DataImage):
             self,
             limits_qdy_px=None,
             limits_qdx_px=None,
+            exclude_qdy=None,
+            exclude_qdx=None,
             shift_box_qdy_px=0,
             shift_box_qdx_px=0,
             log_scale=True,
@@ -1050,12 +1052,30 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-        box_dims : tuple[int, int], tuple[int, int]
-            Tuples that define the bounds along axis 0 and axis 1 of the
-            image, respectively, in pixel indices. The get_box_dims...
-            methods can be used to determine these bounds based on a
-            q-range or a specific box size.
-            The ranges are half open intervals [min, max).
+        limits_qdy_px : iterable of int | int
+            Pixel range along qdy axis for integration box.
+            Half open range of [min, max).
+            If an integer value is given instead, the box limits will
+            be determined internally for a box of that width centered
+            around the beam center and offset by shift_box_qdy_px.
+        limits_qdx_px : iterable of int | int
+            Pixel range along qdx axis for integration box.
+            Half open range of [min, max).
+            If an integer value is given instead, the box limits will
+            be determined internally for a box of that width centered
+            around the beam center and offset by shift_box_qdx_px.
+            If an integer was given for qdy, an integer must be given
+            for qdx.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
         log_scale : bool, optional
             If set to True, the image will be passed to the peak finding
             algorithm on a log sale of intensity. If set to False, the image
@@ -1126,17 +1146,31 @@ class Data2D(DataImage):
         if self.qdy is not None and self.qdx is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 
-            sort_qdy = np.argsort(self.qdy)
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
-                np.arange(0, len(self.qdy))[sort_qdy],
-                self.qdy[sort_qdy])
+                np.arange(0, len(self.qdy)),
+                self.qdy)
 
-            sort_qdx = np.argsort(self.qdx)
             peaks_q[:, 1] = np.interp(
                 peaks[:, 1],
-                np.arange(0, len(self.qdx))[sort_qdx],
-                self.qdx[sort_qdx])
+                np.arange(0, len(self.qdx)),
+                self.qdx)
+
+            if exclude_qdy is not None:
+                if isinstance(exclude_qdy, tuple):
+                    exclude_qdy = [exclude_qdy]
+                for (ex_min, ex_max) in exclude_qdy:
+                    keep = (peaks_q[:, 0] < ex_min) | (peaks_q[:, 0] > ex_max)
+                    peaks = peaks[keep, :]
+                    peaks_q = peaks_q[keep, :]
+
+            if exclude_qdx is not None:
+                if isinstance(exclude_qdx, tuple):
+                    exclude_qdx = [exclude_qdx]
+                for (ex_min, ex_max) in exclude_qdx:
+                    keep = (peaks_q[:, 1] < ex_min) | (peaks_q[:, 1] > ex_max)
+                    peaks = peaks[keep, :]
+                    peaks_q = peaks_q[keep, :]
 
         if show_plot:
             fig = plotting.plot_data2d_find_peaks2d(
@@ -1153,10 +1187,17 @@ class Data2D(DataImage):
         return peaks, peaks_q, fig
 
     def find_peaks2D_one_axis(
-            self, limits_qdy_px=None, limits_qdx_px=None,
-            peak_axis=None, integration_mode='sum',
-            shift_box_qdy_px=0, shift_box_qdx_px=0,
-            log_scale=True, refinement_size=7, algorithm='scikit',
+            self,
+            limits_qdy_px=None,
+            limits_qdx_px=None,
+            exclude_q=None,
+            peak_axis=None,
+            integration_mode='sum',
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
+            log_scale=True,
+            refinement_size=7,
+            algorithm='scikit',
             zoom_plot=True,
             show_plot=True,
             **kwargs):
@@ -1309,17 +1350,25 @@ class Data2D(DataImage):
         if self.qdy is not None and self.qdx is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 
-            sort_qdy = np.argsort(self.qdy)
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
-                np.arange(0, len(self.qdy))[sort_qdy],
-                self.qdy[sort_qdy])
+                np.arange(0, len(self.qdy)),
+                self.qdy)
 
-            sort_qdx = np.argsort(self.qdx)
             peaks_q[:, 1] = np.interp(
                 peaks[:, 1],
-                np.arange(0, len(self.qdx))[sort_qdx],
-                self.qdx[sort_qdx])
+                np.arange(0, len(self.qdx)),
+                self.qdx)
+
+            # can only exclude q range along the peak axis
+            if exclude_q is not None:
+                if isinstance(exclude_q, tuple):
+                    exclude_q = [exclude_q]
+                for (ex_min, ex_max) in exclude_q:
+                    keep = (peaks_q[:, peak_axis] < ex_min) | (peaks_q[:, peak_axis] > ex_max)
+                    peaks = peaks[keep, :]
+                    peaks_q = peaks_q[keep, :]
+
         else:
             peaks_q = None
 
@@ -1357,6 +1406,7 @@ class Data2D(DataImage):
             size_qdx_px,
             update=True,
             beam_center_guess=None,
+            exclude_q=None,
             show_plot=True,
             zoom_plot=True,
             ignore_peaks=[],
@@ -1434,6 +1484,7 @@ class Data2D(DataImage):
             limits_qdy_px=box_dims[0],
             limits_qdx_px=box_dims[1],
             peak_axis=peak_axis,
+            exclude_q=exclude_q,
             show_plot=False,
             **kwargs
         )
@@ -1526,6 +1577,7 @@ class Data2D(DataImage):
             update=True,
             show_plot=True,
             peak_orders=None,
+            exclude_q=None,
             zoom_plot=True,
             ignore_orders=[],
             **kwargs
@@ -1614,6 +1666,7 @@ class Data2D(DataImage):
             limits_qdy_px=box_dims[0],
             limits_qdx_px=box_dims[1],
             peak_axis=peak_axis,
+            exclude_q=exclude_q,
             show_plot=False,
             **kwargs
         )
@@ -1679,6 +1732,7 @@ class Data2D(DataImage):
         size_qdx_px,
         show_plot=True,
         zoom_plot=True,
+        exclude_q=None,
         **kwargs
     ):
         """
@@ -1749,6 +1803,7 @@ class Data2D(DataImage):
             limits_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
             show_plot=False,
+            exclude_q=exclude_q,
             **kwargs
         )
 
