@@ -406,7 +406,7 @@ class Dataset():
         limits_qdy_px: list | tuple | int,
         limits_qdx_px: list | tuple | int,
         mode: str,
-        axis: str | int,
+        axis: str | int = None,
         shift_box_qdy_px=0,
         shift_box_qdx_px=0,
         subtract_background_offset: int | list[int] = None,
@@ -439,6 +439,8 @@ class Dataset():
             performed over all rows in each column and return I vs. qdx.
             If axis is set to 'qdx' or 1, this integration will be
             performed over all columns in each row and return I vs. qdy.
+            If no axis is provided, the function will assume the data
+            should be integrated over the shorter box dimension.
         keys : str | list[str]
             Datas keys that select which Data2D instances the integration
             is applied to.

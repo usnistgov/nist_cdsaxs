@@ -860,7 +860,7 @@ class Data2D(DataImage):
             If axis is set to 'qdx' or 1, this integration will be
             performed over all columns in each row and return I vs. qdy.
             If no axis is provided, the function will assume the data
-            should be integrated over the shorter box edge.
+            should be integrated over the shorter box dimension.
         shift_box_qdy_px : int, optional
             Number of pixels to shift the box by in the positive qdy
             direction. A negative value will shift the box in the
