@@ -27,7 +27,7 @@ UPDATE_QB_TRIGGERS = [
     "detector_y_mm", "detector_y0_mm"
 ]
 
-UPDATE_QS_TRIGGERS = UPDATE_QB_TRIGGERS + [
+UPDATE_QS_TRIGGERS = [
     "sample_phi_deg", "sample_phi_offset_deg",
     "sample_omega_deg", "sample_omega_offset_deg",
     "sample_chi_deg", "sample_chi_offset_deg",
@@ -160,6 +160,8 @@ class Data2D(DataImage):
     _masked_image : NDArray
         Retrieve the current image of the DataImage instance with
         all masked points replaced with np.nan.
+    _x_px : NDArray
+        Pixels from 
     """
 
     def __init__(
@@ -431,9 +433,16 @@ class Data2D(DataImage):
                     elif key == 'energy_ev':
                         self.metadata['wavelength_nm'] =\
                             calculators.energy_to_wavelength(value)
-            if len([x for x in metadata.keys() if x in UPDATE_QS_TRIGGERS]) > 0:
+            if len([x for x in metadata.keys()
+                    if x in UPDATE_QB_TRIGGERS]) > 0:
                 try:
-                    self.calculate_q(suppress_errors=hide_q_warnings)
+                    self._calculate_qb(suppress_errors=hide_q_warnings)
+                except ValueError as e:
+                    warnings.warn(f"{e}")
+            if len([x for x in metadata.keys()
+                    if x in UPDATE_QS_TRIGGERS]) > 0:
+                try:
+                    self._calculate_qs(suppress_errors=hide_q_warnings)
                 except ValueError as e:
                     warnings.warn(f"{e}")
 
@@ -472,8 +481,7 @@ class Data2D(DataImage):
         for q_key in q_attributes:
             setattr(self, q_key, None)
 
-    def calculate_q(self,
-                    suppress_errors: bool = False):
+    def calculate_q(self, suppress_errors: bool = False):
         """
         Calculate the scattering vectors qb and qs in the beam and
         sample coordinate spaces, respectively, as well as their
@@ -487,13 +495,36 @@ class Data2D(DataImage):
             will not raise an error if the parameters are not available.
             Default value is False.
         """
-        # first reset all the q attributes and calculate only those we can
-        self._reset_q_attributes()
+
+        self._calculate_qb(suppress_errors=suppress_errors)
+        self._calculate_qs(suppress_errors=suppress_errors)
+
+    def _calculate_qb(self, suppress_errors: bool = False):
+        """
+        Calculate the scattering vectors qb and qs in the beam and
+        sample coordinate spaces, respectively, as well as their
+        y-axis, x-axis, and z-axis components.
+
+        Parameters
+        ----------
+        suppress_errors : bool, optional
+            If set to True, this method will try to calculate the
+            q vectors if the required metadata is availabe, but it
+            will not raise an error if the parameters are not available.
+            Default value is False.
+        """
 
         # first check if we can calculate beam coordinate q
         missing_keywords = [x for x in UPDATE_QB_TRIGGERS
                             if x not in self.metadata.keys()]
         if len(missing_keywords) > 0:
+            self.qb = None
+            self.qby = None
+            self.qbx = None
+            self.qbz = None
+            self.qby_1d = None
+            self.qbx_1d = None
+
             if not suppress_errors:
                 raise ValueError(
                     "The following metadata is missing to calculate the "
@@ -522,81 +553,90 @@ class Data2D(DataImage):
             self.qbx = qbx
             self.qbz = qbz
 
-            _, qby_1d, _, _ = diffraction.detector_px_to_qbyxz(
-                center_px=(self.metadata['center_px'][0], 0),
-                detector_shape_px=(self.image.shape[0], 1),
-                pixel_size_um=self.metadata['pixel_size_um'],
-                wavelength_nm=self.metadata['wavelength_nm'],
-                sdd_cm=self.metadata['sdd_cm'],
-                center_coordinate_space='beam',
-                detector_phi_deg=self.metadata['detector_phi_deg'],
-                detector_y_mm=self.metadata['detector_y_mm'],
-                detector_phi0_deg=self.metadata['detector_phi0_deg'],
-                detector_y0_mm=self.metadata['detector_y0_mm'],
-                detector_phi_scale=self.metadata['detector_phi_scale'],
-            )
-            self.qby_1d = qby_1d.reshape(-1)
+            self.qby_1d = self.qby[
+                :, int(round(self.metadata['center_px'][1], 0))
+                ].reshape(-1)
+            self.qbx_1d = self.qbx[
+                int(round(self.metadata['center_px'][0], 0)), :
+                ].reshape(-1)
 
-            _, _, qbx_1d, _ = diffraction.detector_px_to_qbyxz(
-                center_px=(0, self.metadata['center_px'][1]),
-                detector_shape_px=(1, self.image.shape[1]),
-                pixel_size_um=self.metadata['pixel_size_um'],
-                wavelength_nm=self.metadata['wavelength_nm'],
-                sdd_cm=self.metadata['sdd_cm'],
-                center_coordinate_space='beam',
-                detector_phi_deg=self.metadata['detector_phi_deg'],
-                detector_y_mm=self.metadata['detector_y_mm'],
-                detector_phi0_deg=self.metadata['detector_phi0_deg'],
-                detector_y0_mm=self.metadata['detector_y0_mm'],
-                detector_phi_scale=self.metadata['detector_phi_scale'],
-            )
-            self.qbx_1d = qbx_1d.reshape(-1)
+    def _calculate_qs(self, suppress_errors: bool = False):
+        """
+        Calculate the scattering vectors qb and qs in the beam and
+        sample coordinate spaces, respectively, as well as their
+        y-axis, x-axis, and z-axis components.
 
-            missing_keywords = [x for x in UPDATE_QS_TRIGGERS
-                                if x not in self.metadata.keys()]
-            if len(missing_keywords) > 0:
+        Parameters
+        ----------
+        suppress_errors : bool, optional
+            If set to True, this method will try to calculate the
+            q vectors if the required metadata is availabe, but it
+            will not raise an error if the parameters are not available.
+            Default value is False.
+        """
+
+        # first check if we can calculate beam coordinate q
+        missing_keywords = [x for x in UPDATE_QS_TRIGGERS
+                            if x not in self.metadata.keys()]
+        if len(missing_keywords) > 0:
+            self.qs = None
+            self.qsy = None
+            self.qsx = None
+            self.qsz = None
+            if not suppress_errors:
+                raise ValueError(
+                    "The following metadata is missing to calculate the "
+                    "beam coordinate scattering vector: "
+                    f"{missing_keywords}. Therefore, the sample coordinate"
+                    "scattering vector also could not be calculated"
+                    )
+            else:
+                pass
+        elif self.qb is None:
+            self.qs = None
+            self.qsy = None
+            self.qsx = None
+            self.qsz = None
+            if not suppress_errors:
+                raise ValueError(
+                    "The beam-based scattering vectors qb are not"
+                    "calculated and so sample-based scattering vectors"
+                    "qs could not be calculated."
+                )
+        else:
+            # check that the rotation information is present
+            # this check is most relevant during the init
+            if 'rotation_type' not in self._sample_rotation.keys() or\
+                'first_axis' not in self._sample_rotation.keys() or\
+                'second_axis' not in self._sample_rotation.keys() or\
+                'third_axis' not in self._sample_rotation.keys():
                 if not suppress_errors:
                     raise ValueError(
-                        "The following metadata is missing to calculate the "
-                        "sample coordinate scattering vector: "
-                        f"{missing_keywords}."
-                        )
+                        "Sample rotation information is missing"
+                    )
                 else:
                     pass
-            else:
-                # check that the rotation information is present
-                # this check is most relevant during the init
-                if 'rotation_type' not in self._sample_rotation.keys() or\
-                 'first_axis' not in self._sample_rotation.keys() or\
-                 'second_axis' not in self._sample_rotation.keys() or\
-                 'third_axis' not in self._sample_rotation.keys():
-                    if not suppress_errors:
-                        raise ValueError(
-                            "Sample rotation information is missing"
-                        )
-                    else:
-                        pass
 
-                else:
-                    qs, qsy, qsx, qsz = diffraction.calculate_q_beam_to_sample(
-                        qby=self.qby,
-                        qbx=self.qbx,
-                        qbz=self.qbz,
-                        sample_phi_deg=self.metadata['sample_phi_deg']\
-                            + self.metadata['sample_phi_offset_deg'],
-                        sample_chi_deg=self.metadata['sample_chi_deg']\
-                            + self.metadata['sample_chi_offset_deg'],
-                        sample_omega_deg=self.metadata['sample_omega_deg']\
-                            + self.metadata['sample_omega_offset_deg'],
-                        rotation=self._sample_rotation['rotation_type'],
-                        first_axis=self._sample_rotation['first_axis'],
-                        second_axis=self._sample_rotation['second_axis'],
-                        third_axis=self._sample_rotation['third_axis'],
-                    )
-                    self.qs = qs
-                    self.qsy = qsy
-                    self.qsx = qsx
-                    self.qsz = qsz
+            else:
+                qs, qsy, qsx, qsz = diffraction.calculate_q_beam_to_sample(
+                    qby=self.qby,
+                    qbx=self.qbx,
+                    qbz=self.qbz,
+                    sample_phi_deg=self.metadata['sample_phi_deg']\
+                        + self.metadata['sample_phi_offset_deg'],
+                    sample_chi_deg=self.metadata['sample_chi_deg']\
+                        + self.metadata['sample_chi_offset_deg'],
+                    sample_omega_deg=self.metadata['sample_omega_deg']\
+                        + self.metadata['sample_omega_offset_deg'],
+                    rotation=self._sample_rotation['rotation_type'],
+                    first_axis=self._sample_rotation['first_axis'],
+                    second_axis=self._sample_rotation['second_axis'],
+                    third_axis=self._sample_rotation['third_axis'],
+                )
+                self.qs = qs
+                self.qsy = qsy
+                self.qsx = qsx
+                self.qsz = qsz
 
     def scale_data(self, value, keyword=None):
         """
@@ -2016,7 +2056,7 @@ class Data2D(DataImage):
 
         return average_sdd, std_sdd, fig
 
-    def find_detector_rotation_correction(
+    def find_chi_from_peaks(
         self,
         size_qdy_px,
         size_qdx_px,
@@ -2025,12 +2065,19 @@ class Data2D(DataImage):
         **kwargs
     ):
         """
-        Find the rotation angle of the sample coordinates x and y about the
-        primary beam axis (qz).
+        Find the rotation angle, chi, of the sample coordinates x and y
+        about the primary beam axis (qz). This function will look
+        for the peaks that lie along the qsy=0 axis.
 
         For this method, the box dimensions are found internally for
         a box with specific widths along each axis centered around the
         starting beam center guess.
+
+        This method should be performed on a scattering image at normal
+        incidence (or as close as possible), i.e. sample_phi_deg +
+        sample_phi_offset_deg = 0, otherwise the apparent angle of the
+        points at either qsy=0 or qsx=0 will not be equal to chi but
+        rather a combination of chi and omega (rotation about x-axis).
 
         Parameters
         ----------
@@ -2067,10 +2114,12 @@ class Data2D(DataImage):
         Returns
         -------
         float
-            Angle kappa in degrees. This angle is a counterclockwise rotation
-            about the primary beam path (qbz) from alignment along qdx. It can
-            be used to align the detector x and y coordinates with the sample 
-            x and y coordinates.
+            Angle of clockwise rotation of the line formed by the
+            located peaks about the primary beam path qbz.
+            If the data analyzed is provided at normal incidence, i.e.,
+            the sample rotation angle phi is as close to 0 as possible
+            accounting for any offsets, this angle corresponds to
+            the sample rotation angle chi.
         matplotlib.pyplot.figure | None
             If show_plot is set to True, the matplotlib pyplot figure
             generated is returned as the second object. If set to
@@ -2083,14 +2132,9 @@ class Data2D(DataImage):
         )
         limits_qdy_px, limits_qdx_px = box_dims
 
-        (min0, max0), (min1, max1) = box_dims
-        try:
-            peak_axis = kwargs.pop('peak_axis')
-        except KeyError:
-            if (max0 - min0) > (max1 - min1):
-                peak_axis = 0
-            else:
-                peak_axis = 1
+        peak_axis = kwargs.pop('peak_axis', None)
+        if peak_axis is None:
+            peak_axis = 1
         peaks, _, _ = self.find_peaks2D_one_axis(
             limits_qdy_px=limits_qdy_px,
             limits_qdx_px=limits_qdx_px,
@@ -2131,6 +2175,134 @@ class Data2D(DataImage):
         # this is because it is a counterclockwise rotation about the
         # beam based z-axis
         return -1*angle, fig
+
+    def find_omega_from_peaks(
+        self,
+        size_qdy_px,
+        size_qdx_px,
+        show_plot=True,
+        zoom_plot=True,
+        **kwargs
+    ):
+        """
+        Find the rotation angle, omega, about the positive x-axis in
+        sample coordinate space.
+
+        This method assumes that the sample rotation angle, chi, has
+        already been determined and is loaded correctly in this
+        Data2D instance's metadata.
+
+        For this method, the box dimensions are found internally for
+        a box with specific widths along each axis centered around the
+        starting beam center guess.
+
+        This method should be performed on a scattering image with a
+        sample rotation angle, phi, far from normal incidence to most
+        accurately determine omega. We also encourage the user to find
+        omega at multiple phi angle to better understand uncertainty
+        in the omega at different positions.
+
+        Parameters
+        ----------
+        size_qdy_px : int
+            Box size in pixels along the qdy axis.
+        size_qdx_px : int
+            Box size in pixels along the qdx axis.
+        peak_orders : list
+            A list of integers that specfies the peak orders found.
+            Default behavior is orders will start at n=1 and increase
+            by one order for every peak found on either side of beam
+            center.
+        show_plot : bool
+            If set to True, a first figure will display the scattering
+            image overlaid with the integration box and markers on each
+            detected peak while a second figure will show the 1D slice
+            extracted from the integration and vertical lines at each
+            peak position. The determiend beam center will be shown
+            with dashed red lines.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Any additional keyword arguments for the find_peaks2D_one_axis()
+            method can be passed through to the underlying function.
+            This includes:
+                peak_axis
+                integration_mode
+                log_scale
+                refinement_size
+                algorithm
+                any keyword arguments for the fitting algorithm
+
+        Returns
+        -------
+        float
+            Angle of clockwise rotation of the line formed by the
+            located peaks about the primary beam path qbz.
+            If the data analyzed is provided far from normal incidence,
+            i.e., the sample rotation angle phi is far from 0, and the
+            sample rotation angle, chi, has been correctly provided in
+            the metadata, this angle corresponds to the sample rotation
+            angle omega.
+        matplotlib.pyplot.figure | None
+            If show_plot is set to True, the matplotlib pyplot figure
+            generated is returned as the second object. If set to
+            False, None is returned in its place.
+        """
+
+        box_dims = self.get_box_dims_size(
+            size_qdy_px=size_qdy_px,
+            size_qdx_px=size_qdx_px
+        )
+        limits_qdy_px, limits_qdx_px = box_dims
+
+        peak_axis = kwargs.pop('peak_axis', None)
+        if peak_axis is None:
+            peak_axis = 1
+        peaks, _, _ = self.find_peaks2D_one_axis(
+            limits_qdy_px=limits_qdy_px,
+            limits_qdx_px=limits_qdx_px,
+            peak_axis=peak_axis,
+            show_plot=False,
+            **kwargs
+        )
+
+        # determine whether the right number of peaks was found
+        if peaks.shape[0] < 2:
+            warnings.warn(
+                "Insuffient peaks found to determine rotation angle.")
+            angle, slope, intercept = np.nan, np.nan, np.nan
+        else:
+            rounded_center = np.round(
+                np.array(self.metadata['center_px']), 0).astype(int)
+            angle, slope, intercept = line_fit(
+                [-1*self.qbx[y, x] for [y, x] in np.round(peaks[:], 0).astype(int)],
+                [self.qby[y, x] for [y, x] in np.round(peaks[:], 0).astype(int)],
+                force_intercept=(
+                    self.qbx[rounded_center[0], rounded_center[1]],
+                    self.qby[rounded_center[0], rounded_center[1]]))
+
+        if show_plot:
+            fig = plotting.plot_data2d_find_detector_rotation_correction(
+                self,
+                peaks=peaks,
+                line=(angle, slope, intercept),
+                limits_axis0=limits_qdy_px,
+                limits_axis1=limits_qdx_px,
+                zoom_plot=zoom_plot,
+                **kwargs
+            )
+        else:
+            fig = None
+
+        # angle is defined as positive is a clockwise rotation
+        # this is because it is a counterclockwise rotation about the
+        # beam based z-axis
+        angle = -1*angle
+
+        omega = self.calculate_omega(angle)
+
+        return omega, fig
 
     def _check_for_keywords_in_metadata(self, keywords):
         """

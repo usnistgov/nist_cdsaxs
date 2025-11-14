@@ -5,6 +5,7 @@ This module contains the diffraction equations.
 """
 
 from __future__ import division, absolute_import, print_function, unicode_literals
+import time
 
 import numpy as np
 from numpy.typing import NDArray
@@ -400,6 +401,7 @@ def detector_px_to_qbyxz(
     # we will need the beam center position in both beam and detector
     # coordinates; if the detector phi and y are both 0, then these
     # coordinate systems align
+    
     if center_coordinate_space.lower() == 'beam':
         center_px_beam = center_px
         center_px_detector = center_px_beam_to_detector(
@@ -429,7 +431,7 @@ def detector_px_to_qbyxz(
             "The center_coordinate_space keyword argument should be"
             "'beam' or 'detector.'"
         )
-
+    
     gamma = _detector_px_to_gamma_rad(
         center_px_beam=center_px_beam,
         detector_shape_px=detector_shape_px,
@@ -520,9 +522,14 @@ def calculate_q_beam(gamma_deg, delta_deg, wavelength_nm):
     delta_rad = np.deg2rad(delta_deg)
 
     # scattering vector components
-    qbx = ko_ang * np.sin(gamma_rad) * np.cos(delta_rad)
-    qby = ko_ang * np.sin(delta_rad)
-    qbz = ko_ang * (np.cos(gamma_rad)*np.cos(delta_rad) - 1)
+    sin_gamma = np.sin(gamma_rad)
+    cos_gamma = np.cos(gamma_rad)
+    cos_delta = np.cos(delta_rad)
+    sin_delta = np.sin(delta_rad)
+
+    qbx = ko_ang * sin_gamma * cos_delta
+    qby = ko_ang * sin_delta
+    qbz = ko_ang * (cos_gamma*cos_delta - 1)
 
     # full scattering vector in beam coordinate space
     qb = np.sqrt(qbx**2 + qby**2 + qbz**2)
@@ -547,10 +554,12 @@ def active_rotation_Rx(omega_deg):
         Active rotation matrix, Rx.
     """
     omega_rad = np.deg2rad(omega_deg)
+    cos_omega = np.cos(omega_rad)
+    sin_omega = np.sin(omega_rad)
     Rx = np.array([
         [1, 0, 0],
-        [0, np.cos(omega_rad), -np.sin(omega_rad)],
-        [0, np.sin(omega_rad), np.cos(omega_rad)],
+        [0, cos_omega, -1*sin_omega],
+        [0, sin_omega, cos_omega],
     ])
 
     return Rx
@@ -572,10 +581,12 @@ def active_rotation_Ry(phi_deg):
         Active rotation matrix, Ry.
     """
     phi_rad = np.deg2rad(phi_deg)
+    cos_phi = np.cos(phi_rad)
+    sin_phi = np.sin(phi_rad)
     Ry = np.array([
-        [np.cos(phi_rad), 0, np.sin(phi_rad)],
+        [cos_phi, 0, sin_phi],
         [0, 1, 0],
-        [-np.sin(phi_rad), 0, np.cos(phi_rad)],
+        [-1*sin_phi, 0, cos_phi],
     ])
 
     return Ry
@@ -597,9 +608,11 @@ def active_rotation_Rz(chi_deg):
         Active rotation matrix, Rz.
     """
     chi_rad = np.deg2rad(chi_deg)
+    cos_chi = np.cos(chi_rad)
+    sin_chi = np.sin(chi_rad)
     Rz = np.array([
-        [np.cos(chi_rad), -np.sin(chi_rad), 0],
-        [np.sin(chi_rad), np.cos(chi_rad), 0],
+        [cos_chi, -1*sin_chi, 0],
+        [sin_chi, cos_chi, 0],
         [0, 0, 1],
     ])
 
@@ -622,10 +635,12 @@ def passive_rotation_Qx(omega_deg):
         Active rotation matrix, Qx.
     """
     omega_rad = np.deg2rad(omega_deg)
+    cos_omega = np.cos(omega_rad)
+    sin_omega = np.sin(omega_rad)
     Qx = np.array([
         [1, 0, 0],
-        [0, np.cos(omega_rad), np.sin(omega_rad)],
-        [0, -np.sin(omega_rad), np.cos(omega_rad)],
+        [0, cos_omega, sin_omega],
+        [0, -1*sin_omega, cos_omega],
     ])
 
     return Qx
@@ -647,10 +662,12 @@ def passive_rotation_Qy(phi_deg):
         Passive rotation matrix, Qy.
     """
     phi_rad = np.deg2rad(phi_deg)
+    cos_phi = np.cos(phi_rad)
+    sin_phi = np.sin(phi_rad)
     Qy = np.array([
-        [np.cos(phi_rad), 0, -np.sin(phi_rad)],
+        [cos_phi, 0, -1*sin_phi],
         [0, 1, 0],
-        [np.sin(phi_rad), 0, np.cos(phi_rad)],
+        [sin_phi, 0, cos_phi],
     ])
 
     return Qy
@@ -672,9 +689,11 @@ def passive_rotation_Qz(chi_deg):
         Passive rotation matrix, Qz.
     """
     chi_rad = np.deg2rad(chi_deg)
+    cos_chi = np.cos(chi_rad)
+    sin_chi = np.sin(chi_rad)
     Qz = np.array([
-        [np.cos(chi_rad), np.sin(chi_rad), 0],
-        [-np.sin(chi_rad), np.cos(chi_rad), 0],
+        [cos_chi, sin_chi, 0],
+        [-1*sin_chi, cos_chi, 0],
         [0, 0, 1],
     ])
 
@@ -1044,6 +1063,7 @@ def calculate_q_beam_to_sample(
         The z-component of the scattering vector, q_sz in sample
         coordinate space.
     """
+    # start_time = time.perf_counter()
     # check that the proper axes are provided for rotation angles
     if sample_chi_deg != 0 and sample_omega_deg != 0 and (
         second_axis is None or third_axis is None
@@ -1071,6 +1091,11 @@ def calculate_q_beam_to_sample(
     second_angle_deg = rot_angles[second_axis] if second_axis is not None else 0
     third_angle_deg = rot_angles[third_axis] if third_axis is not None else 0
 
+    # stop_time = time.perf_counter()
+    # print("time checking all the angles and rotation axes: ", (stop_time - start_time))
+
+    # start_time = time.perf_counter()
+
     # get passive rotation matrix
     if rotation.lower() == 'extrinsic':
         rot = passive_extrinsic_rotation_matrix(
@@ -1091,7 +1116,13 @@ def calculate_q_beam_to_sample(
             third_angle_deg=third_angle_deg,
         )
 
+    # stop_time = time.perf_counter()
+    # print("time to get the rotation matrix", (stop_time - start_time))
+
+    # start_time = time.perf_counter()
     qs = np.matmul(rot, qb).reshape(3, qbx.shape[0], qbx.shape[1])
+    # stop_time = time.perf_counter()
+    # print("time to do matrix multiplication", (stop_time - start_time))
 
     # return in order of qs, qsy, qsx, qsz to match all cd-saxs code
     return np.linalg.norm(qs, axis=0), qs[1, :, :], qs[0, :, :], qs[2, :, :]
