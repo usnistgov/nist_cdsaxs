@@ -1,6 +1,8 @@
 from __future__ import annotations
+import os
 import warnings
 
+import h5py
 import numpy as np
 from numpy.typing import NDArray
 
@@ -2376,3 +2378,72 @@ class Data2D(DataImage):
             )
 
         return True
+
+    def export_to_hdf5(self, directory=None, overwrite=False, verbose=True):
+        """
+        Export this instance of Data2D to an HDF5 file. All attributes
+        of this instance will be saved, except for the image and
+        raw image. Instead, the filepath to the data file containing
+        the raw data will be listed in the metadata and used to
+        reload the data. Any transformations applied to the data
+        will then be reapplied to recreate the image as it was.
+
+        A standard filename will be used and so when calling this
+        function, the location to save this file should be provided.
+        It will not overwrite a file unless the overwrite keyword
+        argument is set to True. If no directory is provided, it will
+        save the file in the current working directory.
+        """
+
+        filename = self.name.replace(" ", "_") + "_Data2D.hdf5"
+        directory = os.path.abspath(directory if directory is not None else ".")
+        if filename in os.listdir(directory) and not overwrite:
+            raise ValueError(
+                "File already exists in this directory. Either change"
+                "the overwrite keyword argument to True to overwrite the"
+                "file or provide another data location."
+            )
+        else:
+            filename = os.path.join(directory, filename)
+
+        file = h5py.File(filename, "w")
+
+        file.create_group("data2d")
+        file["data2d"].create_dataset("mask", data=self.mask)
+        file["data2d"].attrs['name'] = self.name
+
+        file["data2d"].create_group("q")
+        q_attrs = ['qby_1d', 'qbx_1d', 'qb', 'qby', 'qbx', 'qbz',
+                   'qs', 'qsy', 'qsx', 'qsz']
+        for q_i in q_attrs:
+            file['data2d/q'].create_dataset(q_i, data=getattr(self, q_i))
+
+        file["data2d"].create_group("sample_rotation")
+        for key, value in self._sample_rotation.items():
+            file["data2d/sample_rotation"].attrs[key] = value
+
+        file["data2d"].create_group("metadata")
+        for key, value in self.metadata.items():
+            # Only save energy, not wavelength, as to not overspecify.
+            if key != 'wavelength_nm':
+                file["data2d/metadata"].attrs[key] = value
+
+        file["data2d"].create_group("user_params")
+        for key, value in self.user_params.items():
+            try:
+                file["data2d/user_params"].attrs[key] = value
+            except:
+                raise warnings.warn(
+                    f"Could not export user_param {key} with value: "
+                    f"{value} to the HDF5 file"
+                )
+
+        file["data2d"].create_dataset(
+            "data_transformations",
+            data=[(str(a), str(b), str(c))
+                  for (a, b, c) in self.data_transformations])
+
+        file.close()
+
+        if verbose:
+            print(f"Succefully saved Data2D instance at: {filename}")

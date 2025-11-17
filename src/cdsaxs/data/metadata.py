@@ -58,6 +58,10 @@ STRINGS = [
     "data_directory", "filename", "name"
 ]
 
+TUPLES = [
+    'center_px'
+]
+
 
 def correct_metadata_dtype(name, value):
     """
@@ -70,6 +74,8 @@ def correct_metadata_dtype(name, value):
         return int(value)
     elif name in STRINGS:
         return str(value)
+    elif name in TUPLES:
+        return tuple(value)
     else:
         warnings.warn(
             f"No data type known for {name}."
