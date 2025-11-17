@@ -265,9 +265,9 @@ def plot_data2d(
         mask=data2d.mask,
         log_scale=log_scale,
         title=f"Data2D: {data2d.name}",
-        axis0_vals=data2d.qdy,
+        axis0_vals=data2d.qby_1d,
         axis0_type='qdy',
-        axis1_vals=data2d.qdx,
+        axis1_vals=data2d.qbx_1d,
         axis1_type='qdx',
         cmap=cmap,
         aspect=aspect,
@@ -342,10 +342,10 @@ def plot_qslice(
         mask=qslice.image_mask,
         log_scale=log_scale,
         title="Integration Box",
-        axis0_vals=qslice.data2d.qdy[
+        axis0_vals=qslice.data2d.qby_1d[
             qslice.limits_axis0[0]:qslice.limits_axis0[1]],
         axis0_type='qdy',
-        axis1_vals=qslice.data2d.qdx[
+        axis1_vals=qslice.data2d.qbx_1d[
             qslice.limits_axis1[0]:qslice.limits_axis1[1]],
         axis1_type='qdx',
         cmap=cmap,
@@ -627,8 +627,17 @@ def plot_data2d_find_detector_rotation_correction(
             q_range = peaks[:, 1]
             plot_line = peaks[:, 0]
         else:
-            q_range = np.arange(min(limits_axis1), max(limits_axis1), 1)
-            plot_line = q_range*slope + intercept
+            # negative x was used for line fit
+            qbx_box = -1*data2d.qbx_1d[limits_axis1[0]: limits_axis1[1]]
+            plot_line = slope*qbx_box + intercept
+            qbx_index = np.arange(min(limits_axis1), max(limits_axis1), 1)
+            qby_index = [np.round(
+                np.argmin(np.abs(data2d.qby[:, row]-val)), 0).astype(int)
+                for row, val in zip(qbx_index, plot_line)]
+            plot_line = qby_index
+            q_range = qbx_index
+            # q_range = np.arange(min(limits_axis1), max(limits_axis1), 1)
+            # plot_line = q_range*slope + intercept
         fig = plot_errorbar(
             q_range,
             plot_line,

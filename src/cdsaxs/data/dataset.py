@@ -7,6 +7,7 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+from tqdm import tqdm
 
 from cdsaxs.data.data2d import Data2D
 from cdsaxs.data.qslice import QSlice
@@ -110,7 +111,8 @@ class Dataset():
     def update_all_metadata(self,
                             metadata: dict,
                             overwrite: bool = True,
-                            keys: list = None):
+                            keys: list = None,
+                            verbose: bool = True):
         """
         Add or update metadata for all Data2D stored in this Dataset.
         Existing metadata parameters can be updated by keeping the
@@ -130,12 +132,26 @@ class Dataset():
         keys : list
             List of keys to the datas dictionary to select which data
             the update should apply to.
+        verbose : bool
+            If set to True, a progress bar will appear as each data
+            metadata is updated. This can be helpful when the q
+            calcultation if being updated for relevant metadata
+            changes. 
+            Default value is True.
         """
         if keys is None:
             keys = list(self.datas.keys())
+
+        if verbose:
+            pbar = tqdm(range(len(keys)), desc="Updating datas: ",
+                        position=0, leave=True)
         for key in keys:
             data = self.datas[key]
             data.update_metadata(metadata=metadata, overwrite=overwrite)
+            if verbose:
+                pbar.update(1)
+        if verbose:
+            pbar.close()
 
     def update_all_user_params(
             self, params: dict, overwrite: bool = True,
@@ -400,6 +416,73 @@ class Dataset():
         for key in keys:
             data = self.datas[key]
             data.reset_image()
+
+    def apply_rotation_correction_all_data(
+            self, keys=None, angles={}, verbose=True):
+        """
+        Apply a rotation correction to all data images that aligns
+        the qsy and qsx axes with the qby and qbx axes, respectively,
+        based on the sample rotation angles chi and omega.
+
+        Parameters
+        ----------
+        keys : list, optional
+            List of datas keys that identify which data this method
+            should be applied to. If not provide, this method will be
+            applied to all Data2D instances in datas.
+        angles : dict, optional
+            The rotation angle can be set manually by providing the
+            angles in a dictionary where the key corresponds to the
+            Data2D key in dataset.datas and the value is the rotation
+            angle.
+            Not all angles have to be provided; the user can supply
+            an angle to one or more of the datas and the others not
+            provided will be calculated automatically from the sample
+            rotation angles omega and chi.
+            Note that the rotation angle should be positive for a
+            counterclockwise rotation about the beam center position.
+            This is opposite of the angle returned by 'find_chi_from_peaks'
+            as that method is referring to chi which is defined as
+            a counterclockwise rotation about the positive z axis which
+            is a clockwise rotation of the scattering image to the
+            user.
+            Units are degrees.
+        verbose : bool, optional
+            If set to True, a progress bar will be displayed as the
+            rotation is applied to the selected data.
+            Set to False to hide progress bar.
+            Default is True,
+        """
+
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        if verbose:
+            pbar = tqdm(range(len(keys)), desc="Rotating datas: ",
+                        position=0, leave=True)
+        for key in keys:
+            data = self.datas[key]
+            if key in angles.keys():
+                rotation_angle = np.deg2rad(angles[key])
+            else:
+                phi = np.deg2rad(data.metadata['sample_phi_deg']
+                                + data.metadata['sample_phi_offset_deg'])
+                omega = np.deg2rad(data.metadata['sample_omega_deg']
+                                + data.metadata['sample_omega_offset_deg'])
+                chi = np.deg2rad(data.metadata['sample_chi_deg']
+                                + data.metadata['sample_chi_offset_deg'])
+
+                rotation_angle = np.rad2deg(np.atan(
+                    np.tan(chi)*np.cos(phi) - np.sin(phi)*np.tan(omega)/np.cos(chi)
+                ))
+
+            data.rotate_image(rotation_angle)
+
+            if verbose:
+                pbar.update(1)
+
+        if verbose:
+            pbar.close()
 
     def integrate_dataset(
         self,
