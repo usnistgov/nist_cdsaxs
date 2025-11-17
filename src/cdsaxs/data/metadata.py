@@ -59,11 +59,26 @@ def correct_metadata_dtype(name, value):
     """
 
     if name in FLOATS:
-        return float(value)
+        try:
+            return float(value)
+        except:
+            raise ValueError(
+                f"The datatype for metadata {name} should be a float."
+            )
     elif name in INTEGERS:
-        return int(value)
+        try:
+            return int(value)
+        except:
+            raise ValueError(
+                f"The datatype for metadata {name} should be an integer."
+            )
     elif name in STRINGS:
-        return str(value)
+        try:
+            return str(value)
+        except:
+            raise ValueError(
+                f"The datatype for metadata {name} should be a string."
+            )
     else:
         warnings.warn(
             f"No data type known for {name}."
