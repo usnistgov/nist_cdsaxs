@@ -1531,13 +1531,13 @@ class Data2D(DataImage):
 
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
-                np.arange(0, len(self.qdy)),
-                self.qdy)
+                np.arange(0, len(self.qby_1d)),
+                self.qby_1d)
 
             peaks_q[:, 1] = np.interp(
                 peaks[:, 1],
-                np.arange(0, len(self.qdx)),
-                self.qdx)
+                np.arange(0, len(self.qbx_1d)),
+                self.qbx_1d)
 
             if exclude_qdy is not None:
                 if isinstance(exclude_qdy, tuple):
@@ -1735,13 +1735,13 @@ class Data2D(DataImage):
 
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
-                np.arange(0, len(self.qdy)),
-                self.qdy)
+                np.arange(0, len(self.qby_1d)),
+                self.qby_1d)
 
             peaks_q[:, 1] = np.interp(
                 peaks[:, 1],
-                np.arange(0, len(self.qdx)),
-                self.qdx)
+                np.arange(0, len(self.qbx_1d)),
+                self.qbx_1d)
 
             # can only exclude q range along the peak axis
             if exclude_q is not None:
