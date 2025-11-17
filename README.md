@@ -4,26 +4,9 @@ _Insert a description of our software, including a statement of purpose and matu
 ## Installation Instructions
 _Insert basic installation instructions here._
 
-## Installation & Usage Instructions (Legacy GUI)
-1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
-2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
-3. Create an environment with the `environment_legacy.yml` file using the following command. *Note: depending on your Python access capabilities or limitations, you may need to reconfigure your channel in the environment_legacy.yml file.*
-```
-conda env create -f environment_legacy.yml
-```
-4. Activate the environment, replacing `cdsaxs_legacy` with your environment name if it is different.
-```
-conda activate cdsaxs_legacy
-```
-5. Install the legacy CD-SAXS GUI using pip:
-```
-pip install -e .
-```
-6. From within the `cdsaxs_legacy` environment, the GUI can be launched with:
-```
-python src/cdsaxs_gui_legacy/mainwindow.py
-```
-The above command assumes you are still in the root directory of the project. The filepath can be updated to wherever `src/cdsaxs_gui_legacy/mainwindow.py` is located.
+## Legay GUI
+The legacy GUI for CD-SAXS data reduction is no longer supported in this package.
+It can be found at the following location: https://github.com/usnistgov/nist_cdsaxs_legacy_gui
 
 ## Installation & Usage Instructions (Developers)
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
