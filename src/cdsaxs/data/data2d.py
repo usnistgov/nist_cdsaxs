@@ -261,7 +261,7 @@ class Data2D(DataImage):
              'sample_omega_offset_deg': 0,
              "detector_phi_deg": 0,
              "detector_phi0_deg": 0,
-             "detector_phi_scale": 0,
+             "detector_phi_scale": 1,
              "detector_y_mm": 0,
              "detector_y0_mm": 0},
             overwrite=False, hide_q_warnings=True)
