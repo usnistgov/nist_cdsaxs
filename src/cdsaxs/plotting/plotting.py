@@ -1056,7 +1056,7 @@ def plot_reduced_slices(
                     fmt='o-')
 
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1),
-              title=plotting_tools.generate_formatted_axis_label(slice_axis))
+              title=plotting_tools.generate_formatted_axis_label(integrated_axis))
 
     if log_scale:
         ax.set_yscale('log')
