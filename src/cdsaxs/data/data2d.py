@@ -8,7 +8,8 @@ import cdsaxs.calculators as calculators
 from cdsaxs.data.data_image import DataImage
 from cdsaxs.data.metadata import (
     METADATA_KEYWORDS,
-    check_metadata
+    check_metadata,
+    correct_metadata_dtype
 )
 from cdsaxs.data.qslice import QSlice
 import cdsaxs.plotting.plotting as plotting
@@ -261,6 +262,7 @@ class Data2D(DataImage):
                 if key in self.metadata.keys() and not overwrite:
                     pass
                 else:
+                    value = correct_metadata_dtype(key, value)
                     self.metadata[key] = value
                     # handle special wavelength/energy relationship
                     if key == 'wavelength_nm':
