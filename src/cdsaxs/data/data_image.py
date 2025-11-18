@@ -173,6 +173,8 @@ class DataImage():
         # determine counterclockwise steps to achieve same rotation
         while k < 0:
             k += 4
+        while k > 4:
+            k -= 4
         if k != 0:
             self.image = np.rot90(self.image, k=k, axes=(0, 1))
             self.mask = np.rot90(self.mask, k=k, axes=(0, 1))

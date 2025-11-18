@@ -925,6 +925,8 @@ class Data2D(DataImage):
         k = int(np.round(steps, 0))
         while k < 0:
             k += 4
+        while k > 4:
+            k -= 4
         super().rotate_image_ccw(steps=k)
 
         if k == 1:
@@ -947,6 +949,9 @@ class Data2D(DataImage):
 
         # recalcualte q if possible
         self.calculate_q(suppress_errors=True)
+
+        # keep track in data transformations
+        self.data_transformations.append(("rotate_ccw", k, None))
 
     def rotate_image(self,
                      rotation_angle_deg,
@@ -1004,6 +1009,9 @@ class Data2D(DataImage):
         super().rotate_image(rotation_angle_deg=rotation_angle_deg,
                              rotation_center=rotation_center,
                              resampling_mode=resampling_mode)
+
+        self.data_transformations.append(
+            ("rotate", rotation_angle_deg, resampling_mode))
 
     def calculate_omega(self, qsy0_angle):
 
@@ -1067,13 +1075,41 @@ class Data2D(DataImage):
         All transformations to the scattering intensity will also be
         undone, including scale, normalize, add and subtract functions.
 
-        This function will reset the image to the raw image and the beam
-        center will be reset back to default of (0, 0). The mask will
+        This function will reset the image to the raw image. The mask will
         be reset to the default conditions of masking any nan, inf, or
         -inf values.
+
+        CAUTION: The function will attempt to keep track of the beam center
+        based on the rotations and flips from the current set beam
+        center in metadata. It assumes that during a resampling-type
+        rotation (method rotate_image()), the rotation was performed
+        about the beam center. We encourage the user to check after
+        the data reset that the beam center is stil correct.
         """
-        self.update_metadata({'center_px': (0, 0)})
         super().reset_image()
+
+        beam_center = self.metadata['center_px']
+        image_shape = self.image.shape
+
+        for (transform, value, _) in self.data_transformations[::-1]:
+            if transform == 'flip_vertical':
+                beam_center = (image_shape[0]-1-beam_center[0],
+                               beam_center[1])
+            elif transform == 'flip_horizontal':
+                beam_center = (beam_center[0],
+                               image_shape[1]-1-beam_center[1])
+            elif transform == 'rotate_ccw':
+                if value == 1:
+                    beam_center = (beam_center[1],
+                                   image_shape[0]-1-beam_center[0])
+                elif value == 2:
+                    beam_center = (image_shape[0]-1-beam_center[0],
+                                   image_shape[1]-1-beam_center[1])
+                elif value == 3:
+                    beam_center = (image_shape[1]-1-beam_center[1],
+                                   beam_center[0])
+
+        self.update_metadata({'center_px': (0, 0)})
         self.data_transformations = []
 
     def get_box_dims_size(self, size_qdy_px, size_qdx_px,
