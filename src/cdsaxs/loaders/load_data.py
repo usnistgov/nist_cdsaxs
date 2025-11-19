@@ -16,7 +16,9 @@ import cdsaxs.loaders._loader_tools as loader_tools
 from cdsaxs.loaders.detectors import read_pilatus
 from cdsaxs.loaders.filetypes import (
     read_tiff,
-    read_nist_bin
+    read_nist_bin,
+    read_fits,
+    read_als_11_0_1_2
 )
 
 
@@ -106,8 +108,10 @@ def LoadData(
     metadata=None,
     user_params=None,
     name=None,
+    name_pattern=None,
     filetype=None,
     detector_type=None,
+    beamline=None,
 ):
     """
     Create an instance of Data2D from a single data file.
@@ -135,13 +139,39 @@ def LoadData(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'fits'
     detector_type : str
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+    beamline : str
+        Specify the beamline to extract metadata stored in the file's
+        header and attempt to orient the images to align with this
+        software's coordinate conventions.
+        Currently, the accepted beamlines are:
+            'ALS 11.0.1.2'
+            'SMI'
+        Using the beamline function will overwrite any options you have
+        set for filetype or detector_type.
     """
+
+    # if beamline is provided, set the filetype and detector type
+    if beamline is not None:
+        if beamline.lower() in ['als 11.0.1.2', 'als11.0.1.2']:
+            beamline = 'ALS 11.0.1.2'
+            detector_type = None
+            filetype = 'fits'
+        elif beamline.lower() == 'smi':
+            detector_type = 'Pilatus'
+            filetype = 'tiff'
+        else:
+            raise ValueError(
+                f"Did not recognize the beamline: {beamline}. "
+                "Check your spelling. Accepted beamlines are currently "
+                "SMI or ALS 11.0.1.2"
+            )
 
     # clean the filepath and try to determine filetype if not provided
     filepath = loader_tools.clean_filepath(filepath)
@@ -151,6 +181,8 @@ def LoadData(
             filetype = 'tiff'
         elif extension == 'bin':
             filetype = 'nist-bin'
+        elif extension == 'fits':
+            filetype = 'fits'
         else:
             raise ValueError(
                 "Did not recognize the filtype extension:"
@@ -199,6 +231,23 @@ def LoadData(
         # handle negative values between detector panels in the images as nan
         image[image < 0] = np.nan
 
+    elif filetype.lower() in ['fits']:
+        if beamline == 'ALS 11.0.1.2':
+            image, data_filepath, metadata_add = read_als_11_0_1_2(
+                filepath=filepath)
+            for key, value in metadata_add.items():
+                if key in metadata.keys():
+                    warnings.warn(
+                        f"Metadata for {key} was provided by the user and"
+                        "also extracted from the data files. I will not"
+                        "overwrite the information provided by the user"
+                        "but please make sure this is correct."
+                    )
+                else:
+                    metadata[key] = value
+        else:
+            image, data_filepath, _ = read_fits(filepath=filepath)
+
     else:
         raise ValueError(
             f"Did not recognize the filetype {filetype}."
@@ -207,6 +256,9 @@ def LoadData(
     metadata['data_directory'] = os.path.dirname(data_filepath)
     metadata['filename'] = os.path.basename(data_filepath)
 
+    if name_pattern is not None and name is None:
+        name = loader_tools.generate_data_name_from_pattern(
+            name_pattern, metadata, user_params)
     if name is not None:
         metadata['name'] = name
 
@@ -225,7 +277,8 @@ def LoadDataset(
     user_params=None,
     verbose=True,
     filetype=None,
-    detector_type=None
+    detector_type=None,
+    beamline=None,
 ):
     """
     General data loader to create a dataset from a CD-SAXS angle scan
@@ -311,7 +364,17 @@ def LoadDataset(
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+    beamline : str
+        Accepted beamlines are:
+            'SMI'
+            'ALS 11.0.1.2'
+        Providing a beamline will overwrite the filetype and detector
+        type.
         """
+
+    if beamline is not None:
+        detector_type = None
+        filetype = None
 
     dataset = Dataset(name=dataset_name)
 
@@ -364,9 +427,6 @@ def LoadDataset(
                 else:
                     user_params_i[key] = value
             # print("METADATA", metadata_i, user_params_i)
-            # generate the name for the two-dimensional data
-            new_name = loader_tools.generate_data_name_from_pattern(
-                data_name_pattern, metadata_i, user_params_i)
 
             data = LoadData(
                 filepath=filepath,
@@ -374,7 +434,8 @@ def LoadDataset(
                 user_params=user_params_i,
                 filetype=filetype,
                 detector_type=detector_type,
-                name=new_name
+                beamline=beamline,
+                name_pattern=data_name_pattern,
             )
             dataset.add_data(data)
 
@@ -492,16 +553,13 @@ def LoadDataset_MetadataCSV(
                 else:
                     user_params[str(csv_header[ii])] = value
 
-            new_name = loader_tools.generate_data_name_from_pattern(
-                    data_name_pattern, metadata, user_params)
-
             data = LoadData(
                 filepath=filepath,
                 metadata=metadata,
                 user_params=user_params,
                 filetype=filetype,
                 detector_type=detector_type,
-                name=new_name
+                name_pattern=data_name_pattern,
             )
 
             dataset.add_data(data)

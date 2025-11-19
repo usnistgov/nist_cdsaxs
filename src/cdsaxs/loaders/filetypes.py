@@ -1,5 +1,6 @@
 import os
 
+from astropy.io import fits
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
@@ -90,6 +91,82 @@ def read_nist_bin(filepath):
     metadata['pixel_size_um'] = float(sample_meta['Pixel Size '])
 
     return image, filepath, metadata
+
+
+def read_fits(filepath):
+    """
+    Load an image and header from a fits file.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the fits file to be loaded.
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary of the header information where the key: value pairs.
+    """
+
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    # load image
+    image = fits.getdata(filepath, ext=2).astype(np.float64)
+
+    # header dictionary
+    info = [hdu.header for hdu in fits.open(filepath)][0]
+    header = dict(info)
+
+    return image, filepath, header
+
+
+def read_als_11_0_1_2(filepath):
+
+    """
+    Load an image and metadata from data collected at beamline 11.0.1.2
+    at ALS.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the fits file to be loaded.
+
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
+    """
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    image, filepath, header = read_fits(filepath)
+
+    # orient the detector image with our coordinate system
+    image = np.flipud(np.rot90(image, 3))
+
+    metadata = {}
+    metadata['energy_ev'] = header['Beamline Energy']
+    metadata['sample_phi_deg'] = header['Sample Theta'] + 90
+    metadata['I0'] = header['AI 3 Izero']
+    metadata['exposure_time_s'] = header['EXPOSURE']
+    metadata['beam_current'] = header['Beam Current']
+    metadata['detector_phi_deg'] = header['CCD Theta']
+    metadata['detector_y_mm'] = header['CCD X']
+    metadata['CCD Y'] = header['CCD Y']
+    metadata['epu_polarization'] = header['EPU Polarization']
+    metadata['beam_stop_position'] = header['Beam Stop']
+    metadata['pixel_size_um'] = 27
+
+    return image, filepath, metadata
+
 
 """
 
