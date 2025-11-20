@@ -1316,17 +1316,18 @@ class Data2D(DataImage):
             mode=mode,
         )
 
+        q_rois = {}
+        q_keys = ['qb', 'qby', 'qbx', 'qbz', 'qs', 'qsy', 'qsx', 'qsz']
+        for key in q_keys:
+            q_roi = getattr(self, key)[
+                limits_qdy_px[0]: limits_qdy_px[1],
+                limits_qdx_px[0]: limits_qdx_px[1]
+            ]
+            q_rois[key] = q_roi
+
         # extract scattering vector for this integration
-        if axis == 0:
-            q = self.qbx_1d[limits_qdx_px[0]:limits_qdx_px[1]]
-            q_int = np.mean(self.qby_1d[limits_qdy_px[0]:limits_qdy_px[1]])
-            q_axis = 'qdx'
-            q_int_axis = 'qdy'
-        else:
-            q = self.qby_1d[limits_qdy_px[0]:limits_qdy_px[1]]
-            q_int = np.mean(self.qbx_1d[limits_qdx_px[0]:limits_qdx_px[1]])
-            q_axis = 'qdy'
-            q_int_axis = 'qdx'
+        q = np.nanmean(q_rois['qbx' if axis == 0 else 'qby'], axis=axis)
+        q_axis = 'qbx' if axis == 0 else 'qby'
 
         # extract background intensity
         if subtract_background_offset is not None:
@@ -1396,9 +1397,10 @@ class Data2D(DataImage):
             image_mask=mask_box,
             background_Iq=background_i_avg,
             background_qslices=backgrounds,
+            **{key+'_roi': value for key, value in q_rois.items()},
+            **{key: np.nanmean(value, axis=axis)
+               for key, value in q_rois.items() if key != q_axis},
         )
-        # set the q-axis that was integrated over to the mean value
-        integrated_q_slice.__setattr__(q_int_axis, q_int)
 
         if show_plot:
             fig = plotting.plot_data2d_integrate_box(
