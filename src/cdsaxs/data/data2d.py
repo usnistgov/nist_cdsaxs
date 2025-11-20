@@ -1120,40 +1120,52 @@ class Data2D(DataImage):
 
         return (min0, max0), (min1, max1)
 
-    def get_box_dims_qdrange(self, range_qdy, range_qdx):
+    def get_box_dims_qrange(self, *ranges, ignore_mask=True):
         """
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with set q ranges
-        on both axes.
+        on both axes. If your q-range selection results in pixels that
+        do not form a rectangular like box, for example, a box at an
+        angle instead of parallel to either image axis or a curved
+        region, the function will return indices for a rectangular
+        region of interest that encompasses all the selected pixels.
 
         Parameters
         ----------
-        range_qdy : iterable of float
-            Range of scattering vector qdy defining the integration box.
-            Half open range of [min, max). Pixels with a q value that
-            satisfies min <= q < max will be accepted into the box.
-        range_qdx : iterable of float
-            Range of scattering vector qdx definiing the integration box.
-            Half open range of [min, max). Pixels with a q value that
-            satisfies min <= q < max will be accepted into the box.
+        ignore_mask : bool
+            If set to False, only pixels that meet the q range criteria
+            and are not already masked are set as True in the
+            returned mask of this method. If ignore_mask is True,
+            the pixels returned as True in the mask only need to meet
+            the q range criteria set by the user.
+        *ranges : tuple | list
+            Ranges for any of the q-component attributes of this class
+            can be provided as keyword arguments. For example,
+            providing qsy=(-0.01, 0.01) would select pixels that have
+            a qsy values >= -0.01 and <= 0.01.
+            Accepted q components include:
+                qb
+                qby
+                qbx
+                qbz
+                qs
+                qsy
+                qsx
+                qsz
         """
-        # fix the min, max order if the user provided them reversed
-        range_qdy = [min(range_qdy), max(range_qdy)]
-        range_qdx = [min(range_qdx), max(range_qdx)]
+        selection_mask = self.get_pixels_qrange(
+            ignore_mask=ignore_mask, **ranges)
+        selection_indices = np.where(selection_mask)
 
-        qdy_indices = np.where((self.qby_1d >= range_qdy[0])
-                               & (self.qby_1d < range_qdy[1]))[0]
-        limits_qdy_px = (int(np.min(qdy_indices)),
-                         int(np.max(qdy_indices)+1))
+        y_min = np.min(selection_indices[0])
+        y_max = np.max(selection_indices[0])
 
-        qdx_indices = np.where((self.qbx_1d >= range_qdx[0])
-                               & (self.qbx_1d < range_qdx[1]))[0]
-        limits_qdx_px = (int(np.min(qdx_indices)),
-                         int(np.max(qdx_indices)+1))
+        x_min = np.min(selection_indices[1])
+        x_max = np.max(selection_indices[1])
 
-        return limits_qdy_px, limits_qdx_px
+        return (y_min, y_max), (x_min, x_max)
 
-    def get_pixels_qrange(self, **ranges):
+    def get_pixels_qrange(self, ignore_mask=True, **ranges):
         """
         Returns a selection mask that includes image pixels that have
         q-components within the provided ranges. It will not return
@@ -1161,6 +1173,12 @@ class Data2D(DataImage):
 
         Parameters
         ----------
+        ignore_mask : bool
+            If set to False, only pixels that meet the q range criteria
+            and are not already masked are set as True in the
+            returned mask of this method. If ignore_mask is True,
+            the pixels returned as True in the mask only need to meet
+            the q range criteria set by the user.
         *ranges : tuple | list
             Ranges for any of the q-component attributes of this class
             can be provided as keyword arguments. For example,
@@ -1181,10 +1199,14 @@ class Data2D(DataImage):
         NDArray
             Boolean array the same size as the current data image that
             is True for pixels that meet all of the provided q ranges
-            and are not already masked by the instance of this class.
+            and are not already masked by the instance of this class
+            (unless the mask is ignored).
         """
 
-        selected = ~self.mask
+        if ignore_mask:
+            selected = np.ones_like(self.image).astype(bool)
+        else:
+            selected = ~self.mask
 
         for q_comp, limits in ranges.items():
             q_test = getattr(self, q_comp)
@@ -1192,7 +1214,7 @@ class Data2D(DataImage):
             selected = selected * selected_q
 
         return selected
-
+    
     def integrate_box(
         self,
         limits_qdy_px: list | tuple | int,
@@ -1203,7 +1225,8 @@ class Data2D(DataImage):
         shift_box_qdx_px=0,
         show_plot=True,
         subtract_background_offset: int | list[int] = None,
-        plotting_kwargs={},
+        plotting_kwargs={}
+        **q_ranges,
     ) -> QSlice:
         """
         Integrate a region of interest defined by the limits along both
@@ -1281,6 +1304,21 @@ class Data2D(DataImage):
             static matplotlib figures.
             TODO: currently this is disabled and only True is accepted.
             Default value is True.
+
+        **kwargs
+            Ranges for any of the q-component attributes of this class
+            can be provided as keyword arguments. For example,
+            providing qsy=(-0.01, 0.01) would select a box that
+            contains pixels within qsy values >= -0.01 and <= 0.01.
+            Accepted q components include:
+                qb
+                qby
+                qbx
+                qbz
+                qs
+                qsy
+                qsx
+                qsz
 
         Returns
         -------
