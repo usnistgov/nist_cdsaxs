@@ -440,7 +440,7 @@ class Data2D(DataImage):
                 except ValueError as e:
                     warnings.warn(f"{e}")
             if len([x for x in metadata.keys()
-                    if x in UPDATE_QS_TRIGGERS]) > 0:
+                    if x in UPDATE_QS_TRIGGERS or x in UPDATE_QB_TRIGGERS]) > 0:
                 try:
                     self._calculate_qs(suppress_errors=hide_q_warnings)
                 except ValueError as e:
@@ -574,7 +574,6 @@ class Data2D(DataImage):
             will not raise an error if the parameters are not available.
             Default value is False.
         """
-
         # first check if we can calculate beam coordinate q
         missing_keywords = [x for x in UPDATE_QS_TRIGGERS
                             if x not in self.metadata.keys()]

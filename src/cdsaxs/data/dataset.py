@@ -478,6 +478,8 @@ class Dataset():
 
             data.rotate_image(rotation_angle)
 
+            data.update_user_params({'rotation_correction_angle_deg': rotation_angle})
+            
             if verbose:
                 pbar.update(1)
 
