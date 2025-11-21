@@ -1223,14 +1223,13 @@ class Data2D(DataImage):
             selected = selected * selected_q
 
         return selected
-    
+
     def integrate_box(
         self,
         mode: str = 'sum',
         axis: str | int = None,
         show_plot=True,
         subtract_background_offset: int | list[int] = None,
-<<<<<<< HEAD
         width_qdy_px: int = None,
         width_qdx_px: int = None,
         range_qdy_px: tuple = None,
@@ -1241,10 +1240,6 @@ class Data2D(DataImage):
         shift_box_qdx_px: int = 0,
         plotting_kwargs={},
         **kwargs
-=======
-        plotting_kwargs={}
-        **q_ranges,
->>>>>>> 833c15e (added function that finds box dimensions using series of q ranges)
     ) -> QSlice:
         """
         Integrate a region of interest defined by the limits along both
@@ -1300,6 +1295,9 @@ class Data2D(DataImage):
             Default value is True.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4c32943 (fixed integration box to properly correct box dimensions for new diffraction equations)
         Parameters for Box Refinement
         -----------------------------
         The following keyword arguments are specific to defining the
@@ -1335,6 +1333,7 @@ class Data2D(DataImage):
             This assumes that qbx and qsx align with the vertical
             image axis.
             The keyword should be 'qbx' or 'qsx'.
+<<<<<<< HEAD
         **kwargs
             Any of the scattering vector attribute keywords can be
             used to define a range to set the box limits with fully
@@ -1371,6 +1370,28 @@ class Data2D(DataImage):
                 qsx
                 qsz
 >>>>>>> 833c15e (added function that finds box dimensions using series of q ranges)
+=======
+        **kwargs
+            Any of the scattering vector attribute keywords can be
+            used to define a range to set the box limits with fully
+            closed ranges. For example:
+                qby=(-0.03, 0.03)
+            would determine box limits that encompass pixels with values
+            >= -0.03 and <= 0.03 in qby.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+>>>>>>> 4c32943 (fixed integration box to properly correct box dimensions for new diffraction equations)
 
         Returns
         -------
