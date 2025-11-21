@@ -1400,12 +1400,15 @@ class Data2D(DataImage):
 
         """
 
-        detector_center_px = np.round(
-            np.array(self.metadata['center_px_detector']),
-            0).astype(int)
         beam_center_px = np.round(
             np.array(self.metadata['center_px_beam']),
             0).astype(int)
+        if 'center_px_detector' in self.metadata.keys():
+            detector_center_px = np.round(
+                np.array(self.metadata['center_px_detector']),
+                0).astype(int)
+        else:
+            detector_center_px = beam_center_px
 
         # determine the range along y
         if width_qdy_px is not None:
