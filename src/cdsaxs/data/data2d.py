@@ -1129,7 +1129,7 @@ class Data2D(DataImage):
 
         return (min0, max0), (min1, max1)
 
-    def get_box_dims_qrange(self, *ranges, ignore_mask=True):
+    def get_box_dims_qrange(self, ignore_mask=True, **ranges):
         """
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with set q ranges
@@ -1164,15 +1164,31 @@ class Data2D(DataImage):
         """
         selection_mask = self.get_pixels_qrange(
             ignore_mask=ignore_mask, **ranges)
-        selection_indices = np.where(selection_mask)
 
-        y_min = np.min(selection_indices[0])
-        y_max = np.max(selection_indices[0]) + 1
+        heights = np.zeros_like(selection_mask).astype(int)
+        widths = np.zeros_like(selection_mask).astype(int)
 
-        x_min = np.min(selection_indices[1])
-        x_max = np.max(selection_indices[1]) + 1
+        for row in range(0, selection_mask.shape[0]):
+            keeps = selection_mask[row, :].astype(int)
+            height = np.sum(selection_mask[row:, :], axis=0).astype(int)*keeps
+            heights[row, :] = height
 
-        return (y_min, y_max), (x_min, x_max)
+        for col in range(0, selection_mask.shape[1]):
+            keeps = selection_mask[:, col].astype(int)
+            width = np.sum(selection_mask[:, col:], axis=1).astype(int)*keeps
+            widths[:, col] = width
+
+        area = heights*widths
+        row = np.argmax(area, axis=1)
+        col = np.argmax(area, axis=0)
+
+        max_position = np.unravel_index(np.argmax(area), area.shape)
+
+        min_y, min_x = max_position
+        max_y = min_y + heights[max_position]
+        max_x = min_x + widths[max_position]       
+
+        return (min_y, max_y), (min_x, max_x)
 
     def get_pixels_qrange(self, ignore_mask=True, **ranges):
         """
@@ -1401,7 +1417,7 @@ class Data2D(DataImage):
         """
 
         beam_center_px = np.round(
-            np.array(self.metadata['center_px_beam']),
+            np.array(self.metadata['center_px']),
             0).astype(int)
         if 'center_px_detector' in self.metadata.keys():
             detector_center_px = np.round(
@@ -1416,9 +1432,9 @@ class Data2D(DataImage):
                 center_qdy = detector_center_px[0]
             else:
                 if center_qdy[0].lower() == 'qby':
-                    center_qdy = np.argmin(np.abs(self.qby[:, beam_center_px[1]]-center_qdy[1]))
-                if center_qdy[0].lower() == 'qsy':
-                    center_qdy = np.argmin(np.abs(self.qsy[:, beam_center_px[1]]-center_qdy[1]))
+                    center_qdy = np.nanargmin(np.abs(self.qby[:, beam_center_px[1]]-center_qdy[1]))
+                elif center_qdy[0].lower() == 'qsy':
+                    center_qdy = np.nanargmin(np.abs(self.qsy[:, beam_center_px[1]]-center_qdy[1]))
 
             min_y = center_qdy - int(width_qdy_px/2)
             max_y = min_y + width_qdy_px
@@ -1441,18 +1457,17 @@ class Data2D(DataImage):
                 center_qdx = detector_center_px[1]
             else:
                 if center_qdx[0].lower() == 'qbx':
-                    center_qdx = np.argmin(np.abs(self.qbx[beam_center_px[0], :]-center_qdx[1]))
-                if center_qdx[0].lower() == 'qsx':
-                    center_qdx = np.argmin(np.abs(self.qsx[beam_center_px[0], :]-center_qdx[1]))
-
-            min_x = center_qdx - int(width_qdx_px/2)
-            max_x = min_x + width_qdx_px
+                    center_qdx = np.nanargmin(np.abs(self.qbx[beam_center_px[0], :]-center_qdx[1]))
+                elif center_qdx[0].lower() == 'qsx':
+                    center_qdx = np.nanargmin(np.abs(self.qsx[beam_center_px[0], :]-center_qdx[1]))
+                min_x = center_qdx - int(width_qdx_px/2)
+                max_x = min_x + width_qdx_px
 
         elif range_qdx_px is not None:
-            minxy, max_x = range_qdx_px
+            min_x, max_x = range_qdx_px
 
         else:
-            (min_x, max_x), _ = self.get_box_dims_qrange(**kwargs)
+            _, (min_x, max_x) = self.get_box_dims_qrange(**kwargs)
 
         min_x -= shift_box_qdx_px
         max_x -= shift_box_qdx_px

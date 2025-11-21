@@ -476,7 +476,7 @@ class Dataset():
                     np.tan(chi)*np.cos(phi) - np.sin(phi)*np.tan(omega)/np.cos(chi)
                 ))
 
-            data.rotate_image(rotation_angle)
+            data.rotate_image(rotation_angle, rotation_center=data.metadata['center_px_detector'])
 
             data.update_user_params({'rotation_correction_angle_deg': rotation_angle})
             
@@ -488,14 +488,19 @@ class Dataset():
 
     def integrate_dataset(
         self,
-        limits_qdy_px: list | tuple | int,
-        limits_qdx_px: list | tuple | int,
-        mode: str,
+        mode: str = 'sum',
         axis: str | int = None,
-        shift_box_qdy_px=0,
-        shift_box_qdx_px=0,
         subtract_background_offset: int | list[int] = None,
         keys=None,
+        width_qdy_px: int = None,
+        width_qdx_px: int = None,
+        range_qdy_px: tuple = None,
+        range_qdx_px: tuple = None,
+        center_qdy: tuple = None,
+        center_qdx: tuple = None,
+        shift_box_qdy_px: int = 0,
+        shift_box_qdx_px: int = 0,
+        **kwargs
     ):
         """
         Parameters
@@ -540,6 +545,62 @@ class Dataset():
             negative qdx direction.
             Default value is 0.
 
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. In the case that the box is
+        overdefined by the user, this method will prioritize the
+        parameters in order of this list:
+
+        width_qdy_px : int
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max)
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max)
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value)
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value)
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        **kwargs
+            Any of the scattering vector attribute keywords can be
+            used to define a range to set the box limits with fully
+            closed ranges. For example:
+                qby=(-0.03, 0.03)
+            would determine box limits that encompass pixels with values
+            >= -0.03 and <= 0.03 in qby.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+
         Returns
         -------
         IntegratedDataset
@@ -555,14 +616,18 @@ class Dataset():
         for key in keys:
             data = self.datas[key]
             qslice, _ = data.integrate_box(
-                limits_qdy_px=limits_qdy_px,
-                limits_qdx_px=limits_qdx_px,
                 mode=mode,
                 axis=axis,
+                show_plot=False,
+                subtract_background_offset=subtract_background_offset,
+                width_qdy_px=width_qdy_px,
+                width_qdx_px=width_qdx_px,
+                range_qdy_px=range_qdy_px,
+                range_qdx_px=range_qdx_px,
+                center_qdy=center_qdy,
+                center_qdx=center_qdx,
                 shift_box_qdy_px=shift_box_qdy_px,
                 shift_box_qdx_px=shift_box_qdx_px,
-                show_plot=False,
-                subtract_background_offset=subtract_background_offset
             )
             qslices.append(qslice)
 
@@ -704,7 +769,7 @@ class IntegratedDataset():
 
     def plot_data(
         self,
-        q_axis='qdx',
+        q_axis='qbx',
         y_axis='sample_phi_deg',
         log_scale=True,
         cmap='viridis',
