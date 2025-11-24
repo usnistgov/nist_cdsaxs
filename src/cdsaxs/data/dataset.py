@@ -492,14 +492,14 @@ class Dataset():
         axis: str | int = None,
         subtract_background_offset: int | list[int] = None,
         keys=None,
-        width_qdy_px: int = None,
-        width_qdx_px: int = None,
-        range_qdy_px: tuple = None,
-        range_qdx_px: tuple = None,
-        center_qdy: tuple = None,
-        center_qdx: tuple = None,
-        shift_box_qdy_px: int = 0,
-        shift_box_qdx_px: int = 0,
+        width_qdy_px: int | dict = None,
+        width_qdx_px: int | dict = None,
+        range_qdy_px: tuple | dict = None,
+        range_qdx_px: tuple | dict = None,
+        center_qdy: tuple | dict = None,
+        center_qdx: tuple | dict = None,
+        shift_box_qdy_px: int | dict = 0,
+        shift_box_qdx_px: int | dict = 0,
         **kwargs
     ):
         """
@@ -619,181 +619,31 @@ class Dataset():
                 mode=mode,
                 axis=axis,
                 show_plot=False,
+                # if a dictionary is provided we will use the data key
+                # to select the correct keyword value otherwise it will
+                # be the same for all data
                 subtract_background_offset=subtract_background_offset,
-                width_qdy_px=width_qdy_px,
-                width_qdx_px=width_qdx_px,
-                range_qdy_px=range_qdy_px,
-                range_qdx_px=range_qdx_px,
-                center_qdy=center_qdy,
-                center_qdx=center_qdx,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px,
+                width_qdy_px=width_qdy_px if not isinstance(
+                    width_qdy_px, dict) else width_qdy_px[key],
+                width_qdx_px=width_qdx_px if not isinstance(
+                    width_qdx_px, dict) else width_qdx_px[key],
+                range_qdy_px=range_qdy_px if not isinstance(
+                    range_qdy_px, dict) else range_qdy_px[key],
+                range_qdx_px=range_qdx_px if not isinstance(
+                    range_qdx_px, dict) else range_qdx_px[key],
+                center_qdy=center_qdy if not isinstance(
+                    center_qdy, dict) else center_qdy[key],
+                center_qdx=center_qdx if not isinstance(
+                    center_qdx, dict) else center_qdx[key],
+                shift_box_qdy_px=shift_box_qdy_px if not isinstance(
+                    shift_box_qdy_px, dict) else shift_box_qdy_px[key],
+                shift_box_qdx_px=shift_box_qdx_px if not isinstance(
+                    shift_box_qdx_px, dict) else shift_box_qdx_px[key],
             )
             qslices.append(qslice)
 
-        dataset = IntegratedDataset(qslices)
+        dataset = ReducedDataset(qslices)
         return dataset
-
-    # def plot_integrated_dataset(
-    #         self,
-    #         index=None,
-    #         q_axis=None,
-    #         order_by='sample_phi_deg',
-    #         log_scale=True):
-    #     """
-    #     Plot the slices extracted from integrated a dataset of DataQdxQdy.
-
-    #     """
-    #     fig = plotting.plot_integrated_dataset(
-    #         self,
-    #         index=index,
-    #         q_axis=q_axis,
-    #         order_by=order_by,
-    #         log_scale=log_scale,
-    #     )
-
-    #     return fig
-
-    # def mirror_integrated_dataset(
-    #     self,
-    #     index=None,
-    # ):
-    #     if index is None:
-    #         index = max(self.integrated_datasets.keys())
-
-    #     for int_q_slice in self.integrated_datasets[index].values():
-    #         int_q_slice.mirror_q()
-
-    # def reset_mirrored_integrated_dataset(
-    #         self,
-    #         index=None,
-    # ):
-    #     if index is None:
-    #         index = max(self.integrated_datasets.keys())
-
-    #     for int_q_slice in self.integrated_datasets[index].values():
-    #         int_q_slice.reset_mirrored_q()
-
-    # def plot_reduced_dataset(
-    #         self,
-    #         index=None,
-    #         log_scale=True,
-    #         interpolated_image=True,
-    #         plot_marker_size=5
-    # ):
-    #     """
-    #     Plot the Qsz vs. Qsx reduced dataset after integration.
-    #     """
-    #     fig = plotting.plot_reduced_dataset(
-    #         self,
-    #         index=index,
-    #         log_scale=log_scale,
-    #         plot_marker_size=plot_marker_size,
-    #         interpolated_image=interpolated_image
-    #     )
-
-    #     return fig
-
-    # def plot_reduced_slices(
-    #         self,
-    #         index=None,
-    #         q_slice_axis='qsx',
-    #         log_scale=True,
-    #         offset_order=0,
-    #         offset_value=0
-    # ):
-
-    #     fig = plotting.plot_reduced_slices(
-    #         self,
-    #         index=index,
-    #         q_slice_axis=q_slice_axis,
-    #         log_scale=True,
-    #         offset_order=offset_order,
-    #         offset_value=offset_value,
-    #     )
-
-    #     return fig
-
-
-
-class IntegratedDataset():
-
-    def __init__(self, qslices: QSlice | list = None, name=None):
-        """
-        A set of 1D slices taken from detector images in a dataset.
-
-        Parameters
-        ----------
-        qslices : QSlice | list, optional
-            A single QSlice instance or list of QSlice instances to
-            initialize the qslices attribute of this class. If not
-            provided, the qslices attribute will be an empty list and
-            instances of QSlice can later be added.
-        name : str
-            Custom name of the integrated dataset.
-        """
-
-        self.name = name
-        self.qslices = []
-        if qslices is not None:
-            self.add_slices(qslices=qslices)
-
-    def add_slices(self, qslices: QSlice | list | IntegratedDataset):
-        """
-        Add a single QSlice or list of QSlice instances to this dataset.
-        You can also provide another instance of this class and the
-        slices will get added to this instance.
-        """
-        if isinstance(qslices, QSlice):
-            qslices = [qslices]
-        elif isinstance(qslices, IntegratedDataset):
-            qslices = [qslices]
-
-        if isinstance(qslices, list):
-            for qslice in qslices:
-                if isinstance(qslice, QSlice):
-                    self.qslices.append(qslice)
-                elif isinstance(qslice, IntegratedDataset):
-                    self.qslices.extend(qslice.qslices)
-                else:
-                    raise ValueError(
-                        "Didn't recognize qslice data type "
-                        f"{type(qslice)}."
-                    )
-        else:
-            raise ValueError(
-                "Qslices should be a single Q-Slice or IntegratedDataset "
-                "or a list of any combination of those types. Not: "
-                f"{type(qslices)}"
-            )
-
-    def plot_data(
-        self,
-        q_axis='qbx',
-        y_axis='sample_phi_deg',
-        log_scale=True,
-        cmap='viridis',
-        vmin=None,
-        vmax=None,
-        filter_by_q={},
-        filter_by_metadata={},
-        **kwargs
-    ):
-
-        fig = plotting.plot_integrated_dataset(
-            self,
-            q_axis=q_axis,
-            y_axis=y_axis,
-            log_scale=log_scale,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            filter_by_q=filter_by_q,
-            filter_by_metadata=filter_by_metadata,
-            **kwargs
-        )
-
-        return fig
 
 
 class ReducedDataset():

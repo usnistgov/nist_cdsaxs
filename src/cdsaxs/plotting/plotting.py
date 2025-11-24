@@ -765,102 +765,102 @@ def plot_data2d_find_sdd(
     return fig
 
 
-def plot_integrated_dataset(
-        integrated_dataset,
-        q_axis='qbx',
-        y_axis='sample_phi_deg',
-        log_scale=True,
-        cmap='viridis',
-        vmin=None,
-        vmax=None,
-        filter_by_q={},
-        filter_by_metadata={},
-        **kwargs):
+# def plot_integrated_dataset(
+#         integrated_dataset,
+#         q_axis='qbx',
+#         y_axis='sample_phi_deg',
+#         log_scale=True,
+#         cmap='viridis',
+#         vmin=None,
+#         vmax=None,
+#         filter_by_q={},
+#         filter_by_metadata={},
+#         **kwargs):
 
-    filtered_slices = integrated_dataset.qslices.copy()
+#     filtered_slices = integrated_dataset.qslices.copy()
 
-    if filter_by_metadata:
-        for key, value in filter_by_metadata.items():
-            keep = []
-            for data in filtered_slices:
-                if key in METADATA_KEYWORDS:
-                    test = data.data2d.metadata[key]
-                elif key in data.data2d.user_params.keys():
-                    test = data.data2d.user_params[key]
-                else:
-                    keep.append(False)
-                    continue
-                if isinstance(value, tuple):
-                    if np.nanmin(test) >= np.nanmin(value)\
-                            and np.nanmax(test) <= np.nanmax(value):
-                        keep.append(True)
-                    else:
-                        keep.append(False)
-                elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
-                    if value == test:
-                        keep.append(True)
-                    else:
-                        keep.append(False)
-                elif isinstance(value, list):
-                    if test in value:
-                        keep.append(True)
-                    else:
-                        keep.append(False)
-                else:
-                    # could not interpret filter
-                    keep.append(False)
-            filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+#     if filter_by_metadata:
+#         for key, value in filter_by_metadata.items():
+#             keep = []
+#             for data in filtered_slices:
+#                 if key in METADATA_KEYWORDS:
+#                     test = data.data2d.metadata[key]
+#                 elif key in data.data2d.user_params.keys():
+#                     test = data.data2d.user_params[key]
+#                 else:
+#                     keep.append(False)
+#                     continue
+#                 if isinstance(value, tuple):
+#                     if np.nanmin(test) >= np.nanmin(value)\
+#                             and np.nanmax(test) <= np.nanmax(value):
+#                         keep.append(True)
+#                     else:
+#                         keep.append(False)
+#                 elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
+#                     if value == test:
+#                         keep.append(True)
+#                     else:
+#                         keep.append(False)
+#                 elif isinstance(value, list):
+#                     if test in value:
+#                         keep.append(True)
+#                     else:
+#                         keep.append(False)
+#                 else:
+#                     # could not interpret filter
+#                     keep.append(False)
+#             filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    if filter_by_q:
-        for q, qrange in filter_by_q.items():
-            keep = []
-            for data in filtered_slices:
-                test = getattr(data, q)
-                if np.nanmin(test) >= qrange[0]\
-                        and np.nanmax(test) <= qrange[1]:
-                    keep.append(True)
-                else:
-                    keep.append(False)
-            filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+#     if filter_by_q:
+#         for q, qrange in filter_by_q.items():
+#             keep = []
+#             for data in filtered_slices:
+#                 test = getattr(data, q)
+#                 if np.nanmin(test) >= qrange[0]\
+#                         and np.nanmax(test) <= qrange[1]:
+#                     keep.append(True)
+#                 else:
+#                     keep.append(False)
+#             filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    x_vals = []
-    y_vals = []
-    color_vals = []
-    order_vals = []
+#     x_vals = []
+#     y_vals = []
+#     color_vals = []
+#     order_vals = []
 
-    for data in filtered_slices:
-        x_vals.extend(list(getattr(data, q_axis)))
-        order_vals.append(data.data2d.metadata[y_axis]
-                          if y_axis in data.data2d.metadata.keys()
-                          else data.data2d.user_params[y_axis])
-        y_vals.extend(list(np.ones_like(getattr(data, q_axis))*order_vals[-1]))
-        color_vals.extend(list(data.Iq))
+#     for data in filtered_slices:
+#         x_vals.extend(list(getattr(data, q_axis)))
+#         order_vals.append(data.data2d.metadata[y_axis]
+#                           if y_axis in data.data2d.metadata.keys()
+#                           else data.data2d.user_params[y_axis])
+#         y_vals.extend(list(np.ones_like(getattr(data, q_axis))*order_vals[-1]))
+#         color_vals.extend(list(data.Iq))
 
-    if vmin is None:
-        vmin = np.max(
-            [np.nanmin(color_vals), 0.1]
-            ) if log_scale else 0
-    if vmax is None:
-        vmax = np.nanmax(color_vals)
+#     if vmin is None:
+#         vmin = np.max(
+#             [np.nanmin(color_vals), 0.1]
+#             ) if log_scale else 0
+#     if vmax is None:
+#         vmax = np.nanmax(color_vals)
 
-    fig = plt.figure()
-    if log_scale:
-        norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
-    else:
-        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+#     fig = plt.figure()
+#     if log_scale:
+#         norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
+#     else:
+#         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
 
-    data_plot = plt.scatter(
-        x_vals, y_vals, c=color_vals,
-        cmap=cmap, norm=norm,
-        **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
-    colorbar = plt.colorbar(data_plot)
-    colorbar.set_label('Intensity')
+#     data_plot = plt.scatter(
+#         x_vals, y_vals, c=color_vals,
+#         cmap=cmap, norm=norm,
+#         **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
+#     colorbar = plt.colorbar(data_plot)
+#     colorbar.set_label('Intensity')
 
-    plt.title(integrated_dataset.name, wrap=True)
-    plt.xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
-    plt.ylabel(plotting_tools.generate_formatted_axis_label(y_axis))
+#     plt.title(integrated_dataset.name, wrap=True)
+#     plt.xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
+#     plt.ylabel(plotting_tools.generate_formatted_axis_label(y_axis))
 
-    return fig
+#     return fig
 
 
 def plot_reduced_dataset(
@@ -874,7 +874,7 @@ def plot_reduced_dataset(
         interpolated_data=False,
         **kwargs):
 
-    filtered_slices = reduced_dataset.qslices.copy()
+    filtered_slices = reduced_dataset.data.copy()
 
     for key, value in filter_by_metadata.items():
         keep = []

@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from cdsaxs.data.data1d import Data1D
 
 
-class QSlice(Data1D):
+class ReducedData1D(Data1D):
 
     def __init__(
             self,
@@ -34,6 +34,10 @@ class QSlice(Data1D):
             background_qslices=None,
             mask: NDArray = None,
             dIq: NDArray = None,
+            wavelength_nm=None,
+            sample_phi_deg=None,
+            sample_chi_deg=None,
+            sample_omega_deg=None,
             **kwargs
     ):
         """
@@ -200,6 +204,11 @@ class QSlice(Data1D):
         else:
             self.background_Iq = None
         self.background_qslices = background_qslices
+
+        self.sample_phi_deg = sample_phi_deg
+        self.sample_chi_deg = sample_chi_deg
+        self.sample_omega_deg = sample_omega_deg
+        self.wavelength_nm = wavelength_nm
 
     def mirror_q(self, q_axis=None, resort=True):
         """
