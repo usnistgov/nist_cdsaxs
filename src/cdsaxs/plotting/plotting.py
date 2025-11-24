@@ -767,7 +767,7 @@ def plot_data2d_find_sdd(
 
 def plot_integrated_dataset(
         integrated_dataset,
-        q_axis='qdx',
+        q_axis='qbx',
         y_axis='sample_phi_deg',
         log_scale=True,
         cmap='viridis',
@@ -779,47 +779,49 @@ def plot_integrated_dataset(
 
     filtered_slices = integrated_dataset.qslices.copy()
 
-    for key, value in filter_by_metadata.items():
-        keep = []
-        for data in filtered_slices:
-            if key in METADATA_KEYWORDS:
-                test = data.data2d.metadata[key]
-            elif key in data.data2d.user_params.keys():
-                test = data.data2d.user_params[key]
-            else:
-                keep.append(False)
-                continue
-            if isinstance(value, tuple):
-                if np.nanmin(test) >= np.nanmin(value)\
-                        and np.nanmax(test) <= np.nanmax(value):
-                    keep.append(True)
+    if filter_by_metadata:
+        for key, value in filter_by_metadata.items():
+            keep = []
+            for data in filtered_slices:
+                if key in METADATA_KEYWORDS:
+                    test = data.data2d.metadata[key]
+                elif key in data.data2d.user_params.keys():
+                    test = data.data2d.user_params[key]
                 else:
                     keep.append(False)
-            elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
-                if value == test:
-                    keep.append(True)
+                    continue
+                if isinstance(value, tuple):
+                    if np.nanmin(test) >= np.nanmin(value)\
+                            and np.nanmax(test) <= np.nanmax(value):
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+                elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
+                    if value == test:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+                elif isinstance(value, list):
+                    if test in value:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
                 else:
+                    # could not interpret filter
                     keep.append(False)
-            elif isinstance(value, list):
-                if test in value:
-                    keep.append(True)
-                else:
-                    keep.append(False)
-            else:
-                # could not interpret filter
-                keep.append(False)
-        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+            filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    for q, qrange in filter_by_q.items():
-        keep = []
-        for data in filtered_slices:
-            test = getattr(data, q)
-            if np.nanmin(test) >= qrange[0]\
-                    and np.nanmax(test) <= qrange[1]:
-                keep.append(True)
-            else:
-                keep.append(False)
-        filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+    if filter_by_q:
+        for q, qrange in filter_by_q.items():
+            keep = []
+            for data in filtered_slices:
+                test = getattr(data, q)
+                if np.nanmin(test) >= qrange[0]\
+                        and np.nanmax(test) <= qrange[1]:
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
     x_vals = []
     y_vals = []
@@ -872,7 +874,7 @@ def plot_reduced_dataset(
         interpolated_data=False,
         **kwargs):
 
-    filtered_slices = reduced_dataset.data.copy()
+    filtered_slices = reduced_dataset.qslices.copy()
 
     for key, value in filter_by_metadata.items():
         keep = []
@@ -917,8 +919,8 @@ def plot_reduced_dataset(
     q_xaxis = []
     q_yaxis = []
     Iqs = []
-    wavelengths = []
-    sample_phi_degs = []
+    # wavelengths = []
+    # sample_phi_degs = []
 
     for data in filtered_slices:
         q_xaxis.extend(list(getattr(data, 'qsx')))
@@ -926,18 +928,18 @@ def plot_reduced_dataset(
         Iq = np.copy(data.Iq)
         Iq[data.mask] = np.nan
         Iqs.extend(list(Iq))
-        wavelengths.append(data.wavelength_nm)
-        sample_phi_degs.append(data.sample_phi_deg)
+        # wavelengths.append(data.wavelength_nm)
+        # sample_phi_degs.append(data.sample_phi_deg)
 
     q_xaxis = np.array(q_xaxis)
     q_yaxis = np.array(q_yaxis)
     Iqs = np.array(Iqs)
 
-    if len(list(set(wavelengths))) > 1:
-        warnings.warn(
-            "You are using multiple wavelengths in your"
-            "reduction, is that correct? For now we are showing data"
-            "under the assumption of a single wavelength!")
+    # if len(list(set(wavelengths))) > 1:
+    #     warnings.warn(
+    #         "You are using multiple wavelengths in your"
+    #         "reduction, is that correct? For now we are showing data"
+    #         "under the assumption of a single wavelength!")
 
     if vmin is None:
         vmin = np.max(
@@ -953,13 +955,13 @@ def plot_reduced_dataset(
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
 
     if interpolated_data:
-        x_interp, y_interp, Iq_interp, filter_out =\
+        x_interp, y_interp, Iq_interp =\
             plotting_tools.generate_interpolated_reduced_data(
                 qsx=q_xaxis,
                 qsz=q_yaxis,
                 Iq=Iqs,
-                wavelength_nm=wavelengths[0],
-                sample_phi_deg_range=sample_phi_degs,
+                # wavelength_nm=wavelengths[0],
+                # sample_phi_deg_range=sample_phi_degs,
             )
         if log_scale:
             levels = np.logspace(np.log10(vmin), np.log10(vmax), 100)

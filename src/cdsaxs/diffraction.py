@@ -460,7 +460,7 @@ def detector_px_to_qbyxz(
         wavelength_nm=wavelength_nm
     )
 
-    return qb, qby, qbx, qbz
+    return qb, qby, qbx, qbz, center_px_beam, center_px_detector
 
 
 def calculate_q(theta_deg, wavelength_nm):
@@ -1210,7 +1210,7 @@ def detector_px_to_q(
         Components of the scattering vector in beam coordinate space:
         (qby, qbx, qbz)
     """
-    qb, qby, qbx, qbz = detector_px_to_qbyxz(
+    qb, qby, qbx, qbz, _, _ = detector_px_to_qbyxz(
         center_px=center_px,
         detector_shape_px=detector_shape_px,
         pixel_size_um=pixel_size_um,

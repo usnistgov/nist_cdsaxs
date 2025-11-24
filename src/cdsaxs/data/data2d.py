@@ -442,7 +442,7 @@ class Data2D(DataImage):
                 except ValueError as e:
                     warnings.warn(f"{e}")
             if len([x for x in metadata.keys()
-                    if x in UPDATE_QS_TRIGGERS]) > 0:
+                    if x in UPDATE_QS_TRIGGERS or x in UPDATE_QB_TRIGGERS]) > 0:
                 try:
                     self._calculate_qs(suppress_errors=hide_q_warnings)
                 except ValueError as e:
@@ -537,7 +537,7 @@ class Data2D(DataImage):
             else:
                 pass
         else:
-            qb, qby, qbx, qbz = diffraction.detector_px_to_qbyxz(
+            qb, qby, qbx, qbz, _, cd = diffraction.detector_px_to_qbyxz(
                 center_px=self.metadata['center_px'],
                 detector_shape_px=self.image.shape,
                 pixel_size_um=self.metadata['pixel_size_um'],
@@ -554,6 +554,8 @@ class Data2D(DataImage):
             self.qby = qby
             self.qbx = qbx
             self.qbz = qbz
+
+            self.update_metadata({'center_px_detector': cd})
 
             self.qby_1d = self.qby[
                 :, int(round(self.metadata['center_px'][1], 0))
@@ -576,7 +578,6 @@ class Data2D(DataImage):
             will not raise an error if the parameters are not available.
             Default value is False.
         """
-
         # first check if we can calculate beam coordinate q
         missing_keywords = [x for x in UPDATE_QS_TRIGGERS
                             if x not in self.metadata.keys()]
@@ -1075,7 +1076,8 @@ class Data2D(DataImage):
         self.data_transformations = []
 
     def get_box_dims_size(self, size_qdy_px, size_qdx_px,
-                          shift_box_qdy_px=0, shift_box_qdx_px=0):
+                          shift_box_qdy_px=0, shift_box_qdx_px=0,
+                          center = None):
         """
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with a specific width
@@ -1097,6 +1099,9 @@ class Data2D(DataImage):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
+        center : tuple
+            Set the pixel center.
+            Default is the beam center.
 
         Returns
         -------
@@ -1107,7 +1112,10 @@ class Data2D(DataImage):
         """
         # figure out where the box lies with respect to beam center
         # make sure that the box doesn't fall off the image
-        center0, center1 = self.metadata['center_px']
+        if center is None:
+            center0, center1 = self.metadata['center_px']
+        else:
+            center0, center1 = center
 
         center0 = int(np.round(center0, 0))  # closest pixel
         min0 = center0 - int(size_qdy_px/2) - shift_box_qdy_px
@@ -1123,40 +1131,68 @@ class Data2D(DataImage):
 
         return (min0, max0), (min1, max1)
 
-    def get_box_dims_qdrange(self, range_qdy, range_qdx):
+    def get_box_dims_qrange(self, ignore_mask=True, **ranges):
         """
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with set q ranges
-        on both axes.
+        on both axes. If your q-range selection results in pixels that
+        do not form a rectangular like box, for example, a box at an
+        angle instead of parallel to either image axis or a curved
+        region, the function will return indices for a rectangular
+        region of interest that encompasses all the selected pixels.
 
         Parameters
         ----------
-        range_qdy : iterable of float
-            Range of scattering vector qdy defining the integration box.
-            Half open range of [min, max). Pixels with a q value that
-            satisfies min <= q < max will be accepted into the box.
-        range_qdx : iterable of float
-            Range of scattering vector qdx definiing the integration box.
-            Half open range of [min, max). Pixels with a q value that
-            satisfies min <= q < max will be accepted into the box.
+        ignore_mask : bool
+            If set to False, only pixels that meet the q range criteria
+            and are not already masked are set as True in the
+            returned mask of this method. If ignore_mask is True,
+            the pixels returned as True in the mask only need to meet
+            the q range criteria set by the user.
+        *ranges : tuple | list
+            Ranges for any of the q-component attributes of this class
+            can be provided as keyword arguments. For example,
+            providing qsy=(-0.01, 0.01) would select pixels that have
+            a qsy values >= -0.01 and <= 0.01.
+            Accepted q components include:
+                qb
+                qby
+                qbx
+                qbz
+                qs
+                qsy
+                qsx
+                qsz
         """
-        # fix the min, max order if the user provided them reversed
-        range_qdy = [min(range_qdy), max(range_qdy)]
-        range_qdx = [min(range_qdx), max(range_qdx)]
+        selection_mask = self.get_pixels_qrange(
+            ignore_mask=ignore_mask, **ranges)
 
-        qdy_indices = np.where((self.qby_1d >= range_qdy[0])
-                               & (self.qby_1d < range_qdy[1]))[0]
-        limits_qdy_px = (int(np.min(qdy_indices)),
-                         int(np.max(qdy_indices)+1))
+        heights = np.zeros_like(selection_mask).astype(int)
+        widths = np.zeros_like(selection_mask).astype(int)
 
-        qdx_indices = np.where((self.qbx_1d >= range_qdx[0])
-                               & (self.qbx_1d < range_qdx[1]))[0]
-        limits_qdx_px = (int(np.min(qdx_indices)),
-                         int(np.max(qdx_indices)+1))
+        for row in range(0, selection_mask.shape[0]):
+            keeps = selection_mask[row, :].astype(int)
+            height = np.sum(selection_mask[row:, :], axis=0).astype(int)*keeps
+            heights[row, :] = height
 
-        return limits_qdy_px, limits_qdx_px
+        for col in range(0, selection_mask.shape[1]):
+            keeps = selection_mask[:, col].astype(int)
+            width = np.sum(selection_mask[:, col:], axis=1).astype(int)*keeps
+            widths[:, col] = width
 
-    def get_pixels_qrange(self, **ranges):
+        area = heights*widths
+        row = np.argmax(area, axis=1)
+        col = np.argmax(area, axis=0)
+
+        max_position = np.unravel_index(np.argmax(area), area.shape)
+
+        min_y, min_x = max_position
+        max_y = min_y + heights[max_position]
+        max_x = min_x + widths[max_position]       
+
+        return (min_y, max_y), (min_x, max_x)
+
+    def get_pixels_qrange(self, ignore_mask=True, **ranges):
         """
         Returns a selection mask that includes image pixels that have
         q-components within the provided ranges. It will not return
@@ -1164,6 +1200,12 @@ class Data2D(DataImage):
 
         Parameters
         ----------
+        ignore_mask : bool
+            If set to False, only pixels that meet the q range criteria
+            and are not already masked are set as True in the
+            returned mask of this method. If ignore_mask is True,
+            the pixels returned as True in the mask only need to meet
+            the q range criteria set by the user.
         *ranges : tuple | list
             Ranges for any of the q-component attributes of this class
             can be provided as keyword arguments. For example,
@@ -1184,10 +1226,14 @@ class Data2D(DataImage):
         NDArray
             Boolean array the same size as the current data image that
             is True for pixels that meet all of the provided q ranges
-            and are not already masked by the instance of this class.
+            and are not already masked by the instance of this class
+            (unless the mask is ignored).
         """
 
-        selected = ~self.mask
+        if ignore_mask:
+            selected = np.ones_like(self.image).astype(bool)
+        else:
+            selected = ~self.mask
 
         for q_comp, limits in ranges.items():
             q_test = getattr(self, q_comp)
@@ -1198,15 +1244,20 @@ class Data2D(DataImage):
 
     def integrate_box(
         self,
-        limits_qdy_px: list | tuple | int,
-        limits_qdx_px: list | tuple | int,
-        mode: str,
+        mode: str = 'sum',
         axis: str | int = None,
-        shift_box_qdy_px=0,
-        shift_box_qdx_px=0,
         show_plot=True,
         subtract_background_offset: int | list[int] = None,
+        width_qdy_px: int = None,
+        width_qdx_px: int = None,
+        range_qdy_px: tuple = None,
+        range_qdx_px: tuple = None,
+        center_qdy: tuple = None,
+        center_qdx: tuple = None,
+        shift_box_qdy_px: int = 0,
+        shift_box_qdx_px: int = 0,
         plotting_kwargs={},
+        **kwargs
     ) -> QSlice:
         """
         Integrate a region of interest defined by the limits along both
@@ -1220,20 +1271,6 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-        limits_qdy_px : iterable of int
-            Pixel range along qdy axis for integration box.
-            Half open range of [min, max).
-            If an integer value is given instead, the box limits will
-            be determined internally for a box of that width centered
-            around the beam center and offset by shift_box_qdy_px.
-        limits_qdx_px : iterable of int
-            Pixel range along qdx axis for integration box.
-            Half open range of [min, max).
-            If an integer value is given instead, the box limits will
-            be determined internally for a box of that width centered
-            around the beam center and offset by shift_box_qdx_px.
-            If an integer was given for qdy, an integer must be given
-            for qdx.
         mode : str
             Integration mode, either 'sum' or 'mean'.
         axis : str, int
@@ -1246,16 +1283,6 @@ class Data2D(DataImage):
             performed over all columns in each row and return I vs. qdy.
             If no axis is provided, the function will assume the data
             should be integrated over the shorter box dimension.
-        shift_box_qdy_px : int, optional
-            Number of pixels to shift the box by in the positive qdy
-            direction. A negative value will shift the box in the
-            negative qdy direction.
-            Default value is 0.
-        shift_box_qdx_px : int, optional
-            Number of pixels to shift the box by in the positive qdx
-            direction. A negative value will shift the box in the
-            negative qdx direction.
-            Default value is 0.
         show_plot : bool, optional
             If set to False, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
@@ -1285,17 +1312,173 @@ class Data2D(DataImage):
             TODO: currently this is disabled and only True is accepted.
             Default value is True.
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 4c32943 (fixed integration box to properly correct box dimensions for new diffraction equations)
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. In the case that the box is
+        overdefined by the user, this method will prioritize the
+        parameters in order of this list:
+
+        width_qdy_px : int
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max)
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max)
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value)
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value)
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+<<<<<<< HEAD
+        **kwargs
+            Any of the scattering vector attribute keywords can be
+            used to define a range to set the box limits with fully
+            closed ranges. For example:
+                qby=(-0.03, 0.03)
+            would determine box limits that encompass pixels with values
+            >= -0.03 and <= 0.03 in qby.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+=======
+        **kwargs
+            Ranges for any of the q-component attributes of this class
+            can be provided as keyword arguments. For example,
+            providing qsy=(-0.01, 0.01) would select a box that
+            contains pixels within qsy values >= -0.01 and <= 0.01.
+            Accepted q components include:
+                qb
+                qby
+                qbx
+                qbz
+                qs
+                qsy
+                qsx
+                qsz
+>>>>>>> 833c15e (added function that finds box dimensions using series of q ranges)
+=======
+        **kwargs
+            Any of the scattering vector attribute keywords can be
+            used to define a range to set the box limits with fully
+            closed ranges. For example:
+                qby=(-0.03, 0.03)
+            would determine box limits that encompass pixels with values
+            >= -0.03 and <= 0.03 in qby.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+>>>>>>> 4c32943 (fixed integration box to properly correct box dimensions for new diffraction equations)
+
         Returns
         -------
         QSlice
             One-dimensional I vs. q data extracted from the integration.
 
         """
-        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
-            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
-                limits_qdy_px, limits_qdx_px,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px)
+
+        beam_center_px = np.round(
+            np.array(self.metadata['center_px']),
+            0).astype(int)
+        if 'center_px_detector' in self.metadata.keys():
+            detector_center_px = np.round(
+                np.array(self.metadata['center_px_detector']),
+                0).astype(int)
+        else:
+            detector_center_px = beam_center_px
+
+        # determine the range along y
+        if width_qdy_px is not None:
+            if center_qdy is None:
+                center_qdy = detector_center_px[0]
+            else:
+                if center_qdy[0].lower() == 'qby':
+                    center_qdy = np.nanargmin(np.abs(self.qby[:, beam_center_px[1]]-center_qdy[1]))
+                elif center_qdy[0].lower() == 'qsy':
+                    center_qdy = np.nanargmin(np.abs(self.qsy[:, beam_center_px[1]]-center_qdy[1]))
+
+            min_y = center_qdy - int(width_qdy_px/2)
+            max_y = min_y + width_qdy_px
+
+        elif range_qdy_px is not None:
+            min_y, max_y = range_qdy_px
+
+        else:
+            (min_y, max_y), _ = self.get_box_dims_qrange(**kwargs)
+
+        min_y -= shift_box_qdy_px
+        max_y -= shift_box_qdy_px
+
+        min_y = max(min_y, 0)
+        max_y = min(max_y, self.image.shape[0])
+
+        # determine the range along x
+        if width_qdx_px is not None:
+            if center_qdx is None:
+                center_qdx = detector_center_px[1]
+            else:
+                if center_qdx[0].lower() == 'qbx':
+                    center_qdx = np.nanargmin(np.abs(self.qbx[beam_center_px[0], :]-center_qdx[1]))
+                elif center_qdx[0].lower() == 'qsx':
+                    center_qdx = np.nanargmin(np.abs(self.qsx[beam_center_px[0], :]-center_qdx[1]))
+                min_x = center_qdx - int(width_qdx_px/2)
+                max_x = min_x + width_qdx_px
+
+        elif range_qdx_px is not None:
+            min_x, max_x = range_qdx_px
+
+        else:
+            _, (min_x, max_x) = self.get_box_dims_qrange(**kwargs)
+
+        min_x -= shift_box_qdx_px
+        max_x -= shift_box_qdx_px
+
+        min_x = max(min_x, 0)
+        max_x = min(max_x, self.image.shape[1])
+
+        limits_qdy_px = (min_y, max_y)
+        limits_qdx_px = (min_x, max_x)
 
         if axis is None:
             if np.diff(limits_qdy_px) <= np.diff(limits_qdx_px):
@@ -1319,17 +1502,18 @@ class Data2D(DataImage):
             mode=mode,
         )
 
+        q_rois = {}
+        q_keys = ['qb', 'qby', 'qbx', 'qbz', 'qs', 'qsy', 'qsx', 'qsz']
+        for key in q_keys:
+            q_roi = getattr(self, key)[
+                limits_qdy_px[0]: limits_qdy_px[1],
+                limits_qdx_px[0]: limits_qdx_px[1]
+            ]
+            q_rois[key] = q_roi
+
         # extract scattering vector for this integration
-        if axis == 0:
-            q = self.qbx_1d[limits_qdx_px[0]:limits_qdx_px[1]]
-            q_int = np.mean(self.qby_1d[limits_qdy_px[0]:limits_qdy_px[1]])
-            q_axis = 'qdx'
-            q_int_axis = 'qdy'
-        else:
-            q = self.qby_1d[limits_qdy_px[0]:limits_qdy_px[1]]
-            q_int = np.mean(self.qbx_1d[limits_qdx_px[0]:limits_qdx_px[1]])
-            q_axis = 'qdy'
-            q_int_axis = 'qdx'
+        q = np.nanmean(q_rois['qbx' if axis == 0 else 'qby'], axis=axis)
+        q_axis = 'qbx' if axis == 0 else 'qby'
 
         # extract background intensity
         if subtract_background_offset is not None:
@@ -1399,9 +1583,10 @@ class Data2D(DataImage):
             image_mask=mask_box,
             background_Iq=background_i_avg,
             background_qslices=backgrounds,
+            **{key+'_roi': value for key, value in q_rois.items()},
+            **{key: np.nanmean(value, axis=axis)
+               for key, value in q_rois.items() if key != q_axis},
         )
-        # set the q-axis that was integrated over to the mean value
-        integrated_q_slice.__setattr__(q_int_axis, q_int)
 
         if show_plot:
             fig = plotting.plot_data2d_integrate_box(

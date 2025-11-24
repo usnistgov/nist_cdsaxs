@@ -111,11 +111,23 @@ class QSlice(Data1D):
         qb  : Scattering vector in the beam/lab frame; when the detector is
             positioned normal to the incident beam, the lab and detector
             coordinates will align
+
+        Additionally, any of the scattering vectors or their components
+        as the selected region of interest can be provided by appending
+        _roi to the name. For example, qdy_roi would be a two
+        dimensional array that corresponds to qdy for the image_roi
+
         """
 
+        roi_kwargs = {key: value
+                      for key, value in kwargs.items()
+                      if '_roi' in key}
+        other_kwargs = {key: value
+                        for key, value in kwargs.items()
+                        if '_roi' not in key}
         # Base class init
         super().__init__(
-            q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, mask=mask, **kwargs
+            q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, mask=mask, **other_kwargs
         )
 
         self.data2d = data2d
@@ -172,6 +184,9 @@ class QSlice(Data1D):
             raise ValueError(
                 "The image mask should have same dimensions as image roi."
             )
+
+        for key, value in roi_kwargs.items():
+            setattr(self, key, value)
 
         if background_Iq is not None:
             background_Iq = np.array(background_Iq).reshape(-1).astype(float)
