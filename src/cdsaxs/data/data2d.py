@@ -2561,3 +2561,17 @@ class Data2D(DataImage):
             )
 
         return True
+    
+    def _get_metadata(self, keyword):
+        """
+        Return the metadata whether the keyword is found in the metadata
+        or user_params dictionary.
+        """
+        if keyword in self.metadata.keys():
+            return self.metadata[keyword]
+        elif keyword in self.user_params.keys():
+            return self.user_params[keyword]
+        else:
+            raise ValueError(
+                f"Metadata or user_param not found for {keyword}."
+            )

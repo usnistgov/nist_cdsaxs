@@ -153,6 +153,68 @@ class Dataset():
         if verbose:
             pbar.close()
 
+    def filter_data_by_metadata(self, **filters):
+        """
+        Filter the data by any of the metadata or user_params.
+        All filter criteria must be met to be returned from this method.
+
+        Parameters
+        ----------
+        **filters
+            The metadata filters are provided as keyword arguments.
+            The argument name should match any of the keys in the
+            metadata or user_params of the data.
+            The value type of these keyword arguments will specify the
+            criteria the data must meet.
+            tuple : Data must fall within a closed range of (min, max).
+                Any data where the metadata value is >= min and <= max
+                will meet the criteria.
+            int | float : Data must equal this value exactly.
+            str : Data must equal this exactly.
+            If multiple criteria for the same metadata must be met,
+            a list of any of these values can be used. 
+            list[tuple] : Data must fall within one of the ranges
+                provided.
+            list[int | float] : Data must equal one of the values in the
+                list.
+            list[str] : Data must equal one of the values in the list.
+
+        Returns
+        -------
+        list
+            List of data keys that meet the provided metadata criteria.
+        """
+
+        keys = list(self.datas.keys())
+
+        for key, value in filters.items():
+            if isinstance(value, tuple):
+                keys = [x for x in keys
+                        if self.datas[x]._get_metadata(key) <= value[1]
+                        and self.datas[x]._get_metadata(key) >= value[0]]
+            elif isinstance(value, (int, float, str)):
+                keys = [x for x in keys
+                        if self.datas[x]._get_metadata(key) == value]
+            elif isinstance(value, list):
+                keys_i = []
+                for value_i in value:
+                    if isinstance(value_i, tuple):
+                        keys_i.extend([x for x in keys
+                                       if self.datas[x]._get_metadata(key) <= value_i[1]
+                                       and self.datas[x]._get_metadata(key) >= value_i[0]])
+                    elif isinstance(value_i, (int, float, str)):
+                        keys_i.extend([x for x in keys
+                                      if self.datas[x]._get_metadata(key) == value_i])
+                    else:
+                        raise ValueError(
+                            f"Didn't recognize filter for {key} of {value_i}."
+                        )
+                keys = list(set(keys_i))
+            else:
+                raise ValueError(
+                    f"Didn't recognize filter for {key} of {value}."
+                )
+
     def update_all_user_params(
             self, params: dict, overwrite: bool = True,
             keys: list = None):
