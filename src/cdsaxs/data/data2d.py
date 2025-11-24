@@ -660,7 +660,7 @@ class Data2D(DataImage):
     def rotate_image(self,
                      rotation_angle_deg,
                      rotation_center=None,
-                     resampling_mode="bicubic"):
+                     resampling_mode="bilinear"):
 
         """
         Rotate the image counterclockwise by the specified angle about
