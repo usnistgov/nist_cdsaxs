@@ -5,73 +5,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from cdsaxs.data.reduced_data1d import ReducedData1D, ReducedData1DSlice
+from cdsaxs.data.reduced_data1d import ReducedData1DSlice
 from cdsaxs.data.dataset import (
-    IntegratedDataset,
     ReducedDataset,
     ReducedSlices
 )
-import cdsaxs.diffraction as diffraction
 import cdsaxs.plotting.plotting as plotting
-
-
-def reduce_dataset(dataset: IntegratedDataset) -> ReducedDataset:
-    """
-    Reduce an integrated dataset (set of 1D q-slices from the detector
-    data for a phi-scan) and convert from detector coordinate space
-    to sample coordinate space 'qsx', 'qsz', and 'Iq'.
-    TODO: implement filtering
-
-    Parameters
-    ----------
-    dataset : IntegratedDataset
-        Instance of IntegratedDataset containing instances of QSlice.
-
-    Returns
-    -------
-    ReducedDataset
-    """
-
-    reduced_data = []
-
-    for qslice in dataset.qslices:
-        qdx = qslice.qdx
-        qdy = qslice.qdy
-        Iq = qslice.Iq
-        dIq = qslice.dIq
-        mask = qslice.mask
-        wavelength_nm = qslice.data2d.metadata['wavelength_nm'],
-        sample_phi_deg = qslice.data2d.metadata.get('sample_phi_deg', 0)\
-            + qslice.data2d.metadata.get('sample_phi_offset_deg', 0)
-        sample_chi_deg = qslice.data2d.metadata.get('sample_chi_deg', 0)
-        sample_omega_deg = qslice.data2d.metadata.get('sample_chi_deg', 0)
-
-        qsz, qsx, _, _ = diffraction.qxz_to_qz_qx(
-            qdx,
-            qdy if qdy is not None else np.zeros_like(qdx, dtype=float),
-            wavelength_nm,
-            sample_phi_deg,
-            samplethetaoffset=0  # already accounted for this above!
-        )
-
-        data = ReducedData1D(
-            qsx,
-            Iq,
-            q_axis='qsx',
-            wavelength_nm=wavelength_nm,
-            sample_phi_deg=sample_phi_deg,
-            sample_chi_deg=sample_chi_deg,
-            sample_omega_deg=sample_omega_deg,
-            dIq=dIq,
-            mask=mask,
-            qsz=qsz,
-            qdx=qdx,
-            qdy=qdy,
-        )
-
-        reduced_data.append(data)
-
-    return ReducedDataset(data=reduced_data)
 
 
 def slice_reduced_dataset(
