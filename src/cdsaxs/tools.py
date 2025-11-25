@@ -675,3 +675,73 @@ def find_peaks_2D_one_axis(
                    and x < image.shape[1] and x >= 0]
 
     return np.array(coordinates)
+
+
+def find_maximum_rectangular_roi(data):
+    """
+    The data argument should be a boolean area or an array of 1/0 where
+    True/1 indicates pixels that meet the criteria for a selected
+    region of interest.
+
+    This function will try to find the maximum size of a rectangular
+    region of interest that fits within those accepted pixels at
+    each pixel location.
+    """
+
+    data = data.astype(int)
+
+    height = np.flipud(np.cumsum(np.flipud(data), axis=0))*data
+    where_ones_start = np.where((data[1:, :] - data[:-1, :]) == 1, 1, 0)
+    adjustments = height[1:, :] * where_ones_start
+    adjustments = np.flipud(np.maximum.accumulate(np.flipud(adjustments), axis=0))
+    height[:-1, :] = height[:-1, :] - adjustments
+    height[height < 0] = 0
+
+    width = np.fliplr(np.cumsum(np.fliplr(data), axis=1))*data
+    where_ones_start = np.where((data[:, 1:] - data[:, :-1]) == 1, 1, 0)
+    adjustments = width[:, 1:] * where_ones_start
+    adjustments = np.fliplr(np.maximum.accumulate(np.fliplr(adjustments), axis=1))
+    width[:, :-1] = width[:, :-1] - adjustments
+    width[width < 0] = 0
+
+    area = height * width
+
+    found_it = False
+    counter = 0
+    while not found_it and counter <= 1e5:
+        min0, min1 = np.unravel_index(np.argmax(area), area.shape)
+
+        # take the test area assuming first row and column of
+        # continuous ones sets the boundaries
+        test_area = data[min0:min0+height[min0, min1], min1:min1+width[min0, min1]]
+
+        # there could still be zeros anywhere else in test area
+        # find the area for different size boxes here after excluding
+        # those pixels
+        areas = []
+        px_x = np.tile(np.arange(0, test_area.shape[1]), test_area.shape[0])+1
+        px_y = np.tile(np.arange(0, test_area.shape[0]).reshape(-1, 1), test_area.shape[1]).reshape(-1)+1
+        for x, y in zip(px_x, px_y):
+            if np.min(test_area[:y, :x])==0:
+                areas.append(0)
+            else:
+                areas.append(x*y)
+        x, y = px_x[np.argmax(areas)], px_y[np.argmax(areas)]
+        actual_area = x*y
+
+        # new box that's actually the biggest without zeros
+        test_area = test_area[:y, :x]
+        area[min0, min1] = actual_area
+        new_max = np.max(area)
+        if new_max == actual_area or new_max == 1:
+            found_it = True
+
+        # ideally it will find the answer quick but set a break point
+        # just in case for this while loop
+        counter += 1
+
+    max0 = min0 + test_area.shape[0]
+    max1 = min1 + test_area.shape[1]
+
+    return (min0, max0), (min1, max1), height, width, area
+
