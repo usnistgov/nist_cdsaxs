@@ -1359,3 +1359,10 @@ rel_positions = [
        [ 1.25,  0.75],
        [ 1.25,  1.25]
 ]
+
+# SRM spots (2x2 + center = 5 points), (y, x), origin is the first point
+array([[ 0.   ,  0.   ],
+       [-0.125, -0.125],
+       [-0.125,  0.125],
+       [ 0.125, -0.125],
+       [ 0.125,  0.125]])
