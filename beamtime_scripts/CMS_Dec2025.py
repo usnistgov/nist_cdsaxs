@@ -463,84 +463,7 @@ def cdsaxs_Nov2025_template_motor_scan(t=1):
                             exp_t=t, sample=f'{scan_motor}-scan'+'%s'%(ii+1), nume=repeats
                         )
 
-
-def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin1(t=10):
-    """
-    If you need to restart this sample set at a sample other than the
-    first one, change the 'start_at' variable.
-    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
-    all samples in this set will be run with this function call.
-
-    The repeats parameter is used to collect multiple
-    images each with an expsoure time of t at each position during
-    the cd-saxs scan.
-    """
-    det = [pil2M]
-
-    phi_offset = -6
-    # start_phi = -60
-    # stop_phi = 60
-    # phi_steps = int(abs(start_phi-stop_phi) + 1)
-
-    start_at = 0
-    repeats = 1
-
-    # x, y, z should be the center position for each sample
-    # names = [ 'RR50C', 'RR23C', 'RR80E', 'RR50G', 'RR23D', 'RR80D', 'RR50F', 'RRAgBeh', 'RR80C', 'RR50E', 'SRM_W204_H11', 'SRM_W204_F2', 'RR23G', 'RR80G', 'RR50D', 'RR23F', 'RR80F']
-    names = ['RR80C',  'RR50E', 'RR23G','RR80G', 'RR50D', 'RR23F', 'RR80F', 'RR50F', 'RR80D', 'RR23D', 'RR50G', 'RR80E', 'RR23C', 'RR50C']
-    x =     [   -45270, -32270, -11470, 1530,    14530,     27330,  40329,   33330 ,  20131,     6631,   -6369,  -19670,  -32670, -45469]
-    y=      [     7020,   7020,   7320, 7620,     7620,     7620,   7820,    -7480 ,  -7480,    -7480,   -7480,  -7680,   -7880,   -7880]
-
-
-    range_x = 4500 # um, or same units as x, y, z
-    range_y = 3000 # um, or same units as x, y, z
-
-    rel_positions = gen_grid_points_yx(
-        region_of_interest_yx=(range_y, range_x),
-        center_yx=(0, 0),
-        beam_size_yx=(25, 250),
-        grid_points_yx=(2, 4)
-    )
-
-    print(f"========= Measuring at relative grid positions (y, x): {rel_positions}.")
-
-    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
-    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
-
-    for i in range(1):
-        for nn, (name, xs, ys) in enumerate(zip(names, x, y)):
-
-            if nn>=start_at:
-                print(name)
-                print('center positions x, y', xs, ys)
-                yield from bps.mv(piezo.x, xs)
-                yield from bps.mv(piezo.y, ys)
-
-                # make sure that the y motor actually reaches position
-                while abs(piezo.y.position - ys) >= 1:
-                    print('y-motor did not reach position; requesting again')
-                    yield from bps.mv(piezo.y, ys)
-                    yield from bps.sleep(5)
-
-                for ii, (rel_y, rel_x) in enumerate(rel_positions):
-
-                    yield from bps.mv(piezo.x, xs+rel_x)
-                    yield from bps.mv(piezo.y, ys+rel_y)
-
-                    print('moving to x, y', xs+rel_x, ys+rel_y)
-
-                    # make sure that the y motor actually reaches position
-                    while abs(piezo.y.position - (ys + rel_y)) >= 1:
-                        print('y-motor did not reach position; requesting again')
-                        yield from bps.mv(piezo.y, ys + rel_y)
-                        yield from bps.sleep(5)
-
-                    yield from measure_single_position(
-                        phi_offset, exp_t=t, sample=f'{name}_grid'+'%s'%(ii+1), nume=repeats,
-                        log_filepath = 'log_RR1_KlineNov25.csv'
-                    )
-
-def cdsaxs_Nov2025_grid_scans_CaitlynRoundRobin2(t=1):
+def cdsaxs_Dec2025_grid_scans_CaitlynRoundRobin2(t=1):
     """
     If you need to restart this sample set at a sample other than the
     first one, change the 'start_at' variable.
@@ -1297,3 +1220,101 @@ def cdsaxs_Nov2025_dupont_2(t=10):
                 yield from cd_saxs(start_phi+phi_offset, stop_phi+phi_offset, phi_steps, exp_t=t, sample=name+'_measure%s'%(i+1), nume=repeats, log_filepath=log_filename_string)
                 yield from cd_saxs(phi_offset, phi_offset, 1, exp_t=t, sample=name+'_measure_ref-B%s'%(i+1), nume=1, log_filepath=log_filename_string)
 
+def cdsaxs_Dec2025_grid_scans_CaitlynRoundRobin1(t=10):
+    """
+    If you need to restart this sample set at a sample other than the
+    first one, change the 'start_at' variable.
+    Samples are indexed starting at 0, so if 'start_at' is equal to 0,
+    all samples in this set will be run with this function call.
+
+    The repeats parameter is used to collect multiple
+    images each with an expsoure time of t at each position during
+    the cd-saxs scan.
+    """
+    det = [pil2M]
+
+    phi_offset = -6
+    # start_phi = -60
+    # stop_phi = 60
+    # phi_steps = int(abs(start_phi-stop_phi) + 1)
+
+    start_at = 0
+    repeats = 1
+
+    # x, y, z should be the center position for each sample
+    # names = [ 'RR50C', 'RR23C', 'RR80E', 'RR50G', 'RR23D', 'RR80D', 'RR50F', 'RRAgBeh', 'RR80C', 'RR50E', 'SRM_W204_H11', 'SRM_W204_F2', 'RR23G', 'RR80G', 'RR50D', 'RR23F', 'RR80F']
+    names = []
+    x =     [   -45270, -32270, -11470, 1530,    14530,     27330,  40329,   33330 ,  20131,     6631,   -6369,  -19670,  -32670, -45469]
+    y=      [     7020,   7020,   7320, 7620,     7620,     7620,   7820,    -7480 ,  -7480,    -7480,   -7480,  -7680,   -7880,   -7880]
+
+
+    range_x = 4500 # um, or same units as x, y, z
+    range_y = 3000 # um, or same units as x, y, z
+
+    rel_positions = gen_grid_points_yx(
+        region_of_interest_yx=(range_y, range_x),
+        center_yx=(0, 0),
+        beam_size_yx=(25, 250),
+        grid_points_yx=(2, 4)
+    )
+
+    print(f"========= Measuring at relative grid positions (y, x): {rel_positions}.")
+
+    assert len(names) == len(x), f"len of x ({len(x)}) is different from number of samples ({len(names)})"
+    assert len(names) == len(y), f"len of y ({len(y)}) is different from number of samples ({len(names)})"
+
+    for i in range(1):
+        for nn, (name, xs, ys) in enumerate(zip(names, x, y)):
+
+            if nn>=start_at:
+                print(name)
+                print('center positions x, y', xs, ys)
+                yield from bps.mv(piezo.x, xs)
+                yield from bps.mv(piezo.y, ys)
+
+                # make sure that the y motor actually reaches position
+                while abs(piezo.y.position - ys) >= 1:
+                    print('y-motor did not reach position; requesting again')
+                    yield from bps.mv(piezo.y, ys)
+                    yield from bps.sleep(5)
+
+                for ii, (rel_y, rel_x) in enumerate(rel_positions):
+
+                    yield from bps.mv(piezo.x, xs+rel_x)
+                    yield from bps.mv(piezo.y, ys+rel_y)
+
+                    print('moving to x, y', xs+rel_x, ys+rel_y)
+
+                    # make sure that the y motor actually reaches position
+                    while abs(piezo.y.position - (ys + rel_y)) >= 1:
+                        print('y-motor did not reach position; requesting again')
+                        yield from bps.mv(piezo.y, ys + rel_y)
+                        yield from bps.sleep(5)
+
+                    yield from measure_single_position(
+                        phi_offset, exp_t=t, sample=f'{name}_grid'+'%s'%(ii+1), nume=repeats,
+                        log_filepath = 'log_RR1_KlineNov25.csv'
+                    )
+
+
+# relative positions for a 4x4 grid, (y, x), origin is the first one
+# units are mm
+rel_positions = [
+       [ 0.    ,  0.    ],
+       [-1.125 , -1.6875],
+       [-1.125 , -0.5625],
+       [-1.125 ,  0.5625],
+       [-1.125 ,  1.6875],
+       [-0.375 , -1.6875],
+       [-0.375 , -0.5625],
+       [-0.375 ,  0.5625],
+       [-0.375 ,  1.6875],
+       [ 0.375 , -1.6875],
+       [ 0.375 , -0.5625],
+       [ 0.375 ,  0.5625],
+       [ 0.375 ,  1.6875],
+       [ 1.125 , -1.6875],
+       [ 1.125 , -0.5625],
+       [ 1.125 ,  0.5625],
+       [ 1.125 ,  1.6875]
+]
