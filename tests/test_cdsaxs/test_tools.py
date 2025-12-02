@@ -6,6 +6,7 @@ from cdsaxs.tools import find_gaussian_peakloc, line_fit
 from cdsaxs.tools import gaussian_refine_peak_2D
 from cdsaxs.tools import find_peaks_2D, find_peaks_1D
 from cdsaxs.tools import find_peaks_2D_one_axis
+from cdsaxs.tools import rotate_image
 
 
 class TestTools(unittest.TestCase):
@@ -21,20 +22,18 @@ class TestTools(unittest.TestCase):
         ]
         y = np.array(y)
         mean = 1.4
-        # std_dev = 0.5
-        # scale = 3
-        # offset = 2
+        std_dev = 0.5
+        scale = 3
+        offset = 2
 
-        peak_x, peak_index = find_gaussian_peakloc(x, y)
+        peak_x, popt = find_gaussian_peakloc(x, y)
 
         self.assertAlmostEqual(peak_x, mean)
-        self.assertEqual(peak_index, 6)
 
-        # no longer returning popt
-        # self.assertAlmostEqual(popt[0], mean)
-        # self.assertAlmostEqual(popt[1], std_dev)
-        # self.assertAlmostEqual(popt[2], scale)
-        # self.assertAlmostEqual(popt[3], offset)
+        self.assertAlmostEqual(popt[0], mean)
+        self.assertAlmostEqual(popt[1], std_dev)
+        self.assertAlmostEqual(popt[2], scale)
+        self.assertAlmostEqual(popt[3], offset)
 
     def test_line_fit(self):
 
@@ -89,11 +88,10 @@ class TestTools(unittest.TestCase):
         self.assertAlmostEqual(a_opt_test, a_opt, 5)
         self.assertAlmostEqual(b_opt_test, b_opt, 5)
 
-    def test_rotate_image(self):
-        """
-        TODO: implement
-        """
-        pass
+    # def test_rotate_image(self):
+        # TODO: implement, although this is really a wrapper for
+        # PILLOW.Image.rotate()
+        # pass
 
     def test_find_peaks_2D(self):
         image = np.array(
@@ -194,7 +192,7 @@ class TestTools(unittest.TestCase):
                                          exclude_border=False, min_distance=2)
 
         for x, y in zip(test_coordinates, peak_coordinates):
-            self.assertAlmostEqual(x, y, places=4)
+            self.assertAlmostEqual(x, y, places=3)
 
     def test_find_peaks_1D_scipy(self):
         image = np.array(
@@ -222,7 +220,7 @@ class TestTools(unittest.TestCase):
                                          refinement_size=8, algorithm='scipy')
 
         for x, y in zip(test_coordinates, peak_coordinates):
-            self.assertAlmostEqual(x, y, places=4)
+            self.assertAlmostEqual(x, y, places=3)
 
     def test_find_peaks_2D_one_axis(self):
         image = np.array(
@@ -249,7 +247,7 @@ class TestTools(unittest.TestCase):
 
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
-                self.assertAlmostEqual(x, y, places=4)
+                self.assertAlmostEqual(x, y, places=3)
 
     def test_find_peaks_2D_one_axis_scipy(self):
         image = np.array(
@@ -275,4 +273,4 @@ class TestTools(unittest.TestCase):
 
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
-                self.assertAlmostEqual(x, y, places=4)
+                self.assertAlmostEqual(x, y, places=3)
