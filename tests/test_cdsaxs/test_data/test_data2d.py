@@ -857,22 +857,22 @@ class TestData2D(unittest.TestCase):
         ])
         np.testing.assert_array_almost_equal(qslice.background, background_i_avg)
 
-    def test_find_peaks2D(self):
-        # TODO: implement peaks2D test
-        pass
+    # def test_find_peaks2D(self):
+    #     # TODO: implement peaks2D test
+    #     pass
 
-    def test_find_peaks2D_one_axis(self):
-        # TODO: implement peaks2D one axis test
-        pass
+    # def test_find_peaks2D_one_axis(self):
+    #     # TODO: implement peaks2D one axis test
+    #     pass
 
-    def test_find_beam_center(self):
-        # TODO: implement find center test
-        pass
+    # def test_find_beam_center(self):
+    #     # TODO: implement find center test
+    #     pass
 
-    def test_find_sdd(self):
-        # TODO: implement find sdd test
-        pass
+    # def test_find_sdd(self):
+    #     # TODO: implement find sdd test
+    #     pass
 
-    def test_find_detector_rotation_correction(self):
-        # TODO: implement find detector rotation correction test
-        pass
+    # def test_find_detector_rotation_correction(self):
+    #     # TODO: implement find detector rotation correction test
+    #     pass

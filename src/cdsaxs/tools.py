@@ -49,33 +49,36 @@ def find_gaussian_peakloc(x, y, p0=None):
         Gaussian fit.
     """
 
-    mask = np.isnan(y)
-    mask += np.isinf(y)
-    mask += np.isneginf(y)
-    x_fit = x[~mask]
-    y_fit = y[~mask]
+    mask = default_mask(y)
+    x_fit = np.array(x)[~mask]
+    y_fit = np.array(y)[~mask]
 
-    if len(x_fit) < 4:
-        raise TypeError
+    order_by_x = np.argsort(x_fit)
+    x_fit = x_fit[order_by_x]
+    y_fit = y_fit[order_by_x]
 
-    if p0 is not None:
-        popt, _ = curve_fit(
-            gaussian,
-            x_fit, y_fit,
-            p0=p0,
+    if x_fit.shape[0] < 4:
+        raise TypeError(
+            "More than 4 data points need to be provided."
         )
-    else:
-        popt, _ = curve_fit(
-            gaussian,
-            x_fit, y_fit/np.nanmax(y_fit),
-            p0=[
-                x_fit[np.nanargmax(y_fit)], 1, 2, 0
-            ]
-        )
+
+    if p0 is None:
+        offset = np.min(y_fit)
+        amplitude = np.max(y_fit) - offset
+        half_max = amplitude/2
+        above_half = np.where(y_fit > half_max)[0]
+        stdev = (x_fit[np.max(above_half)] - x_fit[np.min(above_half)])/2.355
+        scale = amplitude * np.sqrt(2*np.pi)*stdev
+        p0 = [x[np.argmax(y_fit)], stdev, scale, offset]
+
+    popt, _ = curve_fit(
+        gaussian,
+        x_fit, y_fit,
+        p0=p0,
+    )
     peak_x = popt[0]
-    peak_index = np.argmin(np.abs(x-peak_x))
 
-    return float(peak_x), int(peak_index)
+    return float(peak_x), popt
 
 
 def line_fit(x, y, force_intercept=None):
@@ -155,8 +158,8 @@ def gaussian_refine_peak_2D(image):
 
 
 def rotate_image(image,
-                 degrees, rotation_center, resampling_mode="bicubic",
-                 fillcolor=-9999):
+                 degrees, rotation_center, resampling_mode="bilinear",
+                 log_scale=False, fillcolor=-9999):
     """
 
     Rotates an image by a specified number of degrees counterclockwise
@@ -170,14 +173,22 @@ def rotate_image(image,
         Center of rotation. Indices should be provided as [row, column]
         keeping in mind that numpy index orders rows from top to
         bottom and columns from left to right.
-    rotation_sampling_mode : str
+    rotation_sampling_mode : str, optional
         Set the resampling method used during the rotation.
         The box rotation works by rotating the image underneath then
         extracting the box for integration. Resampling of the
         image intensities can be performed with the 'nearest',
         'bilinear', or 'bicubic' methods in the PILLOW package.
-        Default value is 'bicubic'.
-    fillcolor : float
+        We encourage the user to look into the rotation sampling modes
+        as this may result in 'features' in your data due to sharp
+        log-scale peaks.
+        Default value is 'bilinear'.
+    log_scale : bool, optional
+        Rotate the log-scale of your image. This could help resolve
+        some artifacts caused by certain rotation sampling algorithms
+        but you will lose any pixels that are negative (turned to nan).
+        Deafult value is False.
+    fillcolor : float, optional
         A temporary value used to fill pixels that are outside of the
         original image after rotation. These pixels will
         be replaced with NAN after the rotation is complete. A float
@@ -199,6 +210,10 @@ def rotate_image(image,
     else:
         resample = Image.Resampling.BICUBIC
 
+    image = np.array(image)
+    if log_scale:
+        image = np.log10(image)
+    image[default_mask(image)] = np.nan
     # convert to PILLOW Image for the rotation
     image = Image.fromarray(image)
     image = image.rotate(
@@ -209,6 +224,8 @@ def rotate_image(image,
         fillcolor=fillcolor)
     image = np.array(image)
     image[image == fillcolor] = np.nan
+    if log_scale:
+        image = np.power(10, image)
 
     return image
 
@@ -594,6 +611,7 @@ def find_peaks_2D_one_axis(
     image_fed = np.copy(image)
     if mask is not None:
         image_fed[mask] = np.nan
+    drop_if_any_nan = np.isnan(image_fed).any(axis=1-peak_axis)
     if integration_mode == 'sum':
         image_fed = np.nansum(image_fed, axis=1-peak_axis)
     elif integration_mode == 'mean':
@@ -603,7 +621,7 @@ def find_peaks_2D_one_axis(
             f"Integration mode {integration_mode} not recognized."
             "Use 'mean' or 'sum'."
         )
-    image_fed[np.isnan(image_fed).any(axis=1-peak_axis)] = np.nan
+    image_fed[drop_if_any_nan] = np.nan
 
     refinement_size = max(refinement_size, 4)
     coordinates_peak_axis = find_peaks_1D(image_fed, log_scale=log_scale,

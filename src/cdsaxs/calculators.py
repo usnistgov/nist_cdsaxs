@@ -40,13 +40,59 @@ def gaussian(x, mean, std_dev, scale, offset):
 
 
 def footprint_correction(sample_phi_deg):
+    """
+    This function calculates the footprint correction based on the
+    sample rotation angle about the y-axis. When integrated into the
+    data classes, any offset to the nominal sample_phi_deg is accounted
+    for but if using this function directly, the user should be sure
+    to provide the actual rotation angle for sample_phi_deg.
 
+    Notes from legacy gui:
+    footprint_factor = I(path length = sample thickness) / I (path length)
+                     = (t/cos(0))/ (t/cos(sample phi)) = cos(sample phi)
+
+    Parameters
+    ----------
+    sample_phi_deg : float | array-like
+        Sample rotation angle about the postive y-axis in sample
+        coordinate space.
+        Units are degrees.
+
+    Returns
+    -------
+    float | array-like
+        Footprint correction value at each provided rotation angle.
+        To apply the correction to the scattering intensity, multiply
+        by the returned value.
+    """
+    sample_phi_deg = np.array(sample_phi_deg)
     cos_sample_phi = np.cos(np.deg2rad(sample_phi_deg))
 
-    return float(cos_sample_phi)
+    return cos_sample_phi
 
 
 def sample_size_correction(sample_phi_deg, fwhm_mm, center_mm, sample_size_mm):
+    """
+    Calculate the sample size correction.
+    TODO: flush out this doc string from legacy notes
+
+    Parameters
+    ----------
+    sample_phi_deg : float | array-like
+        Sample rotation angle about the positive y-axis in sample
+        coordinate space.
+        Units are degrees.
+    fwhm_mm : float
+    center_mm : float
+    sample_size_mm : float
+
+    Returns
+    -------
+    float | array-like
+        Sample size correction value at each provided rotation angle.
+        To apply the correction to the scattering intensity, multiply
+        by the returned value.
+    """
     cos_sample_phi = np.cos(np.deg2rad(sample_phi_deg))
 
     sigma_times_sqrt2 = 1e-99 + fwhm_mm / (2 * np.sqrt(np.log(2)))
@@ -65,7 +111,31 @@ def substrate_absorption_correction(sample_phi_deg,
                                     substrate_thickness_um,
                                     substrate_attenuation_coeff_um_m1):
     """
-    Substrate attenuation coefficient in units of 1/um.
+    Calculate the substrate absorption correction at each sample
+    rotation angle with a known substrate thickenss and attenuation
+    coefficient.
+
+    Note from legacy gui:
+    abs_factor = I(path length =substrate thickness) / I(path length)
+     = (I0 exp(-mu*t)) / (I0 exp(-mu*t/cos(phi))) = exp(-mu*t*(1-1/cos(phi)))
+
+    Parameters
+    ----------
+    sample_phi_deg : float | array-like
+        Sample rotation angle about the positive y-axis in sample
+        coordinate space.
+        Units are degrees.
+    substrate_thickness_um : float
+        Thickness of the substrate in units of um.
+    substrate_attenuation_coeff_um_m1 : float
+        Substrate attenuation coefficient in units of 1/um.
+
+    Returns
+    -------
+    float | array-like
+        Substrate absorption correction at each provided rotation angle.
+        To apply the correction to the scattering intensity, multiply
+        by the returned value.
     """
     cos_sample_phi = np.cos(np.deg2rad(sample_phi_deg))
 
