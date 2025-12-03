@@ -242,60 +242,6 @@ class Dataset():
             data = self.datas[key]
             data.update_user_params(params=params, overwrite=overwrite)
 
-    def filter_data_by_metadata(self, key, value):
-        """
-        Get a list of keys to the datas dictionary based on a metadata
-        or user param keyword.
-
-        Parameters
-        ----------
-        key : str
-            Key in either the metadata or user_params dictionaries to
-            filter the data by.
-        value : str, int, float, tuple, list
-            Value of the metadata keyword that the data should be
-            filtered by. If a string, integer, or float, the metadata
-            value for each data will need to match exactly to be returned.
-            Otherwise, if a tuple is provided, the metadata keyword
-            should fall within the numerical range defined by [min, max].
-            This range is inclusive at min and exclusive at max.
-            Finally, if a list is provided, the metadata keyword value
-            should be present in that list. For example, if value was
-            set to [1, 2, 3] and key set to 'sample_phi_deg', any
-            data with a sample_phi_deg equal to 1 or 2 or 3 will be
-            returned in the keys list.
-
-        Returns
-        -------
-        list
-            List of datas keys that meet the filter criteria.
-        """
-
-        keys = []
-
-        for data_key, data in self.datas.items():
-            if key in data.metadata.keys():
-                test_value = data.metadata[key]
-            elif key in data.user_params.keys():
-                test_value = data.user_params[key]
-            else:
-                raise KeyError(
-                    f"The key {key} was not found "
-                    "in either metadata or user_params."
-                )
-
-            if isinstance(value, tuple):
-                if test_value >= value[0] and test_value <= value[1]:
-                    keys.append(data_key)
-            elif isinstance(value, list):
-                if test_value in value:
-                    keys.append(data_key)
-            else:
-                if test_value == value:
-                    keys.append(data_key)
-
-        return keys
-
     def normalize_all_data_by_metadata(
             self, normalize_by, keys=None):
         """
