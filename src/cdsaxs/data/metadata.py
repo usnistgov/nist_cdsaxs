@@ -13,7 +13,6 @@ METADATA_KEYWORDS = [
     "scaling_factor", "I0", "beam_current",
     "data_directory", "filename",
     "name", "center_px", "center_px_detector",
-    'sample_phi_offset_deg',
     "image_rotation_angle",
     "sample_size_mm", "beam_center_mm", "beam_fwhm_mm",
     "substrate_thickness_um", "substrate_attenuation_coeff_um-1",

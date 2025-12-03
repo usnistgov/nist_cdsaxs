@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from cdsaxs.data.reduced_data1d import ReducedData1D
+from cdsaxs.data.reduced_slice import ReducedData1D
 
 
 class TestReducedData1D(unittest.TestCase):

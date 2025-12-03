@@ -10,8 +10,8 @@ import numpy as np
 from tqdm import tqdm
 
 from cdsaxs.data.data2d import Data2D
-from cdsaxs.data.qslice import ReducedData1D
-from cdsaxs.data.reduced_data1d import (
+from cdsaxs.data.reduced_data1d import ReducedData1D
+from cdsaxs.data.reduced_slice import (
     ReducedData1DSlice
 )
 import cdsaxs.plotting.plotting as plotting

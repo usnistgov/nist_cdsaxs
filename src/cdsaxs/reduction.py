@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from cdsaxs.data.reduced_data1d import ReducedData1DSlice
+from cdsaxs.data.reduced_slice import ReducedData1DSlice
 from cdsaxs.data.dataset import (
     ReducedDataset,
     ReducedSlices
