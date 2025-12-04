@@ -1,0 +1,4 @@
+filename,sdd_cm,energy_ev,sample_phi_deg,bpm,name
+W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_id857176_combined.tif,520,16100,-5,0.415,W204_F2 -5.0
+W204_F2measure1_5.2m_16.1keV_num60_00deg_bpm0.417_id857181_combined.tif,520,16100,0,0.417,W204_F2 0.0
+W204_F2measure1_5.2m_16.1keV_num65_05deg_bpm0.413_id857186_combined.tif,520,16100,5,0.413,W204_F2 5.0

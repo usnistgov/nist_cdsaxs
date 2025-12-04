@@ -179,4 +179,4 @@ cython_debug/
 .pypirc
 
 dev_workspace/
-validation/
+./validation/

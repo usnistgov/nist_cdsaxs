@@ -1,0 +1,869 @@
+"""
+This module includes container classes for datasets, i.e. many of 1D or
+2D data instances.
+"""
+
+from __future__ import annotations
+import warnings
+
+import numpy as np
+
+from cdsaxs.data.data2d import Data2D
+from cdsaxs.data.qslice import QSlice
+from cdsaxs.data.reduced_data1d import (
+    ReducedData1D,
+    ReducedData1DSlice
+)
+import cdsaxs.plotting.plotting as plotting
+from cdsaxs.sample import Sample
+
+
+class Dataset():
+    """
+    A container class for a set of Data2D instances that make up a
+    single CD-SAXS measurement for a sample.
+
+    Attributes
+    ----------
+    datas : dict
+        Dictionary containing the Data2D objects. The key for each
+        instance is Data2D.name. Be cautious if the name attribute
+        was kept as default (filename) as it may result in non-unique
+        keys. If you are pulling all data from the same data directory,
+        however, this will not be a problem.
+    name : str
+        Custom name of the dataset.
+    sample : Sample
+        Instance of the Sample class that details the sample measured
+        when collecting the dataset. Information such as sample
+        thickness and attenuation coefficients should be added here to
+        enable the relevant data corrections.
+
+    Optional Attributes
+    -------------------
+    integrated_datasets : dict
+        Dictionary of dictionaries containing integrated data. The key
+        corresponds to an index (ordered by integration).
+        For each inner ditionary, the keys align with the datas.keys() and
+        the values are instances of IntegratedDataSlices. These
+        dictionaries are produced by the cdsaxs integrators.
+
+    reduced_datastets : dict
+
+    reduced_slices : dict
+
+
+    """
+
+    def __init__(
+            self,
+            datas: list[Data2D] = None,
+            name: str = None,
+            sample: str = None
+    ):
+        if datas is not None:
+            self.add_data(datas)
+        else:
+            self.datas = {}
+
+        self.name = name
+        self.sample = sample
+
+    def add_data(self, datas: Data2D | list[Data2D]):
+        """Add one or more Data2D instances to the dataset."""
+        datas = [datas] if not isinstance(datas, list) else datas
+        for data in datas:
+            if data.name in self.datas.keys():
+                raise ValueError(
+                    "You do not have unique names for Data2D instances."
+                )
+            else:
+                self.datas[data.name] = data
+
+    def remove_data(self,
+                    datas: Data2D | list[Data2D] | str | list[str]):
+        """
+        Remove one or more Data2D instances from the dataset.
+        One or more isntances of Data2D can be provided or a list
+        of keys to the datas dictionary.
+        """
+        if type(datas) is not list:
+            datas = [datas]
+        for data in datas:
+            if isinstance(data, Data2D):
+                name = data.name
+            else:
+                name = data
+            try:
+                del self.datas[name]
+            except KeyError:
+                warnings.warn(f"Could not delete {name} data as it was"
+                            "not part of the dataset.")
+
+    def assign_sample(self, sample: Sample):
+        """
+        Assign the measured sample with an instance of the Sample class.
+        """
+        # TODO: implement required sample checks
+        self.sample = sample
+
+    def update_all_metadata(self,
+                            metadata: dict,
+                            overwrite: bool = True,
+                            keys: list = None):
+        """
+        Add or update metadata for all Data2D stored in this Dataset.
+        Existing metadata parameters can be updated by keeping the
+        overwrite argument to True.
+
+        Parameters
+        ----------
+        metadata : dict
+            Key : value pairs of accepted metadata (key) and their
+            values. See Data2D class docstring for list of accepted
+            keywords.
+        overwrite : bool
+            If set to True, any metadata provided to this method will
+            overwrite the existing value in the instance if it already
+            exists in self.metadata.
+            Default value is True.
+        keys : list
+            List of keys to the datas dictionary to select which data
+            the update should apply to.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+        for key in keys:
+            data = self.datas[key]
+            data.update_metadata(metadata=metadata, overwrite=overwrite)
+
+    def update_all_user_params(
+            self, params: dict, overwrite: bool = True,
+            keys: list = None):
+        """
+        Add key: value pairs to the user params for all Data2D.
+        Existing parameters can be updated by keeping the overwrite
+        argument as True.
+
+        Parameters
+        ----------
+        params : dict
+            Key : value pairs of user-specified parameters for this
+            data instance.
+        overwrite : bool
+            If set to True, any parameters provided to this method will
+            overwrite the existing value in this instance if it already
+            exists in self.uer_params.
+            Default value is True.
+        keys : list
+            List of keys to the datas dictionary to select which data
+            the update should apply to.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+        for key in keys:
+            data = self.datas[key]
+            data.update_user_params(params=params, overwrite=overwrite)
+
+    def filter_data_by_metadata(self, key, value):
+        """
+        Get a list of keys to the datas dictionary based on a metadata
+        or user param keyword.
+
+        Parameters
+        ----------
+        key : str
+            Key in either the metadata or user_params dictionaries to
+            filter the data by.
+        value : str, int, float, tuple, list
+            Value of the metadata keyword that the data should be
+            filtered by. If a string, integer, or float, the metadata
+            value for each data will need to match exactly to be returned.
+            Otherwise, if a tuple is provided, the metadata keyword
+            should fall within the numerical range defined by [min, max].
+            This range is inclusive at min and exclusive at max.
+            Finally, if a list is provided, the metadata keyword value
+            should be present in that list. For example, if value was
+            set to [1, 2, 3] and key set to 'sample_phi_deg', any
+            data with a sample_phi_deg equal to 1 or 2 or 3 will be
+            returned in the keys list.
+
+        Returns
+        -------
+        list
+            List of datas keys that meet the filter criteria.
+        """
+
+        keys = []
+
+        for data_key, data in self.datas.items():
+            if key in data.metadata.keys():
+                test_value = data.metadata[key]
+            elif key in data.user_params.keys():
+                test_value = data.user_params[key]
+            else:
+                raise KeyError(
+                    f"The key {key} was not found "
+                    "in either metadata or user_params."
+                )
+
+            if isinstance(value, tuple):
+                if test_value >= value[0] and test_value <= value[1]:
+                    keys.append(data_key)
+            elif isinstance(value, list):
+                if test_value in value:
+                    keys.append(data_key)
+            else:
+                if test_value == value:
+                    keys.append(data_key)
+
+        return keys
+
+    def normalize_all_data_by_metadata(
+            self, normalize_by, keys=None):
+        """
+        Normalize all data by the selected metadata or user parameters.
+        This will not reset any previous normalization. If a new
+        series or normalizations is desired, please run reset normalization
+        first or change reset_first to True.
+
+        Parameters
+        ----------
+        normalize_by : list
+            List of accepted metadata keywords or user parameter keys
+            that should be used to normalize the data.
+        keys : list
+            A list of datas keys can be used to only apply the normalization
+            to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.normalize_by_metadata(normalize_by)
+
+    def scale_all_data_by_metadata(
+            self, scale_by, keys=None):
+        """
+        Scale the image by the desired value.
+        This does not undo any previous scalings unless reset_scale is
+        called first or reset_first is set to True.
+
+        Parameters
+        ----------
+        value : float or int
+            Value by which to scale the data.
+        reset_first : boolean
+            If set to True, any previous scaling will be rest
+            before applying the new requested scale.
+            If left as False, the new parameters will be factored into
+            the existing scaling factor.
+        keys : list
+            A list of datas keys can be used to only apply the scaling
+            to a subset of the data in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.scale_by_metadata(scale_by)
+
+    def normalize_all_data(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.normalize_data(value)
+
+    def scale_all_data(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.scale_data(value)
+
+    def add_to_all_data(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.add_to_data(value)
+
+    def subtract_from_all_data(self, value, keys=None):
+        """
+        Scale the data by the recipricol of the specified value.or array
+        of values that match the dimensions of the data image.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.subtract_from_data(value)
+
+    def apply_footprint_correction(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_footprint_correction()
+
+    def apply_sample_size_correction(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_sample_size_correction()
+
+    def apply_substrate_absorption_correction(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_substrate_absorption_correction()
+
+    def reset_all_data_intensity(self, keys=None):
+        """
+        Reset all normalization, scaling, adding and subtracting.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.reset_intensity()
+
+    def rotate_all_data_ccw(self, steps, keys=None):
+        """
+        Rotate the scattering image in 90 degree counterclockwise steps.
+        The scattering vectors qdy and qdx as well as the beam center
+        position in metadata(center_px) will be updated with the
+        rotation.
+
+        Parameters
+        ----------
+        steps : int
+            Number of 90 degree steps to rotation the image in the
+            counterclockwise direction.
+        keys : list
+            List of datas keys that identify which data this method
+            should be applied to. If not provide, this method will be
+            applied to all Data2D instances in datas.
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.rotate_image_ccw(steps)
+
+    def flip_all_data_horizontally(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.flip_horizontally()
+
+    def flip_all_data_vertically(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.flip_vertically()
+
+    def reset_all_data(self, keys=None):
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.reset_image()
+
+    def integrate_dataset(
+        self,
+        limits_qdy_px: list | tuple | int,
+        limits_qdx_px: list | tuple | int,
+        mode: str,
+        axis: str | int = None,
+        shift_box_qdy_px=0,
+        shift_box_qdx_px=0,
+        subtract_background_offset: int | list[int] = None,
+        keys=None,
+    ):
+        """
+        Parameters
+        ----------
+        limits_qdy_px : iterable of int
+            Pixel range along qdy axis for integration box.
+            Half open range of [min, max).
+            If an integer value is given instead, the box limits will
+            be determined internally for a box of that width centered
+            around the beam center and offset by shift_box_qdy_px.
+        limits_qdx_px : iterable of int
+            Pixel range along qdx axis for integration box.
+            Half open range of [min, max).
+            If an integer value is given instead, the box limits will
+            be determined internally for a box of that width centered
+            around the beam center and offset by shift_box_qdx_px.
+            If an integer was given for qdy, an integer must be given
+            for qdx.
+        mode : str
+            Integration mode, either 'sum' or 'mean'.
+        axis : str, int
+            Axis over which the summation or mean will be
+            performed. Either the q name or numpy index can be provided
+            here.
+            If axis is set to 'qdy' or 0, this integration will be
+            performed over all rows in each column and return I vs. qdx.
+            If axis is set to 'qdx' or 1, this integration will be
+            performed over all columns in each row and return I vs. qdy.
+            If no axis is provided, the function will assume the data
+            should be integrated over the shorter box dimension.
+        keys : str | list[str]
+            Datas keys that select which Data2D instances the integration
+            is applied to.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+
+        Returns
+        -------
+        IntegratedDataset
+            Dataset that contains the integrated q-slices.
+        """
+        if keys is not None:
+            if isinstance(keys, str):
+                keys = [keys]
+        else:
+            keys = list(self.datas.keys())
+
+        qslices = []
+        for key in keys:
+            data = self.datas[key]
+            qslice, _ = data.integrate_box(
+                limits_qdy_px=limits_qdy_px,
+                limits_qdx_px=limits_qdx_px,
+                mode=mode,
+                axis=axis,
+                shift_box_qdy_px=shift_box_qdy_px,
+                shift_box_qdx_px=shift_box_qdx_px,
+                show_plot=False,
+                subtract_background_offset=subtract_background_offset
+            )
+            qslices.append(qslice)
+
+        dataset = IntegratedDataset(qslices)
+        return dataset
+
+    # def plot_integrated_dataset(
+    #         self,
+    #         index=None,
+    #         q_axis=None,
+    #         order_by='sample_phi_deg',
+    #         log_scale=True):
+    #     """
+    #     Plot the slices extracted from integrated a dataset of DataQdxQdy.
+
+    #     """
+    #     fig = plotting.plot_integrated_dataset(
+    #         self,
+    #         index=index,
+    #         q_axis=q_axis,
+    #         order_by=order_by,
+    #         log_scale=log_scale,
+    #     )
+
+    #     return fig
+
+    # def mirror_integrated_dataset(
+    #     self,
+    #     index=None,
+    # ):
+    #     if index is None:
+    #         index = max(self.integrated_datasets.keys())
+
+    #     for int_q_slice in self.integrated_datasets[index].values():
+    #         int_q_slice.mirror_q()
+
+    # def reset_mirrored_integrated_dataset(
+    #         self,
+    #         index=None,
+    # ):
+    #     if index is None:
+    #         index = max(self.integrated_datasets.keys())
+
+    #     for int_q_slice in self.integrated_datasets[index].values():
+    #         int_q_slice.reset_mirrored_q()
+
+    # def plot_reduced_dataset(
+    #         self,
+    #         index=None,
+    #         log_scale=True,
+    #         interpolated_image=True,
+    #         plot_marker_size=5
+    # ):
+    #     """
+    #     Plot the Qsz vs. Qsx reduced dataset after integration.
+    #     """
+    #     fig = plotting.plot_reduced_dataset(
+    #         self,
+    #         index=index,
+    #         log_scale=log_scale,
+    #         plot_marker_size=plot_marker_size,
+    #         interpolated_image=interpolated_image
+    #     )
+
+    #     return fig
+
+    # def plot_reduced_slices(
+    #         self,
+    #         index=None,
+    #         q_slice_axis='qsx',
+    #         log_scale=True,
+    #         offset_order=0,
+    #         offset_value=0
+    # ):
+
+    #     fig = plotting.plot_reduced_slices(
+    #         self,
+    #         index=index,
+    #         q_slice_axis=q_slice_axis,
+    #         log_scale=True,
+    #         offset_order=offset_order,
+    #         offset_value=offset_value,
+    #     )
+
+    #     return fig
+
+
+
+class IntegratedDataset():
+
+    def __init__(self, qslices: QSlice | list = None, name=None):
+        """
+        A set of 1D slices taken from detector images in a dataset.
+
+        Parameters
+        ----------
+        qslices : QSlice | list, optional
+            A single QSlice instance or list of QSlice instances to
+            initialize the qslices attribute of this class. If not
+            provided, the qslices attribute will be an empty list and
+            instances of QSlice can later be added.
+        name : str
+            Custom name of the integrated dataset.
+        """
+
+        self.name = name
+        self.qslices = []
+        if qslices is not None:
+            self.add_slices(qslices=qslices)
+
+    def add_slices(self, qslices: QSlice | list | IntegratedDataset):
+        """
+        Add a single QSlice or list of QSlice instances to this dataset.
+        You can also provide another instance of this class and the
+        slices will get added to this instance.
+        """
+        if isinstance(qslices, QSlice):
+            qslices = [qslices]
+        elif isinstance(qslices, IntegratedDataset):
+            qslices = [qslices]
+
+        if isinstance(qslices, list):
+            for qslice in qslices:
+                if isinstance(qslice, QSlice):
+                    self.qslices.append(qslice)
+                elif isinstance(qslice, IntegratedDataset):
+                    self.qslices.extend(qslice.qslices)
+                else:
+                    raise ValueError(
+                        "Didn't recognize qslice data type "
+                        f"{type(qslice)}."
+                    )
+        else:
+            raise ValueError(
+                "Qslices should be a single Q-Slice or IntegratedDataset "
+                "or a list of any combination of those types. Not: "
+                f"{type(qslices)}"
+            )
+
+    def plot_data(
+        self,
+        q_axis='qdx',
+        y_axis='sample_phi_deg',
+        log_scale=True,
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        filter_by_q={},
+        filter_by_metadata={},
+        **kwargs
+    ):
+
+        fig = plotting.plot_integrated_dataset(
+            self,
+            q_axis=q_axis,
+            y_axis=y_axis,
+            log_scale=log_scale,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            filter_by_q=filter_by_q,
+            filter_by_metadata=filter_by_metadata,
+            **kwargs
+        )
+
+        return fig
+
+
+class ReducedDataset():
+
+    def __init__(
+            self,
+            data: ReducedData1D | list | ReducedDataset = None,
+            name=None):
+        """
+        A set of 1D slices taken from detector images in a dataset.
+
+        Parameters
+        ----------
+        data : ReducedData1D | list, optional
+            A single QSlice instance or list of QSlice instances to
+            initialize the qslices attribute of this class. If not
+            provided, the qslices attribute will be an empty list and
+            instances of QSlice can later be added.
+        name : str
+            Custom name of the integrated dataset.
+        """
+
+        self.name = name
+        self.data = []
+        if data is not None:
+            self.add_data(data=data)
+
+    def add_data(self, data: ReducedData1D | list | ReducedDataset):
+        """
+        Add a single QSlice or list of QSlice instances to this dataset.
+        You can also provide another instance of this class and the
+        slices will get added to this instance.
+        """
+        if isinstance(data, ReducedData1D):
+            data = [data]
+        elif isinstance(data, ReducedDataset):
+            data = [data]
+
+        if isinstance(data, list):
+            for dat in data:
+                if isinstance(dat, ReducedData1D):
+                    self.data.append(dat)
+                elif isinstance(dat, ReducedDataset):
+                    self.data.extend(dat.data)
+                else:
+                    raise ValueError(
+                        "Didn't recognize reduced data type "
+                        f"{type(dat)}."
+                    )
+        else:
+            raise ValueError(
+                "Qslices should be a single ReducedData1D or ReducedDataset "
+                "or a list of any combination of those types. Not: "
+                f"{type(data)}"
+            )
+
+    def plot_data(
+            self,
+            log_scale=True,
+            cmap='viridis',
+            vmin=None,
+            vmax=None,
+            filter_by_q={},
+            filter_by_metadata={},
+            interpolated_data=False,
+            **kwargs
+    ):
+
+        fig = plotting.plot_reduced_dataset(
+            self,
+            log_scale=log_scale,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            filter_by_q=filter_by_q,
+            filter_by_metadata=filter_by_metadata,
+            interpolated_data=interpolated_data,
+            **kwargs
+        )
+
+        return fig
+
+
+class ReducedSlices():
+
+    def __init__(
+            self,
+            slices: ReducedData1DSlice | list | ReducedSlices = None,
+            name=None):
+        """
+        A set of 1D slices taken from detector images in a dataset.
+
+        Parameters
+        ----------
+        data : ReducedData1D | list, optional
+            A single QSlice instance or list of QSlice instances to
+            initialize the qslices attribute of this class. If not
+            provided, the qslices attribute will be an empty list and
+            instances of QSlice can later be added.
+        name : str
+            Custom name of the integrated dataset.
+        """
+
+        self.name = name
+        self.data = []
+        if slices is not None:
+            self.add_slices(slices=slices)
+
+    def add_slices(self, slices: ReducedData1DSlice | list | ReducedSlices):
+        """
+        Add a single QSlice or list of QSlice instances to this dataset.
+        You can also provide another instance of this class and the
+        slices will get added to this instance.
+        """
+        if isinstance(slices, ReducedData1DSlice):
+            slices = [slices]
+        elif isinstance(slices, ReducedSlices):
+            slices = [slices]
+
+        if isinstance(slices, list):
+            for slice_i in slices:
+                if isinstance(slice_i, ReducedData1DSlice):
+                    self.data.append(slice_i)
+                elif isinstance(slice_i, ReducedSlices):
+                    self.data.extend(slice_i.data)
+                else:
+                    raise ValueError(
+                        "Didn't recognize reduced data type "
+                        f"{type(slice_i)}."
+                    )
+        else:
+            raise ValueError(
+                "Slices should be a single ReducedData1DSlice or ReducedSlices"
+                " or a list of any combination of those types. Not: "
+                f"{type(slices)}"
+            )
+
+    def plot_data(self,
+                  q_axis='qsz',
+                  integrated_axis='qsx',
+                  filter_by_q={},
+                  log_scale=True,
+                  offset_order=0,
+                  offset_value=0,
+                  ):
+
+        fig = plotting.plot_reduced_slices(
+            self,
+            q_axis=q_axis,
+            integrated_axis=integrated_axis,
+            filter_by_q=filter_by_q,
+            log_scale=log_scale,
+            offset_order=offset_order,
+            offset_value=offset_value)
+
+        return fig
+
+    def export_reduced_slices(
+            self,
+            filepath,
+            filter_by_q={},
+            q_axis='qsz',
+            integrated_axis='qsx',
+            decimals=5):
+        """
+        Returns the slected reduced slices set currently stored in the
+        dataset. The user must specify the index of the set of slices
+        as well as the q_slice_axis. The number of decimal places the
+        slice positions are rounded at can be changed with the
+        decimals keyword argument.
+
+        NOTE: currently only a q_slice_axis of 'qsx' is accepted or
+        formatted appropriately in the output file.
+        TODO: generalize this in the future.
+        """
+
+        filtered_slices = self.data.copy()
+        for key, value in filter_by_q.items():
+            keep = []
+            for data in filtered_slices:
+                test = getattr(data, key)
+                if np.nanmin(test) >= np.nanmin(value)\
+                        and np.nanmax(test) <= np.nanmax(value):
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
+
+        length = 0
+        for r_slice in filtered_slices:
+            length = np.max((length, len(getattr(r_slice, q_axis))))
+
+        datas = []
+
+        for r_slice in filtered_slices:
+            q = getattr(r_slice, q_axis)
+            Iq = getattr(r_slice, '_masked_Iq')
+            q_int = getattr(r_slice, integrated_axis)
+
+            # sort by q
+            sorted_indexes = np.argsort(q)
+            q = q[sorted_indexes]
+            Iq = Iq[sorted_indexes]
+
+            select = (~np.isnan(Iq)) & (Iq > 0)
+
+            new_q = np.hstack(
+                ([r'$q_z (\AA^{-1})$'],
+                    np.round(q, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(q[select])))
+                    )
+
+            new_Iq = np.hstack(
+                ([f'qx = {np.round(q_int, decimals)}'],
+                    np.round(Iq, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(Iq[select])))
+                    )
+
+            datas.append(new_q)
+            datas.append(new_Iq)
+
+        datas = np.array(datas).T
+        np.savetxt(filepath, datas, delimiter=',', fmt='%s')
