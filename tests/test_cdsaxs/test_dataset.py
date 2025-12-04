@@ -1,6 +1,6 @@
 import unittest
 
-from cdsaxs.dataset import Dataset
+from cdsaxs.data.dataset import Dataset
 
 
 class Dataset(unittest.TestCase):
