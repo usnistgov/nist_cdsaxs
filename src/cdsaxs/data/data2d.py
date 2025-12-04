@@ -36,6 +36,12 @@ UPDATE_QS_TRIGGERS = [
     "sample_chi_deg", "sample_chi_offset_deg",
 ]
 
+ACCEPTED_Q_KEYWORDS = [
+    'qb', 'qbx', 'qby', 'qbz',
+    'qs', 'qsx', 'qsy', 'qsz',
+    'qd', 'qdx', 'qdy', 'qdz',
+]
+
 
 def combine_data2d(*data2d: Data2D, name=None):
     """
@@ -1278,6 +1284,15 @@ class Data2D(DataImage):
                 qsx
                 qsz
         """
+        invalid_kwargs = [x for x in ranges.keys()
+                          if x not in ACCEPTED_Q_KEYWORDS]
+        if len(invalid_kwargs) > 0:
+            raise KeyError(
+                "The following keyword arguments are not allowed for this"
+                f" function: {invalid_kwargs}. Please see the relevant "
+                "doc strings for more details."
+            )
+    
         selection_mask = self.get_pixels_qrange(**ranges)
 
         limits = tools.find_maximum_rectangular_roi(selection_mask)
@@ -1315,6 +1330,15 @@ class Data2D(DataImage):
             and are not already masked by the instance of this class
             (unless the mask is ignored).
         """
+
+        invalid_kwargs = [x for x in ranges.keys()
+                          if x not in ACCEPTED_Q_KEYWORDS]
+        if len(invalid_kwargs) > 0:
+            raise KeyError(
+                "The following keyword arguments are not allowed for this"
+                f" function: {invalid_kwargs}. Please see the relevant "
+                "doc strings for more details."
+            )
 
         selected = np.ones_like(self.image).astype(bool)
 
@@ -1465,6 +1489,15 @@ class Data2D(DataImage):
                 qsx
                 qsz
         """
+
+        invalid_kwargs = [x for x in kwargs.keys()
+                          if x not in ACCEPTED_Q_KEYWORDS]
+        if len(invalid_kwargs) > 0:
+            raise KeyError(
+                "The following keyword arguments are not allowed for this"
+                f" function: {invalid_kwargs}. Please see the relevant "
+                "doc strings for more details."
+            )
 
         # dimensions along y or axis 0
         if width_qdy_px is not None:
