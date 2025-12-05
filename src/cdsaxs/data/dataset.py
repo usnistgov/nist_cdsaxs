@@ -814,6 +814,8 @@ class ReducedSlices():
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
+            offset_axis ='qsy',
+            header_axis = None,
             decimals=5):
         """
         Returns the slected reduced slices set currently stored in the
@@ -826,6 +828,17 @@ class ReducedSlices():
         formatted appropriately in the output file.
         TODO: generalize this in the future.
         """
+
+        if header_axis is None:
+            header_axis = integrated_axis
+        if (header_axis != integrated_axis) or (integrated_axis != 'qsr'):
+            warnings.warn(
+                "Currently only qsr or the integrated axis can be used as the header "
+                "for exporting reduced slices. The header has been set to "
+                "the integrated axis."
+            )
+            header_axis = integrated_axis
+            
 
         filtered_slices = self.data.copy()
         for key, value in filter_by_q.items():
@@ -849,7 +862,13 @@ class ReducedSlices():
             q = getattr(r_slice, q_axis)
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
-
+            q_offset = getattr(r_slice, offset_axis)
+            
+            if header_axis == 'qsr':
+                q_header = np.sqrt(q_int**2 + q_offset**2)
+            else:
+                q_header = q_int
+            
             # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]
@@ -864,7 +883,7 @@ class ReducedSlices():
                     )
 
             new_Iq = np.hstack(
-                ([f'qx = {np.round(q_int, decimals)}'],
+                ([f'qx = {np.round(q_header, decimals)}'],
                     np.round(Iq, decimals=decimals).astype(str)[select],
                     [""]*(length-len(Iq[select])))
                     )
