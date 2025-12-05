@@ -2610,8 +2610,8 @@ class Data2D(DataImage):
         if peak_axis is None:
             peak_axis = 1
         peaks, _, _ = self.find_peaks2D_one_axis(
-            limits_qdy_px=limits_qdy_px,
-            limits_qdx_px=limits_qdx_px,
+            range_qdy_px=limits_qdy_px,
+            range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
             show_plot=False,
             exclude_q=exclude_q,
