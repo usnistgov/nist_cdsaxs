@@ -63,16 +63,19 @@ def find_gaussian_peakloc(x, y, p0=None):
         )
 
     if p0 is None:
-        offset = np.min(y_fit)
-        amplitude = np.max(y_fit) - offset
-        half_max = amplitude/2
-        above_half = np.where(y_fit > half_max)[0]
         try:
-            stdev = (x_fit[np.max(above_half)] - x_fit[np.min(above_half)])/2.355
+            offset = np.min(y_fit)
+            amplitude = np.max(y_fit) - offset
+            half_max = amplitude/2
+            above_half = np.where(y_fit > half_max)[0]
+            try:
+                stdev = (x_fit[np.max(above_half)] - x_fit[np.min(above_half)])/2.355
+            except:
+                stdev = 1.0
+            scale = amplitude * np.sqrt(2*np.pi)*stdev
+            p0 = [x[np.argmax(y_fit)], stdev, scale, offset]
         except:
-            stdev = 1.0
-        scale = amplitude * np.sqrt(2*np.pi)*stdev
-        p0 = [x[np.argmax(y_fit)], stdev, scale, offset]
+            p0 = None
 
     popt, _ = curve_fit(
         gaussian,
