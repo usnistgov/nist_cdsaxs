@@ -1792,12 +1792,16 @@ class Data2D(DataImage):
 
     def find_peaks2D(
             self,
-            limits_qdy_px=None,
-            limits_qdx_px=None,
-            exclude_qdy=None,
-            exclude_qdx=None,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
             shift_box_qdy_px=0,
             shift_box_qdx_px=0,
+            exclude_qdy=None,
+            exclude_qdx=None,
             log_scale=True,
             refinement_size=7,
             show_plot=True,
@@ -1880,15 +1884,16 @@ class Data2D(DataImage):
             scattering vector has not yet been calculated, this will be
             None.
         """
-        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
-            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
-                limits_qdy_px, limits_qdx_px,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px)
-
-        if limits_qdx_px is None:
-            limits_qdy_px = (0, self.image.shape[0])
-            limits_qdx_px = (0, self.image.shape[1])
+        limits_qdy_px, limits_qdx_px = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
+        )
 
         min0, max0 = limits_qdy_px
         min1, max1 = limits_qdx_px
