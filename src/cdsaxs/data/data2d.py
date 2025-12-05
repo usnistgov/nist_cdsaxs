@@ -1950,13 +1950,17 @@ class Data2D(DataImage):
 
     def find_peaks2D_one_axis(
             self,
-            limits_qdy_px=None,
-            limits_qdx_px=None,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
             exclude_q=None,
             peak_axis=None,
             integration_mode='sum',
-            shift_box_qdy_px=0,
-            shift_box_qdx_px=0,
             log_scale=True,
             refinement_size=7,
             algorithm='scikit',
@@ -2071,15 +2075,16 @@ class Data2D(DataImage):
             None.
         """
 
-        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
-            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
-                limits_qdy_px, limits_qdx_px,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px)
-
-        if limits_qdx_px is None:
-            limits_qdy_px = (0, self.image.shape[0])
-            limits_qdx_px = (0, self.image.shape[1])
+        limits_qdy_px, limits_qdx_px = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
+        )
 
         min0, max0 = limits_qdy_px
         min1, max1 = limits_qdx_px
@@ -2164,8 +2169,14 @@ class Data2D(DataImage):
 
     def find_beam_center_from_peaks(
             self,
-            size_qdy_px,
-            size_qdx_px,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
             update=True,
             beam_center_guess=None,
             exclude_q=None,
@@ -2229,9 +2240,15 @@ class Data2D(DataImage):
         if beam_center_guess is not None:
             self.update_metadata({'center_px': beam_center_guess},
                                  overwrite=True)
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
 
         (min0, max0), (min1, max1) = box_dims
@@ -2334,8 +2351,14 @@ class Data2D(DataImage):
     def find_sdd_from_reference_peaks(
             self,
             pitch_nm,
-            size_qdy_px,
-            size_qdx_px,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
             update=True,
             show_plot=True,
             peak_orders=None,
@@ -2411,9 +2434,15 @@ class Data2D(DataImage):
             returned in units of cm.
         """
 
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
 
         (min0, max0), (min1, max1) = box_dims
@@ -2490,8 +2519,14 @@ class Data2D(DataImage):
 
     def find_chi_from_peaks(
         self,
-        size_qdy_px,
-        size_qdx_px,
+        width_qdy_px=None,
+        width_qdx_px=None,
+        range_qdy_px=None,
+        range_qdx_px=None,
+        center_qdy=None,
+        center_qdx=None,
+        shift_box_qdy_px=0,
+        shift_box_qdx_px=0,
         show_plot=True,
         zoom_plot=True,
         exclude_q=None,
@@ -2559,9 +2594,15 @@ class Data2D(DataImage):
             False, None is returned in its place.
         """
 
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
         limits_qdy_px, limits_qdx_px = box_dims
 
@@ -2612,8 +2653,14 @@ class Data2D(DataImage):
 
     def find_omega_from_peaks(
         self,
-        size_qdy_px,
-        size_qdx_px,
+        width_qdy_px=None,
+        width_qdx_px=None,
+        range_qdy_px=None,
+        range_qdx_px=None,
+        center_qdy=None,
+        center_qdx=None,
+        shift_box_qdy_px=0,
+        shift_box_qdx_px=0,
         show_plot=True,
         zoom_plot=True,
         **kwargs
@@ -2684,9 +2731,15 @@ class Data2D(DataImage):
             False, None is returned in its place.
         """
 
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
         limits_qdy_px, limits_qdx_px = box_dims
 
