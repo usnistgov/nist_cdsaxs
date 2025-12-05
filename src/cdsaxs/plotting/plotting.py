@@ -874,7 +874,7 @@ def plot_reduced_dataset(
         interpolated_data=False,
         **kwargs):
 
-    filtered_slices = reduced_dataset.data.copy()
+    filtered_slices = reduced_dataset.datas.copy()
 
     for key, value in filter_by_metadata.items():
         keep = []

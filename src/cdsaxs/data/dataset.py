@@ -657,7 +657,7 @@ class ReducedDataset():
 
     def __init__(
             self,
-            data: ReducedData1D | list | ReducedDataset = None,
+            datas: ReducedData1D | list | ReducedDataset = None,
             name=None):
         """
         A set of 1D slices taken from detector images in a dataset.
@@ -674,27 +674,27 @@ class ReducedDataset():
         """
 
         self.name = name
-        self.data = []
-        if data is not None:
-            self.add_data(data=data)
+        self.datas = []
+        if datas is not None:
+            self.add_data(datas=datas)
 
-    def add_data(self, data: ReducedData1D | list | ReducedDataset):
+    def add_data(self, datas: ReducedData1D | list | ReducedDataset):
         """
         Add a single QSlice or list of QSlice instances to this dataset.
         You can also provide another instance of this class and the
         slices will get added to this instance.
         """
-        if isinstance(data, ReducedData1D):
-            data = [data]
-        elif isinstance(data, ReducedDataset):
-            data = [data]
+        if isinstance(datas, ReducedData1D):
+            datas = [datas]
+        elif isinstance(datas, ReducedDataset):
+            datas = [datas]
 
-        if isinstance(data, list):
-            for dat in data:
+        if isinstance(datas, list):
+            for dat in datas:
                 if isinstance(dat, ReducedData1D):
-                    self.data.append(dat)
+                    self.datas.append(dat)
                 elif isinstance(dat, ReducedDataset):
-                    self.data.extend(dat.data)
+                    self.datas.extend(dat.datas)
                 else:
                     raise ValueError(
                         "Didn't recognize reduced data type "
@@ -704,7 +704,7 @@ class ReducedDataset():
             raise ValueError(
                 "Qslices should be a single ReducedData1D or ReducedDataset "
                 "or a list of any combination of those types. Not: "
-                f"{type(data)}"
+                f"{type(datas)}"
             )
 
     def plot_data(
