@@ -831,14 +831,13 @@ class ReducedSlices():
 
         if header_axis is None:
             header_axis = integrated_axis
-        if (header_axis != integrated_axis) or (integrated_axis != 'qsr'):
+        elif (header_axis != integrated_axis) and (header_axis != 'qsr'):
             warnings.warn(
                 "Currently only qsr or the integrated axis can be used as the header "
                 "for exporting reduced slices. The header has been set to "
                 "the integrated axis."
             )
             header_axis = integrated_axis
-            
 
         filtered_slices = self.data.copy()
         for key, value in filter_by_q.items():
@@ -865,7 +864,7 @@ class ReducedSlices():
             q_offset = getattr(r_slice, offset_axis)
             
             if header_axis == 'qsr':
-                q_header = np.sqrt(q_int**2 + q_offset**2)
+                q_header = np.hypot(q_int, q_offset)
             else:
                 q_header = q_int
             
