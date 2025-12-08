@@ -118,6 +118,7 @@ class ReducedData1DSlice(Data1D):
                  Iq: NDArray,
                  q_axis: str,
                  integrated_axis: str,
+                 offset_axis: str,
                  slice_width: float,
                  dIq: NDArray = None,
                  mask: NDArray = None,
@@ -139,6 +140,10 @@ class ReducedData1DSlice(Data1D):
             The axis that was integrated over to generate this slice.
             This will point to the keyword argument value that should
             also be provided.
+        offset_axis : str
+            The axis that is orthogonal to both the q_axis and the
+            integrated_axis. This will point to the keyword argument
+            value that should also be provided.
         slice_width : float
             Width of the integration box that generated this slice.
         dIq : uncertainity along I, default is None
@@ -182,4 +187,5 @@ class ReducedData1DSlice(Data1D):
         )
 
         self.slice_axis = integrated_axis
+        self.offset_axis = offset_axis
         self.slice_width = slice_width

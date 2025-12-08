@@ -19,6 +19,7 @@ def slice_reduced_dataset(
     q_widths=0.001,
     q_axis='qsx',
     slice_axis='qsz',
+    offset_axis='qsy',
     show_plot=True,
     plotting_kwargs={}
 ) -> ReducedSlices:
@@ -76,6 +77,7 @@ def slice_reduced_dataset(
             Iq=np.array(Iq),
             q_axis=q_axis,
             integrated_axis=integrated_axis,
+            offset_axis=offset_axis,
             slice_width=qmax-qmin
         )
         setattr(reduced_slice, integrated_axis,
