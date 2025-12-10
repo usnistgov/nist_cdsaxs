@@ -959,7 +959,11 @@ class Data2D(DataImage):
                      rotation_angle_deg,
                      rotation_center=None,
                      resampling_mode="bilinear",
-                     resampling_mode_q="bilinear"):
+                     resampling_mode_q="bilinear",
+                     fill_mode="constant",
+                     fill_constant=np.nan,
+                     use_pillow=False,
+                     **kwargs):
 
         """
         Rotate the image counterclockwise by the specified angle about
@@ -1001,11 +1005,22 @@ class Data2D(DataImage):
         for q in ['qs', 'qsx', 'qsy', 'qsz']:
             q_image = getattr(self, q)
             if q_image is not None:
-                q_image_rot = tools.rotate_image(
-                    q_image, degrees=rotation_angle_deg,
-                    rotation_center=rotation_center,
-                    resampling_mode=resampling_mode_q
-                )
+                if not use_pillow:
+                    q_image_rot = tools.rotate_image(
+                        q_image, degrees=rotation_angle_deg,
+                        rotation_center=rotation_center,
+                        resampling_mode=resampling_mode_q,
+                        fill_constant=fill_constant,
+                        fill_mode=fill_mode,
+                        **kwargs
+                    )
+                else:
+                    q_image_rot = tools.rotate_image_pillow(
+                        q_image, degrees=rotation_angle_deg,
+                        rotation_center=rotation_center,
+                        resampling_mode=resampling_mode_q,
+                        **kwargs
+                    )
             setattr(self, q, q_image_rot)
 
         super().rotate_image(rotation_angle_deg=rotation_angle_deg,
@@ -2827,6 +2842,12 @@ class Data2D(DataImage):
             raise ValueError(
                 f"Metadata or user_param not found for {keyword}."
             )
+
+    def _lock_q_calculations(self):
+        self._lock_q_calculations = True
+
+    def _unlock_q_calculations(self):
+        self._lock_q_calculations = False
 
     @property
     def sample_phi_deg(self):
