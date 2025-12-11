@@ -425,7 +425,7 @@ class Dataset():
             data.reset_image()
 
     def apply_rotation_correction_all_data(
-            self, keys=None, angles={}, verbose=True):
+            self, keys=None, angles={}, verbose=True, **kwargs):
         """
         Apply a rotation correction to all data images that aligns
         the qsy and qsx axes with the qby and qbx axes, respectively,
@@ -458,7 +458,13 @@ class Dataset():
             If set to True, a progress bar will be displayed as the
             rotation is applied to the selected data.
             Set to False to hide progress bar.
-            Default is True,
+            Default is True.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Keyword arguments accetped by the rotate_image function
+            in Data2D can be passed through this method.
         """
 
         if keys is None:
@@ -483,10 +489,10 @@ class Dataset():
                     np.tan(chi)*np.cos(phi) - np.sin(phi)*np.tan(omega)/np.cos(chi)
                 ))
 
-            data.rotate_image(rotation_angle, rotation_center=data.metadata['center_px_detector'])
+            data.rotate_image(rotation_angle, rotation_center=data.metadata['center_px_detector'], **kwargs)
 
             data.update_user_params({'rotation_correction_angle_deg': rotation_angle})
-            
+
             if verbose:
                 pbar.update(1)
 
