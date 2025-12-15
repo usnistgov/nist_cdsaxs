@@ -8,7 +8,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
-from sklearn import transform
+from skimage import transform
 
 from cdsaxs.calculators import gaussian
 
