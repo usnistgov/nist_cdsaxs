@@ -701,6 +701,8 @@ def plot_data2d_find_beam_center(
     if show_beam_center:
         if type(show_beam_center) is not tuple:
             center = data2d.metadata['center_px']
+        else:
+            center = show_beam_center
         fig = plot_errorbar(
             [center[1], center[1]],
             [0-0.5, data2d.image.shape[0]-0.5],
