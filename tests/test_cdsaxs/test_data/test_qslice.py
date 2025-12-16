@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from cdsaxs.data.qslice import QSlice
+from cdsaxs.data.reduced_data1d import QSlice
 
 
 class TestIntegratedQSlice(unittest.TestCase):

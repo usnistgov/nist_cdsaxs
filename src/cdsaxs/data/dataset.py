@@ -10,9 +10,8 @@ import numpy as np
 from tqdm import tqdm
 
 from cdsaxs.data.data2d import Data2D
-from cdsaxs.data.qslice import QSlice
-from cdsaxs.data.reduced_data1d import (
-    ReducedData1D,
+from cdsaxs.data.reduced_data1d import ReducedData1D
+from cdsaxs.data.reduced_slice import (
     ReducedData1DSlice
 )
 import cdsaxs.plotting.plotting as plotting
@@ -153,6 +152,68 @@ class Dataset():
         if verbose:
             pbar.close()
 
+    def filter_data_by_metadata(self, **filters):
+        """
+        Filter the data by any of the metadata or user_params.
+        All filter criteria must be met to be returned from this method.
+
+        Parameters
+        ----------
+        **filters
+            The metadata filters are provided as keyword arguments.
+            The argument name should match any of the keys in the
+            metadata or user_params of the data.
+            The value type of these keyword arguments will specify the
+            criteria the data must meet.
+            tuple : Data must fall within a closed range of (min, max).
+                Any data where the metadata value is >= min and <= max
+                will meet the criteria.
+            int | float : Data must equal this value exactly.
+            str : Data must equal this exactly.
+            If multiple criteria for the same metadata must be met,
+            a list of any of these values can be used. 
+            list[tuple] : Data must fall within one of the ranges
+                provided.
+            list[int | float] : Data must equal one of the values in the
+                list.
+            list[str] : Data must equal one of the values in the list.
+
+        Returns
+        -------
+        list
+            List of data keys that meet the provided metadata criteria.
+        """
+
+        keys = list(self.datas.keys())
+
+        for key, value in filters.items():
+            if isinstance(value, tuple):
+                keys = [x for x in keys
+                        if self.datas[x]._get_metadata(key) <= value[1]
+                        and self.datas[x]._get_metadata(key) >= value[0]]
+            elif isinstance(value, (int, float, str)):
+                keys = [x for x in keys
+                        if self.datas[x]._get_metadata(key) == value]
+            elif isinstance(value, list):
+                keys_i = []
+                for value_i in value:
+                    if isinstance(value_i, tuple):
+                        keys_i.extend([x for x in keys
+                                       if self.datas[x]._get_metadata(key) <= value_i[1]
+                                       and self.datas[x]._get_metadata(key) >= value_i[0]])
+                    elif isinstance(value_i, (int, float, str)):
+                        keys_i.extend([x for x in keys
+                                      if self.datas[x]._get_metadata(key) == value_i])
+                    else:
+                        raise ValueError(
+                            f"Didn't recognize filter for {key} of {value_i}."
+                        )
+                keys = list(set(keys_i))
+            else:
+                raise ValueError(
+                    f"Didn't recognize filter for {key} of {value}."
+                )
+
     def update_all_user_params(
             self, params: dict, overwrite: bool = True,
             keys: list = None):
@@ -180,60 +241,6 @@ class Dataset():
         for key in keys:
             data = self.datas[key]
             data.update_user_params(params=params, overwrite=overwrite)
-
-    def filter_data_by_metadata(self, key, value):
-        """
-        Get a list of keys to the datas dictionary based on a metadata
-        or user param keyword.
-
-        Parameters
-        ----------
-        key : str
-            Key in either the metadata or user_params dictionaries to
-            filter the data by.
-        value : str, int, float, tuple, list
-            Value of the metadata keyword that the data should be
-            filtered by. If a string, integer, or float, the metadata
-            value for each data will need to match exactly to be returned.
-            Otherwise, if a tuple is provided, the metadata keyword
-            should fall within the numerical range defined by [min, max].
-            This range is inclusive at min and exclusive at max.
-            Finally, if a list is provided, the metadata keyword value
-            should be present in that list. For example, if value was
-            set to [1, 2, 3] and key set to 'sample_phi_deg', any
-            data with a sample_phi_deg equal to 1 or 2 or 3 will be
-            returned in the keys list.
-
-        Returns
-        -------
-        list
-            List of datas keys that meet the filter criteria.
-        """
-
-        keys = []
-
-        for data_key, data in self.datas.items():
-            if key in data.metadata.keys():
-                test_value = data.metadata[key]
-            elif key in data.user_params.keys():
-                test_value = data.user_params[key]
-            else:
-                raise KeyError(
-                    f"The key {key} was not found "
-                    "in either metadata or user_params."
-                )
-
-            if isinstance(value, tuple):
-                if test_value >= value[0] and test_value <= value[1]:
-                    keys.append(data_key)
-            elif isinstance(value, list):
-                if test_value in value:
-                    keys.append(data_key)
-            else:
-                if test_value == value:
-                    keys.append(data_key)
-
-        return keys
 
     def normalize_all_data_by_metadata(
             self, normalize_by, keys=None):
@@ -418,7 +425,7 @@ class Dataset():
             data.reset_image()
 
     def apply_rotation_correction_all_data(
-            self, keys=None, angles={}, verbose=True):
+            self, keys=None, angles={}, verbose=True, **kwargs):
         """
         Apply a rotation correction to all data images that aligns
         the qsy and qsx axes with the qby and qbx axes, respectively,
@@ -451,7 +458,13 @@ class Dataset():
             If set to True, a progress bar will be displayed as the
             rotation is applied to the selected data.
             Set to False to hide progress bar.
-            Default is True,
+            Default is True.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Keyword arguments accetped by the rotate_image function
+            in Data2D can be passed through this method.
         """
 
         if keys is None:
@@ -476,10 +489,10 @@ class Dataset():
                     np.tan(chi)*np.cos(phi) - np.sin(phi)*np.tan(omega)/np.cos(chi)
                 ))
 
-            data.rotate_image(rotation_angle, rotation_center=data.metadata['center_px_detector'])
+            data.rotate_image(rotation_angle, rotation_center=data.metadata['center_px_detector'], **kwargs)
 
             data.update_user_params({'rotation_correction_angle_deg': rotation_angle})
-            
+
             if verbose:
                 pbar.update(1)
 
@@ -492,14 +505,14 @@ class Dataset():
         axis: str | int = None,
         subtract_background_offset: int | list[int] = None,
         keys=None,
-        width_qdy_px: int = None,
-        width_qdx_px: int = None,
-        range_qdy_px: tuple = None,
-        range_qdx_px: tuple = None,
-        center_qdy: tuple = None,
-        center_qdx: tuple = None,
-        shift_box_qdy_px: int = 0,
-        shift_box_qdx_px: int = 0,
+        width_qdy_px: int | dict = None,
+        width_qdx_px: int | dict = None,
+        range_qdy_px: tuple | dict = None,
+        range_qdx_px: tuple | dict = None,
+        center_qdy: tuple | dict = None,
+        center_qdx: tuple | dict = None,
+        shift_box_qdy_px: int | dict = 0,
+        shift_box_qdx_px: int | dict = 0,
         **kwargs
     ):
         """
@@ -619,188 +632,38 @@ class Dataset():
                 mode=mode,
                 axis=axis,
                 show_plot=False,
+                # if a dictionary is provided we will use the data key
+                # to select the correct keyword value otherwise it will
+                # be the same for all data
                 subtract_background_offset=subtract_background_offset,
-                width_qdy_px=width_qdy_px,
-                width_qdx_px=width_qdx_px,
-                range_qdy_px=range_qdy_px,
-                range_qdx_px=range_qdx_px,
-                center_qdy=center_qdy,
-                center_qdx=center_qdx,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px,
+                width_qdy_px=width_qdy_px if not isinstance(
+                    width_qdy_px, dict) else width_qdy_px[key],
+                width_qdx_px=width_qdx_px if not isinstance(
+                    width_qdx_px, dict) else width_qdx_px[key],
+                range_qdy_px=range_qdy_px if not isinstance(
+                    range_qdy_px, dict) else range_qdy_px[key],
+                range_qdx_px=range_qdx_px if not isinstance(
+                    range_qdx_px, dict) else range_qdx_px[key],
+                center_qdy=center_qdy if not isinstance(
+                    center_qdy, dict) else center_qdy[key],
+                center_qdx=center_qdx if not isinstance(
+                    center_qdx, dict) else center_qdx[key],
+                shift_box_qdy_px=shift_box_qdy_px if not isinstance(
+                    shift_box_qdy_px, dict) else shift_box_qdy_px[key],
+                shift_box_qdx_px=shift_box_qdx_px if not isinstance(
+                    shift_box_qdx_px, dict) else shift_box_qdx_px[key],
             )
             qslices.append(qslice)
 
-        dataset = IntegratedDataset(qslices)
+        dataset = ReducedDataset(qslices)
         return dataset
-
-    # def plot_integrated_dataset(
-    #         self,
-    #         index=None,
-    #         q_axis=None,
-    #         order_by='sample_phi_deg',
-    #         log_scale=True):
-    #     """
-    #     Plot the slices extracted from integrated a dataset of DataQdxQdy.
-
-    #     """
-    #     fig = plotting.plot_integrated_dataset(
-    #         self,
-    #         index=index,
-    #         q_axis=q_axis,
-    #         order_by=order_by,
-    #         log_scale=log_scale,
-    #     )
-
-    #     return fig
-
-    # def mirror_integrated_dataset(
-    #     self,
-    #     index=None,
-    # ):
-    #     if index is None:
-    #         index = max(self.integrated_datasets.keys())
-
-    #     for int_q_slice in self.integrated_datasets[index].values():
-    #         int_q_slice.mirror_q()
-
-    # def reset_mirrored_integrated_dataset(
-    #         self,
-    #         index=None,
-    # ):
-    #     if index is None:
-    #         index = max(self.integrated_datasets.keys())
-
-    #     for int_q_slice in self.integrated_datasets[index].values():
-    #         int_q_slice.reset_mirrored_q()
-
-    # def plot_reduced_dataset(
-    #         self,
-    #         index=None,
-    #         log_scale=True,
-    #         interpolated_image=True,
-    #         plot_marker_size=5
-    # ):
-    #     """
-    #     Plot the Qsz vs. Qsx reduced dataset after integration.
-    #     """
-    #     fig = plotting.plot_reduced_dataset(
-    #         self,
-    #         index=index,
-    #         log_scale=log_scale,
-    #         plot_marker_size=plot_marker_size,
-    #         interpolated_image=interpolated_image
-    #     )
-
-    #     return fig
-
-    # def plot_reduced_slices(
-    #         self,
-    #         index=None,
-    #         q_slice_axis='qsx',
-    #         log_scale=True,
-    #         offset_order=0,
-    #         offset_value=0
-    # ):
-
-    #     fig = plotting.plot_reduced_slices(
-    #         self,
-    #         index=index,
-    #         q_slice_axis=q_slice_axis,
-    #         log_scale=True,
-    #         offset_order=offset_order,
-    #         offset_value=offset_value,
-    #     )
-
-    #     return fig
-
-
-
-class IntegratedDataset():
-
-    def __init__(self, qslices: QSlice | list = None, name=None):
-        """
-        A set of 1D slices taken from detector images in a dataset.
-
-        Parameters
-        ----------
-        qslices : QSlice | list, optional
-            A single QSlice instance or list of QSlice instances to
-            initialize the qslices attribute of this class. If not
-            provided, the qslices attribute will be an empty list and
-            instances of QSlice can later be added.
-        name : str
-            Custom name of the integrated dataset.
-        """
-
-        self.name = name
-        self.qslices = []
-        if qslices is not None:
-            self.add_slices(qslices=qslices)
-
-    def add_slices(self, qslices: QSlice | list | IntegratedDataset):
-        """
-        Add a single QSlice or list of QSlice instances to this dataset.
-        You can also provide another instance of this class and the
-        slices will get added to this instance.
-        """
-        if isinstance(qslices, QSlice):
-            qslices = [qslices]
-        elif isinstance(qslices, IntegratedDataset):
-            qslices = [qslices]
-
-        if isinstance(qslices, list):
-            for qslice in qslices:
-                if isinstance(qslice, QSlice):
-                    self.qslices.append(qslice)
-                elif isinstance(qslice, IntegratedDataset):
-                    self.qslices.extend(qslice.qslices)
-                else:
-                    raise ValueError(
-                        "Didn't recognize qslice data type "
-                        f"{type(qslice)}."
-                    )
-        else:
-            raise ValueError(
-                "Qslices should be a single Q-Slice or IntegratedDataset "
-                "or a list of any combination of those types. Not: "
-                f"{type(qslices)}"
-            )
-
-    def plot_data(
-        self,
-        q_axis='qbx',
-        y_axis='sample_phi_deg',
-        log_scale=True,
-        cmap='viridis',
-        vmin=None,
-        vmax=None,
-        filter_by_q={},
-        filter_by_metadata={},
-        **kwargs
-    ):
-
-        fig = plotting.plot_integrated_dataset(
-            self,
-            q_axis=q_axis,
-            y_axis=y_axis,
-            log_scale=log_scale,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            filter_by_q=filter_by_q,
-            filter_by_metadata=filter_by_metadata,
-            **kwargs
-        )
-
-        return fig
 
 
 class ReducedDataset():
 
     def __init__(
             self,
-            data: ReducedData1D | list | ReducedDataset = None,
+            datas: ReducedData1D | list | ReducedDataset = None,
             name=None):
         """
         A set of 1D slices taken from detector images in a dataset.
@@ -817,27 +680,27 @@ class ReducedDataset():
         """
 
         self.name = name
-        self.data = []
-        if data is not None:
-            self.add_data(data=data)
+        self.datas = []
+        if datas is not None:
+            self.add_data(datas=datas)
 
-    def add_data(self, data: ReducedData1D | list | ReducedDataset):
+    def add_data(self, datas: ReducedData1D | list | ReducedDataset):
         """
         Add a single QSlice or list of QSlice instances to this dataset.
         You can also provide another instance of this class and the
         slices will get added to this instance.
         """
-        if isinstance(data, ReducedData1D):
-            data = [data]
-        elif isinstance(data, ReducedDataset):
-            data = [data]
+        if isinstance(datas, ReducedData1D):
+            datas = [datas]
+        elif isinstance(datas, ReducedDataset):
+            datas = [datas]
 
-        if isinstance(data, list):
-            for dat in data:
+        if isinstance(datas, list):
+            for dat in datas:
                 if isinstance(dat, ReducedData1D):
-                    self.data.append(dat)
+                    self.datas.append(dat)
                 elif isinstance(dat, ReducedDataset):
-                    self.data.extend(dat.data)
+                    self.datas.extend(dat.datas)
                 else:
                     raise ValueError(
                         "Didn't recognize reduced data type "
@@ -847,7 +710,7 @@ class ReducedDataset():
             raise ValueError(
                 "Qslices should be a single ReducedData1D or ReducedDataset "
                 "or a list of any combination of those types. Not: "
-                f"{type(data)}"
+                f"{type(datas)}"
             )
 
     def plot_data(

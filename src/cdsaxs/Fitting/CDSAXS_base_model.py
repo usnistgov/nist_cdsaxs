@@ -13,7 +13,8 @@ from scipy.optimize import (
 import matplotlib.pyplot as plt
 import copy
 from tqdm import tqdm
-
+import warnings
+from matplotlib.colors import LogNorm
 class CDSAXS_Model:
     """
     Base class for CDSAXS modeling.
@@ -250,6 +251,105 @@ class CDSAXS_Model:
             raise ValueError("The data file is empty or not properly formatted")
         except pd.errors.ParserError:
             raise ValueError("Error parsing the CSV file. Check the file format")
+        except Exception as e:
+            raise RuntimeError(f"Error processing data: {str(e)}")
+        
+        return True  # Return success
+    
+    def importCDSAXS_txtlegacy(self, intensity_file, qx_file, qz_file):
+        """
+        Imports CDSAXS data from three separate tab-delimited .txt files with input validation
+        
+        Parameters:
+        -----------
+        intensity_file : str
+            Path to the intensity data file (tab-delimited .txt format)
+        qx_file : str
+            Path to the Qx data file (tab-delimited .txt format)
+        qz_file : str
+            Path to the Qz data file (tab-delimited .txt format)
+        """
+        # Check if input variables exist and are valid
+        for file_path, param_name in [(intensity_file, 'intensity_file'), 
+                                       (qx_file, 'qx_file'), 
+                                       (qz_file, 'qz_file')]:
+            if file_path is None or not isinstance(file_path, str):
+                raise ValueError(f"{param_name} must be a valid file path")
+            
+            # Check if file exists
+            if not os.path.isfile(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+        
+        try:
+            # Read the three tab-delimited files
+            # Using numpy.loadtxt for tab-delimited files
+            Intensity_data = np.loadtxt(intensity_file, delimiter='\t')
+            Qx_data = np.loadtxt(qx_file, delimiter='\t')
+            Qz_data = np.loadtxt(qz_file, delimiter='\t')
+            
+            # Check if files have content
+            if Intensity_data.size == 0 or Qx_data.size == 0 or Qz_data.size == 0:
+                raise ValueError("One or more data files are empty")
+            
+            # Ensure 2D arrays (handle 1D case)
+            if Intensity_data.ndim == 1:
+                Intensity_data = Intensity_data.reshape(-1, 1)
+            if Qx_data.ndim == 1:
+                Qx_data = Qx_data.reshape(-1, 1)
+            if Qz_data.ndim == 1:
+                Qz_data = Qz_data.reshape(-1, 1)
+            
+            # Check that all files have the same dimensions
+            if Intensity_data.shape != Qx_data.shape or Intensity_data.shape != Qz_data.shape:
+                raise ValueError(f"Dimension mismatch: Intensity shape {Intensity_data.shape}, "
+                              f"Qx shape {Qx_data.shape}, Qz shape {Qz_data.shape}. "
+                              f"All files must have the same dimensions.")
+            
+            # Assign data to instance variables
+            self.Intensity = Intensity_data.copy()
+            self.Qx = Qx_data.copy()
+            self.Qz = Qz_data.copy()
+            
+            # Convert zeros in intensity array to NaNs
+            self.Intensity[self.Intensity == 0] = np.nan
+            
+            # Check if Qx values are increasing along the rows and sort if needed
+            # Get the first row with valid data to check order
+            for row_idx in range(self.Qx.shape[0]):
+                if np.all(np.isfinite(self.Qx[row_idx, :])):
+                    # Check if Qx is not in ascending order
+                    if not np.all(np.diff(self.Qx[row_idx, :]) >= 0):
+                        # Get sort indices
+                        sort_indices = np.argsort(self.Qx[row_idx, :])
+                        
+                        # Apply sorting to all arrays
+                        self.Qx = self.Qx[:, sort_indices]
+                        self.Qz = self.Qz[:, sort_indices]
+                        self.Intensity = self.Intensity[:, sort_indices]
+                    break
+            
+            # Create Qy array with zeros where Qx has positive values
+            self.Qy = np.zeros_like(self.Qx)
+            # Only set values to zero where Qx is positive (keep NaN values as they were)
+            self.Qy[self.Qx > 0] = 0
+            
+            # Calculate number of valid points
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            # Process data according to geometry (implemented by subclasses)
+            self.process_imported_data()
+                
+        except IOError as e:
+            raise IOError(f"Error reading one or more files: {str(e)}")
+        except ValueError as e:
+            # Re-raise ValueError with more context if needed
+            if "could not convert string to float" in str(e).lower():
+                raise ValueError("Error parsing data files. Check that files contain only numeric values.")
+            raise
         except Exception as e:
             raise RuntimeError(f"Error processing data: {str(e)}")
         
@@ -955,17 +1055,12 @@ class CDSAXS_Model:
         numpy.ndarray
             The simulated intensity (also sets self.SimInt)
         """
-        if not opt_params:
-            print(f"Debug: About to call simulate_structure")
-            print(f"Debug: self.Intensity shape before sim: {self.Intensity.shape}")
+      
             
-            self.SimInt = self.simulate_structure()
-            
-            print(f"Debug: SimInt shape after sim: {self.SimInt.shape if self.SimInt is not None else 'None'}")
-            print(f"Debug: SimInt sample: {self.SimInt[0,0] if self.SimInt is not None else 'None'}")
-            
-            gf = self.GF_calc(self.SimInt)
-            print(f"Debug: GF value: {gf}")
+        self.SimInt = self.simulate_structure()
+      
+        gf = self.GF_calc(self.SimInt)
+
         
         raise NotImplementedError("Subclasses must implement this method")
     
@@ -1991,8 +2086,8 @@ class CDSAXS_Model:
         df = pd.DataFrame(data_dict)
         
         # Add timestamp to filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_file}_{timestamp}.csv"
+
+        filename = f"{output_file}_.csv"
         
         # Save to CSV
         df.to_csv(filename, index=False)
@@ -2032,8 +2127,8 @@ class CDSAXS_Model:
                     data_dict[f'metadata_{key}'] = value
         
         # Add timestamp to filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_file}_{timestamp}.npz"
+    
+        filename = f"{output_file}.npz"
         
         # Save to NPZ
         np.savez_compressed(filename, **data_dict)

@@ -1,8 +1,10 @@
 from __future__ import annotations
+from typing import Tuple
 import warnings
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.figure import Figure
 
 import cdsaxs.calculators as calculators
 from cdsaxs.data.data_image import DataImage
@@ -11,7 +13,7 @@ from cdsaxs.data.metadata import (
     check_metadata,
     correct_metadata_dtype
 )
-from cdsaxs.data.qslice import QSlice
+from cdsaxs.data.reduced_data1d import ReducedData1D
 import cdsaxs.plotting.plotting as plotting
 import cdsaxs.diffraction as diffraction
 import cdsaxs.tools as tools
@@ -32,6 +34,12 @@ UPDATE_QS_TRIGGERS = [
     "sample_phi_deg", "sample_phi_offset_deg",
     "sample_omega_deg", "sample_omega_offset_deg",
     "sample_chi_deg", "sample_chi_offset_deg",
+]
+
+ACCEPTED_Q_KEYWORDS = [
+    'qb', 'qbx', 'qby', 'qbz',
+    'qs', 'qsx', 'qsy', 'qsz',
+    'qd', 'qdx', 'qdy', 'qdz',
 ]
 
 
@@ -951,7 +959,11 @@ class Data2D(DataImage):
                      rotation_angle_deg,
                      rotation_center=None,
                      resampling_mode="bilinear",
-                     resampling_mode_q="bilinear"):
+                     resampling_mode_q="bilinear",
+                     fill_mode="constant",
+                     fill_constant=np.nan,
+                     use_pillow=False,
+                     **kwargs):
 
         """
         Rotate the image counterclockwise by the specified angle about
@@ -993,11 +1005,22 @@ class Data2D(DataImage):
         for q in ['qs', 'qsx', 'qsy', 'qsz']:
             q_image = getattr(self, q)
             if q_image is not None:
-                q_image_rot = tools.rotate_image(
-                    q_image, degrees=rotation_angle_deg,
-                    rotation_center=rotation_center,
-                    resampling_mode=resampling_mode_q
-                )
+                if not use_pillow:
+                    q_image_rot = tools.rotate_image(
+                        q_image, degrees=rotation_angle_deg,
+                        rotation_center=rotation_center,
+                        resampling_mode=resampling_mode_q,
+                        fill_constant=fill_constant,
+                        fill_mode=fill_mode,
+                        **kwargs
+                    )
+                else:
+                    q_image_rot = tools.rotate_image_pillow(
+                        q_image, degrees=rotation_angle_deg,
+                        rotation_center=rotation_center,
+                        resampling_mode=resampling_mode_q,
+                        **kwargs
+                    )
             setattr(self, q, q_image_rot)
 
         super().rotate_image(rotation_angle_deg=rotation_angle_deg,
@@ -1075,9 +1098,13 @@ class Data2D(DataImage):
         super().reset_image()
         self.data_transformations = []
 
-    def get_box_dims_size(self, size_qdy_px, size_qdx_px,
-                          shift_box_qdy_px=0, shift_box_qdx_px=0,
-                          center = None):
+    def get_box_dims_size(
+            self,
+            size_qdy_px: int | float,
+            size_qdx_px: int | float,
+            shift_box_qdy_px: int = 0,
+            shift_box_qdx_px: int = 0,
+            center: tuple = None) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         """
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with a specific width
@@ -1086,9 +1113,9 @@ class Data2D(DataImage):
         Parameters
         ----------
         size_qdy_px : int
-            Size of the box in pixels along qdy axis (axis 0)
+            Height of the box in pixels along qdy axis (axis 0)
         size_qdx_px : int
-            Size of the box in pixels along qdx axis (axis 1)
+            Height of the box in pixels along qdy axis (axis 0)
         shift_box_qdy_px : int, optional
             Number of pixels to shift the box by in the positive qdy
             direction. A negative value will shift the box in the
@@ -1099,9 +1126,13 @@ class Data2D(DataImage):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
-        center : tuple
-            Set the pixel center.
-            Default is the beam center.
+        center : tuple[int | float]
+            Set the pixel center of the box.
+            Default is the center_px_detector (detector based beam
+            center coordinates) or next the center_px (beam based beam
+            center coordinates).
+            First element should be center along axis 0 and second
+            element should be center along axis 1.
 
         Returns
         -------
@@ -1110,45 +1141,149 @@ class Data2D(DataImage):
         tuple(int, int)
             Half open range along the qdx axis (axis 0).
         """
-        # figure out where the box lies with respect to beam center
-        # make sure that the box doesn't fall off the image
-        if center is None:
-            center0, center1 = self.metadata['center_px']
-        else:
-            center0, center1 = center
 
-        center0 = int(np.round(center0, 0))  # closest pixel
-        min0 = center0 - int(size_qdy_px/2) - shift_box_qdy_px
-        max0 = min0 + size_qdy_px
-        min0 = max(min0, 0)
-        max0 = min(max0, self.image.shape[0])
+        limits_axis0 = self._get_box_dims_size_y(
+            size_qdy_px=size_qdy_px, shift_box_qdy_px=shift_box_qdy_px,
+            center=center if center is None else center[0]
+        )
 
-        center1 = int(np.round(center1, 0))  # closest pixel
-        min1 = center1 - int(size_qdx_px/2) - shift_box_qdx_px
-        max1 = min1 + size_qdx_px
-        min1 = max(min1, 0)
-        max1 = min(max1, self.image.shape[1])
+        limits_axis1 = self._get_box_dims_size_x(
+            size_qdx_px=size_qdx_px, shift_box_qdx_px=shift_box_qdx_px,
+            center=center if center is None else center[1]
+        )
 
-        return (min0, max0), (min1, max1)
+        return limits_axis0, limits_axis1
 
-    def get_box_dims_qrange(self, ignore_mask=True, **ranges):
+    def _get_box_dims_size_y(
+            self,
+            size_qdy_px: int,
+            shift_box_qdy_px: int = 0,
+            center: int | float = None,
+            allow_overflow=False) -> Tuple[int, int]:
         """
-        Find the pixel index limits in half open ranges [min, max) that
-        define a region of interest based on a box with set q ranges
-        on both axes. If your q-range selection results in pixels that
-        do not form a rectangular like box, for example, a box at an
-        angle instead of parallel to either image axis or a curved
-        region, the function will return indices for a rectangular
-        region of interest that encompasses all the selected pixels.
+        Find pixel index limits that defines the height and position of
+        a rectangular region of interest (limits along y or first axis
+        of the image).
 
         Parameters
         ----------
-        ignore_mask : bool
-            If set to False, only pixels that meet the q range criteria
-            and are not already masked are set as True in the
-            returned mask of this method. If ignore_mask is True,
-            the pixels returned as True in the mask only need to meet
-            the q range criteria set by the user.
+        size_qdy_px : int
+            Height of the box in pixels along qdy axis (axis 0)
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            Default value is 0.
+        center : int
+            Set the pixel center of the box.
+            Default is the center_px_detector (detector based beam
+            center coordinates) or next the center_px (beam based beam
+            center coordinates).
+
+        Returns
+        -------
+        tuple(int, int)
+            Half open range along the qdy axis (axis 0).
+        """
+        if center is None:
+            try:
+                center_float = self.metadata['center_px_detector'][0]
+            except KeyError:
+                center_float = self.metadata['center_px'][0]
+            center = round(center_float)
+        else:
+            center_float = center
+            center = round(center)
+
+        # since the beam center can fall not on the center of a pixel
+        # shift the box in the case that the box width is even to be
+        # as close to centered around the beam center as possible
+        if size_qdy_px % 2 == 0 and center_float > center:
+            shift_box_qdy_px -= 1
+
+        min0 = center - int(size_qdy_px/2) - shift_box_qdy_px
+        max0 = min0 + size_qdy_px
+
+        if not allow_overflow:
+            min0 = max(min0, 0)
+            max0 = min(max0, self.image.shape[0])
+
+        return min0, max0
+
+    def _get_box_dims_size_x(
+            self,
+            size_qdx_px: int,
+            shift_box_qdx_px: int = 0,
+            center: int | float = None,
+            allow_overflow=False) -> Tuple[int, int]:
+        """
+        Find pixel index limits that defines the width and position of
+        a rectangular region of interest (limits along x or second
+        axis of the image).
+
+        Parameters
+        ----------
+        size_qdx_px : int
+            Height of the box in pixels along qdy axis (axis 0)
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+        center : int
+            Set the pixel center of the box.
+            Default is the center_px_detector (detector based beam
+            center coordinates) or next the center_px (beam based beam
+            center coordinates).
+
+        Returns
+        -------
+        tuple(int, int)
+            Half open range along the qdx axis (axis 1).
+        """
+        if center is None:
+            try:
+                center_float = self.metadata['center_px_detector'][1]
+            except KeyError:
+                center_float = self.metadata['center_px'][1]
+            center = round(center_float)
+        else:
+            center_float = center
+            center = round(center)
+
+        # since the beam center can fall not on the center of a pixel
+        # shift the box in the case that the box width is even to be
+        # as close to centered around the beam center as possible
+        if size_qdx_px % 2 == 0 and center_float > center:
+            shift_box_qdx_px -= 1
+
+        min1 = center - int(size_qdx_px/2) - shift_box_qdx_px
+        max1 = min1 + size_qdx_px
+
+        if not allow_overflow:
+            min1 = max(min1, 0)
+            max1 = min(max1, self.image.shape[1])
+
+        return min1, max1
+
+    def get_box_dims_qrange(
+            self, **ranges) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+        """
+        Find the pixel index limits in half open ranges [min, max) that
+        define a region of interest based on a box with set q ranges
+        on both axes.
+        
+        If your q-range selection results in pixels that do not form
+        a rectangular region of interest, the algorithm will try to
+        find the largest rectangular region of interest that still
+        meets all the provided criteria and bounds.
+
+        If you are looking for a mask that finds all pixels that meet
+        the provided qrange criteria, please use:
+        Data2D.get_pixels_qrange().
+
+        Parameters
+        ----------
         *ranges : tuple | list
             Ranges for any of the q-component attributes of this class
             can be provided as keyword arguments. For example,
@@ -1164,35 +1299,22 @@ class Data2D(DataImage):
                 qsx
                 qsz
         """
-        selection_mask = self.get_pixels_qrange(
-            ignore_mask=ignore_mask, **ranges)
+        invalid_kwargs = [x for x in ranges.keys()
+                          if x not in ACCEPTED_Q_KEYWORDS]
+        if len(invalid_kwargs) > 0:
+            raise KeyError(
+                "The following keyword arguments are not allowed for this"
+                f" function: {invalid_kwargs}. Please see the relevant "
+                "doc strings for more details."
+            )
+    
+        selection_mask = self.get_pixels_qrange(**ranges)
 
-        heights = np.zeros_like(selection_mask).astype(int)
-        widths = np.zeros_like(selection_mask).astype(int)
+        limits = tools.find_maximum_rectangular_roi(selection_mask)
 
-        for row in range(0, selection_mask.shape[0]):
-            keeps = selection_mask[row, :].astype(int)
-            height = np.sum(selection_mask[row:, :], axis=0).astype(int)*keeps
-            heights[row, :] = height
+        return limits
 
-        for col in range(0, selection_mask.shape[1]):
-            keeps = selection_mask[:, col].astype(int)
-            width = np.sum(selection_mask[:, col:], axis=1).astype(int)*keeps
-            widths[:, col] = width
-
-        area = heights*widths
-        row = np.argmax(area, axis=1)
-        col = np.argmax(area, axis=0)
-
-        max_position = np.unravel_index(np.argmax(area), area.shape)
-
-        min_y, min_x = max_position
-        max_y = min_y + heights[max_position]
-        max_x = min_x + widths[max_position]       
-
-        return (min_y, max_y), (min_x, max_x)
-
-    def get_pixels_qrange(self, ignore_mask=True, **ranges):
+    def get_pixels_qrange(self, **ranges) -> NDArray:
         """
         Returns a selection mask that includes image pixels that have
         q-components within the provided ranges. It will not return
@@ -1200,12 +1322,6 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-        ignore_mask : bool
-            If set to False, only pixels that meet the q range criteria
-            and are not already masked are set as True in the
-            returned mask of this method. If ignore_mask is True,
-            the pixels returned as True in the mask only need to meet
-            the q range criteria set by the user.
         *ranges : tuple | list
             Ranges for any of the q-component attributes of this class
             can be provided as keyword arguments. For example,
@@ -1230,10 +1346,16 @@ class Data2D(DataImage):
             (unless the mask is ignored).
         """
 
-        if ignore_mask:
-            selected = np.ones_like(self.image).astype(bool)
-        else:
-            selected = ~self.mask
+        invalid_kwargs = [x for x in ranges.keys()
+                          if x not in ACCEPTED_Q_KEYWORDS]
+        if len(invalid_kwargs) > 0:
+            raise KeyError(
+                "The following keyword arguments are not allowed for this"
+                f" function: {invalid_kwargs}. Please see the relevant "
+                "doc strings for more details."
+            )
+
+        selected = np.ones_like(self.image).astype(bool)
 
         for q_comp, limits in ranges.items():
             q_test = getattr(self, q_comp)
@@ -1241,6 +1363,186 @@ class Data2D(DataImage):
             selected = selected * selected_q
 
         return selected
+
+    def get_box_dims(
+            self,
+            width_qdy_px: int = None,
+            width_qdx_px: int = None,
+            range_qdy_px: tuple = None,
+            range_qdx_px: tuple = None,
+            center_qdy: tuple = None,
+            center_qdx: tuple = None,
+            shift_box_qdy_px: int = 0,
+            shift_box_qdx_px: int = 0,
+            **kwargs
+    ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+        """
+        Find the index limits that define a rectangular region of
+        interest in the scattering image based on a range of optional
+        criteria.
+
+        Not all keyword arguments should be used at the same time.
+        For each axis, the routes to determine the pixel ranges are
+        listed below. You can use two different methods to select ranges
+        along the y and x axes by providing different keyword arguments
+        for each axis.
+
+        1. box size
+            Set the width of the box along one of the axes using
+            'width_qdy_px' along the vertical axis or 'width_qdx_px'
+            along the horizontal axis.
+
+            The box will be centered at the detector space beam center
+            position if available otherwise the beam coordinate space
+            beam center position ('center_px' in metadata) by default.
+
+            The center position can be set to a custom value in either
+            the beam or sample-coordinate spaces. For example, you can
+            set the box center along the verticla y-axis by setting
+            'center_qdy' to either ('qby', value) or ('qsy', value).
+            For example, you can selection a region of interest along
+            the line where 'qsy' is equal to 0.1 by setting ('qsy', 0.1).
+            The pixel with the closest value to 0.1 will be set as the
+            center pixel.
+            CAUTION: This function assumes that you have aligned the
+            sample space x and y axes parallel with the detector space
+            x and y axes, respectively, by applying a rotation correction
+            for easier region of interest selection.
+
+            Accepted keyword arguments:
+                width_qdy_px
+                center_qdy
+                shift_box_qdy_px
+                width_qdx_px
+                center_qdx
+                shift_box_qdx_px
+
+        2. pixel range
+            Set the pixel indexing range with 'range_qdy_px' or
+            'range_qdx_px'. These tuples of (start, stop) represent
+            half open ranges of [start, stop), following the Python
+            indexing rules.
+
+            For example, a range of (5, 10) along qdy will select rows
+            in the image with pixel indices of 5, 6, 7, 8, and 9. Keep
+            in mind that indexing follows the Python Numpy convention
+            of first axis counts rows from top to bottom and second
+            axis counts columns from left to right.
+
+            Accepted keyword arguments:
+                range_qdy_px
+                range_qdx_px
+
+        3. q-ranges
+            Use any of the q attributes to select a set of pixels that
+            meet all the provided criteria. For example, setting
+            'qs' = (0, 0.1) would select all pixels with a qs value
+            >= 0 and <= 0.1. Note that these are closed ranges of
+            [min, max].
+
+            Also, using a combination of these ranges or
+            the detector configuration may result in selected pixels
+            that do not form a rectangular region of interest. In this
+            case, the algorithm will try to find the largest rectangular
+            continuous region of interest within these selected pixels.
+
+            Accepted keyword arguments: **kwargs listed below.
+
+        Parameters
+        ----------
+        width_qdy_px : int
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        center_qdy : (keyword, value)
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value)
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+        range_qdy_px : (min, max)
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max)
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        **kwargs
+            Ranges for any of the q-component attributes of this class
+            can be provided as keyword arguments. For example,
+            providing qsy=(-0.01, 0.01) would select a box that
+            contains pixels within qsy values >= -0.01 and <= 0.01.
+            Accepted q components include:
+                qb
+                qby
+                qbx
+                qbz
+                qs
+                qsy
+                qsx
+                qsz
+        """
+
+        invalid_kwargs = [x for x in kwargs.keys()
+                          if x not in ACCEPTED_Q_KEYWORDS]
+        if len(invalid_kwargs) > 0:
+            raise KeyError(
+                "The following keyword arguments are not allowed for this"
+                f" function: {invalid_kwargs}. Please see the relevant "
+                "doc strings for more details."
+            )
+
+        # dimensions along y or axis 0
+        if width_qdy_px is not None:
+            if center_qdy is not None:
+                center_qdy = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdy[0].lower())-center_qdy[1])))[0]
+            min_y, max_y = self._get_box_dims_size_y(
+                size_qdy_px=width_qdy_px,
+                center=center_qdy,
+                shift_box_qdy_px=shift_box_qdy_px
+            )
+        elif range_qdy_px is not None:
+            min_y, max_y = range_qdy_px
+        else:
+            (min_y, max_y), _ = self.get_box_dims_qrange(**kwargs)
+
+        # dimensions along x or axis 1
+        if width_qdx_px is not None:
+            if center_qdx is not None:
+                center_qdx = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdx[0].lower())-center_qdx[1])))[1]
+            min_x, max_x = self._get_box_dims_size_x(
+                size_qdx_px=width_qdx_px,
+                center=center_qdx,
+                shift_box_qdx_px=shift_box_qdx_px
+            )
+        elif range_qdx_px is not None:
+            min_x, max_x = range_qdx_px
+        else:
+            (min_x, max_x), _ = self.get_box_dims_qrange(**kwargs)
+
+        return (min_y, max_y), (min_x, max_x)
 
     def integrate_box(
         self,
@@ -1258,7 +1560,7 @@ class Data2D(DataImage):
         shift_box_qdx_px: int = 0,
         plotting_kwargs={},
         **kwargs
-    ) -> QSlice:
+    ) -> Tuple[ReducedData1D, Figure | None]:
         """
         Integrate a region of interest defined by the limits along both
         axes qdy and qdx (0 and 1, respectively).
@@ -1312,18 +1614,13 @@ class Data2D(DataImage):
             TODO: currently this is disabled and only True is accepted.
             Default value is True.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 4c32943 (fixed integration box to properly correct box dimensions for new diffraction equations)
         Parameters for Box Refinement
         -----------------------------
         The following keyword arguments are specific to defining the
         box limits of the region of interest for integration. We caution
         the user to consider which keyword arguments to select as not
-        all should be used simultaneously. In the case that the box is
-        overdefined by the user, this method will prioritize the
-        parameters in order of this list:
+        all should be used simultaneously. Please see documentation
+        for the data2d.get_box_dims() method for more details.
 
         width_qdy_px : int
             Set the box width along the vertical axis of the
@@ -1351,14 +1648,6 @@ class Data2D(DataImage):
             This assumes that qbx and qsx align with the vertical
             image axis.
             The keyword should be 'qbx' or 'qsx'.
-<<<<<<< HEAD
-        **kwargs
-            Any of the scattering vector attribute keywords can be
-            used to define a range to set the box limits with fully
-            closed ranges. For example:
-                qby=(-0.03, 0.03)
-            would determine box limits that encompass pixels with values
-            >= -0.03 and <= 0.03 in qby.
         shift_box_qdy_px : int, optional
             Number of pixels to shift the box by in the positive qdy
             direction. A negative value will shift the box in the
@@ -1372,7 +1661,6 @@ class Data2D(DataImage):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
-=======
         **kwargs
             Ranges for any of the q-component attributes of this class
             can be provided as keyword arguments. For example,
@@ -1387,98 +1675,25 @@ class Data2D(DataImage):
                 qsy
                 qsx
                 qsz
->>>>>>> 833c15e (added function that finds box dimensions using series of q ranges)
-=======
-        **kwargs
-            Any of the scattering vector attribute keywords can be
-            used to define a range to set the box limits with fully
-            closed ranges. For example:
-                qby=(-0.03, 0.03)
-            would determine box limits that encompass pixels with values
-            >= -0.03 and <= 0.03 in qby.
-        shift_box_qdy_px : int, optional
-            Number of pixels to shift the box by in the positive qdy
-            direction. A negative value will shift the box in the
-            negative qdy direction.
-            This is the last step performed in determining the box
-            dimensions, so all other limitations will be taken into
-            account first.
-            Default value is 0.
-        shift_box_qdx_px : int, optional
-            Number of pixels to shift the box by in the positive qdx
-            direction. A negative value will shift the box in the
-            negative qdx direction.
-            Default value is 0.
->>>>>>> 4c32943 (fixed integration box to properly correct box dimensions for new diffraction equations)
 
         Returns
         -------
-        QSlice
+        ReducedData1D
             One-dimensional I vs. q data extracted from the integration.
 
         """
 
-        beam_center_px = np.round(
-            np.array(self.metadata['center_px']),
-            0).astype(int)
-        if 'center_px_detector' in self.metadata.keys():
-            detector_center_px = np.round(
-                np.array(self.metadata['center_px_detector']),
-                0).astype(int)
-        else:
-            detector_center_px = beam_center_px
-
-        # determine the range along y
-        if width_qdy_px is not None:
-            if center_qdy is None:
-                center_qdy = detector_center_px[0]
-            else:
-                if center_qdy[0].lower() == 'qby':
-                    center_qdy = np.nanargmin(np.abs(self.qby[:, beam_center_px[1]]-center_qdy[1]))
-                elif center_qdy[0].lower() == 'qsy':
-                    center_qdy = np.nanargmin(np.abs(self.qsy[:, beam_center_px[1]]-center_qdy[1]))
-
-            min_y = center_qdy - int(width_qdy_px/2)
-            max_y = min_y + width_qdy_px
-
-        elif range_qdy_px is not None:
-            min_y, max_y = range_qdy_px
-
-        else:
-            (min_y, max_y), _ = self.get_box_dims_qrange(**kwargs)
-
-        min_y -= shift_box_qdy_px
-        max_y -= shift_box_qdy_px
-
-        min_y = max(min_y, 0)
-        max_y = min(max_y, self.image.shape[0])
-
-        # determine the range along x
-        if width_qdx_px is not None:
-            if center_qdx is None:
-                center_qdx = detector_center_px[1]
-            else:
-                if center_qdx[0].lower() == 'qbx':
-                    center_qdx = np.nanargmin(np.abs(self.qbx[beam_center_px[0], :]-center_qdx[1]))
-                elif center_qdx[0].lower() == 'qsx':
-                    center_qdx = np.nanargmin(np.abs(self.qsx[beam_center_px[0], :]-center_qdx[1]))
-                min_x = center_qdx - int(width_qdx_px/2)
-                max_x = min_x + width_qdx_px
-
-        elif range_qdx_px is not None:
-            min_x, max_x = range_qdx_px
-
-        else:
-            _, (min_x, max_x) = self.get_box_dims_qrange(**kwargs)
-
-        min_x -= shift_box_qdx_px
-        max_x -= shift_box_qdx_px
-
-        min_x = max(min_x, 0)
-        max_x = min(max_x, self.image.shape[1])
-
-        limits_qdy_px = (min_y, max_y)
-        limits_qdx_px = (min_x, max_x)
+        limits_qdy_px, limits_qdx_px = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
+            **kwargs
+        )
 
         if axis is None:
             if np.diff(limits_qdy_px) <= np.diff(limits_qdx_px):
@@ -1518,7 +1733,6 @@ class Data2D(DataImage):
         # extract background intensity
         if subtract_background_offset is not None:
             backgrounds = []
-            backgrounds_iq = []
             if type(subtract_background_offset) is int:
                 subtract_background_offset = [subtract_background_offset]
             for offset in subtract_background_offset:
@@ -1536,41 +1750,30 @@ class Data2D(DataImage):
                         limits_qdx_px[0] + (offset if axis == 1 else 0),
                         limits_qdx_px[1] + (offset if axis == 1 else 0)
                     )
-                    background_i, b_image, b_mask = super().slice_box(
-                        limits_axis0=limits_qdy_px_sub,
-                        limits_axis1=limits_qdx_px_sub,
-                        axis=axis,
+
+                    b_slice, _ = self.integrate_box(
                         mode=mode,
+                        axis=axis,
+                        show_plot=False,
+                        range_qdy_px=limits_qdy_px_sub,
+                        range_qdx_px=limits_qdx_px_sub,
                     )
 
-                    b_slice = QSlice(
-                        q=q,
-                        Iq=background_i,
-                        q_axis=q_axis,
-                        data2d=self,
-                        limits_axis0=limits_qdy_px_sub,
-                        limits_axis1=limits_qdx_px_sub,
-                        integration_mode=mode,
-                        integration_axis=axis,
-                        image_roi=b_image,
-                        image_mask=b_mask,
-                    )
-
-                    backgrounds_iq.append(background_i)
                     backgrounds.append(b_slice)
 
-            background_i_avg = np.array(backgrounds_iq)
             # even if some points are masked in some background offsets
             # we will use the background points
-            background_i_avg = np.nanmean(background_i_avg, axis=0)
+            background_i_avg = np.nanmean(
+                np.array([b_slice.Iq for b_slice in backgrounds]),
+                axis=0)
             integrated_i -= background_i_avg
 
         else:
             background_i_avg = None
             backgrounds = None
 
-        # create instance of QSlice to hold integration metadata
-        integrated_q_slice = QSlice(
+        # create instance of ReducedData1D to hold integration metadata
+        integrated_q_slice = ReducedData1D(
             q=q,
             Iq=integrated_i,
             q_axis=q_axis,
@@ -1583,6 +1786,10 @@ class Data2D(DataImage):
             image_mask=mask_box,
             background_Iq=background_i_avg,
             background_qslices=backgrounds,
+            wavelength_nm=self.metadata['wavelength_nm'],
+            sample_phi_deg=self.sample_phi_deg,
+            sample_chi_deg=self.sample_chi_deg,
+            sample_omega_deg=self.sample_omega_deg,
             **{key+'_roi': value for key, value in q_rois.items()},
             **{key: np.nanmean(value, axis=axis)
                for key, value in q_rois.items() if key != q_axis},
@@ -1600,12 +1807,16 @@ class Data2D(DataImage):
 
     def find_peaks2D(
             self,
-            limits_qdy_px=None,
-            limits_qdx_px=None,
-            exclude_qdy=None,
-            exclude_qdx=None,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
             shift_box_qdy_px=0,
             shift_box_qdx_px=0,
+            exclude_qdy=None,
+            exclude_qdx=None,
             log_scale=True,
             refinement_size=7,
             show_plot=True,
@@ -1688,15 +1899,16 @@ class Data2D(DataImage):
             scattering vector has not yet been calculated, this will be
             None.
         """
-        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
-            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
-                limits_qdy_px, limits_qdx_px,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px)
-
-        if limits_qdx_px is None:
-            limits_qdy_px = (0, self.image.shape[0])
-            limits_qdx_px = (0, self.image.shape[1])
+        limits_qdy_px, limits_qdx_px = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
+        )
 
         min0, max0 = limits_qdy_px
         min1, max1 = limits_qdx_px
@@ -1758,13 +1970,17 @@ class Data2D(DataImage):
 
     def find_peaks2D_one_axis(
             self,
-            limits_qdy_px=None,
-            limits_qdx_px=None,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
             exclude_q=None,
             peak_axis=None,
             integration_mode='sum',
-            shift_box_qdy_px=0,
-            shift_box_qdx_px=0,
             log_scale=True,
             refinement_size=7,
             algorithm='scikit',
@@ -1879,15 +2095,16 @@ class Data2D(DataImage):
             None.
         """
 
-        if type(limits_qdy_px) is int and type(limits_qdx_px) is int:
-            limits_qdy_px, limits_qdx_px = self.get_box_dims_size(
-                limits_qdy_px, limits_qdx_px,
-                shift_box_qdy_px=shift_box_qdy_px,
-                shift_box_qdx_px=shift_box_qdx_px)
-
-        if limits_qdx_px is None:
-            limits_qdy_px = (0, self.image.shape[0])
-            limits_qdx_px = (0, self.image.shape[1])
+        limits_qdy_px, limits_qdx_px = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
+        )
 
         min0, max0 = limits_qdy_px
         min1, max1 = limits_qdx_px
@@ -1972,9 +2189,15 @@ class Data2D(DataImage):
 
     def find_beam_center_from_peaks(
             self,
-            size_qdy_px,
-            size_qdx_px,
-            update=True,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
+            update=False,
             beam_center_guess=None,
             exclude_q=None,
             show_plot=True,
@@ -2037,9 +2260,15 @@ class Data2D(DataImage):
         if beam_center_guess is not None:
             self.update_metadata({'center_px': beam_center_guess},
                                  overwrite=True)
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
 
         (min0, max0), (min1, max1) = box_dims
@@ -2051,8 +2280,8 @@ class Data2D(DataImage):
             else:
                 peak_axis = 1
         peaks, _, _ = self.find_peaks2D_one_axis(
-            limits_qdy_px=box_dims[0],
-            limits_qdx_px=box_dims[1],
+            range_qdy_px=box_dims[0],
+            range_qdx_px=box_dims[1],
             peak_axis=peak_axis,
             exclude_q=exclude_q,
             show_plot=False,
@@ -2142,9 +2371,15 @@ class Data2D(DataImage):
     def find_sdd_from_reference_peaks(
             self,
             pitch_nm,
-            size_qdy_px,
-            size_qdx_px,
-            update=True,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
+            update=False,
             show_plot=True,
             peak_orders=None,
             exclude_q=None,
@@ -2219,9 +2454,15 @@ class Data2D(DataImage):
             returned in units of cm.
         """
 
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
 
         (min0, max0), (min1, max1) = box_dims
@@ -2233,8 +2474,8 @@ class Data2D(DataImage):
             else:
                 peak_axis = 1
         peaks, peaks_q, _ = self.find_peaks2D_one_axis(
-            limits_qdy_px=box_dims[0],
-            limits_qdx_px=box_dims[1],
+            range_qdy_px=box_dims[0],
+            range_qdx_px=box_dims[1],
             peak_axis=peak_axis,
             exclude_q=exclude_q,
             show_plot=False,
@@ -2298,8 +2539,14 @@ class Data2D(DataImage):
 
     def find_chi_from_peaks(
         self,
-        size_qdy_px,
-        size_qdx_px,
+        width_qdy_px=None,
+        width_qdx_px=None,
+        range_qdy_px=None,
+        range_qdx_px=None,
+        center_qdy=None,
+        center_qdx=None,
+        shift_box_qdy_px=0,
+        shift_box_qdx_px=0,
         show_plot=True,
         zoom_plot=True,
         exclude_q=None,
@@ -2367,9 +2614,15 @@ class Data2D(DataImage):
             False, None is returned in its place.
         """
 
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
         limits_qdy_px, limits_qdx_px = box_dims
 
@@ -2377,8 +2630,8 @@ class Data2D(DataImage):
         if peak_axis is None:
             peak_axis = 1
         peaks, _, _ = self.find_peaks2D_one_axis(
-            limits_qdy_px=limits_qdy_px,
-            limits_qdx_px=limits_qdx_px,
+            range_qdy_px=limits_qdy_px,
+            range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
             show_plot=False,
             exclude_q=exclude_q,
@@ -2420,8 +2673,14 @@ class Data2D(DataImage):
 
     def find_omega_from_peaks(
         self,
-        size_qdy_px,
-        size_qdx_px,
+        width_qdy_px=None,
+        width_qdx_px=None,
+        range_qdy_px=None,
+        range_qdx_px=None,
+        center_qdy=None,
+        center_qdx=None,
+        shift_box_qdy_px=0,
+        shift_box_qdx_px=0,
         show_plot=True,
         zoom_plot=True,
         **kwargs
@@ -2492,9 +2751,15 @@ class Data2D(DataImage):
             False, None is returned in its place.
         """
 
-        box_dims = self.get_box_dims_size(
-            size_qdy_px=size_qdy_px,
-            size_qdx_px=size_qdx_px
+        box_dims = self.get_box_dims(
+            width_qdy_px=width_qdy_px,
+            width_qdx_px=width_qdx_px,
+            range_qdy_px=range_qdy_px,
+            range_qdx_px=range_qdx_px,
+            center_qdy=center_qdy,
+            center_qdx=center_qdx,
+            shift_box_qdy_px=shift_box_qdy_px,
+            shift_box_qdx_px=shift_box_qdx_px,
         )
         limits_qdy_px, limits_qdx_px = box_dims
 
@@ -2502,8 +2767,8 @@ class Data2D(DataImage):
         if peak_axis is None:
             peak_axis = 1
         peaks, _, _ = self.find_peaks2D_one_axis(
-            limits_qdy_px=limits_qdy_px,
-            limits_qdx_px=limits_qdx_px,
+            range_qdy_px=limits_qdy_px,
+            range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
             show_plot=False,
             **kwargs
@@ -2563,3 +2828,82 @@ class Data2D(DataImage):
             )
 
         return True
+
+    def _get_metadata(self, keyword):
+        """
+        Return the metadata whether the keyword is found in the metadata
+        or user_params dictionary.
+        """
+        if keyword in self.metadata.keys():
+            return self.metadata[keyword]
+        elif keyword in self.user_params.keys():
+            return self.user_params[keyword]
+        else:
+            raise ValueError(
+                f"Metadata or user_param not found for {keyword}."
+            )
+
+    def _lock_q_calculations(self):
+        self._lock_q_calculations = True
+
+    def _unlock_q_calculations(self):
+        self._lock_q_calculations = False
+
+    @property
+    def sample_phi_deg(self):
+        actual_sample_phi = self.metadata['sample_phi_deg']
+        actual_sample_phi += self.metadata['sample_phi_offset_deg']
+        return actual_sample_phi
+
+    @property
+    def sample_chi_deg(self):
+        actual_sample_chi = self.metadata['sample_chi_deg']
+        actual_sample_chi += self.metadata['sample_chi_offset_deg']
+        return actual_sample_chi
+
+    @property
+    def sample_omega_deg(self):
+        actual_sample_omega = self.metadata['sample_omega_deg']
+        actual_sample_omega += self.metadata['sample_omega_offset_deg']
+        return actual_sample_omega
+
+    @property
+    def detector_phi_deg(self):
+        actual_detector_phi = self.metadata.get('detector_phi_deg', 0)
+        actual_detector_phi -= self.metadata.get('detector_phi0_deg', 0)
+        actual_detector_phi *= self.metadata.get('detector_phi_scale', 1)
+        return actual_detector_phi
+
+    @property
+    def detector_y_mm(self):
+        actual_detector_y = self.metadata.get('detector_y_mm', 0)
+        actual_detector_y -= self.metadata.get('detector_y0_mm', 0)
+        return actual_detector_y
+
+    @property
+    def energy_ev(self):
+        return self.metadata.get('energy_ev')
+
+    @property
+    def wavelength_nm(self):
+        return self.metadata.get('wavelength_nm')
+
+    @property
+    def exposure_time_s(self):
+        return self.metadata.get('exposure_time_s')
+
+    @property
+    def sdd_cm(self):
+        return self.metadata.get('sdd_cm')
+
+    @property
+    def pixel_size_um(self):
+        return self.metadata.get('pixel_size_um')
+
+    @property
+    def data_directory(self):
+        return self.metadata.get('data_directory')
+
+    @property
+    def filename(self):
+        return self.metadata.get('filename')
