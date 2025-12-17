@@ -442,9 +442,9 @@ class TrapezoidModelArray(CDSAXS_Model):
             Coord = np.zeros([layers+1, 5, 1])
             for T in range(layers+1):
                 if T == 0:
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
+                    Coord[T, 0, 0] = 0 # left bottom (x)
+                    Coord[T, 1, 0] = PAR[0, 0] # right bottom (x)
+                    Coord[T, 2, 0] = PAR[0, 1] # height
                     Coord[T, 3, 0] = 0
                     Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
                 else:
@@ -754,17 +754,17 @@ class TrapezoidModelArray(CDSAXS_Model):
                 if i > 0:
                     H1 = H1 + Coord[i-1, 2, 0]
                     
-                x1 = Coord[i, 0, 0]
-                x4 = Coord[i, 1, 0]
-                x2 = Coord[i+1, 0, 0]
-                x3 = Coord[i+1, 1, 0]
+                x1 = Coord[i, 0, 0] # bottom left
+                x4 = Coord[i, 1, 0] # bottom right
+                x2 = Coord[i+1, 0, 0] # top left
+                x3 = Coord[i+1, 1, 0] # top right
                 
                 # Avoid division by zero
                 x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
                 x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
                 
-                SL = Coord[i, 2, 0] / (x2 - x1)
-                SR = -Coord[i, 2, 0] / (x4 - x3)
+                SL = Coord[i, 2, 0] / (x2 - x1) # slope left
+                SR = -Coord[i, 2, 0] / (x4 - x3) # slope right
                 
                 A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
                 A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
