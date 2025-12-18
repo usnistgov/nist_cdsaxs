@@ -5029,46 +5029,59 @@ class CDSAXS_Model:
                     
                 return lp + ll
             
+            # Handle thin parameter: extract from emcee_kwargs if present, function param takes precedence
+            emcee_kwargs_clean = emcee_kwargs.copy()
+            if 'thin' in emcee_kwargs_clean:
+                # Function parameter thin takes precedence
+                del emcee_kwargs_clean['thin']
+            # Use function parameter thin (defaults to 1)
+            thin_to_use = thin
+            
             # Initialize sampler
             sampler = emcee.EnsembleSampler(
-                n_walkers, n_params, log_probability, **emcee_kwargs
+                n_walkers, n_params, log_probability, **emcee_kwargs_clean
             )
             
             if verbose:
                 print(f"Running MCMC: {n_steps} steps with {n_walkers} walkers")
-                print(f"Burn-in: {burn_in} steps, Thinning: {thin}")
+                print(f"Burn-in: {burn_in} steps, Thinning: {thin_to_use}")
             
             # Run MCMC
             if progress:
                 # Run with progress bar
                 with tqdm(total=n_steps, desc="MCMC Progress") as pbar:
-                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps)):
+                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps, thin=thin_to_use)):
                         pbar.update(1)
                         if i % 100 == 0 and verbose:
                             acceptance = np.mean(sampler.acceptance_fraction)
                             pbar.set_postfix({"Accept": f"{acceptance:.3f}"})
             else:
                 # Run without progress bar
-                sampler.run_mcmc(initial_positions, n_steps)
+                sampler.run_mcmc(initial_positions, n_steps, thin=thin_to_use)
             
             # Extract results
+            # Note: chains are already thinned by emcee when thin > 1 is passed to sample()/run_mcmc()
             chains = sampler.get_chain()
             log_prob = sampler.get_log_prob()
             
-            # Apply burn-in and thinning
+            # Apply burn-in
+            # When thin is passed to emcee, chains are already thinned, so we need to adjust burn_in
+            # burn_in_thinned = burn_in / thin_to_use (rounded down to nearest integer)
             if burn_in > 0:
-                chains_burned = chains[burn_in:]
-                log_prob_burned = log_prob[burn_in:]
+                burn_in_thinned = burn_in // thin_to_use if thin_to_use > 1 else burn_in
+                if burn_in_thinned > 0:
+                    chains_burned = chains[burn_in_thinned:]
+                    log_prob_burned = log_prob[burn_in_thinned:]
+                else:
+                    chains_burned = chains
+                    log_prob_burned = log_prob
             else:
                 chains_burned = chains
                 log_prob_burned = log_prob
             
-            if thin > 1:
-                chains_final = chains_burned[::thin]
-                log_prob_final = log_prob_burned[::thin]
-            else:
-                chains_final = chains_burned
-                log_prob_final = log_prob_burned
+            # Thinning is already handled by emcee, so no need for post-processing thinning
+            chains_final = chains_burned
+            log_prob_final = log_prob_burned
             
             # Flatten chains for analysis
             flat_chains = chains_final.reshape(-1, n_params)
