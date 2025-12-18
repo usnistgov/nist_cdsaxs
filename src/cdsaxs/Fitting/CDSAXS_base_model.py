@@ -5039,42 +5039,41 @@ class CDSAXS_Model:
             
             # Initialize sampler
             sampler = emcee.EnsembleSampler(
-                n_walkers, n_params, log_probability, **emcee_kwargs_clean
+                n_walkers, n_params, log_probability, **emcee_kwargs
             )
             
             if verbose:
                 print(f"Running MCMC: {n_steps} steps with {n_walkers} walkers")
-                print(f"Burn-in: {burn_in} steps, Thinning: {thin_to_use}")
+                print(f"Burn-in: {burn_in} steps, Thinning: {thin}")
             
             # Run MCMC
             if progress:
                 # Run with progress bar
                 with tqdm(total=n_steps, desc="MCMC Progress") as pbar:
-                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps, thin=thin_to_use)):
+                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps)):
                         pbar.update(1)
                         if i % 100 == 0 and verbose:
                             acceptance = np.mean(sampler.acceptance_fraction)
                             pbar.set_postfix({"Accept": f"{acceptance:.3f}"})
             else:
                 # Run without progress bar
-                sampler.run_mcmc(initial_positions, n_steps, thin=thin_to_use)
+                sampler.run_mcmc(initial_positions, n_steps)
             
             # Extract results
-            # Note: chains are already thinned by emcee when thin > 1 is passed to sample()/run_mcmc()
             chains = sampler.get_chain()
             log_prob = sampler.get_log_prob()
             
-            # Apply burn-in
-            # When thin is passed to emcee, chains are already thinned, so we need to adjust burn_in
-            # burn_in_thinned = burn_in / thin_to_use (rounded down to nearest integer)
+            # Apply burn-in and thinning
             if burn_in > 0:
-                burn_in_thinned = burn_in // thin_to_use if thin_to_use > 1 else burn_in
-                if burn_in_thinned > 0:
-                    chains_burned = chains[burn_in_thinned:]
-                    log_prob_burned = log_prob[burn_in_thinned:]
-                else:
-                    chains_burned = chains
-                    log_prob_burned = log_prob
+                chains_burned = chains[burn_in:]
+                log_prob_burned = log_prob[burn_in:]
+            else:
+                chains_burned = chains
+                log_prob_burned = log_prob
+            
+            if thin > 1:
+                chains_final = chains_burned[::thin]
+                log_prob_final = log_prob_burned[::thin]
             else:
                 chains_burned = chains
                 log_prob_burned = log_prob
