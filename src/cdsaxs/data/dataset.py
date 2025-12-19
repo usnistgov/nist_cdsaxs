@@ -61,10 +61,9 @@ class Dataset():
             name: str = None,
             sample: str = None
     ):
+        self.datas = {}
         if datas is not None:
             self.add_data(datas)
-        else:
-            self.datas = {}
 
         self.name = name
         self.sample = sample
@@ -425,7 +424,7 @@ class Dataset():
             data.reset_image()
 
     def apply_rotation_correction_all_data(
-            self, keys=None, angles={}, verbose=True, **kwargs):
+            self, keys=None, angles={}, verbose=True, use_qsy=False, **kwargs):
         """
         Apply a rotation correction to all data images that aligns
         the qsy and qsx axes with the qby and qbx axes, respectively,
@@ -477,6 +476,18 @@ class Dataset():
             data = self.datas[key]
             if key in angles.keys():
                 rotation_angle = np.deg2rad(angles[key])
+            elif use_qsy:
+                abs_limit = 0.004*np.nanmax(data.qsy)
+                points = np.where(np.abs(data.qsy) <= abs_limit)
+                counter = 0
+                while len(points[0]) > 200 and counter < 1000:
+                    abs_limit /= 2
+                    counter += 1
+                    points = np.where(np.abs(data.qsy) <= abs_limit)
+                x_fit = list(points[1]) + [data.metadata['center_px_detector'][1]]
+                y_fit = list(points[0]) + [data.metadata['center_px_detector'][0]]
+                m, _ = np.polyfit(x_fit, y_fit, 1)
+                rotation_angle = np.rad2deg(np.arctan2(m, 1))
             else:
                 phi = np.deg2rad(data.metadata['sample_phi_deg']
                                 + data.metadata['sample_phi_offset_deg'])

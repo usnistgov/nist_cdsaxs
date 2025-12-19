@@ -870,5 +870,5 @@ def find_maximum_rectangular_roi(data):
     max0 = min0 + test_area.shape[0]
     max1 = min1 + test_area.shape[1]
 
-    return (min0, max0), (min1, max1), height, width, area
+    return (min0, max0), (min1, max1) #, height, width, area
 

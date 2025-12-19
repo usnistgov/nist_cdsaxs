@@ -79,7 +79,7 @@ def slice_reduced_dataset(
             slice_width=qmax-qmin
         )
         setattr(reduced_slice, integrated_axis,
-                np.round(np.mean([qmin, qmax]), 4))
+                q_values[i])
         slices.append(reduced_slice)
 
     reduced_slices = ReducedSlices(slices=slices)

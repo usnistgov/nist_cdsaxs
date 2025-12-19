@@ -1517,7 +1517,7 @@ class Data2D(DataImage):
         # dimensions along y or axis 0
         if width_qdy_px is not None:
             if center_qdy is not None:
-                center_qdy = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdy[0].lower())-center_qdy[1])))[0]
+                center_qdy = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdy[0].lower())-center_qdy[1])), self.image.shape)[0]
             min_y, max_y = self._get_box_dims_size_y(
                 size_qdy_px=width_qdy_px,
                 center=center_qdy,
@@ -1531,7 +1531,7 @@ class Data2D(DataImage):
         # dimensions along x or axis 1
         if width_qdx_px is not None:
             if center_qdx is not None:
-                center_qdx = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdx[0].lower())-center_qdx[1])))[1]
+                center_qdx = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdx[0].lower())-center_qdx[1])), self.image.shape)[1]
             min_x, max_x = self._get_box_dims_size_x(
                 size_qdx_px=width_qdx_px,
                 center=center_qdx,
@@ -2516,8 +2516,8 @@ class Data2D(DataImage):
         sdd_cm_orders = pixel_distances_cm / np.tan(theta_rad)
 
         # calculate average SDD from all peaks
-        average_sdd = np.round(np.mean(sdd_cm_orders), 2)
-        std_sdd = np.round(np.std(sdd_cm_orders), 2)
+        average_sdd = np.round(np.mean(sdd_cm_orders), 4)
+        std_sdd = np.round(np.std(sdd_cm_orders), 4)
 
         if update:
             self.update_metadata({'sdd_cm': average_sdd}, overwrite=True)
