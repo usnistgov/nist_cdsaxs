@@ -13,7 +13,8 @@ from scipy.optimize import (
 import matplotlib.pyplot as plt
 import copy
 from tqdm import tqdm
-
+import warnings
+from matplotlib.colors import LogNorm
 class CDSAXS_Model:
     """
     Base class for CDSAXS modeling.
@@ -250,6 +251,105 @@ class CDSAXS_Model:
             raise ValueError("The data file is empty or not properly formatted")
         except pd.errors.ParserError:
             raise ValueError("Error parsing the CSV file. Check the file format")
+        except Exception as e:
+            raise RuntimeError(f"Error processing data: {str(e)}")
+        
+        return True  # Return success
+    
+    def importCDSAXS_txtlegacy(self, intensity_file, qx_file, qz_file):
+        """
+        Imports CDSAXS data from three separate tab-delimited .txt files with input validation
+        
+        Parameters:
+        -----------
+        intensity_file : str
+            Path to the intensity data file (tab-delimited .txt format)
+        qx_file : str
+            Path to the Qx data file (tab-delimited .txt format)
+        qz_file : str
+            Path to the Qz data file (tab-delimited .txt format)
+        """
+        # Check if input variables exist and are valid
+        for file_path, param_name in [(intensity_file, 'intensity_file'), 
+                                       (qx_file, 'qx_file'), 
+                                       (qz_file, 'qz_file')]:
+            if file_path is None or not isinstance(file_path, str):
+                raise ValueError(f"{param_name} must be a valid file path")
+            
+            # Check if file exists
+            if not os.path.isfile(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+        
+        try:
+            # Read the three tab-delimited files
+            # Using numpy.loadtxt for tab-delimited files
+            Intensity_data = np.loadtxt(intensity_file, delimiter='\t')
+            Qx_data = np.loadtxt(qx_file, delimiter='\t')
+            Qz_data = np.loadtxt(qz_file, delimiter='\t')
+            
+            # Check if files have content
+            if Intensity_data.size == 0 or Qx_data.size == 0 or Qz_data.size == 0:
+                raise ValueError("One or more data files are empty")
+            
+            # Ensure 2D arrays (handle 1D case)
+            if Intensity_data.ndim == 1:
+                Intensity_data = Intensity_data.reshape(-1, 1)
+            if Qx_data.ndim == 1:
+                Qx_data = Qx_data.reshape(-1, 1)
+            if Qz_data.ndim == 1:
+                Qz_data = Qz_data.reshape(-1, 1)
+            
+            # Check that all files have the same dimensions
+            if Intensity_data.shape != Qx_data.shape or Intensity_data.shape != Qz_data.shape:
+                raise ValueError(f"Dimension mismatch: Intensity shape {Intensity_data.shape}, "
+                              f"Qx shape {Qx_data.shape}, Qz shape {Qz_data.shape}. "
+                              f"All files must have the same dimensions.")
+            
+            # Assign data to instance variables
+            self.Intensity = Intensity_data.copy()
+            self.Qx = Qx_data.copy()
+            self.Qz = Qz_data.copy()
+            
+            # Convert zeros in intensity array to NaNs
+            self.Intensity[self.Intensity == 0] = np.nan
+            
+            # Check if Qx values are increasing along the rows and sort if needed
+            # Get the first row with valid data to check order
+            for row_idx in range(self.Qx.shape[0]):
+                if np.all(np.isfinite(self.Qx[row_idx, :])):
+                    # Check if Qx is not in ascending order
+                    if not np.all(np.diff(self.Qx[row_idx, :]) >= 0):
+                        # Get sort indices
+                        sort_indices = np.argsort(self.Qx[row_idx, :])
+                        
+                        # Apply sorting to all arrays
+                        self.Qx = self.Qx[:, sort_indices]
+                        self.Qz = self.Qz[:, sort_indices]
+                        self.Intensity = self.Intensity[:, sort_indices]
+                    break
+            
+            # Create Qy array with zeros where Qx has positive values
+            self.Qy = np.zeros_like(self.Qx)
+            # Only set values to zero where Qx is positive (keep NaN values as they were)
+            self.Qy[self.Qx > 0] = 0
+            
+            # Calculate number of valid points
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            # Process data according to geometry (implemented by subclasses)
+            self.process_imported_data()
+                
+        except IOError as e:
+            raise IOError(f"Error reading one or more files: {str(e)}")
+        except ValueError as e:
+            # Re-raise ValueError with more context if needed
+            if "could not convert string to float" in str(e).lower():
+                raise ValueError("Error parsing data files. Check that files contain only numeric values.")
+            raise
         except Exception as e:
             raise RuntimeError(f"Error processing data: {str(e)}")
         
@@ -955,17 +1055,12 @@ class CDSAXS_Model:
         numpy.ndarray
             The simulated intensity (also sets self.SimInt)
         """
-        if not opt_params:
-            print(f"Debug: About to call simulate_structure")
-            print(f"Debug: self.Intensity shape before sim: {self.Intensity.shape}")
+      
             
-            self.SimInt = self.simulate_structure()
-            
-            print(f"Debug: SimInt shape after sim: {self.SimInt.shape if self.SimInt is not None else 'None'}")
-            print(f"Debug: SimInt sample: {self.SimInt[0,0] if self.SimInt is not None else 'None'}")
-            
-            gf = self.GF_calc(self.SimInt)
-            print(f"Debug: GF value: {gf}")
+        self.SimInt = self.simulate_structure()
+      
+        gf = self.GF_calc(self.SimInt)
+
         
         raise NotImplementedError("Subclasses must implement this method")
     
@@ -1991,8 +2086,8 @@ class CDSAXS_Model:
         df = pd.DataFrame(data_dict)
         
         # Add timestamp to filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_file}_{timestamp}.csv"
+
+        filename = f"{output_file}_.csv"
         
         # Save to CSV
         df.to_csv(filename, index=False)
@@ -2032,8 +2127,8 @@ class CDSAXS_Model:
                     data_dict[f'metadata_{key}'] = value
         
         # Add timestamp to filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_file}_{timestamp}.npz"
+    
+        filename = f"{output_file}.npz"
         
         # Save to NPZ
         np.savez_compressed(filename, **data_dict)
@@ -4934,6 +5029,14 @@ class CDSAXS_Model:
                     
                 return lp + ll
             
+            # Handle thin parameter: extract from emcee_kwargs if present, function param takes precedence
+            emcee_kwargs_clean = emcee_kwargs.copy()
+            if 'thin' in emcee_kwargs_clean:
+                # Function parameter thin takes precedence
+                del emcee_kwargs_clean['thin']
+            # Use function parameter thin (defaults to 1)
+            thin_to_use = thin
+            
             # Initialize sampler
             sampler = emcee.EnsembleSampler(
                 n_walkers, n_params, log_probability, **emcee_kwargs
@@ -4972,8 +5075,12 @@ class CDSAXS_Model:
                 chains_final = chains_burned[::thin]
                 log_prob_final = log_prob_burned[::thin]
             else:
-                chains_final = chains_burned
-                log_prob_final = log_prob_burned
+                chains_burned = chains
+                log_prob_burned = log_prob
+            
+            # Thinning is already handled by emcee, so no need for post-processing thinning
+            chains_final = chains_burned
+            log_prob_final = log_prob_burned
             
             # Flatten chains for analysis
             flat_chains = chains_final.reshape(-1, n_params)
@@ -5847,14 +5954,6 @@ class CDSAXS_Model:
         """
         Calculate uncertainty envelope for a single trapezoid sample.
         """
-        # Debug: print array sizes
-        if pop_number == 0:  # Only print for first sample
-            print(f"Debug: widths length: {len(widths)}")
-            print(f"Debug: heights length: {len(heights)}")
-            print(f"Debug: trap_heights length: {len(trap_heights)}")
-            print(f"Debug: trap_heights: {trap_heights}")
-            print(f"Debug: total_height: {total_height}")
-        
         # Convert to coordinates similar to your SymCoordAssign function
         coord = np.zeros([len(widths), 2])  # [layer, left/right]
         
@@ -5917,13 +6016,6 @@ class CDSAXS_Model:
         """
         Calculate uncertainty envelope for a single cylinder sample.
         """
-        # Debug: print array sizes for first sample
-        if pop_number == 0:
-            print(f"Debug Cylinder: radii length: {len(radii)}")
-            print(f"Debug Cylinder: heights length: {len(heights)}")
-            print(f"Debug Cylinder: cyl_heights length: {len(cyl_heights)}")
-            print(f"Debug Cylinder: total_height: {total_height}")
-        
         # For cylinders, we treat them similar to trapezoids but with radius instead of half-width
         for c in range(n_slices):
             if total_height > 0:
@@ -6197,6 +6289,740 @@ class CDSAXS_Model:
         # Plot horizontal lines
         for i in range(len(radii)):
             plt.plot([-radii[i], radii[i]], [cyl_heights[i], cyl_heights[i]], **kwargs)
+    
+    def compute_structure_slice_samples(self, mcmc_results, n_samples=1000, n_slices=201, 
+                                        random_seed=None, verbose=False):
+        """Compute x/y samples for each height slice from MCMC chains.
+
+        Uses the same internal machinery as plot_mcmc_uncertainty_envelope to
+        reconstruct the trapezoid (or cylinder) structure for many MCMC samples,
+        but returns the raw slice samples (xi, yi) for further analysis.
+
+        This function applies each MCMC sample to the model, extracts the structure
+        geometry, and computes the x positions (left/right edges) and y positions
+        (heights) at evenly spaced slices through the structure.
+
+        Parameters
+        ----------
+        mcmc_results : dict
+            Output from CDSAXS_MCMC containing:
+            - 'flat_chains': flattened MCMC chain samples
+            - 'param_names': list of parameter names
+        n_samples : int, optional
+            Number of MCMC samples to draw from the flattened chains. Default: 1000
+        n_slices : int, optional
+            Number of height slices (vertical sampling points). Default: 201
+        random_seed : int, optional
+            Random seed for sample selection. If None, uses current random state. Default: None
+        verbose : bool, optional
+            Whether to print progress information. Default: False
+
+        Returns
+        -------
+        xi : ndarray, shape (n_slices, 2, n_samples)
+            x positions for left/right edges at each slice and sample.
+            xi[slice_idx, 0, :] = left edge positions
+            xi[slice_idx, 1, :] = right edge positions
+        yi : ndarray, shape (n_slices, 1, n_samples)
+            y (height) for each slice and sample.
+            Note: yi values are typically constant across samples for a given slice,
+            but may vary slightly due to different total heights in different samples.
+        sample_indices : ndarray, shape (n_samples,)
+            Indices of the MCMC samples that were used (for reference)
+        """
+        # Set random seed if provided
+        if random_seed is not None:
+            np.random.seed(random_seed)
+        
+        # Extract flattened chains and parameter names
+        flat_chains = mcmc_results['flat_chains']
+        param_names = mcmc_results['param_names']
+        
+        # Limit number of samples for performance
+        total_samples = len(flat_chains)
+        if n_samples > total_samples:
+            n_samples = total_samples
+            if verbose:
+                print(f"Warning: Requested {n_samples} samples but only {total_samples} available. Using all samples.")
+        
+        # Randomly select samples for diversity
+        sample_indices = np.random.choice(total_samples, n_samples, replace=False)
+        selected_samples = flat_chains[sample_indices]
+        
+        if verbose:
+            print(f"Computing structure samples for {n_samples} MCMC samples with {n_slices} slices...")
+        
+        # Store original model parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Allocate arrays
+        xi = np.zeros((n_slices, 2, n_samples))
+        yi = np.zeros((n_slices, 1, n_samples))
+        
+        try:
+            for k, sample_params in enumerate(selected_samples):
+                if verbose and (k + 1) % 100 == 0:
+                    print(f"  Processing sample {k + 1}/{n_samples}...")
+                
+                # Apply MCMC params to model
+                self._apply_mcmc_parameters(sample_params, param_names)
+                
+                # Extract structure information based on geometry
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    trap_heights = np.zeros(len(heights) + 1)
+                    for i, h in enumerate(heights):
+                        trap_heights[i + 1] = trap_heights[i] + h
+                    total_height = trap_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_trapezoid_envelope_sample(
+                        widths, heights, trap_heights, total_height,
+                        xi, yi, k, n_slices
+                    )
+                    
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    cyl_heights = np.zeros(len(heights) + 1)
+                    for i, h in enumerate(heights):
+                        cyl_heights[i + 1] = cyl_heights[i] + h
+                    total_height = cyl_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_cylinder_envelope_sample(
+                        radii, heights, cyl_heights, total_height,
+                        xi, yi, k, n_slices
+                    )
+                else:
+                    raise ValueError(f"Unsupported geometry: {self.geometry}")
+        
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+        
+        if verbose:
+            print(f"Completed computing {n_samples} structure samples.")
+            print(f"  xi shape: {xi.shape}")
+            print(f"  yi shape: {yi.shape}")
+            print(f"  Height range: [{np.min(yi):.2f}, {np.max(yi):.2f}] Å")
+            print(f"  X range: [{np.min(xi):.2f}, {np.max(xi):.2f}] Å")
+        
+        return xi, yi, sample_indices
+    
+    def plot_mcmc_uncertainty_envelope_percentile(self, mcmc_results, n_samples=100, n_slices=101, 
+                                                   confidence_level=0.95, plot_results=True, 
+                                                   figsize=(10, 6), show_best_fit=True, show_mean=True,
+                                                   show_base=True, colors=None):
+        """
+        Plot uncertainty envelope around structure from MCMC results using percentiles.
+        
+        This is a percentile-based version of plot_mcmc_uncertainty_envelope that uses
+        percentiles instead of standard deviation to calculate the uncertainty envelope.
+        This is more robust for non-normal distributions.
+        
+        Parameters:
+        -----------
+        mcmc_results : dict
+            Results from CDSAXS_MCMC containing chains and parameter info
+        n_samples : int, optional
+            Number of MCMC samples to use for uncertainty calculation. Default: 100
+        n_slices : int, optional
+            Number of height slices for uncertainty envelope. Default: 101
+        confidence_level : float, optional
+            Confidence level for uncertainty envelope (0-1). Default: 0.95 (95% CI)
+        plot_results : bool, optional
+            Whether to plot the results. Default: True
+        figsize : tuple, optional
+            Figure size. Default: (10, 6)
+        show_best_fit : bool, optional
+            Whether to overlay the best-fit structure. Default: True
+        show_mean : bool, optional
+            Whether to show the mean structure. Default: True
+        show_base : bool, optional
+            Whether to show the base line at y=0. Default: True
+        colors : dict, optional
+            Custom colors for plotting. Keys: 'envelope', 'mean', 'best_fit', 'structure'
+            
+        Returns:
+        --------
+        tuple
+            (center_line, inner_envelope, outer_envelope) arrays for plotting
+        """
+        # Set default colors
+        if colors is None:
+            colors = {
+                'envelope': 'cornflowerblue',
+                'mean': 'red',
+                'best_fit': 'darkgreen',
+                'structure': 'red'
+            }
+        
+        # Extract flattened chains and parameter names
+        flat_chains = mcmc_results['flat_chains']
+        param_names = mcmc_results['param_names']
+        
+        # Limit number of samples for performance
+        total_samples = len(flat_chains)
+        if n_samples > total_samples:
+            n_samples = total_samples
+        
+        # Randomly select samples for diversity
+        sample_indices = np.random.choice(total_samples, n_samples, replace=False)
+        selected_samples = flat_chains[sample_indices]
+        
+        # Store original model parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Initialize arrays for uncertainty calculation
+        xi = np.zeros([n_slices, 2, n_samples])  # [slice, side(left/right), sample]
+        yi = np.zeros([n_slices, 1, n_samples])  # [slice, 1, sample]
+        
+        try:
+            # Process each MCMC sample
+            for pop_number, sample_params in enumerate(selected_samples):
+                # Apply MCMC parameters to model
+                self._apply_mcmc_parameters(sample_params, param_names)
+                
+                # Extract structure information based on geometry
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    trap_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        trap_heights[i + 1] = trap_heights[i] + heights[i]
+                    total_height = trap_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_trapezoid_envelope_sample(
+                        widths, heights, trap_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+                    
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    cyl_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+                    total_height = cyl_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_cylinder_envelope_sample(
+                        radii, heights, cyl_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+            
+            # Calculate percentiles from confidence level
+            alpha = 1 - confidence_level
+            p_low = 100 * alpha / 2
+            p_high = 100 * (1 - alpha / 2)
+            
+            # Calculate percentile-based statistics
+            center_x = np.mean(xi, axis=2)  # Mean across samples (for center line)
+            center_y = np.mean(yi, axis=2)
+            
+            # Calculate percentile bounds for x (left and right edges separately)
+            x_left_percentiles = np.percentile(xi[:, 0, :], [p_low, 50, p_high], axis=1).T  # [n_slices, 3]
+            x_right_percentiles = np.percentile(xi[:, 1, :], [p_low, 50, p_high], axis=1).T  # [n_slices, 3]
+            
+            # Calculate percentile bounds for y
+            y_percentiles = np.percentile(yi[:, 0, :], [p_low, 50, p_high], axis=1).T  # [n_slices, 3]
+            
+            # Create envelope arrays using percentiles
+            # Outer envelope: p_low for left edge, p_high for right edge
+            outer_edge = np.zeros_like(center_x)
+            outer_edge[:, 0] = x_left_percentiles[:, 0]  # Left side: lower percentile (outward)
+            outer_edge[:, 1] = x_right_percentiles[:, 2]  # Right side: upper percentile (outward)
+            
+            # Inner envelope: p_high for left edge, p_low for right edge
+            inner_edge = np.zeros_like(center_x)
+            inner_edge[:, 0] = x_left_percentiles[:, 2]  # Left side: upper percentile (inward)
+            inner_edge[:, 1] = x_right_percentiles[:, 0]  # Right side: lower percentile (inward)
+            
+            y_inner = y_percentiles[:, 0]  # Lower percentile
+            y_outer = y_percentiles[:, 2]   # Upper percentile
+            
+            # Create plotting arrays (similar to original function)
+            center_line = np.zeros([2 * n_slices, 2])
+            inner_envelope = np.zeros([2 * n_slices, 2])
+            outer_envelope = np.zeros([2 * n_slices, 2])
+            
+            # Center line (using mean)
+            center_line[0:n_slices, 0] = center_x[:, 0]  # Left side
+            center_line[n_slices:2*n_slices, 0] = np.flipud(center_x[:, 1])  # Right side (flipped)
+            center_line[0:n_slices, 1] = center_y[:, 0]  # Heights
+            center_line[n_slices:2*n_slices, 1] = np.flipud(center_y[:, 0])  # Heights (flipped)
+            
+            # Inner envelope
+            inner_envelope[0:n_slices, 0] = inner_edge[:, 0]
+            inner_envelope[n_slices:2*n_slices, 0] = np.flipud(inner_edge[:, 1])
+            inner_envelope[0:n_slices, 1] = y_inner
+            inner_envelope[n_slices:2*n_slices, 1] = np.flipud(y_inner)
+            
+            # Outer envelope
+            outer_envelope[0:n_slices, 0] = outer_edge[:, 0]
+            outer_envelope[n_slices:2*n_slices, 0] = np.flipud(outer_edge[:, 1])
+            outer_envelope[0:n_slices, 1] = y_outer
+            outer_envelope[n_slices:2*n_slices, 1] = np.flipud(y_outer)
+            
+            # Plot results if requested
+            if plot_results:
+                self._plot_uncertainty_envelope_percentile(
+                    center_line, inner_envelope, outer_envelope, figsize, 
+                    show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results
+                )
+            
+            return center_line, inner_envelope, outer_envelope
+            
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+    
+    def _plot_uncertainty_envelope_percentile(self, center_line, inner_envelope, outer_envelope, 
+                                              figsize, show_best_fit, show_mean, show_base, 
+                                              colors, confidence_level, mcmc_results):
+        """Helper function to plot the uncertainty envelope (percentile-based)."""
+        plt.figure(figsize=figsize)
+        
+        # Convert confidence level to percentage for label
+        conf_percent = int(confidence_level * 100)
+        
+        # Plot outer envelope (filled with semi-transparent color)
+        plt.fill(outer_envelope[:, 0], outer_envelope[:, 1], 
+                alpha=0.4, color=colors['envelope'], 
+                label=f'{conf_percent}% CI (percentile-based)', 
+                zorder=2)
+        
+        # Plot dashed lines around the outside of the confidence interval
+        plt.plot(outer_envelope[:, 0], outer_envelope[:, 1], 
+                color='steelblue', linewidth=1.5, linestyle='--', 
+                alpha=0.8, zorder=4)
+        
+        # Plot inner envelope (filled with white to create "hole" effect)
+        plt.fill(inner_envelope[:, 0], inner_envelope[:, 1], 
+                alpha=1.0, color='white', zorder=3)
+        
+        # Plot mean structure if requested
+        if show_mean:
+            plt.plot(center_line[:, 0], center_line[:, 1], 
+                    color=colors['mean'], linewidth=1.5, 
+                    label='Mean Structure', zorder=5)
+        
+        # Add base line connecting left and right sides
+        if show_base:
+            # Find the leftmost and rightmost points at the base (y=0)
+            base_indices = np.where(np.abs(center_line[:, 1]) < 1e-6)[0]
+            if len(base_indices) >= 2:
+                base_x_coords = center_line[base_indices, 0]
+                x_left = np.min(base_x_coords)
+                x_right = np.max(base_x_coords)
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)
+            else:
+                # Fallback: use the width of the structure at the base
+                n_slices = len(center_line) // 2
+                x_left = center_line[0, 0]
+                x_right = center_line[n_slices, 0]
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)
+        
+        # Optionally overlay the best-fit structure from MCMC
+        if show_best_fit:
+            try:
+                best_params = mcmc_results.get('best_params', None)
+                if best_params is not None:
+                    param_names = mcmc_results['param_names']
+                    original_params = self.model_params.copy()
+                    try:
+                        self._apply_mcmc_parameters(best_params, param_names)
+                        # Extract best-fit structure
+                        if self.geometry == 'trapezoid':
+                            heights, widths = self._extract_structure_for_uncertainty()
+                            # Plot trapezoid outline using existing method
+                            self._plot_trapezoid_outline(widths, heights, 
+                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                       label='Best Fit (MCMC)', zorder=6)
+                        elif self.geometry == 'cylinder':
+                            heights, radii = self._extract_structure_for_uncertainty()
+                            # Plot cylinder outline using existing method
+                            self._plot_cylinder_outline(radii, heights,
+                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                       label='Best Fit (MCMC)', zorder=6)
+                    finally:
+                        self.model_params = original_params
+                        self.update_traditional_from_model_params()
+            except Exception as e:
+                print(f"Warning: Could not plot best-fit structure: {e}")
+        
+        plt.xlabel('x (Å)')
+        plt.ylabel('y (Å)')
+        plt.title('MCMC Uncertainty Envelope (Percentile-based)')
+        plt.legend(loc='best')
+        plt.grid(True, alpha=0.3)
+        plt.axis('equal')
+        plt.tight_layout()
+        plt.show()
+    
+    def plot_slice_histograms_enhanced(self, xi, yi, slice_indices, plot_xi=True, plot_yi=True, 
+                                       bins=50, confidence_level=0.95, percentiles=None, figsize=None):
+        """Plot histograms of xi and/or yi values for selected height slices.
+        
+        This function plots histograms for:
+        - x-left: left edge positions
+        - x-right: right edge positions  
+        - y: height positions (when plot_yi=True)
+        
+        Note: x-center is NOT plotted. Only left, right, and y are shown.
+        
+        Uncertainty indicators:
+        - Blue dashed lines: ±1σ (standard deviation based, ~68% CI for normal distribution)
+        - Green dotted lines: Percentile-based confidence interval (default 95% CI)
+        
+        Parameters
+        ----------
+        xi : ndarray, shape (n_slices, 2, n_samples)
+            x positions (left/right) from compute_structure_slice_samples
+        yi : ndarray, shape (n_slices, 1, n_samples)
+            y positions (heights) corresponding to xi
+        slice_indices : list[int] or int
+            Indices of slices to plot (0 .. n_slices-1). Can be a single int or list.
+        plot_xi : bool, optional
+            Whether to plot xi histograms (left and right edges). Default: True
+        plot_yi : bool, optional
+            Whether to plot yi histograms. Default: True
+        bins : int, optional
+            Number of histogram bins. Default: 50
+        confidence_level : float, optional
+            Confidence level for percentile calculation (0-1). Default: 0.95 (95% CI)
+            If percentiles is provided, this is ignored.
+        percentiles : tuple, optional
+            Lower and upper percentiles to mark (e.g. (2.5, 97.5)). 
+            If None, calculated from confidence_level. Default: None
+        figsize : tuple, optional
+            Figure size. If None, automatically determined. Default: None
+        """
+        # Calculate percentiles from confidence_level if not provided
+        if percentiles is None:
+            alpha = 1 - confidence_level
+            p_low = 100 * alpha / 2
+            p_high = 100 * (1 - alpha / 2)
+            percentiles = (p_low, p_high)
+        
+        # Convert single slice index to list
+        if isinstance(slice_indices, int):
+            slice_indices = [slice_indices]
+        slice_indices = list(slice_indices)
+        
+        n_slices, _, n_samples = xi.shape
+        
+        # Determine what to plot: left, right (when plot_xi=True), and y (when plot_yi=True)
+        n_xi_plots = 2 if plot_xi else 0  # left and right only (no center)
+        n_yi_plots = 1 if plot_yi else 0
+        n_plots_per_slice = n_xi_plots + n_yi_plots
+        n_slices_to_plot = len(slice_indices)
+        
+        if n_plots_per_slice == 0:
+            print("Warning: Both plot_xi and plot_yi are False. Nothing to plot.")
+            return
+        
+        # Calculate subplot layout
+        n_cols = min(3, n_plots_per_slice)
+        n_rows = n_slices_to_plot
+        
+        if figsize is None:
+            figsize = (5 * n_cols, 4 * n_rows)
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+        
+        # Handle single subplot case
+        if n_slices_to_plot == 1 and n_plots_per_slice == 1:
+            axes = np.array([[axes]])
+        elif n_slices_to_plot == 1:
+            axes = axes.reshape(1, -1)
+        elif n_plots_per_slice == 1:
+            axes = axes.reshape(-1, 1)
+        else:
+            axes = axes.reshape(n_rows, n_cols)
+        
+        # Plot for each slice
+        for row_idx, slice_idx in enumerate(slice_indices):
+            if slice_idx < 0 or slice_idx >= n_slices:
+                # Hide invalid slices
+                for col_idx in range(n_cols):
+                    if row_idx < axes.shape[0] and col_idx < axes.shape[1]:
+                        axes[row_idx, col_idx].set_visible(False)
+                continue
+            
+            col_idx = 0
+            
+            # Extract data for this slice
+            x_left = xi[slice_idx, 0, :]
+            x_right = xi[slice_idx, 1, :]
+            y_val = yi[slice_idx, 0, :]
+            y_mean = np.mean(y_val)
+            
+            # Plot xi histograms (left and right only, no center)
+            if plot_xi:
+                # Left edge
+                if col_idx < axes.shape[1]:
+                    ax = axes[row_idx, col_idx]
+                    mean = np.mean(x_left)
+                    std = np.std(x_left)
+                    p_low_val, p_high_val = np.percentile(x_left, percentiles)
+                    
+                    ax.hist(x_left, bins=bins, color='lightblue', edgecolor='black', alpha=0.7)
+                    ax.axvline(mean, color='red', linestyle='-', linewidth=2, label=f'mean={mean:.2f}')
+                    ax.axvline(mean - std, color='blue', linestyle='--', linewidth=1.5, 
+                              label=f'±1σ (std-based, ~68% CI)')
+                    ax.axvline(mean + std, color='blue', linestyle='--', linewidth=1.5)
+                    ax.axvline(p_low_val, color='green', linestyle=':', linewidth=1.5, 
+                              label=f'{percentiles[0]:.1f}% (percentile)')
+                    ax.axvline(p_high_val, color='green', linestyle=':', linewidth=1.5, 
+                              label=f'{percentiles[1]:.1f}% (percentile)')
+                    
+                    ax.set_title(f"Slice {slice_idx} (y≈{y_mean:.1f}): Left Edge")
+                    ax.set_xlabel("x-left (Å)")
+                    ax.set_ylabel("Count")
+                    ax.legend(loc='best', fontsize=8)
+                    ax.grid(True, alpha=0.3)
+                    col_idx += 1
+                
+                # Right edge
+                if col_idx < axes.shape[1]:
+                    ax = axes[row_idx, col_idx]
+                    mean = np.mean(x_right)
+                    std = np.std(x_right)
+                    p_low_val, p_high_val = np.percentile(x_right, percentiles)
+                    
+                    ax.hist(x_right, bins=bins, color='lightcoral', edgecolor='black', alpha=0.7)
+                    ax.axvline(mean, color='red', linestyle='-', linewidth=2, label=f'mean={mean:.2f}')
+                    ax.axvline(mean - std, color='blue', linestyle='--', linewidth=1.5, 
+                              label=f'±1σ (std-based, ~68% CI)')
+                    ax.axvline(mean + std, color='blue', linestyle='--', linewidth=1.5)
+                    ax.axvline(p_low_val, color='green', linestyle=':', linewidth=1.5, 
+                              label=f'{percentiles[0]:.1f}% (percentile)')
+                    ax.axvline(p_high_val, color='green', linestyle=':', linewidth=1.5, 
+                              label=f'{percentiles[1]:.1f}% (percentile)')
+                    
+                    ax.set_title(f"Slice {slice_idx} (y≈{y_mean:.1f}): Right Edge")
+                    ax.set_xlabel("x-right (Å)")
+                    ax.set_ylabel("Count")
+                    ax.legend(loc='best', fontsize=8)
+                    ax.grid(True, alpha=0.3)
+                    col_idx += 1
+            
+            # Plot yi histogram
+            if plot_yi and col_idx < axes.shape[1]:
+                ax = axes[row_idx, col_idx]
+                mean = np.mean(y_val)
+                std = np.std(y_val)
+                p_low_val, p_high_val = np.percentile(y_val, percentiles)
+                
+                ax.hist(y_val, bins=bins, color='lightgreen', edgecolor='black', alpha=0.7)
+                ax.axvline(mean, color='red', linestyle='-', linewidth=2, label=f'mean={mean:.2f}')
+                if std > 1e-10:  # Only plot std if there's variation
+                    ax.axvline(mean - std, color='blue', linestyle='--', linewidth=1.5, 
+                              label=f'±1σ (std-based, ~68% CI)')
+                    ax.axvline(mean + std, color='blue', linestyle='--', linewidth=1.5)
+                ax.axvline(p_low_val, color='green', linestyle=':', linewidth=1.5, 
+                          label=f'{percentiles[0]:.1f}% (percentile)')
+                ax.axvline(p_high_val, color='green', linestyle=':', linewidth=1.5, 
+                          label=f'{percentiles[1]:.1f}% (percentile)')
+                
+                ax.set_title(f"Slice {slice_idx}: Height (y)")
+                ax.set_xlabel("y (Å)")
+                ax.set_ylabel("Count")
+                ax.legend(loc='best', fontsize=8)
+                ax.grid(True, alpha=0.3)
+                col_idx += 1
+            
+            # Hide unused subplots in this row
+            while col_idx < axes.shape[1]:
+                axes[row_idx, col_idx].set_visible(False)
+                col_idx += 1
+        
+        plt.tight_layout()
+        plt.show()
+    
+    def print_slice_uncertainties(self, mcmc_results, slice_indices, n_samples=1000, n_slices=1001,
+                                  confidence_level=0.95, use_percentiles=True, verbose=True):
+        """
+        Print uncertainty statistics (mean, std, percentiles) at specific height slices.
+        
+        This function computes the structure samples and then calculates and displays
+        uncertainty statistics for the requested slices.
+        
+        Parameters
+        ----------
+        mcmc_results : dict
+            Results from CDSAXS_MCMC containing chains and parameter info
+        slice_indices : list[int] or int
+            Indices of slices to analyze (0 .. n_slices-1). Can be a single int or list.
+        n_samples : int, optional
+            Number of MCMC samples to use. Default: 1000
+        n_slices : int, optional
+            Number of height slices used in computation. Default: 1001
+        confidence_level : float, optional
+            Confidence level for percentile calculation (0-1). Default: 0.95
+        use_percentiles : bool, optional
+            If True, use percentile-based statistics. If False, use std-based. Default: True
+        verbose : bool, optional
+            Whether to print the results. Default: True
+            
+        Returns
+        -------
+        dict
+            Dictionary containing uncertainty statistics for each slice:
+            {
+                slice_idx: {
+                    'y': {'mean': float, 'std': float, 'percentiles': (low, high)},
+                    'x_left': {'mean': float, 'std': float, 'percentiles': (low, high)},
+                    'x_right': {'mean': float, 'std': float, 'percentiles': (low, high)},
+                    'width': {'mean': float, 'std': float, 'percentiles': (low, high)}
+                }
+            }
+        """
+        # Convert single slice index to list
+        if isinstance(slice_indices, int):
+            slice_indices = [slice_indices]
+        slice_indices = list(slice_indices)
+        
+        # Compute structure samples
+        xi, yi, sample_indices = self.compute_structure_slice_samples(
+            mcmc_results, n_samples=n_samples, n_slices=n_slices, verbose=False
+        )
+        
+        # Calculate percentiles from confidence level
+        alpha = 1 - confidence_level
+        p_low = 100 * alpha / 2
+        p_high = 100 * (1 - alpha / 2)
+        
+        results = {}
+        
+        if verbose:
+            print("=" * 80)
+            print(f"UNCERTAINTY STATISTICS AT SPECIFIC SLICES")
+            print("=" * 80)
+            print(f"Confidence Level: {confidence_level*100:.1f}%")
+            print(f"Number of samples: {n_samples}")
+            print(f"Total slices: {n_slices}")
+            print("=" * 80)
+        
+        for slice_idx in slice_indices:
+            if slice_idx < 0 or slice_idx >= n_slices:
+                if verbose:
+                    print(f"\nWarning: Slice {slice_idx} is out of range (0-{n_slices-1}). Skipping.")
+                continue
+            
+            # Extract data for this slice
+            x_left = xi[slice_idx, 0, :]
+            x_right = xi[slice_idx, 1, :]
+            y_val = yi[slice_idx, 0, :]
+            width = x_right - x_left  # Width at this slice
+            
+            # Calculate statistics
+            y_mean = np.mean(y_val)
+            y_std = np.std(y_val)
+            y_percentiles = np.percentile(y_val, [p_low, p_high])
+            
+            x_left_mean = np.mean(x_left)
+            x_left_std = np.std(x_left)
+            x_left_percentiles = np.percentile(x_left, [p_low, p_high])
+            
+            x_right_mean = np.mean(x_right)
+            x_right_std = np.std(x_right)
+            x_right_percentiles = np.percentile(x_right, [p_low, p_high])
+            
+            width_mean = np.mean(width)
+            width_std = np.std(width)
+            width_percentiles = np.percentile(width, [p_low, p_high])
+            
+            # Store results
+            results[slice_idx] = {
+                'y': {
+                    'mean': y_mean,
+                    'std': y_std,
+                    'percentiles': (y_percentiles[0], y_percentiles[1])
+                },
+                'x_left': {
+                    'mean': x_left_mean,
+                    'std': x_left_std,
+                    'percentiles': (x_left_percentiles[0], x_left_percentiles[1])
+                },
+                'x_right': {
+                    'mean': x_right_mean,
+                    'std': x_right_std,
+                    'percentiles': (x_right_percentiles[0], x_right_percentiles[1])
+                },
+                'width': {
+                    'mean': width_mean,
+                    'std': width_std,
+                    'percentiles': (width_percentiles[0], width_percentiles[1])
+                }
+            }
+            
+            if verbose:
+                print(f"\nSlice {slice_idx} (y ≈ {y_mean:.2f} Å):")
+                print("-" * 80)
+                
+                # Height (y)
+                print(f"  Height (y):")
+                print(f"    Mean:     {y_mean:>10.3f} Å")
+                print(f"    Std:      {y_std:>10.3f} Å")
+                if use_percentiles:
+                    print(f"    {p_low:.1f}% percentile: {y_percentiles[0]:>10.3f} Å")
+                    print(f"    {p_high:.1f}% percentile: {y_percentiles[1]:>10.3f} Å")
+                    print(f"    Range ({confidence_level*100:.0f}% CI): [{y_percentiles[0]:.3f}, {y_percentiles[1]:.3f}] Å")
+                else:
+                    print(f"    ±1σ:      [{y_mean - y_std:.3f}, {y_mean + y_std:.3f}] Å")
+                
+                # Left edge
+                print(f"\n  Left Edge (x_left):")
+                print(f"    Mean:     {x_left_mean:>10.3f} Å")
+                print(f"    Std:      {x_left_std:>10.3f} Å")
+                if use_percentiles:
+                    print(f"    {p_low:.1f}% percentile: {x_left_percentiles[0]:>10.3f} Å")
+                    print(f"    {p_high:.1f}% percentile: {x_left_percentiles[1]:>10.3f} Å")
+                    print(f"    Range ({confidence_level*100:.0f}% CI): [{x_left_percentiles[0]:.3f}, {x_left_percentiles[1]:.3f}] Å")
+                else:
+                    print(f"    ±1σ:      [{x_left_mean - x_left_std:.3f}, {x_left_mean + x_left_std:.3f}] Å")
+                
+                # Right edge
+                print(f"\n  Right Edge (x_right):")
+                print(f"    Mean:     {x_right_mean:>10.3f} Å")
+                print(f"    Std:      {x_right_std:>10.3f} Å")
+                if use_percentiles:
+                    print(f"    {p_low:.1f}% percentile: {x_right_percentiles[0]:>10.3f} Å")
+                    print(f"    {p_high:.1f}% percentile: {x_right_percentiles[1]:>10.3f} Å")
+                    print(f"    Range ({confidence_level*100:.0f}% CI): [{x_right_percentiles[0]:.3f}, {x_right_percentiles[1]:.3f}] Å")
+                else:
+                    print(f"    ±1σ:      [{x_right_mean - x_right_std:.3f}, {x_right_mean + x_right_std:.3f}] Å")
+                
+                # Width
+                print(f"\n  Width (x_right - x_left):")
+                print(f"    Mean:     {width_mean:>10.3f} Å")
+                print(f"    Std:      {width_std:>10.3f} Å")
+                if use_percentiles:
+                    print(f"    {p_low:.1f}% percentile: {width_percentiles[0]:>10.3f} Å")
+                    print(f"    {p_high:.1f}% percentile: {width_percentiles[1]:>10.3f} Å")
+                    print(f"    Range ({confidence_level*100:.0f}% CI): [{width_percentiles[0]:.3f}, {width_percentiles[1]:.3f}] Å")
+                else:
+                    print(f"    ±1σ:      [{width_mean - width_std:.3f}, {width_mean + width_std:.3f}] Å")
+        
+        if verbose:
+            print("\n" + "=" * 80)
+        
+        return results
             
             
     def _clear_callback_data(self):
