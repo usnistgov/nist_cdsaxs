@@ -4558,7 +4558,7 @@ class CDSAXS_Model:
     def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
                        plot_results=True, plot_structure=True, plot_grid=True, 
                        plot_combined=False, verbose=False, use_callbacks=False, 
-                       callback_frequency=10, constraints=None, **kwargs):
+                       callback_frequency=10, constraints=[], **kwargs):
         """
         Flexible optimization method for CDSAXS model fitting with optional callback monitoring.
         
@@ -4617,7 +4617,7 @@ class CDSAXS_Model:
             # Check to make sure constraints is either a list or None
             if constraints is not None and not isinstance(constraints, list):
                 constraints = [constraints]
-                warning.warn("Constraints should be provided as a list. Converted to list automatically.")
+                warnings.warn("Constraints should be provided as a list. Converted to list automatically.")
             
             # Create parameter names list and bounds list
             param_names = []
