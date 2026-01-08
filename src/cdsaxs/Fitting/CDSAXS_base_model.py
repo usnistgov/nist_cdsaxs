@@ -4558,7 +4558,7 @@ class CDSAXS_Model:
     def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
                        plot_results=True, plot_structure=True, plot_grid=True, 
                        plot_combined=False, verbose=False, use_callbacks=False, 
-                       callback_frequency=10, **kwargs):
+                       callback_frequency=10, constraints=None, **kwargs):
         """
         Flexible optimization method for CDSAXS model fitting with optional callback monitoring.
         
@@ -4582,6 +4582,8 @@ class CDSAXS_Model:
             Whether to enable callback monitoring. Default: False
         callback_frequency : int, optional
             Print progress every N iterations when using callbacks. Default: 10
+        constraints : list, optional
+            List of constraint functions for optimizers that support constraints
         **kwargs : dict
             Additional arguments passed to the scipy optimizer
             
@@ -4611,6 +4613,11 @@ class CDSAXS_Model:
             
             # Ensure all parameters have default values
             params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+            
+            # Check to make sure constraints is either a list or None
+            if constraints is not None and not isinstance(constraints, list):
+                constraints = [constraints]
+                warning.warn("Constraints should be provided as a list. Converted to list automatically.")
             
             # Create parameter names list and bounds list
             param_names = []
@@ -4670,7 +4677,7 @@ class CDSAXS_Model:
                 print(f"Starting optimization with {optimizer} using {len(param_names)} parameters...")
             
             result = self._run_scipy_optimizer(
-                optimizer, wrapper_func, bounds, initial_values, verbose, **kwargs
+                optimizer, wrapper_func, bounds, initial_values, constraints, verbose, **kwargs
             )
             
             # Store the optimization result
@@ -4719,7 +4726,7 @@ class CDSAXS_Model:
             return None
         
         
-    def _run_scipy_optimizer(self, optimizer, objective_func, bounds, initial_values, verbose, **kwargs):
+    def _run_scipy_optimizer(self, optimizer, objective_func, bounds, initial_values, constraints, verbose, **kwargs):
         """
         Run the specified scipy optimizer with appropriate parameters.
         
@@ -4733,6 +4740,8 @@ class CDSAXS_Model:
             Parameter bounds
         initial_values : list
             Initial parameter values
+        constraints : list, optional
+            List of constraint functions
         verbose : bool
             Whether to print progress
         **kwargs : dict
@@ -4750,7 +4759,8 @@ class CDSAXS_Model:
                 'polish': True,
                 'x0': np.array(initial_values),
                 'maxiter': 100,
-                'popsize': 15
+                'popsize': 15,
+                'constraints' : constraints,
             }
             default_params.update(kwargs)
             
@@ -4763,6 +4773,7 @@ class CDSAXS_Model:
             default_params = {
                 'x0': np.array(initial_values),
                 'maxiter': 1000,
+                'constraints' : constraints,
                 #'local_search_options': {'method': 'L-BFGS-B'}
             }
             default_params.update(kwargs)
@@ -4776,7 +4787,8 @@ class CDSAXS_Model:
             default_params = {
                 'n': 100,  # Number of sampling points
                 'iters': 3,  # Number of iterations
-                'sampling_method': 'sobol'
+                'sampling_method': 'sobol',
+                'constraints' : constraints,
             }
             default_params.update(kwargs)
             
@@ -4792,7 +4804,8 @@ class CDSAXS_Model:
                 'stepsize': 0.5,
                 'minimizer_kwargs': {
                     'method': 'L-BFGS-B',
-                    'bounds': bounds
+                    'bounds': bounds,
+                    'constraints' : constraints,
                 }
             }
             default_params.update(kwargs)
@@ -4811,7 +4824,8 @@ class CDSAXS_Model:
             default_params = {
                 'method': method,
                 'bounds': bounds if method in ['L-BFGS-B', 'TNC', 'SLSQP'] else None,
-                'options': {'maxiter': 1000}
+                'options': {'maxiter': 1000},
+                'constraints' : constraints,
             }
             default_params.update(kwargs)
             
