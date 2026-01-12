@@ -1285,14 +1285,7 @@ class CylinderModel(CDSAXS_Model):
                 elif param_name == 'Bk':
                     temp_Bk = optimization_values[i]
             
-            #Handle fractional heights if specified
-            #Compute final cylinder height from total height
-            if H_total is not None:
-                remainder = H_total
-                for cyl_idx in range(self.layers):
-                    remainder -= temp_PAR[cyl_idx, 1]
-            
-            
+            #Handle fractional heights if specified            
             if H_total is not None:
                 max_height_idx = np.argmax(temp_PAR[:self.layers, 1])
                 #calculate current sum of heights excluding the max height cylinder
@@ -1306,6 +1299,7 @@ class CylinderModel(CDSAXS_Model):
                 
                 #Assign the remainder height to the max height cylinder
                 temp_PAR[max_height_idx, 1] = h_remainder
+                self.model_params['cylinders'][max_height_idx]['height'] = h_remainder # ensure model_params is updated too
                 
             # Create SimPar array for cylindrical GF function
             SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
