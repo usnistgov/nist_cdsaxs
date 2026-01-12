@@ -1302,7 +1302,7 @@ class CylinderModel(CDSAXS_Model):
 
                 # Enforce physical validity
                 if h_remainder <= 0:
-                    return np.inf  # or -np.inf for log-prob
+                    return float('inf')  # or -np.inf for log-prob
                 
                 #Assign the remainder height to the max height cylinder
                 temp_PAR[max_height_idx, 1] = h_remainder
