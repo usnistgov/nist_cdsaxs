@@ -1262,6 +1262,9 @@ class CylinderModel(CDSAXS_Model):
             temp_I0 = self.I0
             temp_Bk = self.Bk
             
+            #New handling for total height parameter
+            H_total = None
+            
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('cyl_'):
                     parts = param_name.split('_')
@@ -1272,6 +1275,9 @@ class CylinderModel(CDSAXS_Model):
                         temp_PAR[cyl_idx, 0] = optimization_values[i]
                     elif param_type == 'height':
                         temp_PAR[cyl_idx, 1] = optimization_values[i]
+            
+                elif param_name == 'total_height':
+                    H_total = optimization_values[i]      
                 elif param_name == 'DW':
                     temp_DW = optimization_values[i]
                 elif param_name == 'I0':
@@ -1279,6 +1285,28 @@ class CylinderModel(CDSAXS_Model):
                 elif param_name == 'Bk':
                     temp_Bk = optimization_values[i]
             
+            #Handle fractional heights if specified
+            #Compute final cylinder height from total height
+            if H_total is not None:
+                remainder = H_total
+                for cyl_idx in range(self.layers):
+                    remainder -= temp_PAR[cyl_idx, 1]
+            
+            
+            if H_total is not None:
+                max_height_idx = np.argmax(temp_PAR[:self.layers, 1])
+                #calculate current sum of heights excluding the max height cylinder
+                partial_height_sum = np.sum(temp_PAR[:self.layers, 1]) - temp_PAR[max_height_idx, 1]
+                #calculate the remaining height to assign to the max height cylinder
+                h_remainder = H_total - partial_height_sum
+
+                # Enforce physical validity
+                if h_remainder <= 0:
+                    return np.inf  # or -np.inf for log-prob
+                
+                #Assign the remainder height to the max height cylinder
+                temp_PAR[max_height_idx, 1] = h_remainder
+                
             # Create SimPar array for cylindrical GF function
             SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
             
