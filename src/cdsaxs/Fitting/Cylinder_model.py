@@ -1289,8 +1289,8 @@ class CylinderModel(CDSAXS_Model):
             if H_total is not None:
                 #Heights treated as a probability instead of an actual value 
                 #NEED TO UPDATE HEIGHTS AFTER THE FACT IF USING THIS LOGIC
-                height_sum = np.sum(temp_PAR[:self.layers,1])
-                adj_heights = (temp_PAR[:self.layers,1]/height_sum)*H_total
+                height_sum = np.sum(temp_PAR[:self.layers+1,1])
+                adj_heights = (temp_PAR[:self.layers+1,1]/height_sum)*H_total
                 
                 #update heights in temp_PAR
                 for i, adj_height in enumerate(adj_heights):
