@@ -1287,31 +1287,42 @@ class CylinderModel(CDSAXS_Model):
             
             #Handle fractional heights if specified            
             if H_total is not None:
-                #force middle cylinder to take up excess height
-                mid_cyl_idx = self.layers//2
+                #Heights treated as a probability instead of an actual value 
+                #NEED TO UPDATE HEIGHTS AFTER THE FACT IF USING THIS LOGIC
+                height_sum = np.sum(temp_PAR[:self.layers,1])
+                adj_heights = (temp_PAR[:self.layers,1]/height_sum)*H_total
                 
-                #calculate current sum of heights excluding the max height cylinder
-                height_sum = np.sum(temp_PAR[:self.layers, 1])
-                partial_height_sum =  height_sum - temp_PAR[mid_cyl_idx, 1]
-                #calculate the remaining height to assign to the max height cylinder
-                h_remainder = H_total - partial_height_sum
+                #update heights in temp_PAR
+                for i, adj_height in enumerate(adj_heights):
+                    temp_PAR[i,1] = adj_height
+                
+                
+                
+                # #force middle cylinder to take up excess height
+                # mid_cyl_idx = self.layers//2
+                
+                # #calculate current sum of heights excluding the max height cylinder
+                # height_sum = np.sum(temp_PAR[:self.layers, 1])
+                # partial_height_sum =  height_sum - temp_PAR[mid_cyl_idx, 1]
+                # #calculate the remaining height to assign to the max height cylinder
+                # h_remainder = H_total - partial_height_sum
 
-                # Enforce physical validity
-                if h_remainder <= 0:
-                    #rescale heights to make solution possible
-                    adj_heights = (temp_PAR[:self.layers,1]/height_sum)*H_total
-                    # temp_PAR[:self.layers,1] = adj_heights
+                # # Enforce physical validity
+                # if h_remainder <= 0:
+                #     #rescale heights to make solution possible
+                #     adj_heights = (temp_PAR[:self.layers,1]/height_sum)*H_total
+                #     # temp_PAR[:self.layers,1] = adj_heights
                     
-                    #propogate correction to model_params
-                    for i, adj_height in enumerate(adj_heights):
-                        temp_PAR[i,1] = adj_height
-                        self.model_params['cylinders'][i]['height'] = adj_height
-                        self.model_params['optimization'][f'cyl_{i}_height']['default'] = adj_height
-                else:
-                    #Assign the remainder height to the max height cylinder
-                    temp_PAR[mid_cyl_idx, 1] = h_remainder
-                    self.model_params['cylinders'][mid_cyl_idx]['height'] = h_remainder # ensure model_params is updated too
-                    self.model_params['optimization'][f'cyl_{mid_cyl_idx}_height']['default']=h_remainder
+                #     #propogate correction to model_params
+                #     for i, adj_height in enumerate(adj_heights):
+                #         temp_PAR[i,1] = adj_height
+                #         self.model_params['cylinders'][i]['height'] = adj_height
+                #         self.model_params['optimization'][f'cyl_{i}_height']['default'] = adj_height
+                # else:
+                #     #Assign the remainder height to the max height cylinder
+                #     temp_PAR[mid_cyl_idx, 1] = h_remainder
+                #     self.model_params['cylinders'][mid_cyl_idx]['height'] = h_remainder # ensure model_params is updated too
+                #     self.model_params['optimization'][f'cyl_{mid_cyl_idx}_height']['default']=h_remainder
                     
             # Create SimPar array for cylindrical GF function
             SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
