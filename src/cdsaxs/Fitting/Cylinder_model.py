@@ -1287,7 +1287,9 @@ class CylinderModel(CDSAXS_Model):
             
             #Handle fractional heights if specified            
             if H_total is not None:
-                max_height_idx = np.argmax(temp_PAR[:self.layers, 1])
+                max_height_idxs = np.where(temp_PAR[:self.layers, 1] == np.max(temp_PAR[:self.layers, 1]))[0]
+                max_height_idx = max_height_idxs[len(max_height_idxs)//2]  # choose middle index if multiple
+                
                 #calculate current sum of heights excluding the max height cylinder
                 partial_height_sum = np.sum(temp_PAR[:self.layers, 1]) - temp_PAR[max_height_idx, 1]
                 #calculate the remaining height to assign to the max height cylinder
