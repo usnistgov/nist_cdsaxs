@@ -4917,7 +4917,7 @@ class CDSAXS_Model:
     import numpy as np
     import copy
     import matplotlib.pyplot as plt
-    import corner  # For corner plots
+    # import corner  # For corner plots
     from tqdm import tqdm
     import warnings
 
