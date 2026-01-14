@@ -58,6 +58,7 @@ def slice_reduced_dataset(
     slices = []
     for i, (qmin, qmax) in enumerate(q_ranges):
         q = []
+        q_offset = []
         Iq = []
         for data in dataset.datas:
             selection = np.where(
@@ -68,7 +69,10 @@ def slice_reduced_dataset(
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
                 q.append(np.nanmean(getattr(data, q_axis)[selection]))
+                q_offset.append(np.nanmean(getattr(data,offset_axis)[selection]))
                 Iq.append(np.nanmean(data.Iq[selection]))
+
+                                
                 # qsz.extend(list(data.qsz[selection]))
                 # Iq.extend(list(data.Iq[selection]))
 
@@ -81,7 +85,9 @@ def slice_reduced_dataset(
             slice_width=qmax-qmin
         )
         setattr(reduced_slice, integrated_axis,
-                np.round(np.mean([qmin, qmax]), 4))
+                np.round(np.mean([qmin, qmax]), 4)) #TODO: removing rounding to maintain data integrity
+        setattr(reduced_slice, offset_axis, 
+                np.array(q_offset))
         slices.append(reduced_slice)
 
     reduced_slices = ReducedSlices(slices=slices)
