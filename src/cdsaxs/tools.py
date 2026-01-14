@@ -8,6 +8,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
+from skimage import transform
 
 from cdsaxs.calculators import gaussian
 
@@ -164,8 +165,110 @@ def gaussian_refine_peak_2D(image):
 
 
 def rotate_image(image,
-                 degrees, rotation_center, resampling_mode="bilinear",
-                 log_scale=False, fillcolor=-9999):
+                 degrees, rotation_center,
+                 resampling_mode="bilinear",
+                 fill_mode="constant",
+                 fill_constant=np.nan,
+                 log_scale=False,
+                 **kwargs):
+    """
+
+    Rotates an image by a specified number of degrees counterclockwise
+    about the rotation center.
+
+    Parameters
+    ----------
+    image : ndarray
+        Two-dimensional image for rotation.
+    rotation_center : list
+        Center of rotation. Indices should be provided as [row, column]
+        keeping in mind that numpy index orders rows from top to
+        bottom and columns from left to right.
+    resampling_mode : str, optional
+        Set the resampling method used during the rotation.
+        The box rotation works by rotating the image underneath then
+        extracting the box for integration. Resampling modes are
+        chosen from the sklearn.transform.warp method. Options are:
+            nearest_neighbor
+            bilinear (default)
+            biquadratic
+            bicubic
+            biquartic
+            biquintic
+        Default value is 'bilinear'.
+    fill_mode : str, optional
+        Determine how pixels outside the boundaries of the input image
+        are filled after the rotation. Options match those from np.pad.
+        Options are:
+            constant (default)
+            edge
+            symmetric
+            reflect
+            wrap
+        Default value is "constant".
+    fill_constant : float, optional
+        Specifies the constant value used to fill pixels outside the
+        image boundaries after rotation. Only applies when resampling_mode
+        is set to 'constant'.
+    log_scale : bool, optional
+        Rotate the log-scale of your image. This could help resolve
+        some artifacts caused by certain rotation sampling algorithms
+        but you will lose any pixels that are negative (turned to nan).
+        Deafult value is False.
+
+    Other Parameters
+    ----------------
+    **kwargs
+        Other keyword arguments for skimage.transform.rotate are
+        accepted. These include:
+            resize
+            clip
+            preserve_range
+
+    Returns
+    -------
+    ndarray
+        Two-dimensional rotated image of same dimensions as 'image'.
+    """
+
+    sklearn_resampling_modes = {
+        "nearest_neighbor": 0,
+        "bilinear": 1,
+        "biquadratic": 2,
+        "bicubic": 3,
+        "biquartic": 4,
+        "biquintic": 5,
+    }
+
+    resampling_mode = ''.join(filter(str.isalpha, resampling_mode.lower()))
+    resampling_order = sklearn_resampling_modes[resampling_mode]
+
+    fill_mode = fill_mode.lower()
+
+    image = np.array(image)
+    if log_scale:
+        image = np.log10(image)
+    image[default_mask(image)] = np.nan
+
+    image = transform.rotate(
+        image,
+        angle=degrees,
+        center=(rotation_center[1], rotation_center[0]),  # needs (col, row)
+        order=resampling_order,
+        mode=fill_mode,
+        cval=fill_constant,
+        **kwargs
+    )
+
+    if log_scale:
+        image = np.power(10, image)
+
+    return image
+
+
+def rotate_image_pillow(
+        image, degrees, rotation_center, resampling_mode="bilinear", 
+        log_scale=False, fillcolor=-9999):
     """
 
     Rotates an image by a specified number of degrees counterclockwise
