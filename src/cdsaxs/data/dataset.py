@@ -820,7 +820,7 @@ class ReducedSlices():
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
-            orthogonal_axis ='qsy',
+            offset_axis ='qsy',
             header_axis = None,
             decimals=5):
         """
@@ -867,7 +867,7 @@ class ReducedSlices():
             q = getattr(r_slice, q_axis)
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
-            q_offset = getattr(r_slice, orthogonal_axis)
+            q_offset = getattr(r_slice, offset_axis)
             
             if header_axis == 'qsr':
                 q_header = np.hypot(q_int, q_offset)
