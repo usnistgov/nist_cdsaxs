@@ -824,7 +824,7 @@ class ReducedSlices():
             header_axis = None,
             decimals=5):
         """
-        Returns the slected reduced slices set currently stored in the
+        Outputs the slected reduced slices set currently stored in the
         dataset. The user must specify the index of the set of slices
         as well as the q_slice_axis. The number of decimal places the
         slice positions are rounded at can be changed with the
@@ -833,6 +833,11 @@ class ReducedSlices():
         NOTE: currently only a q_slice_axis of 'qsx' is accepted or
         formatted appropriately in the output file.
         TODO: generalize this in the future.
+        
+        Returns
+        -------
+        Datas
+            Numpy array in the format used to export the data.
         """
 
         if header_axis is None:
@@ -921,3 +926,4 @@ class ReducedSlices():
 
         datas = np.array(datas).T
         np.savetxt(filepath, datas, delimiter=',', fmt='%s')
+        return datas
