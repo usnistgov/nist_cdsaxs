@@ -869,31 +869,54 @@ class ReducedSlices():
             q_int = getattr(r_slice, integrated_axis)
             q_offset = getattr(r_slice, offset_axis)
             
-            if header_axis == 'qsr':
-                q_header = np.hypot(q_int, q_offset)
-            else:
-                q_header = q_int
             
             # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]
+            q_offset=q_offset[sorted_indexes]
             Iq = Iq[sorted_indexes]
-
+        
             select = (~np.isnan(Iq)) & (Iq > 0)
+            num_points = len(q[select])
 
-            new_q = np.hstack(
+            #Create columns for qx,qy,qr(if header axis == qsr is specified)
+  
+            new_qx = np.hstack(                 #integration axis
+                ([r'$q_x (\AA^{-1})$'],
+                    [str(np.round(q_int, decimals))]*num_points,
+                    [""]*(length-num_points))
+            )
+            new_qy = np.hstack(                 #offset axis
+            ([r'$q_y (\AA^{-1})$'],
+                [str(np.round(q_offset, decimals))]*len(q[select]),
+                [""]*(length-len(q[select])))
+            )
+            new_qz = np.hstack(                 #q axis that data are plotted along
                 ([r'$q_z (\AA^{-1})$'],
                     np.round(q, decimals=decimals).astype(str)[select],
                     [""]*(length-len(q[select])))
                     )
 
+            datas.append(new_qx)
+            datas.append(new_qy)
+            datas.append(new_qz)
+            
+            if header_axis == 'qsr':
+                qsr = np.hypot(q_int,q_offset)
+                new_qr = np.hstack(
+                    ([r'$q_r (\AA^{-1})$'],
+                        np.round(qsr, decimals=decimals).astype(str)[select],
+                        [""]*(length-num_points))
+                )
+                
+                datas.append(new_qr)
+            
             new_Iq = np.hstack(
-                ([f'qx = {np.round(q_header, decimals)}'],
+                ([r'$I (A.U.)$'],
                     np.round(Iq, decimals=decimals).astype(str)[select],
                     [""]*(length-len(Iq[select])))
                     )
-
-            datas.append(new_q)
+            
             datas.append(new_Iq)
 
         datas = np.array(datas).T
