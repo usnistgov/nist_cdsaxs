@@ -884,18 +884,18 @@ class ReducedSlices():
             new_qx = np.hstack(                 #integration axis
                 ([r'$q_x (\AA^{-1})$'],
                     [str(np.round(q_int, decimals))]*num_points,
-                    [""]*(length-num_points))
+                    [""]*(length-len(q[select])))
             )
             new_qy = np.hstack(                 #offset axis
-            ([r'$q_y (\AA^{-1})$'],
-                [str(np.round(q_offset, decimals))]*len(q[select]),
-                [""]*(length-len(q[select])))
+                ([r'$q_y (\AA^{-1})$'],
+                    np.round(q_offset, decimals).astype(str)[select],
+                    [""]*(length-len(q_offset[select])))
             )
             new_qz = np.hstack(                 #q axis that data are plotted along
                 ([r'$q_z (\AA^{-1})$'],
                     np.round(q, decimals=decimals).astype(str)[select],
                     [""]*(length-len(q[select])))
-                    )
+            )
 
             datas.append(new_qx)
             datas.append(new_qy)
@@ -906,7 +906,7 @@ class ReducedSlices():
                 new_qr = np.hstack(
                     ([r'$q_r (\AA^{-1})$'],
                         np.round(qsr, decimals=decimals).astype(str)[select],
-                        [""]*(length-num_points))
+                        [""]*(length-len(qsr[select])))
                 )
                 
                 datas.append(new_qr)
