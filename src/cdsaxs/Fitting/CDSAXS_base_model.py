@@ -6586,6 +6586,451 @@ class CDSAXS_Model:
             self.model_params = original_params
             self.update_traditional_from_model_params()
     
+    def plot_mcmc_uncertainty_envelope_percentile2(self, mcmc_results, n_samples=100, n_slices=101, 
+                                                   confidence_level=0.95, plot_results=True, 
+                                                   figsize=(10, 6), show_best_fit=True, show_mean=True,
+                                                   show_base=True, colors=None, combine_envelopes=False):
+        """
+        Plot uncertainty envelope around structure from MCMC results using percentiles with multiple envelopes.
+        
+        This function creates 6 separate envelopes:
+        - Inner envelope: inner_lower (y_inner), inner_middle (median y), inner_upper (y_outer)
+        - Outer envelope: outer_lower (y_inner), outer_middle (median y), outer_upper (y_outer)
+        
+        This is an extended version of plot_mcmc_uncertainty_envelope_percentile that provides
+        more detailed uncertainty visualization by showing envelopes at different y percentiles.
+        
+        When combine_envelopes=True, the three inner and three outer envelopes are combined by
+        selecting points that are furthest from the center line, handling crossover points between envelopes.
+        
+        Parameters:
+        -----------
+        mcmc_results : dict
+            Results from CDSAXS_MCMC containing chains and parameter info
+        n_samples : int, optional
+            Number of MCMC samples to use for uncertainty calculation. Default: 100
+        n_slices : int, optional
+            Number of height slices for uncertainty envelope. Default: 101
+        confidence_level : float, optional
+            Confidence level for uncertainty envelope (0-1). Default: 0.95 (95% CI)
+        plot_results : bool, optional
+            Whether to plot the results. Default: True
+        figsize : tuple, optional
+            Figure size. Default: (10, 6)
+        show_best_fit : bool, optional
+            Whether to overlay the best-fit structure. Default: True
+        show_mean : bool, optional
+            Whether to show the mean structure. Default: True
+        show_base : bool, optional
+            Whether to show the base line at y=0. Default: True
+        colors : dict, optional
+            Custom colors for plotting. Keys: 'envelope', 'mean', 'best_fit', 'structure'
+        combine_envelopes : bool, optional
+            If True, combine the three inner and three outer envelopes by selecting points
+            furthest from center line. Default: False
+            
+        Returns:
+        --------
+        tuple
+            If combine_envelopes=False:
+                (center_line, inner_lower, inner_middle, inner_upper, outer_lower, outer_middle, outer_upper)
+            If combine_envelopes=True:
+                (center_line, inner_lower, inner_middle, inner_upper, outer_lower, outer_middle, outer_upper,
+                 inner_combined, outer_combined)
+        """
+        # Set default colors
+        if colors is None:
+            colors = {
+                'envelope': 'cornflowerblue',
+                'mean': 'red',
+                'best_fit': 'darkgreen',
+                'structure': 'red'
+            }
+        
+        # Extract flattened chains and parameter names
+        flat_chains = mcmc_results['flat_chains']
+        param_names = mcmc_results['param_names']
+        
+        # Limit number of samples for performance
+        total_samples = len(flat_chains)
+        if n_samples > total_samples:
+            n_samples = total_samples
+        
+        # Randomly select samples for diversity
+        sample_indices = np.random.choice(total_samples, n_samples, replace=False)
+        selected_samples = flat_chains[sample_indices]
+        
+        # Store original model parameters
+        original_params = copy.deepcopy(self.model_params)
+        
+        # Initialize arrays for uncertainty calculation
+        xi = np.zeros([n_slices, 2, n_samples])  # [slice, side(left/right), sample]
+        yi = np.zeros([n_slices, 1, n_samples])  # [slice, 1, sample]
+        
+        try:
+            # Process each MCMC sample
+            for pop_number, sample_params in enumerate(selected_samples):
+                # Apply MCMC parameters to model
+                self._apply_mcmc_parameters(sample_params, param_names)
+                
+                # Extract structure information based on geometry
+                if self.geometry == 'trapezoid':
+                    heights, widths = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    trap_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        trap_heights[i + 1] = trap_heights[i] + heights[i]
+                    total_height = trap_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_trapezoid_envelope_sample(
+                        widths, heights, trap_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+                    
+                elif self.geometry == 'cylinder':
+                    heights, radii = self._extract_structure_for_uncertainty()
+                    
+                    # Create cumulative heights array (including 0 at start)
+                    cyl_heights = np.zeros(len(heights) + 1)
+                    for i in range(len(heights)):
+                        cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+                    total_height = cyl_heights[-1]
+                    
+                    # Calculate uncertainty envelope for this sample
+                    self._calculate_cylinder_envelope_sample(
+                        radii, heights, cyl_heights, total_height,
+                        xi, yi, pop_number, n_slices
+                    )
+            
+            # Calculate percentiles from confidence level
+            alpha = 1 - confidence_level
+            p_low = 100 * alpha / 2
+            p_high = 100 * (1 - alpha / 2)
+            
+            # Calculate percentile-based statistics
+            center_x = np.mean(xi, axis=2)  # Mean across samples (for center line)
+            center_y = np.mean(yi, axis=2)
+            
+            # Calculate percentile bounds for x (left and right edges separately)
+            x_left_percentiles = np.percentile(xi[:, 0, :], [p_low, 50, p_high], axis=1).T  # [n_slices, 3]
+            x_right_percentiles = np.percentile(xi[:, 1, :], [p_low, 50, p_high], axis=1).T  # [n_slices, 3]
+            
+            # Calculate percentile bounds for y
+            y_percentiles = np.percentile(yi[:, 0, :], [p_low, 50, p_high], axis=1).T  # [n_slices, 3]
+            
+            # Create envelope arrays using percentiles
+            # Outer envelope: p_low for left edge, p_high for right edge
+            outer_edge = np.zeros_like(center_x)
+            outer_edge[:, 0] = x_left_percentiles[:, 0]  # Left side: lower percentile (outward)
+            outer_edge[:, 1] = x_right_percentiles[:, 2]  # Right side: upper percentile (outward)
+            
+            # Inner envelope: p_high for left edge, p_low for right edge
+            inner_edge = np.zeros_like(center_x)
+            inner_edge[:, 0] = x_left_percentiles[:, 2]  # Left side: upper percentile (inward)
+            inner_edge[:, 1] = x_right_percentiles[:, 0]  # Right side: lower percentile (inward)
+            
+            y_inner = y_percentiles[:, 0]  # Lower percentile
+            y_median = y_percentiles[:, 1]  # Median (50th percentile)
+            y_outer = y_percentiles[:, 2]   # Upper percentile
+            
+            # Create plotting arrays for center line
+            center_line = np.zeros([2 * n_slices, 2])
+            center_line[0:n_slices, 0] = center_x[:, 0]  # Left side
+            center_line[n_slices:2*n_slices, 0] = np.flipud(center_x[:, 1])  # Right side (flipped)
+            center_line[0:n_slices, 1] = center_y[:, 0]  # Heights
+            center_line[n_slices:2*n_slices, 1] = np.flipud(center_y[:, 0])  # Heights (flipped)
+            
+            # Create 6 envelope arrays
+            inner_lower = np.zeros([2 * n_slices, 2])
+            inner_middle = np.zeros([2 * n_slices, 2])
+            inner_upper = np.zeros([2 * n_slices, 2])
+            outer_lower = np.zeros([2 * n_slices, 2])
+            outer_middle = np.zeros([2 * n_slices, 2])
+            outer_upper = np.zeros([2 * n_slices, 2])
+            
+            # Inner envelope - lower (y_inner)
+            inner_lower[0:n_slices, 0] = inner_edge[:, 0]
+            inner_lower[n_slices:2*n_slices, 0] = np.flipud(inner_edge[:, 1])
+            inner_lower[0:n_slices, 1] = y_inner
+            inner_lower[n_slices:2*n_slices, 1] = np.flipud(y_inner)
+            
+            # Inner envelope - middle (median y)
+            inner_middle[0:n_slices, 0] = inner_edge[:, 0]
+            inner_middle[n_slices:2*n_slices, 0] = np.flipud(inner_edge[:, 1])
+            inner_middle[0:n_slices, 1] = y_median
+            inner_middle[n_slices:2*n_slices, 1] = np.flipud(y_median)
+            
+            # Inner envelope - upper (y_outer)
+            inner_upper[0:n_slices, 0] = inner_edge[:, 0]
+            inner_upper[n_slices:2*n_slices, 0] = np.flipud(inner_edge[:, 1])
+            inner_upper[0:n_slices, 1] = y_outer
+            inner_upper[n_slices:2*n_slices, 1] = np.flipud(y_outer)
+            
+            # Outer envelope - lower (y_inner)
+            outer_lower[0:n_slices, 0] = outer_edge[:, 0]
+            outer_lower[n_slices:2*n_slices, 0] = np.flipud(outer_edge[:, 1])
+            outer_lower[0:n_slices, 1] = y_inner
+            outer_lower[n_slices:2*n_slices, 1] = np.flipud(y_inner)
+            
+            # Outer envelope - middle (median y)
+            outer_middle[0:n_slices, 0] = outer_edge[:, 0]
+            outer_middle[n_slices:2*n_slices, 0] = np.flipud(outer_edge[:, 1])
+            outer_middle[0:n_slices, 1] = y_median
+            outer_middle[n_slices:2*n_slices, 1] = np.flipud(y_median)
+            
+            # Outer envelope - upper (y_outer)
+            outer_upper[0:n_slices, 0] = outer_edge[:, 0]
+            outer_upper[n_slices:2*n_slices, 0] = np.flipud(outer_edge[:, 1])
+            outer_upper[0:n_slices, 1] = y_outer
+            outer_upper[n_slices:2*n_slices, 1] = np.flipud(y_outer)
+            
+            # Combine envelopes if requested
+            inner_combined = None
+            outer_combined = None
+            if combine_envelopes:
+                # Combine inner envelopes (furthest from center)
+                # Use lower y range to limit to y_inner max
+                inner_combined = self._combine_envelopes_furthest_from_center(
+                    inner_lower, inner_middle, inner_upper, center_line, use_lower_y_range=True
+                )
+                # Combine outer envelopes (furthest from center)
+                # Use upper y range to extend to y_outer max
+                outer_combined = self._combine_envelopes_furthest_from_center(
+                    outer_lower, outer_middle, outer_upper, center_line, use_lower_y_range=False
+                )
+            
+            # Plot results if requested
+            if plot_results:
+                self._plot_uncertainty_envelope_percentile2(
+                    center_line, inner_lower, inner_middle, inner_upper, 
+                    outer_lower, outer_middle, outer_upper, figsize, 
+                    show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results,
+                    inner_combined, outer_combined
+                )
+            
+            # Return appropriate values based on combine_envelopes flag
+            if combine_envelopes:
+                return center_line, inner_lower, inner_middle, inner_upper, outer_lower, outer_middle, outer_upper, inner_combined, outer_combined
+            else:
+                return center_line, inner_lower, inner_middle, inner_upper, outer_lower, outer_middle, outer_upper
+            
+        finally:
+            # Restore original parameters
+            self.model_params = original_params
+            self.update_traditional_from_model_params()
+    
+    def _calculate_distance_from_center_line(self, point, center_line):
+        """
+        Calculate the distance from a point to the nearest point on the center line.
+        
+        Parameters:
+        -----------
+        point : array-like, shape (2,)
+            Point coordinates [x, y]
+        center_line : array-like, shape (n_points, 2)
+            Center line points [[x, y], ...]
+            
+        Returns:
+        --------
+        float
+            Minimum distance from point to center line
+        """
+        point = np.array(point)
+        center_line = np.array(center_line)
+        
+        # Calculate distances to all points on center line
+        distances = np.sqrt(np.sum((center_line - point)**2, axis=1))
+        
+        # Also check distances to line segments between consecutive points
+        min_dist = np.min(distances)
+        
+        # Check line segments for potentially closer points
+        for i in range(len(center_line) - 1):
+            p1 = center_line[i]
+            p2 = center_line[i + 1]
+            
+            # Vector from p1 to p2
+            v = p2 - p1
+            # Vector from p1 to point
+            w = point - p1
+            
+            # Project point onto line segment
+            c1 = np.dot(w, v)
+            if c1 <= 0:
+                # Closest to p1
+                dist = np.linalg.norm(point - p1)
+            else:
+                c2 = np.dot(v, v)
+                if c2 <= c1:
+                    # Closest to p2
+                    dist = np.linalg.norm(point - p2)
+                else:
+                    # Closest to point on segment
+                    b = c1 / c2
+                    proj = p1 + b * v
+                    dist = np.linalg.norm(point - proj)
+            
+            min_dist = min(min_dist, dist)
+        
+        return min_dist
+    
+    def _find_envelope_crossovers(self, envelope1, envelope2, center_line):
+        """
+        Find crossover points where two envelopes intersect based on distance from center line.
+        
+        Parameters:
+        -----------
+        envelope1 : array-like, shape (n_points, 2)
+            First envelope points
+        envelope2 : array-like, shape (n_points, 2)
+            Second envelope points
+        center_line : array-like, shape (n_points, 2)
+            Center line points
+            
+        Returns:
+        --------
+        array
+            Indices where envelopes cross (where distance ordering changes)
+        """
+        n_points = len(envelope1)
+        crossovers = []
+        
+        # Calculate distances for both envelopes
+        dist1 = np.array([self._calculate_distance_from_center_line(envelope1[i], center_line) 
+                          for i in range(n_points)])
+        dist2 = np.array([self._calculate_distance_from_center_line(envelope2[i], center_line) 
+                          for i in range(n_points)])
+        
+        # Find where the difference changes sign (crossover)
+        diff = dist1 - dist2
+        for i in range(n_points - 1):
+            if diff[i] * diff[i + 1] < 0:  # Sign change indicates crossover
+                crossovers.append(i)
+        
+        return np.array(crossovers)
+    
+    def _combine_envelopes_furthest_from_center(self, envelope_lower, envelope_middle, envelope_upper, center_line, use_lower_y_range=False):
+        """
+        Combine three envelopes by selecting points that are furthest from the center line.
+        
+        This function handles the case where y positions differ between envelopes by
+        interpolating to find corresponding points at similar y values.
+        
+        Parameters:
+        -----------
+        envelope_lower : array-like, shape (n_points, 2)
+            Lower envelope points
+        envelope_middle : array-like, shape (n_points, 2)
+            Middle envelope points
+        envelope_upper : array-like, shape (n_points, 2)
+            Upper envelope points
+        center_line : array-like, shape (n_points, 2)
+            Center line points
+        use_lower_y_range : bool, optional
+            If True, use lower envelope's y range (for inner envelopes, limits to y_inner max).
+            If False, use upper envelope's y range (for outer envelopes, extends to y_outer max).
+            Default: False
+            
+        Returns:
+        --------
+        array, shape (n_points, 2)
+            Combined envelope with points furthest from center line
+        """
+        envelope_lower = np.array(envelope_lower)
+        envelope_middle = np.array(envelope_middle)
+        envelope_upper = np.array(envelope_upper)
+        center_line = np.array(center_line)
+        
+        n_points = len(envelope_lower)
+        n_slices = n_points // 2
+        
+        # For the combined envelope, we need to use the full y range, especially extending
+        # to the maximum y_outer. We'll use the upper envelope's y values as reference
+        # since it has the highest y values, ensuring we capture the full extent.
+        
+        # Process left and right sides separately
+        combined = np.zeros_like(envelope_lower)
+        
+        for side_idx in range(2):
+            if side_idx == 0:
+                # Left side
+                start_idx = 0
+                end_idx = n_slices
+            else:
+                # Right side (flipped)
+                start_idx = n_slices
+                end_idx = n_points
+            
+            # Get y values for each envelope on this side
+            y_lower = envelope_lower[start_idx:end_idx, 1]
+            y_middle = envelope_middle[start_idx:end_idx, 1]
+            y_upper = envelope_upper[start_idx:end_idx, 1]
+            
+            # Choose y reference based on envelope type
+            # For inner envelopes: use lower envelope's y range (limits to y_inner max)
+            # For outer envelopes: use upper envelope's y range (extends to y_outer max)
+            if use_lower_y_range:
+                y_ref = y_lower.copy()  # Inner envelope: limit to y_inner max
+            else:
+                y_ref = y_upper.copy()  # Outer envelope: extend to y_outer max
+            
+            # For each reference y point, find corresponding points on all three envelopes
+            for i, y_val in enumerate(y_ref):
+                # Find indices on each envelope closest to this y value
+                if use_lower_y_range:
+                    idx_lower = i  # Already aligned with lower envelope
+                    idx_middle = np.argmin(np.abs(y_middle - y_val))
+                    idx_upper = np.argmin(np.abs(y_upper - y_val))
+                else:
+                    idx_lower = np.argmin(np.abs(y_lower - y_val))
+                    idx_middle = np.argmin(np.abs(y_middle - y_val))
+                    idx_upper = i  # Already aligned with upper envelope
+                
+                # Get points from each envelope
+                pt_lower = envelope_lower[start_idx + idx_lower]
+                pt_middle = envelope_middle[start_idx + idx_middle]
+                pt_upper = envelope_upper[start_idx + idx_upper]
+                
+                # Special handling based on envelope type
+                if use_lower_y_range:
+                    # For inner envelope: if we're beyond the range of middle/upper, use lower envelope point
+                    if y_val > np.max(y_middle) or y_val > np.max(y_upper):
+                        # At heights beyond other envelopes, use lower envelope point
+                        combined[start_idx + i] = pt_lower
+                    else:
+                        # Calculate distances and select furthest from center
+                        dist_lower = self._calculate_distance_from_center_line(pt_lower, center_line)
+                        dist_middle = self._calculate_distance_from_center_line(pt_middle, center_line)
+                        dist_upper = self._calculate_distance_from_center_line(pt_upper, center_line)
+                        distances = [dist_lower, dist_middle, dist_upper]
+                        points = [pt_lower, pt_middle, pt_upper]
+                        max_idx = np.argmax(distances)
+                        combined[start_idx + i] = points[max_idx]
+                else:
+                    # For outer envelope: if we're at a high y value where upper envelope extends beyond others,
+                    # prioritize using the upper envelope point to preserve the maximum height
+                    if y_val > np.max(y_middle) and y_val > np.max(y_lower):
+                        # At heights beyond other envelopes, use upper envelope point
+                        combined[start_idx + i] = pt_upper
+                    else:
+                        # Calculate distances from center line for all three points
+                        dist_lower = self._calculate_distance_from_center_line(pt_lower, center_line)
+                        dist_middle = self._calculate_distance_from_center_line(pt_middle, center_line)
+                        dist_upper = self._calculate_distance_from_center_line(pt_upper, center_line)
+                        
+                        # Select point with maximum distance
+                        # This ensures we get the furthest point from center at each y level
+                        distances = [dist_lower, dist_middle, dist_upper]
+                        points = [pt_lower, pt_middle, pt_upper]
+                        max_idx = np.argmax(distances)
+                        
+                        # Use the selected point, which preserves its y value
+                        combined[start_idx + i] = points[max_idx]
+        
+        return combined
+    
     def _plot_uncertainty_envelope_percentile(self, center_line, inner_envelope, outer_envelope, 
                                               figsize, show_best_fit, show_mean, show_base, 
                                               colors, confidence_level, mcmc_results):
@@ -6668,6 +7113,197 @@ class CDSAXS_Model:
         plt.ylabel('y (Å)')
         plt.title('MCMC Uncertainty Envelope (Percentile-based)')
         plt.legend(loc='best')
+        plt.grid(True, alpha=0.3)
+        plt.axis('equal')
+        plt.tight_layout()
+        plt.show()
+    
+    def _plot_uncertainty_envelope_percentile2(self, center_line, inner_lower, inner_middle, inner_upper,
+                                               outer_lower, outer_middle, outer_upper, figsize, 
+                                               show_best_fit, show_mean, show_base, colors, 
+                                               confidence_level, mcmc_results, inner_combined=None, outer_combined=None):
+        """Helper function to plot the uncertainty envelope with 6 separate envelopes (percentile-based)."""
+        # Convert confidence level to percentage for label
+        conf_percent = int(confidence_level * 100)
+        
+        # If combined envelopes are provided, create two separate plots
+        if inner_combined is not None or outer_combined is not None:
+            # First plot: Component envelopes
+            plt.figure(figsize=figsize)
+            self._plot_component_envelopes(center_line, inner_lower, inner_middle, inner_upper,
+                                          outer_lower, outer_middle, outer_upper, 
+                                          show_best_fit, show_mean, show_base, colors, 
+                                          conf_percent, mcmc_results)
+            
+            # Second plot: Combined envelopes
+            plt.figure(figsize=figsize)
+            self._plot_combined_envelopes(center_line, inner_combined, outer_combined,
+                                         show_best_fit, show_mean, show_base, colors,
+                                         conf_percent, mcmc_results)
+        else:
+            # Single plot: Component envelopes only
+            plt.figure(figsize=figsize)
+            self._plot_component_envelopes(center_line, inner_lower, inner_middle, inner_upper,
+                                          outer_lower, outer_middle, outer_upper, 
+                                          show_best_fit, show_mean, show_base, colors, 
+                                          conf_percent, mcmc_results)
+    
+    def _plot_component_envelopes(self, center_line, inner_lower, inner_middle, inner_upper,
+                                 outer_lower, outer_middle, outer_upper, 
+                                 show_best_fit, show_mean, show_base, colors, 
+                                 conf_percent, mcmc_results):
+        """Plot the 6 component envelopes."""
+        # Plot outer envelopes (from outermost to innermost)
+        # Outer upper envelope (y_outer)
+        plt.fill(outer_upper[:, 0], outer_upper[:, 1], 
+                alpha=0.2, color='lightblue', 
+                label=f'Outer Upper (y_outer)', 
+                zorder=2)
+        plt.plot(outer_upper[:, 0], outer_upper[:, 1], 
+                color='steelblue', linewidth=1.0, linestyle='--', 
+                alpha=0.6, zorder=3)
+        
+        # Outer middle envelope (median y)
+        plt.fill(outer_middle[:, 0], outer_middle[:, 1], 
+                alpha=0.2, color='cornflowerblue', 
+                label=f'Outer Middle (median)', 
+                zorder=3)
+        plt.plot(outer_middle[:, 0], outer_middle[:, 1], 
+                color='steelblue', linewidth=1.0, linestyle='--', 
+                alpha=0.6, zorder=4)
+        
+        # Outer lower envelope (y_inner)
+        plt.fill(outer_lower[:, 0], outer_lower[:, 1], 
+                alpha=0.2, color='royalblue', 
+                label=f'Outer Lower (y_inner)', 
+                zorder=4)
+        plt.plot(outer_lower[:, 0], outer_lower[:, 1], 
+                color='steelblue', linewidth=1.0, linestyle='--', 
+                alpha=0.6, zorder=5)
+        
+        # Plot inner envelopes (from outermost to innermost)
+        # Inner upper envelope (y_outer)
+        plt.fill(inner_upper[:, 0], inner_upper[:, 1], 
+                alpha=0.3, color='lightcoral', 
+                label=f'Inner Upper (y_outer)', 
+                zorder=5)
+        plt.plot(inner_upper[:, 0], inner_upper[:, 1], 
+                color='crimson', linewidth=1.0, linestyle=':', 
+                alpha=0.7, zorder=6)
+        
+        # Inner middle envelope (median y)
+        plt.fill(inner_middle[:, 0], inner_middle[:, 1], 
+                alpha=0.3, color='salmon', 
+                label=f'Inner Middle (median)', 
+                zorder=6)
+        plt.plot(inner_middle[:, 0], inner_middle[:, 1], 
+                color='crimson', linewidth=1.0, linestyle=':', 
+                alpha=0.7, zorder=7)
+        
+        # Inner lower envelope (y_inner)
+        plt.fill(inner_lower[:, 0], inner_lower[:, 1], 
+                alpha=0.3, color='indianred', 
+                label=f'Inner Lower (y_inner)', 
+                zorder=7)
+        plt.plot(inner_lower[:, 0], inner_lower[:, 1], 
+                color='crimson', linewidth=1.0, linestyle=':', 
+                alpha=0.7, zorder=8)
+        
+        # Add common plot elements
+        self._add_common_plot_elements(center_line, show_best_fit, show_mean, show_base, 
+                                      colors, conf_percent, mcmc_results, 
+                                      'Component Envelopes')
+    
+    def _plot_combined_envelopes(self, center_line, inner_combined, outer_combined,
+                                show_best_fit, show_mean, show_base, colors,
+                                conf_percent, mcmc_results):
+        """Plot the combined envelopes."""
+        # Plot outer combined envelope
+        if outer_combined is not None:
+            plt.fill(outer_combined[:, 0], outer_combined[:, 1], 
+                    alpha=0.3, color='darkblue', 
+                    label='Outer Combined (furthest from center)', 
+                    zorder=1, edgecolor='navy', linewidth=2)
+            plt.plot(outer_combined[:, 0], outer_combined[:, 1], 
+                    color='navy', linewidth=2, linestyle='-', 
+                    alpha=0.9, zorder=2)
+        
+        # Plot inner combined envelope
+        if inner_combined is not None:
+            plt.fill(inner_combined[:, 0], inner_combined[:, 1], 
+                    alpha=0.4, color='darkred', 
+                    label='Inner Combined (furthest from center)', 
+                    zorder=2, edgecolor='maroon', linewidth=2)
+            plt.plot(inner_combined[:, 0], inner_combined[:, 1], 
+                    color='maroon', linewidth=2, linestyle='-', 
+                    alpha=0.9, zorder=3)
+        
+        # Add common plot elements
+        self._add_common_plot_elements(center_line, show_best_fit, show_mean, show_base, 
+                                      colors, conf_percent, mcmc_results, 
+                                      'Combined Envelopes')
+    
+    def _add_common_plot_elements(self, center_line, show_best_fit, show_mean, show_base,
+                                 colors, conf_percent, mcmc_results, plot_type):
+        """Add common plot elements (mean structure, base line, best fit) to the current plot."""
+        # Plot mean structure if requested
+        if show_mean:
+            plt.plot(center_line[:, 0], center_line[:, 1], 
+                    color=colors['mean'], linewidth=1.5, 
+                    label='Mean Structure', zorder=9)
+        
+        # Add base line connecting left and right sides
+        if show_base:
+            # Find the leftmost and rightmost points at the base (y=0)
+            base_indices = np.where(np.abs(center_line[:, 1]) < 1e-6)[0]
+            if len(base_indices) >= 2:
+                base_x_coords = center_line[base_indices, 0]
+                x_left = np.min(base_x_coords)
+                x_right = np.max(base_x_coords)
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)
+            else:
+                # Fallback: use the width of the structure at the base
+                n_slices = len(center_line) // 2
+                x_left = center_line[0, 0]
+                x_right = center_line[n_slices, 0]
+                plt.plot([x_left, x_right], [0, 0], 
+                        color=colors['structure'], linewidth=1.5, 
+                        alpha=0.8, zorder=1)
+        
+        # Optionally overlay the best-fit structure from MCMC
+        if show_best_fit:
+            try:
+                best_params = mcmc_results.get('best_params', None)
+                if best_params is not None:
+                    param_names = mcmc_results['param_names']
+                    original_params = self.model_params.copy()
+                    try:
+                        self._apply_mcmc_parameters(best_params, param_names)
+                        # Extract best-fit structure
+                        if self.geometry == 'trapezoid':
+                            heights, widths = self._extract_structure_for_uncertainty()
+                            # Plot trapezoid outline using existing method
+                            self._plot_trapezoid_outline(widths, heights, 
+                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                       label='Best Fit (MCMC)', zorder=10)
+                        elif self.geometry == 'cylinder':
+                            heights, radii = self._extract_structure_for_uncertainty()
+                            # Plot cylinder outline using existing method
+                            self._plot_cylinder_outline(radii, heights,
+                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                       label='Best Fit (MCMC)', zorder=10)
+                    finally:
+                        self.model_params = original_params
+                        self.update_traditional_from_model_params()
+            except Exception as e:
+                print(f"Warning: Could not plot best-fit structure: {e}")
+        
+        plt.xlabel('x (Å)')
+        plt.ylabel('y (Å)')
+        plt.title(f'MCMC Uncertainty Envelope - {plot_type} (Percentile-based, {conf_percent}% CI)')
+        plt.legend(loc='best', fontsize=8)
         plt.grid(True, alpha=0.3)
         plt.axis('equal')
         plt.tight_layout()
