@@ -256,7 +256,7 @@ class CDSAXS_Model:
         
         return True  # Return success
     
-    def importCDSAXS_reductionCode(self, Datafile, calc_qr = False):
+    def importCDSAXS_reductionCode(self, Datafile):
         """
         Imports CDSAXS data from a reduction code file with input validation
         
@@ -267,8 +267,6 @@ class CDSAXS_Model:
         -----------
         Datafile : str
             Path to the data file (CSV format)
-        calc_qr : Bool (default = False) 
-            Whether qx and qy should be used to calculate qr
             
         """
         # Check if input variable exists and is valid
@@ -331,15 +329,7 @@ class CDSAXS_Model:
                 qx_data = Data1[:, qx_col]
                 qy_data = Data1[:, qy_col]
                 qz_data = Data1[:, qz_col]
-                if has_qr:
-                    qr_data = Data1[:, qr_col]
                 I_data = Data1[:, I_col]
-                
-                if has_qr and not calc_qr:
-                    qx_data = qr_data   #treat qr as qx for simplicity sake
-                elif calc_qr: 
-                    qr_data = np.hypot(qx_data,qy_data)
-                    qx_data = qr_data   #treat qr as qx for simplicity sake
                     
                 # Filter out empty strings and convert to float
                 valid_mask = (qz_data != '') & (I_data != '')
