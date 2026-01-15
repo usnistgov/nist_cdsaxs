@@ -6824,7 +6824,8 @@ class CDSAXS_Model:
     def plot_mcmc_uncertainty_envelope_percentile3(self, mcmc_results, n_samples=100, n_slices=101, 
                                                    confidence_levels=[0.5, 0.9, 0.95], plot_results=True, 
                                                    figsize=(10, 6), show_best_fit=True, show_mean=True,
-                                                   show_base=True, colors=None, layer_indices=None, layer_positions=None):
+                                                   show_base=True, colors=None, layer_indices=None, layer_positions=None,
+                                                   arbitrary_heights=None):
         """
         Plot uncertainty envelope around structure from MCMC results with multiple confidence levels.
         
@@ -6859,6 +6860,9 @@ class CDSAXS_Model:
         layer_positions : str or list of str, optional
             Position(s) on layer(s) to mark: 'top' or 'bottom'. If single string, applies to all layers.
             If list, must match length of layer_indices. Default: 'top'
+        arbitrary_heights : float or list of float, optional
+            Arbitrary height(s) at which to draw horizontal lines and calculate uncertainties.
+            Heights should be in Å. Default: None
             
         Returns:
         --------
@@ -6953,6 +6957,21 @@ class CDSAXS_Model:
                 layer_heights, layer_info = self._calculate_mean_layer_heights(
                     selected_samples, param_names, layer_indices, layer_positions
                 )
+            
+            # Add arbitrary heights to layer_info if provided
+            if arbitrary_heights is not None:
+                if not isinstance(arbitrary_heights, (list, tuple, np.ndarray)):
+                    arbitrary_heights = [arbitrary_heights]
+                
+                if layer_info is None:
+                    layer_info = []
+                
+                for height in arbitrary_heights:
+                    layer_info.append({
+                        'layer_index': None,
+                        'position': 'arbitrary',
+                        'mean_height': height
+                    })
             
             # Calculate and combine envelopes for each confidence level
             results = {}
@@ -7642,14 +7661,12 @@ class CDSAXS_Model:
         if center_line is None:
             center_line = results[sorted_levels[0]]['center_line']
         
-        # Draw layer boundary lines if requested
-        if layer_heights is not None and layer_info is not None:
+        # Draw layer boundary lines if requested (no labels in legend)
+        if layer_info is not None:
             for layer_data in layer_info:
                 layer_height = layer_data['mean_height']
-                layer_index = layer_data['layer_index']
-                layer_position = layer_data['position']
-                label = f"Layer {layer_index} {layer_position}"
-                self._plot_layer_boundary_line(layer_height, center_line, label=label)
+                # Don't add to legend - plot without label
+                self._plot_layer_boundary_line(layer_height, center_line, label='')
             
             # Print x positions with uncertainty at layer heights
             if xi is not None and yi is not None and conf_levels is not None:
@@ -7742,7 +7759,7 @@ class CDSAXS_Model:
             List of confidence levels
         """
         print("\n" + "=" * 80)
-        print("Layer Boundary X Positions with Uncertainty")
+        print("X Positions with Uncertainty at Specified Heights")
         print("=" * 80)
         
         n_slices = len(center_line) // 2
@@ -7752,7 +7769,12 @@ class CDSAXS_Model:
             layer_position = layer_data['position']
             layer_height = layer_data['mean_height']
             
-            print(f"\nLayer {layer_index} {layer_position} (height = {layer_height:.3f} Å)")
+            # Create header based on whether it's a layer or arbitrary height
+            if layer_index is not None:
+                header = f"Layer {layer_index} {layer_position}"
+            else:
+                header = "Arbitrary Height"
+            print(f"\n{header} (height = {layer_height:.3f} Å)")
             print("-" * 80)
             
             # Find slice index closest to layer_height
@@ -7802,13 +7824,39 @@ class CDSAXS_Model:
                 width_percentiles = np.percentile(width_samples, [p_low, p_high])
                 print(f"    {conf_percent}% CI:  [{width_percentiles[0]:.3f}, {width_percentiles[1]:.3f}] Å")
             
+            # Calculate statistics for left and right edges
+            left_mean = np.mean(x_left_samples)
+            left_std = np.std(x_left_samples)
+            right_mean = np.mean(x_right_samples)
+            right_std = np.std(x_right_samples)
+            
             print(f"\n  Left Edge X Position:")
-            print(f"    Mean:     {np.mean(x_left_samples):>10.3f} Å")
-            print(f"    Std:      {np.std(x_left_samples):>10.3f} Å")
+            print(f"    Mean:     {left_mean:>10.3f} Å")
+            print(f"    Std:      {left_std:>10.3f} Å")
+            print(f"    ±1σ:      [{left_mean - left_std:.3f}, {left_mean + left_std:.3f}] Å")
+            
+            for conf_level in sorted(confidence_levels):
+                alpha = 1 - conf_level
+                p_low = 100 * alpha / 2
+                p_high = 100 * (1 - alpha / 2)
+                conf_percent = int(conf_level * 100)
+                
+                left_percentiles = np.percentile(x_left_samples, [p_low, p_high])
+                print(f"    {conf_percent}% CI:  [{left_percentiles[0]:.3f}, {left_percentiles[1]:.3f}] Å")
             
             print(f"\n  Right Edge X Position:")
-            print(f"    Mean:     {np.mean(x_right_samples):>10.3f} Å")
-            print(f"    Std:      {np.std(x_right_samples):>10.3f} Å")
+            print(f"    Mean:     {right_mean:>10.3f} Å")
+            print(f"    Std:      {right_std:>10.3f} Å")
+            print(f"    ±1σ:      [{right_mean - right_std:.3f}, {right_mean + right_std:.3f}] Å")
+            
+            for conf_level in sorted(confidence_levels):
+                alpha = 1 - conf_level
+                p_low = 100 * alpha / 2
+                p_high = 100 * (1 - alpha / 2)
+                conf_percent = int(conf_level * 100)
+                
+                right_percentiles = np.percentile(x_right_samples, [p_low, p_high])
+                print(f"    {conf_percent}% CI:  [{right_percentiles[0]:.3f}, {right_percentiles[1]:.3f}] Å")
         
         print("\n" + "=" * 80)
     
@@ -7876,12 +7924,12 @@ class CDSAXS_Model:
         plt.ylabel('y (Å)')
         plt.title(f'MCMC Uncertainty Envelopes (Percentile-based, up to {max_conf}% CI)')
         
-        # Filter legend to only show mean structure, uncertainty envelopes, and layer boundaries
+        # Filter legend to only show mean structure and uncertainty envelopes (no layer boundaries)
         handles, labels = plt.gca().get_legend_handles_labels()
         filtered_handles = []
         filtered_labels = []
         for handle, label in zip(handles, labels):
-            if 'Mean Structure' in label or 'Uncertainty Envelope' in label or 'Layer' in label:
+            if 'Mean Structure' in label or 'Uncertainty Envelope' in label:
                 filtered_handles.append(handle)
                 filtered_labels.append(label)
         plt.legend(filtered_handles, filtered_labels, loc='best', fontsize=8)
