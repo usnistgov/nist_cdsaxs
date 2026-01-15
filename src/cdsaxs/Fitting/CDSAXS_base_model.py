@@ -256,6 +256,162 @@ class CDSAXS_Model:
         
         return True  # Return success
     
+    def importCDSAXS_reductionCode(self, Datafile):
+        """
+        Imports CDSAXS data from a reduction code file with input validation
+        
+        Expected file format with columns:
+        q_x, q_y, q_z, [q_r], I (repeating pattern)
+        
+        Parameters:
+        -----------
+        Datafile : str
+            Path to the data file (CSV format)
+            
+        """
+        # Check if input variable exists and is valid
+        if Datafile is None or not isinstance(Datafile, str):
+            raise ValueError("Datafile must be a valid file path")
+        
+        # Check if file exists
+        if not os.path.isfile(Datafile):
+            raise FileNotFoundError(f"File not found: {Datafile}")
+        
+        try:
+            # Import data using pandas
+            Data = pd.read_csv(Datafile)
+            
+            # Check if file has content
+            if Data.empty:
+                raise ValueError("The data file is empty")
+            
+            # Check the number of cuts
+            num_columns = len(Data.columns)
+            if num_columns < 4:
+                raise ValueError("Data must have at least 4 columns")
+            
+            #check to see if qr is present in the exported data
+            has_qr = (num_columns % 5 == 0)
+            cols_per_slice = 5 if has_qr else 4
+            
+            if num_columns % cols_per_slice != 0:
+                raise ValueError(f"Number of columns ({num_columns}) is not divisible by {cols_per_slice}")
+            
+            numbercuts = num_columns // cols_per_slice
+            
+            #Convert to numpy array
+            Data1 = Data.to_numpy()
+
+            # Remove header row and get actual data
+            # First row contains headers like '$q_x (\AA^{-1})$', '$q_y (\AA^{-1})$', etc.
+            # Actual numeric data starts from second row
+            
+            # Collect data from all slices
+            all_qx = []
+            all_qy = []
+            all_qz = []
+            all_intensity = []
+            
+            for i in range(numbercuts):
+                if has_qr:
+                    qx_col = i * 5
+                    qy_col = i * 5 + 1
+                    qz_col = i * 5 + 2
+                    qr_col = i * 5 + 3  # Not used currently, but available
+                    I_col = i * 5 + 4
+                else:
+                    qx_col = i * 4
+                    qy_col = i * 4 + 1
+                    qz_col = i * 4 + 2
+                    I_col = i * 4 + 3
+                
+                # Extract columns and convert to float
+                qx_data = Data1[:, qx_col]
+                qy_data = Data1[:, qy_col]
+                qz_data = Data1[:, qz_col]
+                I_data = Data1[:, I_col]
+                    
+                # Filter out empty strings and convert to float
+                valid_mask = (qz_data != '') & (I_data != '')
+                
+                if np.any(valid_mask):
+                    qx_vals = qx_data[valid_mask].astype(float)
+                    qy_vals = qy_data[valid_mask].astype(float)
+                    qz_vals = qz_data[valid_mask].astype(float)
+                    I_vals = I_data[valid_mask].astype(float)
+                    
+                    all_qx.append(qx_vals)
+                    all_qy.append(qy_vals)
+                    all_qz.append(qz_vals)
+                    all_intensity.append(I_vals)
+            
+            if not all_qz:
+                raise ValueError("No valid data found in file")
+            
+            # Find the maximum length to create properly sized arrays
+            max_length = max(len(arr) for arr in all_qz)
+            
+            # Initialize arrays with NaN
+            self.Qx = np.full([max_length, numbercuts], np.nan)
+            self.Qy = np.full([max_length, numbercuts], np.nan)
+            self.Qz = np.full([max_length, numbercuts], np.nan)
+            self.Intensity = np.full([max_length, numbercuts], np.nan)
+            
+            # Fill arrays with data
+            for i in range(numbercuts):
+                n_points = len(all_qz[i])
+                self.Qx[:n_points, i] = all_qx[i]
+                self.Qy[:n_points, i] = all_qy[i]
+                self.Qz[:n_points, i] = all_qz[i]
+                self.Intensity[:n_points, i] = all_intensity[i]
+            
+            # Check if Qx values are increasing along the columns and sort if needed
+            # Get the first row with valid data to check order
+            for row_idx in range(self.Qx.shape[0]):
+                valid_qx = self.Qx[row_idx, :][np.isfinite(self.Qx[row_idx, :])]
+                if len(valid_qx) > 0:
+                    # Check if Qx is not in ascending order
+                    if not np.all(np.diff(valid_qx) >= 0):
+                        # Get sort indices based on first valid row
+                        qx_first_valid = self.Qx[row_idx, :]
+                        # Create sort indices only for non-NaN values
+                        finite_mask = np.isfinite(qx_first_valid)
+                        finite_indices = np.where(finite_mask)[0]
+                        finite_values = qx_first_valid[finite_mask]
+                        
+                        # Get the order of finite values
+                        finite_sort_order = np.argsort(finite_values)
+                        
+                        # Create full sort indices
+                        sort_indices = np.arange(self.Qx.shape[1])
+                        sort_indices[finite_indices] = finite_indices[finite_sort_order]
+                        
+                        # Apply sorting to all arrays
+                        self.Qx = self.Qx[:, sort_indices]
+                        self.Qy = self.Qy[:, sort_indices]
+                        self.Qz = self.Qz[:, sort_indices]
+                        self.Intensity = self.Intensity[:, sort_indices]
+                    break
+            
+            # Calculate number of valid points
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            # Process data according to geometry (implemented by subclasses)
+            self.process_imported_data()
+                
+        except pd.errors.EmptyDataError:
+            raise ValueError("The data file is empty or not properly formatted")
+        except pd.errors.ParserError:
+            raise ValueError("Error parsing the CSV file. Check the file format")
+        except Exception as e:
+            raise RuntimeError(f"Error processing data: {str(e)}")
+        
+        return True  # Return success
+    
     def importCDSAXS_txtlegacy(self, intensity_file, qx_file, qz_file):
         """
         Imports CDSAXS data from three separate tab-delimited .txt files with input validation
