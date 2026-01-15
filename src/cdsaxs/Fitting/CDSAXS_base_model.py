@@ -7218,25 +7218,30 @@ class CDSAXS_Model:
                                 show_best_fit, show_mean, show_base, colors,
                                 conf_percent, mcmc_results):
         """Plot the combined envelopes."""
-        # Plot outer combined envelope
-        if outer_combined is not None:
-            plt.fill(outer_combined[:, 0], outer_combined[:, 1], 
-                    alpha=0.3, color='darkblue', 
-                    label='Outer Combined (furthest from center)', 
-                    zorder=1, edgecolor='navy', linewidth=2)
-            plt.plot(outer_combined[:, 0], outer_combined[:, 1], 
-                    color='navy', linewidth=2, linestyle='-', 
-                    alpha=0.9, zorder=2)
+        # Shade only the region between outer and inner envelopes
+        if outer_combined is not None and inner_combined is not None:
+            # Create a polygon that goes around outer envelope, then back along inner envelope (reversed)
+            # This creates a filled region between the two envelopes
+            combined_polygon = np.vstack([
+                outer_combined,  # Outer envelope (forward)
+                inner_combined[::-1]  # Inner envelope (reversed to close the polygon)
+            ])
+            plt.fill(combined_polygon[:, 0], combined_polygon[:, 1], 
+                    alpha=0.3, color='cornflowerblue', 
+                    label=f'{conf_percent}% Uncertainty Envelope', 
+                    zorder=1, edgecolor=None)
         
-        # Plot inner combined envelope
+        # Plot outer combined envelope outline (thin dashed blue)
+        if outer_combined is not None:
+            plt.plot(outer_combined[:, 0], outer_combined[:, 1], 
+                    color='steelblue', linewidth=1, linestyle='--', 
+                    alpha=0.8, zorder=2)
+        
+        # Plot inner combined envelope outline (thin dashed blue)
         if inner_combined is not None:
-            plt.fill(inner_combined[:, 0], inner_combined[:, 1], 
-                    alpha=0.4, color='darkred', 
-                    label='Inner Combined (furthest from center)', 
-                    zorder=2, edgecolor='maroon', linewidth=2)
             plt.plot(inner_combined[:, 0], inner_combined[:, 1], 
-                    color='maroon', linewidth=2, linestyle='-', 
-                    alpha=0.9, zorder=3)
+                    color='steelblue', linewidth=1, linestyle='--', 
+                    alpha=0.8, zorder=3)
         
         # Add common plot elements
         self._add_common_plot_elements(center_line, show_best_fit, show_mean, show_base, 
@@ -7272,7 +7277,7 @@ class CDSAXS_Model:
                         color=colors['structure'], linewidth=1.5, 
                         alpha=0.8, zorder=1)
         
-        # Optionally overlay the best-fit structure from MCMC
+        # Optionally overlay the best-fit structure from MCMC (no label for combined plot)
         if show_best_fit:
             try:
                 best_params = mcmc_results.get('best_params', None)
@@ -7284,16 +7289,26 @@ class CDSAXS_Model:
                         # Extract best-fit structure
                         if self.geometry == 'trapezoid':
                             heights, widths = self._extract_structure_for_uncertainty()
-                            # Plot trapezoid outline using existing method
-                            self._plot_trapezoid_outline(widths, heights, 
-                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
-                                                       label='Best Fit (MCMC)', zorder=10)
+                            # Plot trapezoid outline using existing method (no label for combined plot)
+                            if plot_type == 'Combined Envelopes':
+                                self._plot_trapezoid_outline(widths, heights, 
+                                                           color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                           label='', zorder=10)
+                            else:
+                                self._plot_trapezoid_outline(widths, heights, 
+                                                           color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                           label='Best Fit (MCMC)', zorder=10)
                         elif self.geometry == 'cylinder':
                             heights, radii = self._extract_structure_for_uncertainty()
-                            # Plot cylinder outline using existing method
-                            self._plot_cylinder_outline(radii, heights,
-                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
-                                                       label='Best Fit (MCMC)', zorder=10)
+                            # Plot cylinder outline using existing method (no label for combined plot)
+                            if plot_type == 'Combined Envelopes':
+                                self._plot_cylinder_outline(radii, heights,
+                                                           color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                           label='', zorder=10)
+                            else:
+                                self._plot_cylinder_outline(radii, heights,
+                                                           color=colors['best_fit'], linewidth=1.0, linestyle='-',
+                                                           label='Best Fit (MCMC)', zorder=10)
                     finally:
                         self.model_params = original_params
                         self.update_traditional_from_model_params()
@@ -7303,7 +7318,21 @@ class CDSAXS_Model:
         plt.xlabel('x (Å)')
         plt.ylabel('y (Å)')
         plt.title(f'MCMC Uncertainty Envelope - {plot_type} (Percentile-based, {conf_percent}% CI)')
-        plt.legend(loc='best', fontsize=8)
+        
+        # For combined plot, only show mean structure and uncertainty envelope in legend
+        if plot_type == 'Combined Envelopes':
+            # Get handles and labels, filter to only show mean structure and uncertainty envelope
+            handles, labels = plt.gca().get_legend_handles_labels()
+            filtered_handles = []
+            filtered_labels = []
+            for handle, label in zip(handles, labels):
+                if 'Mean Structure' in label or 'Uncertainty Envelope' in label:
+                    filtered_handles.append(handle)
+                    filtered_labels.append(label)
+            plt.legend(filtered_handles, filtered_labels, loc='best', fontsize=8)
+        else:
+            plt.legend(loc='best', fontsize=8)
+        
         plt.grid(True, alpha=0.3)
         plt.axis('equal')
         plt.tight_layout()
