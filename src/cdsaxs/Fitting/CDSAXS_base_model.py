@@ -28,7 +28,7 @@ class CDSAXS_Model:
         Parameters:
         -----------
         geometry : str
-            Geometry type ('trapezoid' or 'cylinder')
+            Geometry type ('trapezoid', 'sige', or 'cylinder')
         model : str
             Model type
         layers : int
@@ -56,6 +56,9 @@ class CDSAXS_Model:
         if geometry == 'trapezoid':
             from .trapezoid_model import TrapezoidModel
             return TrapezoidModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
+        elif geometry == 'sige':
+            from .SiGe_model import SiGeModelArray
+            return SiGeModelArray(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
         elif geometry == 'cylinder':
             from .cylinder_model import CylinderModel
             return CylinderModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
@@ -69,7 +72,7 @@ class CDSAXS_Model:
         Parameters:
         -----------
         geometry : str
-            Geometry type (e.g., 'trapezoid' or 'cylinder')
+            Geometry type (e.g., 'trapezoid', 'sige', or 'cylinder')
         model : str
             Model type
         layers : int
@@ -814,7 +817,7 @@ class CDSAXS_Model:
         
         try:
             # Print trapezoid parameters
-            if self.geometry == 'trapezoid':
+            if self.geometry in ['trapezoid', 'sige']:
                 initial_traps = initial_model_params.get('trapezoids', [])
                 current_traps = self.model_params.get('trapezoids', [])
                 
@@ -861,6 +864,26 @@ class CDSAXS_Model:
                             
                             print(f"Trap {i} Height{'':<7} {initial_val:<12.4f} {lower_str:<12} "
                                 f"{colored_value:<12} {upper_str:<12}")
+                        
+                        # Print twidth (if present - used by SiGe model)
+                        if 'twidth' in initial_trap or 'twidth' in current_trap:
+                            # Check if twidth exists in both or if we should print anyway
+                            if 'twidth' in initial_trap and 'twidth' in current_trap:
+                                param_name = f'trap_{i}_twidth'
+                                initial_val = initial_trap['twidth']
+                                current_val = current_trap['twidth']
+                                
+                                param_info = optimization_params.get(param_name, {})
+                                lower_bound = param_info.get('min')
+                                upper_bound = param_info.get('max')
+                                colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
+                                                                boundary_threshold, use_colors)
+                                
+                                lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                                upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+                                
+                                print(f"Trap {i} TWidth{'':<6} {initial_val:<12.4f} {lower_str:<12} "
+                                    f"{colored_value:<12} {upper_str:<12}")
             
             # Print cylinder parameters
             elif self.geometry == 'cylinder':
@@ -1935,8 +1958,8 @@ class CDSAXS_Model:
                 axes = axes.flatten()
         
         # Determine the appropriate Q-component for labeling
-        q_component = self.Qx if self.geometry == 'trapezoid' else self.Qr
-        q_label = 'Qx' if self.geometry == 'trapezoid' else 'Qr'
+        q_component = self.Qx if self.geometry in ['trapezoid', 'sige'] else self.Qr
+        q_label = 'Qx' if self.geometry in ['trapezoid', 'sige'] else 'Qr'
         
         # Plot each cut
         for i, (ax, idx) in enumerate(zip(axes, cut_indices)):
@@ -2014,7 +2037,7 @@ class CDSAXS_Model:
         qz_data = self.Qz.copy()
         
         # Get Q-component data based on geometry
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             q_data = self.Qx.copy()
             q_label = 'qx'
         else:
@@ -2115,7 +2138,7 @@ class CDSAXS_Model:
         }
         
         # Add the appropriate Q component
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             data_dict['Qx'] = q_data
         else:
             data_dict['Qr'] = q_data
@@ -2192,7 +2215,7 @@ class CDSAXS_Model:
                     validation_results['valid'] = False
             
             # Validate geometry-specific parameters
-            if self.geometry == 'trapezoid':
+            if self.geometry in ['trapezoid', 'sige']:
                 self._validate_trapezoid_params(validation_results)
             elif self.geometry == 'cylinder':
                 self._validate_cylinder_params(validation_results)
@@ -2332,13 +2355,18 @@ class CDSAXS_Model:
             summary['I0'] = self.model_params.get('I0', 'Unknown')
             summary['Bk'] = self.model_params.get('Bk', 'Unknown')
             
-            if self.geometry == 'trapezoid' and 'trapezoids' in self.model_params:
+            if self.geometry in ['trapezoid', 'sige'] and 'trapezoids' in self.model_params:
                 widths = [trap.get('width', 0) for trap in self.model_params['trapezoids']]
                 heights = [trap.get('height', 0) for trap in self.model_params['trapezoids'][:-1]]
                 summary['widths'] = widths
                 summary['heights'] = heights
                 summary['total_height'] = sum(heights)
                 summary['aspect_ratio'] = max(widths) / summary['total_height'] if summary['total_height'] > 0 else float('inf')
+                
+                # Include twidth if present (used by SiGe model)
+                twidths = [trap.get('twidth') for trap in self.model_params['trapezoids'] if 'twidth' in trap]
+                if twidths:
+                    summary['twidths'] = twidths
             
             elif self.geometry == 'cylinder' and 'cylinders' in self.model_params:
                 radii = [cyl.get('radius', 0) for cyl in self.model_params['cylinders']]
@@ -2775,11 +2803,12 @@ class CDSAXS_Model:
 
     def calculate_width_at_height(self, height_position: float):
         """Calculate the width (trapezoid) or radius (cylinder) at a given height position."""
+        ### Not clear if this will work for the SiGe Model
         if not hasattr(self, 'model_params'):
             raise AttributeError("Model must have model_params attribute")
         
         # Get structure data based on geometry
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             structures = self.model_params['trapezoids']
             width_key = 'width'
         elif self.geometry == 'cylinder':
@@ -2825,7 +2854,7 @@ class CDSAXS_Model:
 
     def get_total_structure_height(self):
         """Get the total height of the model structure."""
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             structures = self.model_params['trapezoids']
         elif self.geometry == 'cylinder':
             structures = self.model_params['cylinders']
@@ -2848,7 +2877,7 @@ class CDSAXS_Model:
         tuple
             (layer_index, position_in_layer) where position_in_layer is 0-1
         """
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             structures = self.model_params['trapezoids']
         elif self.geometry == 'cylinder':
             structures = self.model_params['cylinders']
@@ -2924,7 +2953,7 @@ class CDSAXS_Model:
             pass
         
         # Method 4: Manual class selection (fallback)
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             # Try to get TrapezoidModel class
             try:
                 # First try to get it from the same module
@@ -3018,7 +3047,7 @@ class CDSAXS_Model:
             raise ValueError("Height percentage must be between 0 and 100")
         
         # Get structures
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             structures = self.model_params['trapezoids']
             width_key = 'width'
         else:
@@ -3101,7 +3130,7 @@ class CDSAXS_Model:
         # Create new model parameters
         new_model_params = copy.deepcopy(self.model_params)
         
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             new_model_params['trapezoids'] = new_structures
         else:
             new_model_params['cylinders'] = new_structures
@@ -3230,7 +3259,7 @@ class CDSAXS_Model:
         insertion_height = (height_percentage / 100) * total_height
         insertion_width = self.calculate_width_at_height(insertion_height)
         
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             ax1.axhline(y=insertion_height, color='red', linestyle='--', alpha=0.7, 
                     label=f'Insertion at {height_percentage}%')
             ax1.plot([-insertion_width/2, insertion_width/2], [insertion_height, insertion_height], 
@@ -3269,7 +3298,7 @@ class CDSAXS_Model:
         # Initialize optimization parameters with the specified margin
         param_limits = {}
         
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             # Add trapezoid parameters
             for i, trap in enumerate(self.model_params['trapezoids']):
                 # Width parameters
@@ -3413,7 +3442,7 @@ class CDSAXS_Model:
         tuple
             (height_points, width_points) arrays defining the structure profile
         """
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             structures = self.model_params['trapezoids']
             width_key = 'width'
         elif self.geometry == 'cylinder':
@@ -3733,7 +3762,7 @@ class CDSAXS_Model:
         """
         opt_params = {}
         
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             # Add all trapezoid parameters
             for i, trap in enumerate(self.model_params['trapezoids']):
                 # Width parameters
@@ -3923,7 +3952,7 @@ class CDSAXS_Model:
             # Add parameter values
             if fit['final_params'] is not None:
                 # Add key parameters based on geometry
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     # Show first few trapezoid widths and heights
                     for i in range(min(3, len(fit['final_params']['trapezoids']))):
                         trap = fit['final_params']['trapezoids'][i]
@@ -4150,7 +4179,7 @@ class CDSAXS_Model:
                     n_cuts_to_show = min(3, self.Intensity.shape[1])
                     
                     for cut_idx in range(n_cuts_to_show):
-                        if self.geometry == 'trapezoid':
+                        if self.geometry in ['trapezoid', 'sige']:
                             qz_values = self.Qz[:, cut_idx]
                             q_value = self.Qx[0, cut_idx]
                             q_label = 'Qx'
@@ -4423,7 +4452,7 @@ class CDSAXS_Model:
             
             # Add final parameter values
             if fit['final_params'] is not None and include_all_params:
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     for i, trap in enumerate(fit['final_params']['trapezoids']):
                         row[f'Final_trap_{i}_width'] = trap['width']
                         if 'height' in trap:
@@ -4660,7 +4689,7 @@ class CDSAXS_Model:
             # Choose wrapper function based on geometry
             if self.geometry == 'cylinder':
                 wrapper_func = self._cylinder_optimization_wrapper
-            elif self.geometry == 'trapezoid':
+            elif self.geometry in ['trapezoid', 'sige']:
                 wrapper_func = self._trapezoid_optimization_wrapper
             else:
                 raise ValueError(f"Unsupported geometry: {self.geometry}")
@@ -4857,7 +4886,7 @@ class CDSAXS_Model:
             raise ValueError("Could not extract optimal values from optimization result")
         
         # Update parameters based on geometry
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             # Make a deep copy of trapezoids to avoid modifying the original
             optimized_params['trapezoids'] = [trap.copy() for trap in initial_model_params['trapezoids']]
             
@@ -5263,7 +5292,7 @@ class CDSAXS_Model:
             # Choose wrapper function based on geometry
             if self.geometry == 'cylinder':
                 gf = self._cylinder_optimization_wrapper(theta)
-            elif self.geometry == 'trapezoid':
+            elif self.geometry in ['trapezoid', 'sige']:
                 gf = self._trapezoid_optimization_wrapper(theta)
             else:
                 return -np.inf
@@ -5296,7 +5325,7 @@ class CDSAXS_Model:
         updated_params = copy.deepcopy(self.model_params)
         
         # Update parameters based on geometry
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             # Make a deep copy of trapezoids
             updated_params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
             
@@ -5589,7 +5618,7 @@ class CDSAXS_Model:
             self._apply_mcmc_parameters(params, param_names)
             
             # Extract structure points for plotting
-            if self.geometry == 'trapezoid':
+            if self.geometry in ['trapezoid', 'sige']:
                 heights, widths = self._extract_width_height_relationship()
                 structures_samples.append((heights, widths))
             elif self.geometry == 'cylinder':
@@ -5609,7 +5638,7 @@ class CDSAXS_Model:
         
         # Plot sample structures properly
         for heights, widths in structures_samples:
-            if self.geometry == 'trapezoid':
+            if self.geometry in ['trapezoid', 'sige']:
                 # Plot proper trapezoid shape
                 base_width = widths[0]
                 
@@ -5663,7 +5692,7 @@ class CDSAXS_Model:
         # Plot best-fit structure on top (on the same axes)
         best_heights, best_widths = self._extract_width_height_relationship()
         
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             # Plot best-fit trapezoid in red
             base_width = best_widths[0]
             
@@ -5876,7 +5905,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(sample_params, param_names)
                 
                 # Extract structure information based on geometry
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     heights, widths = self._extract_structure_for_uncertainty()
                     
                     # Create cumulative heights array (including 0 at start)
@@ -5934,7 +5963,7 @@ class CDSAXS_Model:
         tuple
             (heights, widths_or_radii) arrays
         """
-        if self.geometry == 'trapezoid':
+        if self.geometry in ['trapezoid', 'sige']:
             structures = self.model_params['trapezoids']
             widths = [trap['width'] for trap in structures]
             heights = [trap['height'] for trap in structures[:-1]]  # Skip last (top)
@@ -6190,7 +6219,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(best_params, param_names)
                 
                 # Extract best-fit structure
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     heights, widths = self._extract_structure_for_uncertainty()
                     self._plot_trapezoid_outline(widths, heights, 
                                             color=colors['best_fit'], 
@@ -6368,7 +6397,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(sample_params, param_names)
                 
                 # Extract structure information based on geometry
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     heights, widths = self._extract_structure_for_uncertainty()
                     
                     # Create cumulative heights array (including 0 at start)
@@ -6489,7 +6518,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(sample_params, param_names)
                 
                 # Extract structure information based on geometry
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     heights, widths = self._extract_structure_for_uncertainty()
                     
                     # Create cumulative heights array (including 0 at start)
@@ -6674,7 +6703,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(sample_params, param_names)
                 
                 # Extract structure information based on geometry
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     heights, widths = self._extract_structure_for_uncertainty()
                     
                     # Create cumulative heights array (including 0 at start)
@@ -6909,7 +6938,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(sample_params, param_names)
                 
                 # Extract structure information based on geometry
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     heights, widths = self._extract_structure_for_uncertainty()
                     
                     # Create cumulative heights array (including 0 at start)
@@ -7116,7 +7145,7 @@ class CDSAXS_Model:
                 self._apply_mcmc_parameters(sample_params, param_names)
                 
                 # Extract structure information
-                if self.geometry == 'trapezoid':
+                if self.geometry in ['trapezoid', 'sige']:
                     structures = self.model_params['trapezoids']
                     heights = [trap['height'] for trap in structures[:-1]]  # Skip last (top)
                 elif self.geometry == 'cylinder':
@@ -7439,7 +7468,7 @@ class CDSAXS_Model:
                     try:
                         self._apply_mcmc_parameters(best_params, param_names)
                         # Extract best-fit structure
-                        if self.geometry == 'trapezoid':
+                        if self.geometry in ['trapezoid', 'sige']:
                             heights, widths = self._extract_structure_for_uncertainty()
                             # Plot trapezoid outline using existing method
                             self._plot_trapezoid_outline(widths, heights, 
@@ -7899,7 +7928,7 @@ class CDSAXS_Model:
                     try:
                         self._apply_mcmc_parameters(best_params, param_names)
                         # Extract best-fit structure
-                        if self.geometry == 'trapezoid':
+                        if self.geometry in ['trapezoid', 'sige']:
                             heights, widths = self._extract_structure_for_uncertainty()
                             # Plot trapezoid outline using existing method (no label)
                             self._plot_trapezoid_outline(widths, heights, 
@@ -7978,7 +8007,7 @@ class CDSAXS_Model:
                     try:
                         self._apply_mcmc_parameters(best_params, param_names)
                         # Extract best-fit structure
-                        if self.geometry == 'trapezoid':
+                        if self.geometry in ['trapezoid', 'sige']:
                             heights, widths = self._extract_structure_for_uncertainty()
                             # Plot trapezoid outline using existing method (no label for combined plot)
                             if plot_type == 'Combined Envelopes':
