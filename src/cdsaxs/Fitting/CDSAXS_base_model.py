@@ -873,6 +873,10 @@ class CDSAXS_Model:
                                 initial_val = initial_trap['twidth']
                                 current_val = current_trap['twidth']
                                 
+                                # Skip if twidth is None (not all trapezoids have twidth)
+                                if initial_val is None or current_val is None:
+                                    continue
+                                
                                 param_info = optimization_params.get(param_name, {})
                                 lower_bound = param_info.get('min')
                                 upper_bound = param_info.get('max')
@@ -3317,6 +3321,15 @@ class CDSAXS_Model:
                         'max': height_val * (1 + optimization_margin),
                         'default': height_val
                     }
+                
+                # TWidth parameters (if present - used by SiGe model)
+                if 'twidth' in trap and trap['twidth'] is not None:
+                    twidth_val = trap['twidth']
+                    param_limits[f'trap_{i}_twidth'] = {
+                        'min': twidth_val * (1 - optimization_margin),
+                        'max': twidth_val * (1 + optimization_margin),
+                        'default': twidth_val
+                    }
         
         elif self.geometry == 'cylinder':
             # Add cylinder parameters
@@ -3780,6 +3793,15 @@ class CDSAXS_Model:
                         'min': height_val * (1 - margin),
                         'max': height_val * (1 + margin),
                         'default': height_val
+                    }
+                
+                # TWidth parameters (if present - used by SiGe model)
+                if 'twidth' in trap and trap['twidth'] is not None:
+                    twidth_val = trap['twidth']
+                    opt_params[f'trap_{i}_twidth'] = {
+                        'min': twidth_val * (1 - margin),
+                        'max': twidth_val * (1 + margin),
+                        'default': twidth_val
                     }
         
         elif self.geometry == 'cylinder':
@@ -4901,7 +4923,7 @@ class CDSAXS_Model:
                     # Parse trapezoid parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width' or 'height'
+                    param_type = parts[2]  # 'width', 'height', or 'twidth'
                     
                     optimized_params['trapezoids'][trap_idx][param_type] = optimal_values[i]
                 elif param_name.startswith('Bk_'):

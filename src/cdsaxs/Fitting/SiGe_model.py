@@ -264,6 +264,14 @@ class SiGeModelArray(CDSAXS_Model):
                     'max': trap['height'] * 1.1,
                     'default': trap['height']
                 }
+                
+                # Add twidth parameter if present (used by SiGe model)
+                if 'twidth' in trap and trap['twidth'] is not None:
+                    param_limits[f'trap_{i}_twidth'] = {
+                        'min': trap['twidth'] * 0.9,
+                        'max': trap['twidth'] * 1.1,
+                        'default': trap['twidth']
+                    }
             
             # Add global parameters
             param_limits['DW'] = {
@@ -965,7 +973,7 @@ class SiGeModelArray(CDSAXS_Model):
                     # Parse trapezoid parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width' or 'height'
+                    param_type = parts[2]  # 'width', 'height', or 'twidth'
                     
                     # Make sure we have a deep copy of trapezoids to avoid modifying the original
                     if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
@@ -1001,7 +1009,8 @@ class SiGeModelArray(CDSAXS_Model):
                 if i <= self.layers:
                     temp_PAR[i, 0] = trap['width']
                     temp_PAR[i, 1] = trap['height']
-                    temp_PAR[i, 2] = trap['twidth']
+                    # Handle twidth - use None if not present (will be handled by SymCoordAssign)
+                    temp_PAR[i, 2] = trap.get('twidth', None)
             
             # Extract global parameters
             temp_DW = params['DW']
@@ -1143,7 +1152,7 @@ class SiGeModelArray(CDSAXS_Model):
                     # Parse trapezoid parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width' or 'height'
+                    param_type = parts[2]  # 'width', 'height', or 'twidth'
                     
                     optimized_params['trapezoids'][trap_idx][param_type] = result.x[i]
                 elif param_name.startswith('Bk_'):
