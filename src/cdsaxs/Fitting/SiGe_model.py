@@ -5,15 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.patches import Polygon, Patch
 import copy
-from scipy.optimize import (
-    differential_evolution, 
-    dual_annealing, 
-    shgo, 
-    basinhopping, 
-    minimize
-)
-from tqdm import tqdm
-import seaborn as sns
+from scipy.optimize import differential_evolution
 
 from CDSAXS_base_model import CDSAXS_Model
 
@@ -123,9 +115,11 @@ class SiGeModelArray(CDSAXS_Model):
         # Create trapezoids list from PAR
         trapezoids = []
         for i in range(self.layers + 1):
+            tw = self.PAR[i, 2] if (self.PAR.shape[1] >= 3) else np.nan
             trapezoid = {
                 'width': self.PAR[i, 0],
-                'height': self.PAR[i, 1]
+                'height': self.PAR[i, 1],
+                'twidth': None if (isinstance(tw, float) and np.isnan(tw)) else tw
             }
             trapezoids.append(trapezoid)
         
@@ -155,6 +149,200 @@ class SiGeModelArray(CDSAXS_Model):
             self.model_params['Pitch'] = self.Pitch
             
         return self.model_params
+
+    def _has_typed_layers(self, trapezoids):
+        """
+        Return True if any trapezoid dict indicates a non-standard (typed) layer.
+        Currently supports `Layer_Type: 'Ellipse'` (case-insensitive).
+        """
+        if trapezoids is None:
+            return False
+        for t in trapezoids:
+            if isinstance(t, dict) and t.get('Layer_Type', None) is not None:
+                return True
+        return False
+
+    def _expand_ellipse_layer(self, layer_dict, next_layer_dict=None):
+        """
+        Expand a single ellipse layer dict into a list of standard trapezoid segments.
+
+        Expected schema:
+        - width: bottom width
+        - height: total height
+        - twidth: top width (may be None; falls back to next layer width or bottom width)
+        - depth: semi-minor axis (indentation depth)
+        - num_layers: number of discretization segments
+        """
+        width0 = float(layer_dict.get('width', 0.0))
+        height = float(layer_dict.get('height', 0.0))
+        depth = float(layer_dict.get('depth', 0.0))
+        n = int(layer_dict.get('num_layers', 1))
+        if n < 1:
+            n = 1
+
+        # Top width can be independent (mismatch allowed)
+        # Default behavior: if `twidth` is not provided/None, set top width == bottom width.
+        twidth_val = layer_dict.get('twidth', None)
+        if twidth_val is None:
+            width1 = width0
+        else:
+            width1 = float(twidth_val)
+
+        if height < 0:
+            raise ValueError("Ellipse layer height must be non-negative")
+        if width0 <= 0 or width1 <= 0:
+            raise ValueError("Ellipse layer widths must be positive")
+        if depth < 0:
+            raise ValueError("Ellipse layer depth must be non-negative")
+        if depth >= min(width0, width1) / 2.0 and height > 0:
+            raise ValueError("Ellipse layer depth must be < min(width0,width1)/2 to keep positive widths")
+
+        # Zero-height layer: treat as a single degenerate segment
+        if height == 0:
+            return [{'width': width0, 'height': 0.0, 'twidth': width1}]
+
+        dy = height / n
+        y = np.linspace(0.0, height, n + 1)
+
+        # Base width transitions linearly between bottom and top widths
+        base_w = width0 + (width1 - width0) * (y / height)
+
+        # Ellipse indentation profile: horizontal ellipse, semi-major (vertical) = height/2, semi-minor (horizontal) = depth
+        if depth == 0:
+            w = base_w
+        else:
+            semi_major = height / 2.0
+            center_y = height / 2.0
+            norm = (y - center_y) / semi_major
+            indent = depth * np.sqrt(np.maximum(0.0, 1.0 - norm**2))
+            w = base_w - 2.0 * indent
+
+        # Safety clamp against tiny negatives from numeric noise
+        w = np.maximum(w, 1e-12)
+
+        segments = []
+        for i in range(n):
+            segments.append({'width': float(w[i]), 'height': float(dy), 'twidth': float(w[i + 1])})
+        return segments
+
+    def _expand_typed_layers(self, model_params):
+        """
+        Expand user-provided (design) layers into a pure trapezoid stack suitable for simulation.
+
+        Returns:
+        - expanded_trapezoids: list[dict] length = expanded_layers + 1
+        - expanded_slds: list[float] length = expanded_layers + 1
+        - expanded_layers: int (the `layers` parameter used everywhere else)
+        """
+        if model_params is None:
+            raise ValueError("model_params cannot be None")
+
+        design_traps = model_params.get('trapezoids', [])
+        if not isinstance(design_traps, list):
+            raise TypeError("model_params['trapezoids'] must be a list of dicts")
+
+        # Design layer count is informational; use provided value if present, else infer
+        design_layers = int(model_params.get('layers', max(0, len(design_traps))))
+
+        # Require explicit trapezoid count convention: len(trapezoids) == layers + 1
+        # We avoid injecting any height=0 boundary layers (h=0 should not occur in normal use).
+        if design_layers > 0 and len(design_traps) != design_layers + 1:
+            raise ValueError(
+                f"Typed-layer schema requires len(model_params['trapezoids']) == layers + 1. "
+                f"Got layers={design_layers} and trapezoids={len(design_traps)}. "
+                f"Please add the top (layers+1) trapezoid entry explicitly (with non-zero height)."
+            )
+
+        # SLDs: if missing, default to 1 per design entry; if provided, resize permissively
+        design_slds = model_params.get('slds', None)
+        if design_slds is None:
+            design_slds_list = [1.0] * max(1, len(design_traps))
+        else:
+            design_slds_list = list(design_slds) if isinstance(design_slds, (list, tuple, np.ndarray)) else [float(design_slds)]
+            if len(design_slds_list) != len(design_traps):
+                if len(design_slds_list) == 1:
+                    design_slds_list = [float(design_slds_list[0])] * max(1, len(design_traps))
+                else:
+                    design_slds_list = list(np.resize(np.array(design_slds_list, dtype=float), max(1, len(design_traps))))
+            # No implicit boundary insertion; keep SLD list aligned to user-provided trapezoids
+
+        expanded_traps = []
+        expanded_slds = []
+
+        for idx, trap in enumerate(design_traps):
+            if not isinstance(trap, dict):
+                raise TypeError(f"Each trapezoid entry must be a dict; got {type(trap)} at index {idx}")
+
+            layer_type = trap.get('Layer_Type', None)
+            layer_type_norm = str(layer_type).strip().lower() if layer_type is not None else 'trapezoid'
+            sld_val = float(design_slds_list[idx]) if idx < len(design_slds_list) else 1.0
+
+            # Ensure required keys exist for standard usage
+            trap_width = trap.get('width', None)
+            trap_height = trap.get('height', None)
+            trap_twidth = trap.get('twidth', None)
+
+            if layer_type_norm == 'ellipse':
+                next_trap = design_traps[idx + 1] if idx + 1 < len(design_traps) else None
+                ellipse_segments = self._expand_ellipse_layer(trap, next_layer_dict=next_trap)
+                for seg in ellipse_segments:
+                    expanded_traps.append(seg)
+                    expanded_slds.append(sld_val)
+            else:
+                if trap_width is None:
+                    raise ValueError(f"Trapezoid {idx} missing 'width'")
+                if trap_height is None:
+                    raise ValueError(f"Trapezoid {idx} missing 'height'")
+                expanded_traps.append({'width': trap_width, 'height': trap_height, 'twidth': trap_twidth})
+                expanded_slds.append(sld_val)
+
+        # Ensure the last segment has an explicit top width to avoid PAR[T+1] out-of-range in legacy logic
+        if expanded_traps:
+            if expanded_traps[-1].get('twidth', None) is None:
+                expanded_traps[-1]['twidth'] = expanded_traps[-1]['width']
+
+        expanded_layers = max(0, len(expanded_traps) - 1)
+
+        return expanded_traps, expanded_slds, expanded_layers, design_layers, design_traps, design_slds_list
+
+    def _ensure_expanded_model_params(self):
+        """
+        Ensure `self.model_params` is in expanded (simulation) form.
+        If typed layers are present, this mutates `self.model_params` in-place and preserves
+        the original user-provided design structure under `design_*` keys.
+        """
+        if not hasattr(self, 'model_params') or self.model_params is None:
+            return
+
+        # If we already expanded and current trapezoids contain no Layer_Type markers, do nothing
+        trapezoids = self.model_params.get('trapezoids', None)
+        if not self._has_typed_layers(trapezoids):
+            return
+
+        # Avoid re-expanding an already-expanded structure unless the current list is still typed
+        if self.model_params.get('_expanded_from_typed_layers', False) and not self._has_typed_layers(trapezoids):
+            return
+
+        (
+            expanded_traps,
+            expanded_slds,
+            expanded_layers,
+            design_layers,
+            design_traps,
+            design_slds_list,
+        ) = self._expand_typed_layers(self.model_params)
+
+        # Preserve original (design) structure
+        if 'design_trapezoids' not in self.model_params:
+            self.model_params['design_layers'] = design_layers
+            self.model_params['design_trapezoids'] = copy.deepcopy(design_traps)
+            self.model_params['design_slds'] = copy.deepcopy(design_slds_list)
+
+        # Replace with expanded (simulation) structure
+        self.model_params['layers'] = int(expanded_layers)
+        self.model_params['trapezoids'] = expanded_traps
+        self.model_params['slds'] = expanded_slds
+        self.model_params['_expanded_from_typed_layers'] = True
     
     def update_traditional_from_model_params(self):
         """
@@ -162,6 +350,9 @@ class SiGeModelArray(CDSAXS_Model):
         """
         if not hasattr(self, 'model_params'):
             return
+
+        # Expand any typed layers (e.g., ellipse) into standard trapezoid segments for simulation
+        self._ensure_expanded_model_params()
             
         # Update PAR from trapezoids
         trapezoids = self.model_params['trapezoids']
@@ -169,9 +360,13 @@ class SiGeModelArray(CDSAXS_Model):
             self.PAR = np.zeros((len(trapezoids), 3))
             
         for i, trap in enumerate(trapezoids):
-            self.PAR[i, 0] = trap['width']
-            self.PAR[i, 1] = trap['height']
-            self.PAR[i, 2] = trap['twidth']
+            self.PAR[i, 0] = trap.get('width')
+            self.PAR[i, 1] = trap.get('height')
+            tw = trap.get('twidth', None)
+            self.PAR[i, 2] = np.nan if tw is None else tw
+
+        # Ensure `self.layers` matches the simulation trapezoid count convention (len(trapezoids) == layers+1)
+        self.layers = int(self.model_params.get('layers', max(0, len(trapezoids) - 1)))
         
         # Update global parameters
         self.DW = self.model_params['DW']
@@ -247,6 +442,9 @@ class SiGeModelArray(CDSAXS_Model):
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
+
+        # Ensure typed layers (if any) are expanded before generating optimization params
+        self._ensure_expanded_model_params()
             
         # Create default limits if not provided
         if param_limits is None:
@@ -389,16 +587,20 @@ class SiGeModelArray(CDSAXS_Model):
         if not hasattr(self, 'model_params'):
             raise AttributeError("Missing required attribute: model_params")
             
+        # Ensure any typed layers have been expanded before extracting PAR
+        self._ensure_expanded_model_params()
+
         trapezoids = self.model_params['trapezoids']
-        layers = self.model_params['layers']
+        layers = int(self.model_params['layers'])
         
         # Create PAR array
         PAR = np.zeros([layers + 1, 3])
         for i, trap in enumerate(trapezoids):
             if i <= layers:
-                PAR[i, 0] = trap['width']
-                PAR[i, 1] = trap['height']
-                PAR[i, 2] = trap['twidth']
+                PAR[i, 0] = trap.get('width')
+                PAR[i, 1] = trap.get('height')
+                tw = trap.get('twidth', None)
+                PAR[i, 2] = np.nan if tw is None else tw
                 
         return PAR
     
@@ -452,32 +654,33 @@ class SiGeModelArray(CDSAXS_Model):
                 raise ValueError(f"PAR must have at least 2 columns, but has shape {PAR.shape}")
             
             # Main calculation code
-            Coord = np.zeros([layers+1, 7, 1])
-            for T in range(layers+1):
-                if T == 0:
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
-                    Coord[T, 3, 0] = 0
-                    Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
-                    if np.isnan(PAR[0,2]):
-                        Coord[T, 5, 0] = 0.5*( PAR[0,0] - PAR[1,0] )
-                        Coord[T, 6, 0] = 0.5*( PAR[0,0] + PAR[1,0] )
-                    else:
-                        Coord[T, 5, 0] = 0.5*( PAR[0,0] - PAR[0,2] )
-                        Coord[T, 6, 0] = 0.5*( PAR[0,0] + PAR[0,2] )
+            # Center each segment independently about the global centerline, allowing width mismatches
+            center = 0.5 * float(PAR[0, 0])
+            Coord = np.zeros([layers + 1, 7, 1])
+            for T in range(layers + 1):
+                w_bottom = float(PAR[T, 0])
+                h = float(PAR[T, 1])
+                Coord[T, 2, 0] = h
+                Coord[T, 3, 0] = 0
+                Coord[T, 4, 0] = 1  # single material
+
+                # Bottom edges (x1,x4)
+                x_left = center - 0.5 * w_bottom
+                x_right = center + 0.5 * w_bottom
+                Coord[T, 0, 0] = x_left
+                Coord[T, 1, 0] = x_right
+
+                # Top width selection (twidth overrides; otherwise uses next width where available)
+                if not np.isnan(PAR[T, 2]):
+                    w_top = float(PAR[T, 2])
                 else:
-                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-                    Coord[T, 2, 0] = PAR[T, 1]
-                    Coord[T, 3, 0] = 0
-                    Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
-                    if np.isnan(PAR[T,2]):
-                        Coord[T, 5, 0] = Coord[T, 0, 0] + 0.5*( PAR[T,0] - PAR[T+1,0] )
-                        Coord[T, 6, 0] = Coord[T, 5, 0] + PAR[T+1,0]
+                    if T < layers:
+                        w_top = float(PAR[T + 1, 0])
                     else:
-                        Coord[T, 5, 0] = Coord[T, 0, 0] + 0.5*( PAR[T,0] - PAR[T,2] )
-                        Coord[T, 6, 0] = Coord[T, 5, 0] + PAR[T,2]
+                        w_top = w_bottom
+
+                Coord[T, 5, 0] = center - 0.5 * w_top
+                Coord[T, 6, 0] = center + 0.5 * w_top
             
             # If using self attributes, update self.Coord
             if using_self:
@@ -536,48 +739,32 @@ class SiGeModelArray(CDSAXS_Model):
             # Initialize coordinate array
             Coord = np.zeros([layers + 1, 7, 1])
             
-            # Assign coordinates and SLD values
-            for layer_idx in range(layers):
-                # Each layer_idx corresponds to coordinate index layer_idx
-                T = layer_idx
-                
-                if T == 0:
-                    # Bottom layer
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
-                    Coord[T, 3, 0] = 0
-                    if np.isnan(PAR[0,2]):
-                        Coord[T, 5, 0] = 0.5*( PAR[0,0] - PAR[1,0] )
-                        Coord[T, 6, 0] = 0.5*( PAR[0,0] + PAR[1,0] )
-                    else:
-                        Coord[T, 5, 0] = 0.5*( PAR[0,0] - PAR[0,2] )
-                        Coord[T, 6, 0] = 0.5*( PAR[0,0] + PAR[0,2] )
+            # Center each segment independently about the global centerline, allowing width mismatches
+            center = 0.5 * float(PAR[0, 0])
+
+            for T in range(layers + 1):
+                w_bottom = float(PAR[T, 0])
+                h = float(PAR[T, 1])
+
+                # Bottom edges
+                Coord[T, 0, 0] = center - 0.5 * w_bottom
+                Coord[T, 1, 0] = center + 0.5 * w_bottom
+                Coord[T, 2, 0] = h
+                Coord[T, 3, 0] = 0
+
+                # Top width selection (twidth overrides; otherwise uses next width where available)
+                if not np.isnan(PAR[T, 2]):
+                    w_top = float(PAR[T, 2])
                 else:
-                    # Upper layers
-                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-                    Coord[T, 2, 0] = PAR[T, 1]
-                    Coord[T, 3, 0] = 0
-                    if np.isnan(PAR[T,2]):
-                        Coord[T, 5, 0] = Coord[T, 0, 0] + 0.5*( PAR[T,0] - PAR[T+1,0] )
-                        Coord[T, 6, 0] = Coord[T, 5, 0] + PAR[T+1,0]
+                    if T < layers:
+                        w_top = float(PAR[T + 1, 0])
                     else:
-                        Coord[T, 5, 0] = Coord[T, 0, 0] + 0.5*( PAR[T,0] - PAR[T,2] )
-                        Coord[T, 6, 0] = Coord[T, 5, 0] + PAR[T,2]
-                
-                # CLEAR SLD ASSIGNMENT: layer_idx gets sld_array[layer_idx]
-                Coord[T, 4, 0] = sld_array[layer_idx]
-            
-            # Handle the top vertex (T = layers)
-            T = layers
-            Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-            Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-            Coord[T, 2, 0] = PAR[T, 1]
-            Coord[T, 3, 0] = 0
-            Coord[T, 4, 0] = sld_array[T]  # Top vertex - no layer associated
-            Coord[T, 5, 0] = Coord[T, 0, 0] + 0.5*( PAR[T,0] - PAR[T,2] )
-            Coord[T, 6, 0] = Coord[T, 5, 0] + PAR[T,2]
+                        w_top = w_bottom
+                Coord[T, 5, 0] = center - 0.5 * w_top
+                Coord[T, 6, 0] = center + 0.5 * w_top
+
+                # SLD assignment: one value per trapezoid entry
+                Coord[T, 4, 0] = sld_array[T]
             
             if using_self:
                 self.Coord = Coord
@@ -1232,7 +1419,6 @@ class SiGeModelArray(CDSAXS_Model):
             Whether to plot the combined view with all cuts
         """
         import matplotlib.pyplot as plt
-        import numpy as np
         
         # Plot trapezoid structure comparison on the same plot
         if plot_structure:
@@ -1832,7 +2018,7 @@ class SiGeModelArray(CDSAXS_Model):
         min_width = results['width_values'][min_idx[1]]
         min_dw = results['dw_values'][min_idx[0]]
         
-        print(f"\n1-Layer Width+DW Sweep Summary:")
+        print("\n1-Layer Width+DW Sweep Summary:")
         print(f"Grid size: {len(results['width_values'])} x {len(results['dw_values'])}")
         print(f"Width range: {results['width_values'][0]:.1f} to {results['width_values'][-1]:.1f}")
         print(f"DW range: {results['dw_values'][0]:.1f} to {results['dw_values'][-1]:.1f}")
