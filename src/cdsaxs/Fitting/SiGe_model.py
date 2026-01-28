@@ -1397,10 +1397,14 @@ class SiGeModelArray(CDSAXS_Model):
             # Store the optimization result
             self.optimization_result = result
             
-            # Update model parameters with optimized values
+            # Update model parameters with optimized values (design-level where available)
             optimized_params = self.model_params.copy()
-            
-            # Make a deep copy of trapezoids to avoid modifying the original
+
+            # Deep copies to avoid mutating originals
+            if 'design_trapezoids' in self.model_params:
+                optimized_params['design_trapezoids'] = [
+                    trap.copy() for trap in self.model_params['design_trapezoids']
+                ]
             optimized_params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
             
             # Initialize background array for updates
@@ -1411,12 +1415,19 @@ class SiGeModelArray(CDSAXS_Model):
             
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('trap_'):
-                    # Parse trapezoid parameter
+                    # Parse trapezoid (design-layer) parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width', 'height', or 'twidth'
-                    
-                    optimized_params['trapezoids'][trap_idx][param_type] = result.x[i]
+                    param_type = parts[2]
+
+                    if 'design_trapezoids' in optimized_params:
+                        # Store best-fit values on the design geometry
+                        if trap_idx < len(optimized_params['design_trapezoids']):
+                            optimized_params['design_trapezoids'][trap_idx][param_type] = result.x[i]
+                    else:
+                        # Pure trapezoid case: write directly to trapezoids
+                        if trap_idx < len(optimized_params['trapezoids']):
+                            optimized_params['trapezoids'][trap_idx][param_type] = result.x[i]
                 elif param_name.startswith('Bk_'):
                     # Background parameter for specific column
                     bk_idx = int(param_name.split('_')[1])

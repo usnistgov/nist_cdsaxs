@@ -780,8 +780,23 @@ class CDSAXS_Model:
         # Get optimization parameters to extract bounds
         optimization_params = getattr(self, 'model_params', {}).get('optimization', {})
         if not optimization_params:
-            # Try to get from stored optimization info
+            # Try to get from stored optimization info (e.g. MCMC)
             optimization_params = getattr(self, 'mcmc_param_info', {})
+
+        # Build a lookup from parameter name -> optimized value (if available)
+        optimized_values = {}
+        if hasattr(self, 'optimization_result') and getattr(self, 'optimization_result') is not None:
+            opt_vec = getattr(self.optimization_result, 'x', None)
+            if opt_vec is not None:
+                if hasattr(self, 'param_names'):
+                    names = self.param_names
+                elif hasattr(self, 'mcmc_param_names'):
+                    names = self.mcmc_param_names
+                else:
+                    names = None
+                if names is not None and len(names) == len(opt_vec):
+                    for idx, pname in enumerate(names):
+                        optimized_values[pname] = opt_vec[idx]
         
         print(f"\n{BOLD}Parameter Changes with Optimization Bounds:{RESET}")
         print("=" * 80)
@@ -818,76 +833,78 @@ class CDSAXS_Model:
         try:
             # Print trapezoid parameters
             if self.geometry in ['trapezoid', 'sige']:
-                initial_traps = initial_model_params.get('trapezoids', [])
-                current_traps = self.model_params.get('trapezoids', [])
-                
-                max_traps = max(len(initial_traps), len(current_traps))
-                
-                for i in range(max_traps):
-                    if i < len(initial_traps) and i < len(current_traps):
-                        initial_trap = initial_traps[i]
-                        current_trap = current_traps[i]
-                        
-                        # Print width
-                        if 'width' in initial_trap and 'width' in current_trap:
-                            param_name = f'trap_{i}_width'
-                            initial_val = initial_trap['width']
-                            current_val = current_trap['width']
-                            
-                            # Get bounds and apply color coding
-                            param_info = optimization_params.get(param_name, {})
-                            lower_bound = param_info.get('min')
-                            upper_bound = param_info.get('max')
-                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
-                                                            boundary_threshold, use_colors)
-                            
-                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
-                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
-                            
-                            print(f"Trap {i} Width{'':<8} {initial_val:<12.4f} {lower_str:<12} "
-                                f"{colored_value:<12} {upper_str:<12}")
-                        
-                        # Print height
-                        if 'height' in initial_trap and 'height' in current_trap:
-                            param_name = f'trap_{i}_height'
-                            initial_val = initial_trap['height']
-                            current_val = current_trap['height']
-                            
-                            param_info = optimization_params.get(param_name, {})
-                            lower_bound = param_info.get('min')
-                            upper_bound = param_info.get('max')
-                            colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
-                                                            boundary_threshold, use_colors)
-                            
-                            lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
-                            upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
-                            
-                            print(f"Trap {i} Height{'':<7} {initial_val:<12.4f} {lower_str:<12} "
-                                f"{colored_value:<12} {upper_str:<12}")
-                        
-                        # Print twidth (if present - used by SiGe model)
-                        if 'twidth' in initial_trap or 'twidth' in current_trap:
-                            # Check if twidth exists in both or if we should print anyway
-                            if 'twidth' in initial_trap and 'twidth' in current_trap:
-                                param_name = f'trap_{i}_twidth'
-                                initial_val = initial_trap['twidth']
-                                current_val = current_trap['twidth']
-                                
-                                # Skip if twidth is None (not all trapezoids have twidth)
+                # Use optimization parameters to determine which trapezoid fields are truly optimizable,
+                # and print only those. For typed layers (e.g., ellipse), prefer design_trapezoids so we
+                # report one row per design layer rather than many discretized segments.
+
+                # Group optimizable trap fields by index: {idx: {field, ...}, ...}
+                trap_opt_fields = {}
+                for pname in optimization_params.keys():
+                    if pname.startswith('trap_'):
+                        parts = pname.split('_')
+                        if len(parts) >= 3 and parts[1].isdigit():
+                            idx = int(parts[1])
+                            field = parts[2]
+                            trap_opt_fields.setdefault(idx, set()).add(field)
+
+                # If no trap_* parameters are optimizable, skip detailed trapezoid printing
+                if trap_opt_fields:
+                    # Choose design-level trapezoids when available
+                    initial_traps = (
+                        initial_model_params.get('design_trapezoids')
+                        if 'design_trapezoids' in initial_model_params
+                        else initial_model_params.get('trapezoids', [])
+                    )
+                    current_traps = (
+                        self.model_params.get('design_trapezoids')
+                        if 'design_trapezoids' in getattr(self, 'model_params', {})
+                        else self.model_params.get('trapezoids', [])
+                    )
+
+                    label_map = {
+                        'width': 'Width',
+                        'height': 'Height',
+                        'twidth': 'TWidth',
+                        'depth': 'Depth',
+                    }
+
+                    for i in sorted(trap_opt_fields.keys()):
+                        if i < len(initial_traps) and i < len(current_traps):
+                            initial_trap = initial_traps[i]
+                            current_trap = current_traps[i]
+
+                            for field in sorted(trap_opt_fields[i]):
+                                if field not in initial_trap or field not in current_trap:
+                                    continue
+
+                                param_name = f"trap_{i}_{field}"
+                                initial_val = initial_trap[field]
+
+                                # Prefer the optimized value from the DE/MCMC result if available
+                                if param_name in optimized_values:
+                                    current_val = optimized_values[param_name]
+                                else:
+                                    current_val = current_trap[field]
+
+                                # Skip if values are None (e.g., unused twidth)
                                 if initial_val is None or current_val is None:
                                     continue
-                                
+
                                 param_info = optimization_params.get(param_name, {})
                                 lower_bound = param_info.get('min')
                                 upper_bound = param_info.get('max')
-                                colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
-                                                                boundary_threshold, use_colors)
-                                
+                                colored_value = self._get_colored_value(
+                                    current_val, lower_bound, upper_bound, boundary_threshold, use_colors
+                                )
+
                                 lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
                                 upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
-                                
-                                print(f"Trap {i} TWidth{'':<6} {initial_val:<12.4f} {lower_str:<12} "
-                                    f"{colored_value:<12} {upper_str:<12}")
+
+                                field_label = label_map.get(field, field.capitalize())
+                                print(
+                                    f"Trap {i} {field_label:<8} {initial_val:<12.4f} {lower_str:<12} "
+                                    f"{colored_value:<12} {upper_str:<12}"
+                                )
             
             # Print cylinder parameters
             elif self.geometry == 'cylinder':
@@ -941,7 +958,11 @@ class CDSAXS_Model:
             for param in ['DW', 'I0']:
                 if param in initial_model_params and param in self.model_params:
                     initial_val = initial_model_params[param]
-                    current_val = self.model_params[param]
+
+                    if param in optimized_values:
+                        current_val = optimized_values[param]
+                    else:
+                        current_val = self.model_params[param]
                     
                     param_info = optimization_params.get(param, {})
                     lower_bound = param_info.get('min')
@@ -968,7 +989,10 @@ class CDSAXS_Model:
                     for i in range(min(len(initial_bk), len(current_bk))):
                         param_name = f'Bk_{i}'
                         initial_val = initial_bk[i]
-                        current_val = current_bk[i]
+                        if param_name in optimized_values:
+                            current_val = optimized_values[param_name]
+                        else:
+                            current_val = current_bk[i]
                         
                         param_info = optimization_params.get(param_name, {})
                         lower_bound = param_info.get('min')
@@ -984,10 +1008,15 @@ class CDSAXS_Model:
                 
                 # Handle scalar background
                 elif not isinstance(initial_bk, (list, np.ndarray)) and not isinstance(current_bk, (list, np.ndarray)):
-                    param_info = optimization_params.get('Bk', {})
+                    param_name = 'Bk'
+                    param_info = optimization_params.get(param_name, {})
                     lower_bound = param_info.get('min')
                     upper_bound = param_info.get('max')
-                    colored_value = self._get_colored_value(current_bk, lower_bound, upper_bound, 
+                    if param_name in optimized_values:
+                        current_val = optimized_values[param_name]
+                    else:
+                        current_val = current_bk
+                    colored_value = self._get_colored_value(current_val, lower_bound, upper_bound, 
                                                     boundary_threshold, use_colors)
                     
                     lower_str = f"{lower_bound:.6f}" if lower_bound is not None else "N/A"
@@ -1996,7 +2025,7 @@ class CDSAXS_Model:
             ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (counts)')
             ax.grid(True, linestyle='--', alpha=0.7)
-            #ax.legend()
+            ax.legend()
         
         # Hide unused subplots
         for i in range(len(cut_indices), len(axes)):
