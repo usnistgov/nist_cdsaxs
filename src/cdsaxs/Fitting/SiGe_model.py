@@ -184,6 +184,185 @@ class SiGeModelArray(CDSAXS_Model):
                 base[k] = v
 
         return base
+
+    def _get_param_by_name(self, params_dict, name):
+        """
+        Get a parameter value from a model_params-like dict by a string name.
+
+        Supported:
+        - trap_{i}_{field}   (design-level; prefers design_trapezoids when present)
+        - sld_{i}
+        - DW, I0
+        - Bk, Bk_{i}
+        """
+        if params_dict is None:
+            raise ValueError("params_dict cannot be None")
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+
+        if name.startswith('trap_'):
+            parts = name.split('_')
+            if len(parts) < 3:
+                raise ValueError(f"Invalid trap parameter name: {name}")
+            idx = int(parts[1])
+            field = parts[2]
+            traps = params_dict.get('design_trapezoids', None)
+            if not isinstance(traps, list):
+                traps = params_dict.get('trapezoids', None)
+            if not isinstance(traps, list) or idx >= len(traps):
+                raise IndexError(f"Trapezoid index {idx} out of range for {name}")
+            return traps[idx][field]
+
+        if name.startswith('sld_'):
+            idx = int(name.split('_')[1])
+            slds = params_dict.get('design_slds', None)
+            if slds is None:
+                slds = params_dict.get('slds', None)
+            if slds is None:
+                raise KeyError("No SLD array found in params_dict")
+            slds_list = list(slds) if isinstance(slds, (list, tuple, np.ndarray)) else [float(slds)]
+            if idx >= len(slds_list):
+                raise IndexError(f"SLD index {idx} out of range for {name}")
+            return slds_list[idx]
+
+        if name in ('DW', 'I0'):
+            return params_dict[name]
+
+        if name == 'Bk':
+            return params_dict.get('Bk', None)
+
+        if name.startswith('Bk_'):
+            idx = int(name.split('_')[1])
+            bk = params_dict.get('Bk', None)
+            if isinstance(bk, (list, tuple, np.ndarray)):
+                bk_list = list(bk)
+                if idx >= len(bk_list):
+                    raise IndexError(f"Bk index {idx} out of range for {name}")
+                return bk_list[idx]
+            return bk
+
+        raise ValueError(f"Unknown parameter name for constraints: {name}")
+
+    def _set_param_by_name(self, params_dict, name, value):
+        """
+        Set a parameter value in a model_params-like dict by a string name.
+        Mirrors `_get_param_by_name` supported names.
+        """
+        if params_dict is None:
+            raise ValueError("params_dict cannot be None")
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+
+        if name.startswith('trap_'):
+            parts = name.split('_')
+            if len(parts) < 3:
+                raise ValueError(f"Invalid trap parameter name: {name}")
+            idx = int(parts[1])
+            field = parts[2]
+            traps_key = 'design_trapezoids' if isinstance(params_dict.get('design_trapezoids', None), list) else 'trapezoids'
+            traps = params_dict.get(traps_key, None)
+            if not isinstance(traps, list) or idx >= len(traps):
+                raise IndexError(f"Trapezoid index {idx} out of range for {name}")
+            traps[idx][field] = value
+            return
+
+        if name.startswith('sld_'):
+            idx = int(name.split('_')[1])
+            key = 'design_slds' if params_dict.get('design_slds', None) is not None else 'slds'
+            slds = params_dict.get(key, None)
+            if slds is None:
+                raise KeyError("No SLD array found in params_dict")
+            slds_list = list(slds) if isinstance(slds, (list, tuple, np.ndarray)) else [float(slds)]
+            if idx >= len(slds_list):
+                raise IndexError(f"SLD index {idx} out of range for {name}")
+            slds_list[idx] = float(value)
+            params_dict[key] = slds_list
+            return
+
+        if name in ('DW', 'I0'):
+            params_dict[name] = float(value)
+            return
+
+        if name == 'Bk':
+            params_dict['Bk'] = value
+            return
+
+        if name.startswith('Bk_'):
+            idx = int(name.split('_')[1])
+            bk = params_dict.get('Bk', None)
+            if isinstance(bk, (list, tuple, np.ndarray)):
+                bk_list = list(bk)
+            else:
+                # Create a 1-element list if scalar
+                bk_list = [bk]
+            if idx >= len(bk_list):
+                # Extend with last value
+                last = bk_list[-1] if bk_list else 0.0
+                while len(bk_list) <= idx:
+                    bk_list.append(last)
+            bk_list[idx] = float(value)
+            params_dict['Bk'] = bk_list
+            return
+
+        raise ValueError(f"Unknown parameter name for constraints: {name}")
+
+    def _apply_constraints(self, params_dict, constraints):
+        """
+        Apply constraints to a model_params-like dict in-place.
+
+        Constraints format:
+          {'lhs': 'trap_0_width', 'op': '==', 'rhs': 'trap_1_width', 'offset': 0.0}
+          {'lhs': 'trap_2_depth', 'op': '<=', 'rhs': 'trap_2_width', 'offset': 5.0}
+
+        For '==': lhs is derived from rhs (+ offset).
+        For '<=': lhs is clipped to rhs (+ offset) if it violates.
+        """
+        if not constraints:
+            return params_dict
+        if not isinstance(constraints, list):
+            raise TypeError("model_params['constraints'] must be a list of dict rules")
+
+        # Normalize rules
+        eq_rules = []
+        le_rules = []
+        for rule in constraints:
+            if not isinstance(rule, dict):
+                continue
+            lhs = rule.get('lhs', None)
+            rhs = rule.get('rhs', None)
+            op = rule.get('op', None)
+            offset = float(rule.get('offset', 0.0) or 0.0)
+            if lhs is None or rhs is None or op is None:
+                continue
+            op = str(op).strip()
+            if op == '==':
+                eq_rules.append((lhs, rhs, offset))
+            elif op in ('<=', '<'):
+                le_rules.append((lhs, rhs, offset))
+            else:
+                raise ValueError(f"Unsupported constraint op: {op}")
+
+        # Resolve equalities (iterate to allow chained equalities)
+        for _ in range(10):
+            changed = False
+            for lhs, rhs, offset in eq_rules:
+                rhs_val = self._get_param_by_name(params_dict, rhs)
+                new_val = float(rhs_val) + float(offset)
+                old_val = self._get_param_by_name(params_dict, lhs)
+                if old_val != new_val:
+                    self._set_param_by_name(params_dict, lhs, new_val)
+                    changed = True
+            if not changed:
+                break
+
+        # Enforce inequalities by clipping lhs
+        for lhs, rhs, offset in le_rules:
+            rhs_val = float(self._get_param_by_name(params_dict, rhs)) + float(offset)
+            lhs_val = float(self._get_param_by_name(params_dict, lhs))
+            if lhs_val > rhs_val:
+                self._set_param_by_name(params_dict, lhs, rhs_val)
+
+        return params_dict
     
     
     
@@ -1176,6 +1355,56 @@ class SiGeModelArray(CDSAXS_Model):
                 if not hasattr(self, 'Bk'):
                     raise AttributeError("Missing required attribute: Bk")
                 Bk = self.Bk
+
+            # Apply constraints (forward simulation path) before coordinate generation.
+            # We enforce constraints on the design-level parameters, then expand typed layers.
+            constraints = None
+            if hasattr(self, 'model_params') and isinstance(self.model_params, dict):
+                constraints = self.model_params.get('constraints', None)
+
+            if constraints:
+                # Build design-level params dict for constraint application
+                if 'design_trapezoids' in self.model_params and 'design_slds' in self.model_params:
+                    tmp_design = {
+                        'design_trapezoids': [t.copy() for t in self.model_params['design_trapezoids']],
+                        'design_slds': copy.deepcopy(self.model_params.get('design_slds', [])),
+                        'DW': self.model_params.get('DW', DW),
+                        'I0': self.model_params.get('I0', I0),
+                        'Bk': self.model_params.get('Bk', Bk),
+                        'layers': self.model_params.get('design_layers', len(self.model_params['design_trapezoids']) - 1),
+                    }
+                    self._apply_constraints(tmp_design, constraints)
+                    tmp_model_params = {
+                        'trapezoids': tmp_design['design_trapezoids'],
+                        'layers': tmp_design['layers'],
+                        'slds': tmp_design.get('design_slds', None),
+                    }
+                else:
+                    tmp_model_params = {
+                        'trapezoids': [t.copy() for t in self.model_params.get('trapezoids', [])],
+                        'layers': int(self.model_params.get('layers', max(0, len(self.model_params.get('trapezoids', [])) - 1))),
+                        'slds': copy.deepcopy(self.model_params.get('slds', None)),
+                    }
+                    self._apply_constraints(tmp_model_params, constraints)
+
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                # Override PAR/layers for this simulation call
+                temp_PAR = np.zeros((expanded_layers + 1, 3))
+                for ii, trap in enumerate(expanded_traps):
+                    if ii <= expanded_layers:
+                        temp_PAR[ii, 0] = trap.get('width')
+                        temp_PAR[ii, 1] = trap.get('height')
+                        tw = trap.get('twidth', None)
+                        temp_PAR[ii, 2] = np.nan if tw is None else tw
+                PAR = temp_PAR
+                layers = expanded_layers
+                # Also override SLDs by passing through SymCoordAssign via sld_values
+                # (SimTrap_SM calls SymCoordAssign(PAR,layers) which will use self.sld_values;
+                # keep self.sld_values consistent for this call.)
+                try:
+                    self.sld_values = np.array(expanded_slds, dtype=float)
+                except Exception:
+                    pass
             
             # Generate coordinates if PAR is provided - uses current SLD values
             if PAR is not None:
@@ -1349,6 +1578,11 @@ class SiGeModelArray(CDSAXS_Model):
                 'layers': design_layers,
                 'slds': design_slds_list,
             }
+
+            # Apply constraints on the design parameters before expansion/coordinates
+            constraints = self.model_params.get('constraints', None) if hasattr(self, 'model_params') else None
+            if constraints:
+                self._apply_constraints(tmp_model_params, constraints)
 
             expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
 
@@ -2000,8 +2234,40 @@ class SiGeModelArray(CDSAXS_Model):
         grey_dark = float(np.clip(grey_dark, 0.0, 1.0))
         shading_alpha = float(np.clip(float(shading_alpha), 0.0, 1.0))
 
+        # Apply constraints for plotting on a copy of model_params, then expand typed layers
+        plot_params = copy.deepcopy(self.model_params)
+        constraints = plot_params.get('constraints', None)
+        if constraints:
+            # Prefer design-level when present
+            if 'design_trapezoids' in plot_params and 'design_slds' in plot_params:
+                tmp_design = {
+                    'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
+                    'design_slds': copy.deepcopy(plot_params.get('design_slds', [])),
+                    'DW': plot_params.get('DW', self.DW),
+                    'I0': plot_params.get('I0', self.I0),
+                    'Bk': plot_params.get('Bk', self.Bk),
+                    'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
+                }
+                self._apply_constraints(tmp_design, constraints)
+                tmp_model_params = {
+                    'trapezoids': tmp_design['design_trapezoids'],
+                    'layers': tmp_design['layers'],
+                    'slds': tmp_design.get('design_slds', None),
+                }
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+            else:
+                # No design_trapezoids; apply directly and expand if typed layers exist
+                self._apply_constraints(plot_params, constraints)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+
         ax = self._plot_trapezoid_structure(
-            self.model_params,
+            plot_params,
             linestyle='-',
             color=color,
             alpha=1.0,
@@ -2035,10 +2301,10 @@ class SiGeModelArray(CDSAXS_Model):
             self._add_dimension_annotations()
 
         # Add SLD/material legend if requested
-        layers = self.model_params['layers']
+        layers = plot_params['layers']
         if shade_by_sld and show_sld_legend and layers > 0:
-            if 'slds' in self.model_params:
-                slds_all = np.array(self.model_params['slds'], dtype=float)
+            if 'slds' in plot_params:
+                slds_all = np.array(plot_params['slds'], dtype=float)
             elif hasattr(self, 'sld_values'):
                 slds_all = np.array(self.sld_values, dtype=float)
             else:

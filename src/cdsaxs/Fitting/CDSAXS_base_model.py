@@ -4691,6 +4691,26 @@ class CDSAXS_Model:
             
             # Ensure all parameters have default values
             params_to_optimize = self._ensure_defaults_in_params(params_to_optimize)
+
+            # Auto-drop derived parameters from equality constraints (lhs of '==')
+            derived = set()
+            constraints = getattr(self, 'model_params', {}).get('constraints', None)
+            if isinstance(constraints, list):
+                for rule in constraints:
+                    if isinstance(rule, dict) and str(rule.get('op', '')).strip() == '==':
+                        lhs = rule.get('lhs', None)
+                        if isinstance(lhs, str):
+                            derived.add(lhs)
+
+            if derived:
+                filtered = {}
+                for k, v in params_to_optimize.items():
+                    if k in derived:
+                        if verbose:
+                            print(f"WARNING: Dropping derived constrained parameter from optimization: {k}")
+                        continue
+                    filtered[k] = v
+                params_to_optimize = filtered
             
             # Create parameter names list and bounds list
             param_names = []
@@ -5077,6 +5097,26 @@ class CDSAXS_Model:
             
             # Ensure all parameters have default values
             params_to_sample = self._ensure_defaults_in_params(params_to_sample)
+
+            # Auto-drop derived parameters from equality constraints (lhs of '==')
+            derived = set()
+            constraints = getattr(self, 'model_params', {}).get('constraints', None)
+            if isinstance(constraints, list):
+                for rule in constraints:
+                    if isinstance(rule, dict) and str(rule.get('op', '')).strip() == '==':
+                        lhs = rule.get('lhs', None)
+                        if isinstance(lhs, str):
+                            derived.add(lhs)
+
+            if derived:
+                filtered = {}
+                for k, v in params_to_sample.items():
+                    if k in derived:
+                        if verbose:
+                            print(f"WARNING: Dropping derived constrained parameter from MCMC sampling: {k}")
+                        continue
+                    filtered[k] = v
+                params_to_sample = filtered
             
             # Setup MCMC parameters
             param_names = list(params_to_sample.keys())
