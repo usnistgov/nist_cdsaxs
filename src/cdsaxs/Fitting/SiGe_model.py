@@ -100,6 +100,90 @@ class SiGeModelArray(CDSAXS_Model):
         # Clean up temporary attribute
         if hasattr(self, '_full_background_array'):
             delattr(self, '_full_background_array')
+
+    def _extract_inline_trapezoid_bounds(self, trapezoids):
+        """
+        Extract inline optimization bounds from a list of (design-level) trapezoid dicts.
+
+        Expected inline schema per layer dict (all optional):
+        - width_bounds:  (min, max)
+        - height_bounds: (min, max)
+        - twidth_bounds: (min, max)
+        - depth_bounds:  (min, max)   (typically for Layer_Type='Ellipse')
+
+        Returns a dict compatible with model_params['optimization'], e.g.
+        {'trap_0_width': {'min':..., 'max':...}, ...}
+        """
+        if trapezoids is None:
+            return {}
+        if not isinstance(trapezoids, list):
+            raise TypeError("model_params['trapezoids'] must be a list of dicts")
+
+        def _validate_bounds(val, key):
+            if val is None:
+                return None
+            if not isinstance(val, (list, tuple)) or len(val) != 2:
+                raise ValueError(f"{key} must be a 2-tuple/list (min,max); got {val!r}")
+            lo, hi = val[0], val[1]
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                raise ValueError(f"{key} bounds must be numeric; got {val!r}")
+            lo, hi = float(lo), float(hi)
+            if not lo < hi:
+                raise ValueError(f"{key} must satisfy min < max; got {val!r}")
+            return lo, hi
+
+        bounds_map = {
+            'width_bounds': 'width',
+            'height_bounds': 'height',
+            'twidth_bounds': 'twidth',
+            'depth_bounds': 'depth',
+        }
+
+        opt = {}
+        for i, trap in enumerate(trapezoids):
+            if not isinstance(trap, dict):
+                continue
+            for bounds_key, field in bounds_map.items():
+                if bounds_key not in trap:
+                    continue
+                lo_hi = _validate_bounds(trap.get(bounds_key), f"trapezoids[{i}].{bounds_key}")
+                if lo_hi is None:
+                    continue
+                lo, hi = lo_hi
+                opt[f"trap_{i}_{field}"] = {'min': lo, 'max': hi}
+        return opt
+
+    def _merge_inline_bounds_into_optimization(self, param_limits=None):
+        """
+        Merge inline trapezoid *_bounds into an optimization dict.
+
+        Precedence: explicit entries in `param_limits` (or model_params['optimization'])
+        override inline bounds.
+
+        Returns merged dict (does not guarantee defaults are present).
+        """
+        if not hasattr(self, 'model_params') or self.model_params is None:
+            return param_limits if param_limits is not None else {}
+
+        # Prefer design-level trapezoids when present (typed-layer models)
+        design_traps = self.model_params.get('design_trapezoids', None)
+        traps = design_traps if isinstance(design_traps, list) else self.model_params.get('trapezoids', [])
+
+        inline_opt = self._extract_inline_trapezoid_bounds(traps)
+
+        base = {}
+        if isinstance(param_limits, dict):
+            base = {k: v.copy() if isinstance(v, dict) else v for k, v in param_limits.items()}
+        else:
+            existing = self.model_params.get('optimization', {})
+            if isinstance(existing, dict):
+                base = {k: v.copy() if isinstance(v, dict) else v for k, v in existing.items()}
+
+        for k, v in inline_opt.items():
+            if k not in base:
+                base[k] = v
+
+        return base
     
     
     
@@ -445,13 +529,19 @@ class SiGeModelArray(CDSAXS_Model):
 
         # Ensure typed layers (if any) are expanded before generating optimization params
         self._ensure_expanded_model_params()
+
+        # Merge inline bounds (if present) into optimization config (explicit config wins)
+        param_limits = self._merge_inline_bounds_into_optimization(param_limits)
             
         # Create default limits if not provided
-        if param_limits is None:
+        auto_generated = False
+        if not param_limits:
+            auto_generated = True
             param_limits = {}
             
-            # Add trapezoid parameters
-            for i, trap in enumerate(self.model_params['trapezoids']):
+            # Add trapezoid parameters (design-level when available; otherwise current trapezoids)
+            traps_for_defaults = self.model_params.get('design_trapezoids', self.model_params['trapezoids'])
+            for i, trap in enumerate(traps_for_defaults):
                 param_limits[f'trap_{i}_width'] = {
                     'min': trap['width'] * 0.9,
                     'max': trap['width'] * 1.1,
@@ -516,16 +606,15 @@ class SiGeModelArray(CDSAXS_Model):
                         else:
                             raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
         
-        # Add SLD parameters - they're treated just like other parameters
-        if hasattr(self, 'sld_values'):
+        # Add SLD parameters only when auto-generating a full default optimization set.
+        # If the user provided explicit bounds (either via param_limits or inline *_bounds),
+        # we do NOT implicitly add extra optimizable parameters.
+        if auto_generated and hasattr(self, 'sld_values'):
             for i, sld_val in enumerate(self.sld_values):
                 param_name = f'sld_{i}'
-                
-                # Only add to optimization if not already specified
                 if param_name not in param_limits:
-                    # Set reasonable default bounds for SLD values
                     param_limits[param_name] = {
-                        'min': max(0.1, sld_val * 0.5),  # Positive SLD with 50% range
+                        'min': max(0.1, sld_val * 0.5),
                         'max': sld_val * 2.0,
                         'default': sld_val
                     }
