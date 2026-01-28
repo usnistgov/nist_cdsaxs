@@ -791,10 +791,26 @@ class SiGeModelArray(CDSAXS_Model):
                 raise ValueError(f"SLD index {sld_idx} out of range")
         
         elif param_name.startswith('trap_'):
+            # Trapezoid (design-layer) parameter: width, height, twidth, depth, etc.
             parts = param_name.split('_')
             trap_idx = int(parts[1])
             param_type = parts[2]
-            return self.model_params['trapezoids'][trap_idx][param_type]
+
+            if not hasattr(self, 'model_params'):
+                raise AttributeError("Missing required attribute: model_params")
+
+            # Prefer design_trapezoids if present (typed-layer aware, including ellipse depth)
+            if 'design_trapezoids' in self.model_params:
+                design_traps = self.model_params['design_trapezoids']
+                if trap_idx >= len(design_traps):
+                    raise IndexError(f"design_trapezoids index {trap_idx} out of range")
+                return design_traps[trap_idx][param_type]
+
+            # Fallback: use current trapezoids list (pure trapezoid models)
+            traps = self.model_params.get('trapezoids', None)
+            if traps is None or trap_idx >= len(traps):
+                raise IndexError(f"trapezoids index {trap_idx} out of range")
+            return traps[trap_idx][param_type]
         
         elif param_name.startswith('Bk_'):
             bk_idx = int(param_name.split('_')[1])
@@ -834,11 +850,26 @@ class SiGeModelArray(CDSAXS_Model):
                 raise ValueError(f"SLD index {sld_idx} out of range")
         
         elif param_name.startswith('trap_'):
-            # Trapezoid parameter
+            # Trapezoid (design-layer) parameter
             parts = param_name.split('_')
             trap_idx = int(parts[1])
             param_type = parts[2]
-            self.model_params['trapezoids'][trap_idx][param_type] = value
+
+            if not hasattr(self, 'model_params'):
+                raise AttributeError("Missing required attribute: model_params")
+
+            # Prefer updating design_trapezoids if present so that typed layers (ellipse)
+            # remain under design control and are re-expanded consistently.
+            if 'design_trapezoids' in self.model_params:
+                design_traps = self.model_params['design_trapezoids']
+                if trap_idx >= len(design_traps):
+                    raise IndexError(f"design_trapezoids index {trap_idx} out of range")
+                design_traps[trap_idx][param_type] = value
+            else:
+                traps = self.model_params.get('trapezoids', None)
+                if traps is None or trap_idx >= len(traps):
+                    raise IndexError(f"trapezoids index {trap_idx} out of range")
+                traps[trap_idx][param_type] = value
             
         elif param_name.startswith('Bk_'):
             # Background parameter for specific column
@@ -862,7 +893,7 @@ class SiGeModelArray(CDSAXS_Model):
             if hasattr(self, 'model_params'):
                 self.model_params[param_name] = value
         
-        # Update traditional parameters
+        # Update traditional/expanded parameters from model_params after any change
         self.update_traditional_from_model_params()
             
     def _initialize_sld_values(self):
@@ -1149,29 +1180,35 @@ class SiGeModelArray(CDSAXS_Model):
             else:
                 temp_Bk = self.Bk
             
-            # Initialize SLD array
-            if hasattr(self, 'sld_values'):
-                temp_sld_values = self.sld_values.copy()
-            else:
-                temp_sld_values = np.ones(self.layers + 1)
+            # Initialize design-level SLD array placeholder (filled below)
+            temp_sld_values = None
             
             # Update parameters with optimization values
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('trap_'):
-                    # Parse trapezoid parameter
+                    # Parse trapezoid (design-layer) parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width', 'height', or 'twidth'
-                    
-                    # Make sure we have a deep copy of trapezoids to avoid modifying the original
-                    if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
-                        params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
-                    
-                    params['trapezoids'][trap_idx][param_type] = optimization_values[i]
-                    
+                    param_type = parts[2]
+
+                    # We do not mutate self.model_params here; changes are applied to
+                    # a local design-level trapezoid list constructed below.
+                    if 'design_trapezoids' in params:
+                        # Ensure local copy exists
+                        if 'design_trapezoids' not in params or params['design_trapezoids'] is self.model_params.get('design_trapezoids'):
+                            params['design_trapezoids'] = [t.copy() for t in self.model_params['design_trapezoids']]
+                        params['design_trapezoids'][trap_idx][param_type] = optimization_values[i]
+                    else:
+                        if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
+                            params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+                        params['trapezoids'][trap_idx][param_type] = optimization_values[i]
+
                 elif param_name.startswith('sld_'):
-                    # SLD parameter - treat just like any other parameter
+                    # SLD parameter at design-layer index
                     sld_idx = int(param_name.split('_')[1])
+                    if temp_sld_values is None:
+                        # Will be sized properly once design_slds_list is created; just record index/value pair.
+                        temp_sld_values = {}
                     temp_sld_values[sld_idx] = optimization_values[i]
                     
                 elif param_name.startswith('Bk_'):
@@ -1191,26 +1228,63 @@ class SiGeModelArray(CDSAXS_Model):
                     # Global parameter (DW, I0)
                     params[param_name] = optimization_values[i]
             
-            # Create temporary PAR array for compatibility
-            temp_PAR = np.zeros((self.layers + 1, 3))
-            for i, trap in enumerate(params['trapezoids']):
-                if i <= self.layers:
+            # Build a local design-level trapezoid/SRD list for this evaluation
+            if 'design_trapezoids' in params:
+                design_traps = [t.copy() for t in params['design_trapezoids']]
+                design_layers = params.get('design_layers', len(design_traps) - 1)
+                design_slds_list = list(params.get('design_slds', []))
+            else:
+                # Fall back to treating current trapezoids as design-level
+                design_traps = [t.copy() for t in params['trapezoids']]
+                design_layers = len(design_traps) - 1
+                if 'slds' in params:
+                    slds_val = params['slds']
+                    if isinstance(slds_val, (list, tuple, np.ndarray)):
+                        design_slds_list = list(slds_val)
+                    else:
+                        design_slds_list = [float(slds_val)] * len(design_traps)
+                elif hasattr(self, 'sld_values'):
+                    design_slds_list = list(self.sld_values)
+                else:
+                    design_slds_list = [1.0] * len(design_traps)
+
+            # Apply any optimized SLDs at design index level
+            if isinstance(temp_sld_values, dict):
+                for idx, val in temp_sld_values.items():
+                    if 0 <= idx < len(design_slds_list):
+                        design_slds_list[idx] = float(val)
+
+            # Use existing typed-layer expansion logic on a temporary model_params-like dict
+            tmp_model_params = {
+                'trapezoids': design_traps,
+                'layers': design_layers,
+                'slds': design_slds_list,
+            }
+
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+
+            # Create temporary PAR array and effective SLD array for compatibility
+            temp_PAR = np.zeros((expanded_layers + 1, 3))
+            sld_eff = np.ones(expanded_layers + 1, dtype=float)
+
+            for i, trap in enumerate(expanded_traps):
+                if i <= expanded_layers:
                     temp_PAR[i, 0] = trap['width']
                     temp_PAR[i, 1] = trap['height']
-                    # Handle twidth - use None if not present (will be handled by SymCoordAssign)
-                    temp_PAR[i, 2] = trap.get('twidth', None)
+                    temp_PAR[i, 2] = trap.get('twidth', trap['width'])
+                    sld_eff[i] = float(expanded_slds[i]) if i < len(expanded_slds) else 1.0
             
             # Extract global parameters
             temp_DW = params['DW']
             temp_I0 = params['I0']
             
-            # Use SymCoordAssign with current SLD values
-            Coord = self.SymCoordAssign(temp_PAR, self.layers, sld_values=temp_sld_values)
+            # Use SymCoordAssign with expanded SLD values
+            Coord = self.SymCoordAssign(temp_PAR, expanded_layers, sld_values=sld_eff)
             if Coord is None:
                 raise RuntimeError("Failed to assign coordinates with SLD values")
             
             # Calculate form factor
-            form = self.FreeFormTrapezoid(Coord, self.layers, Qx, Qz)
+            form = self.FreeFormTrapezoid(Coord, expanded_layers, Qx, Qz)
             if form is None:
                 raise RuntimeError("Failed to calculate form factor")
             
