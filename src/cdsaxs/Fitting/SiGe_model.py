@@ -1517,12 +1517,15 @@ class SiGeModelArray(CDSAXS_Model):
             else:
                 slds = np.ones(layers, dtype=float)
 
+            # Keep all layers+1 SLD values if provided (one per trapezoid entry including top)
             if len(slds) == layers + 1:
-                slds = slds[:layers]
-            elif len(slds) == 1 and layers > 1:
-                slds = np.full(layers, float(slds[0]), dtype=float)
-            elif len(slds) != layers:
-                slds = np.resize(slds, layers).astype(float)
+                # Keep all values - one SLD per trapezoid entry
+                pass
+            elif len(slds) == 1 and layers > 0:
+                slds = np.full(layers + 1, float(slds[0]), dtype=float)
+            elif len(slds) != layers + 1:
+                # Resize to match trapezoid count (layers + 1)
+                slds = np.resize(slds, layers + 1).astype(float)
 
             finite_slds = slds[np.isfinite(slds)]
             if finite_slds.size == 0:
@@ -1533,14 +1536,18 @@ class SiGeModelArray(CDSAXS_Model):
 
             base_w = float(trapezoids[0]['width'])
             height0 = 0.0
-            for i in range(int(layers)):
+            # Shade all trapezoids including the top one (layers + 1 total)
+            for i in range(int(layers) + 1):
                 h = float(trapezoids[i]['height'])
                 if h <= 0:
                     continue
 
                 w0 = float(trapezoids[i]['width'])
                 if trapezoids[i]['twidth'] is None:
-                    w1 = float(trapezoids[i + 1]['width'])
+                    if i < layers:
+                        w1 = float(trapezoids[i + 1]['width'])
+                    else:
+                        w1 = w0  # Top trapezoid: use same width if no twidth
                 else:
                     w1 = float(trapezoids[i]['twidth'])
 
@@ -1552,7 +1559,7 @@ class SiGeModelArray(CDSAXS_Model):
                 y0 = height0
                 y1 = height0 + h
 
-                sld_val = float(slds[i])
+                sld_val = float(slds[i]) if i < len(slds) else 1.0
                 if denom is None:
                     t = 0.5
                 else:
