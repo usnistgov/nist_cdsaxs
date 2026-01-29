@@ -2031,7 +2031,7 @@ class CDSAXS_Model:
         
         return opt_params
     
-    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
+    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes', show_legend=False):
         """
         Plots intensity vs Qz for specific cuts (Qx for trapezoid, Qr for cylinder)
         
@@ -2125,7 +2125,8 @@ class CDSAXS_Model:
             ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (counts)')
             ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
+            if show_legend:
+                ax.legend()
         
         # Hide unused subplots
         for i in range(len(cut_indices), len(axes)):
@@ -5977,7 +5978,7 @@ class CDSAXS_Model:
     def plot_mcmc_uncertainty_envelope(self, mcmc_results, n_samples=100, n_slices=101, 
                                  confidence_level=0.95, plot_results=True, 
                                  figsize=(10, 6), show_best_fit=True, show_mean=True,
-                                 show_base=True, colors=None):
+                                 show_base=True, colors=None, return_figure=False):
         """
         Plot uncertainty envelope around structure from emcee MCMC results.
         
@@ -6083,12 +6084,15 @@ class CDSAXS_Model:
             
             # Plot results if requested
             if plot_results:
-                self._plot_uncertainty_envelope_enhanced(
+                fig = self._plot_uncertainty_envelope_enhanced(
                     center_line, inner_envelope, outer_envelope, figsize, 
-                    show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results
+                    show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results,
+                    return_figure=return_figure
                 )
-            
-            return center_line, inner_envelope, outer_envelope
+            if return_figure:
+                return center_line, inner_envelope, outer_envelope, fig
+            else:
+                return center_line, inner_envelope, outer_envelope
             
         finally:
             # Restore original parameters
@@ -6293,11 +6297,12 @@ class CDSAXS_Model:
         return center_line, inner_envelope, outer_envelope
 
     def _plot_uncertainty_envelope_enhanced(self, center_line, inner_envelope, outer_envelope, 
-                                        figsize, show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results):
+                                        figsize, show_best_fit, show_mean, show_base, colors, confidence_level, mcmc_results,
+                                        return_figure=False):
         """
         Enhanced plot of the uncertainty envelope with better visualization.
         """
-        plt.figure(figsize=figsize)
+        fig = plt.figure(figsize=figsize)
         
         # Convert confidence level to percentage for label
         conf_percent = int(confidence_level * 100)
@@ -6399,6 +6404,9 @@ class CDSAXS_Model:
         # Adjust layout and show
         plt.tight_layout()
         plt.show()
+        
+        if return_figure:
+            return fig
 
     def _plot_trapezoid_outline(self, widths, heights, **kwargs):
         """
