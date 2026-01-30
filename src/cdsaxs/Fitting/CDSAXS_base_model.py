@@ -21,7 +21,7 @@ class CDSAXS_Model:
     """
     
     @staticmethod
-    def create_model(geometry, model, layers, PAR=None, SLD=None, DW=None, I0=None, Bk=None, Pitch=None, model_params=None):
+    def create_model(geometry, model, layers, PAR=None, SLD=None, DW=None, DWz=None, DWr=None, I0=None, Bk=None, Pitch=None, model_params=None):
         """
         Factory method to create the appropriate model based on geometry.
         
@@ -55,14 +55,14 @@ class CDSAXS_Model:
         """
         if geometry == 'trapezoid':
             from .trapezoid_model import TrapezoidModel
-            return TrapezoidModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
+            return TrapezoidModel(model, layers, PAR, SLD, DW, DWz, DWr, I0, Bk, Pitch, model_params)
         elif geometry == 'cylinder':
             from .cylinder_model import CylinderModel
-            return CylinderModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
+            return CylinderModel(model, layers, PAR, SLD, DW, DWz, DWr, I0, Bk, Pitch, model_params)
         else:
             raise ValueError(f"Unsupported geometry: {geometry}")
     
-    def __init__(self, geometry, model, layers, PAR=None, SLD=None, DW=None, I0=None, Bk=None, Pitch=None, model_params=None):
+    def __init__(self, geometry, model, layers, PAR=None, SLD=None, DW=None, DWz=None, DWr=None, I0=None, Bk=None, Pitch=None, model_params=None):
         """
         Initialize the CDSAXS model.
         
@@ -95,6 +95,8 @@ class CDSAXS_Model:
         self.PAR = PAR
         self.SLD = SLD
         self.DW = DW
+        self.DWz = DWz
+        self.DWr = DWr
         self.I0 = I0
         self.Bk = Bk
         self.Pitch = Pitch
@@ -102,6 +104,8 @@ class CDSAXS_Model:
         # Store initial values
         self.PAR_Initial = np.copy(self.PAR) if self.PAR is not None else None
         self.DW_Initial = self.DW
+        self.DWz_Initial = self.DWz
+        self.DWr_Initial = self.DWr
         self.I0_Initial = self.I0
         self.Bk_Initial = self.Bk
         
@@ -111,10 +115,16 @@ class CDSAXS_Model:
             self.update_traditional_from_model_params()
         else:
             self.build_model_params_from_traditional()
+        # Initialize directional DW values if present or propagate legacy DW
+        self._initialize_dw_values()
         
         # Create SimPar for compatibility with existing code
         if self.PAR is not None:
-            self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
+            # Include directional DW components if available
+            if hasattr(self, 'DWz') and hasattr(self, 'DWr') and self.DWz is not None and self.DWr is not None:
+                self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DWz, self.DWr, self.Bk])
+            else:
+                self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
             
         # Initialize callback data storage
         self._callback_data = {
@@ -137,6 +147,37 @@ class CDSAXS_Model:
         To be implemented by subclasses.
         """
         raise NotImplementedError("Subclasses must implement this method")
+
+    def _initialize_dw_values(self):
+        """
+        Initialize Debye-Waller values. Supports legacy single `DW`
+        or separate `DWz` and `DWr`. Ensures float dtype and sensible defaults.
+        """
+        # Priority: model_params DWz/DWr > model_params DW > legacy self.DW or provided DWz/DWr
+        if hasattr(self, 'model_params') and ('DWz' in self.model_params or 'DWr' in self.model_params):
+            self.DWz = float(self.model_params.get('DWz', self.model_params.get('DW', 0.0)))
+            self.DWr = float(self.model_params.get('DWr', self.model_params.get('DW', 0.0)))
+            self.DW = float(self.model_params.get('DW', np.sqrt((self.DWz**2 + self.DWr**2) / 2)))
+        elif getattr(self, 'DWz', None) is not None or getattr(self, 'DWr', None) is not None:
+            # If DWz/DWr were provided directly to the constructor, ensure floats and compute legacy DW
+            self.DWz = float(getattr(self, 'DWz', 0.0))
+            self.DWr = float(getattr(self, 'DWr', 0.0))
+            self.DW = float(np.sqrt((self.DWz**2 + self.DWr**2) / 2))
+        elif hasattr(self, 'DW') and self.DW is not None:
+            # propagate single DW to both components
+            self.DW = float(self.DW)
+            self.DWz = float(self.DW)
+            self.DWr = float(self.DW)
+        else:
+            # sensible defaults
+            self.DW = 0.0
+            self.DWz = 0.0
+            self.DWr = 0.0
+
+        # Store initial DW components for reset
+        self.DW_Initial = getattr(self, 'DW', None)
+        self.DWz_Initial = getattr(self, 'DWz', None)
+        self.DWr_Initial = getattr(self, 'DWr', None)
     
     def update_traditional_from_model_params(self):
         """

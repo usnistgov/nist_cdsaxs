@@ -20,7 +20,7 @@ class CylinderModel(CDSAXS_Model):
     CDSAXS model for cylindrical structures.
     """
     
-    def __init__(self, model, layers, PAR=None, SLD=None, DW=None, I0=None, Bk=None, Pitch=None, model_params=None):
+    def __init__(self, model, layers, PAR=None, SLD=None, DW=None, DWz=None, DWr=None, I0=None, Bk=None, Pitch=None, model_params=None):
         """
         Initialize the cylinder model.
         
@@ -36,6 +36,10 @@ class CylinderModel(CDSAXS_Model):
             Scattering length density array
         DW : float, optional
             Debye-Waller factor
+        DWz: float, optional
+            Debye-Waller factor z component
+        DWr: float, optional
+            Debye-Waller factor r component
         I0 : float, optional
             Intensity scaling factor
         Bk : float, optional
@@ -45,7 +49,7 @@ class CylinderModel(CDSAXS_Model):
         model_params : dict, optional
             Dictionary-based parameters
         """
-        super().__init__('cylinder', model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
+        super().__init__('cylinder', model, layers, PAR, SLD, DW, DWz, DWr, I0, Bk, Pitch, model_params)
         
         # Initialize cylinder-specific attributes
         self.Qr = None
@@ -59,6 +63,8 @@ class CylinderModel(CDSAXS_Model):
                 
         # Initialize SLD values
         self._initialize_sld_values()
+        # Initialize DW (Debye-Waller) values (supports DW or DWz/DWr)
+        self._initialize_dw_values()
     
     def build_model_params_from_traditional(self):
         """
@@ -101,6 +107,16 @@ class CylinderModel(CDSAXS_Model):
         
         if hasattr(self, 'Pitch') and self.Pitch is not None:
             self.model_params['Pitch'] = self.Pitch
+        # Prefer explicit DWz/DWr if present
+        if hasattr(self, 'DWz') and hasattr(self, 'DWr'):
+            self.model_params['DWz'] = self.DWz
+            self.model_params['DWr'] = self.DWr
+            # For backward compatibility keep DW as None or computed
+            self.model_params['DW'] = getattr(self, 'DW', None)
+        else:
+            # Keep legacy DW if provided
+            if hasattr(self, 'DW') and self.DW is not None:
+                self.model_params['DW'] = self.DW
             
         return self.model_params
     
@@ -143,9 +159,25 @@ class CylinderModel(CDSAXS_Model):
             
         if 'Pitch' in self.model_params:
             self.Pitch = self.model_params['Pitch']
+        # Handle Debye-Waller options (DW or DWz/DWr)
+        if 'DWz' in self.model_params and 'DWr' in self.model_params:
+            self.DWz = float(self.model_params['DWz'])
+            self.DWr = float(self.model_params['DWr'])
+            # Keep legacy DW for compatibility (set to None or average)
+            self.DW = float(self.model_params.get('DW', np.sqrt((self.DWz**2 + self.DWr**2)/2)))
+        elif 'DW' in self.model_params:
+            # Single DW provided: propagate to DWz and DWr for compatibility
+            self.DW = float(self.model_params['DW'])
+            self.DWz = float(self.DW)
+            self.DWr = float(self.DW)
             
         # Update SimPar
-        self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DW, self.Bk])
+        # If directional DW components are present, include them in SimPar tail
+        if hasattr(self, 'DWz') and hasattr(self, 'DWr'):
+            self.SimPar = np.append(self.PAR.ravel(), [self.I0, self.DWz, self.DWr, self.Bk])
+        else:
+            # Fallback to legacy DW
+            self.SimPar = np.append(self.PAR.ravel(), [self.I0, getattr(self, 'DW', None), self.Bk])
         
         return True
     
@@ -254,6 +286,21 @@ class CylinderModel(CDSAXS_Model):
                 'max': self.Bk * 1.1,
                 'default': self.Bk
             }
+        # If DWz/DWr are available, add them instead of a single DW
+        if hasattr(self, 'DWz') and hasattr(self, 'DWr'):
+            # remove single DW entry if it exists
+            if 'DW' in param_limits:
+                del param_limits['DW']
+            param_limits['DWz'] = {
+                'min': max(0.0, self.DWz * 0.9),
+                'max': self.DWz * 1.1,
+                'default': self.DWz
+            }
+            param_limits['DWr'] = {
+                'min': max(0.0, self.DWr * 0.9),
+                'max': self.DWr * 1.1,
+                'default': self.DWr
+            }
         else:
             # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
@@ -355,8 +402,10 @@ class CylinderModel(CDSAXS_Model):
             cyl_idx = int(parts[1])
             param_type = parts[2]
             return self.model_params['cylinders'][cyl_idx][param_type]
-        
+
         elif param_name in ['DW', 'I0', 'Bk']:
+            return getattr(self, param_name)
+        elif param_name in ['DWz', 'DWr']:
             return getattr(self, param_name)
         
         else:
@@ -398,6 +447,12 @@ class CylinderModel(CDSAXS_Model):
             cyl_idx = int(parts[1])
             param_type = parts[2]
             self.model_params['cylinders'][cyl_idx][param_type] = value
+
+        elif param_name in ['DWz', 'DWr']:
+            # Set directional Debye-Waller components
+            setattr(self, param_name, float(value))
+            if hasattr(self, 'model_params'):
+                self.model_params[param_name] = float(value)
         
         else:
             # Global parameter (DW, I0, Bk)
@@ -633,8 +688,8 @@ class CylinderModel(CDSAXS_Model):
                 else:
                     raise AttributeError("Missing required scattering vector attributes: Qr and/or Qz")
             
-            if not hasattr(self, 'DW'):
-                raise AttributeError("Missing required attribute: DW (Debye-Waller factor)")
+            if not (hasattr(self, 'DW') or (hasattr(self, 'DWz') and hasattr(self, 'DWr'))):
+                raise AttributeError("Missing required attribute: DW or (DWz and DWr) (Debye-Waller factor)")
                 
             if not hasattr(self, 'I0'):
                 raise AttributeError("Missing required attribute: I0 (Intensity scaling factor)")
@@ -663,9 +718,12 @@ class CylinderModel(CDSAXS_Model):
                 raise RuntimeError("Failed to calculate form factor in ConeFourierTransform")
             
             # Calculate Debye-Waller factor
-            # For cylindrical geometry, use Qr instead of Qx
-            M = np.power(np.exp(-1 * (np.power(self.Qr, 2) + np.power(self.Qz, 2)) * np.power(self.DW, 2)), 0.5)
-            
+            # For cylindrical geometry, prefer separate components if available
+            if hasattr(self, "DW") and self.DW is not None:
+                M = np.exp(-0.5 * ((np.power(self.Qr, 2) + np.power(self.Qz, 2)) * np.power(self.DW, 2)))
+            else:
+                # Use directional components DWz (z) and DWr (radial)
+                M = np.exp(-0.5 * (np.power(self.Qr, 2) * np.power(self.DWr, 2) + np.power(self.Qz, 2) * np.power(self.DWz, 2)))
             # Apply Debye-Waller factor to form factor
             Formfactor = self.form * M
             Formfactor = abs(Formfactor)
@@ -728,18 +786,29 @@ class CylinderModel(CDSAXS_Model):
                 raise ValueError(f"Discretization array must have at least {layers} elements")
                 
             # Check if SimPar has sufficient elements
-            required_length = (layers + 1) * 2 + 3  # For PARs, I0, DW, Bk
-            if len(SimPar) < required_length:
-                raise ValueError(f"SimPar array must have at least {required_length} elements, but has {len(SimPar)}")
+            base_len = (layers + 1) * 2
+            if len(SimPar) < base_len + 3:
+                raise ValueError(f"SimPar array must have at least {base_len + 3} or {base_len + 4} elements, but has {len(SimPar)}")
             
             # Reshape parameters
             PARs = np.zeros([layers + 1, 2])
             PARs[:, 0:2] = np.reshape(SimPar[0:(layers + 1) * 2], (layers + 1, 2))
             
-            # Extract I0, DW, Bk parameters
-            I0 = SimPar[(layers + 1) * 2]
-            DW = SimPar[(layers + 1) * 2 + 1]
-            Bk = SimPar[(layers + 1) * 2 + 2]
+            # Extract tail parameters: support either [I0, DW, Bk] or [I0, DWz, DWr, Bk]
+            tail = SimPar[base_len:]
+            if len(tail) == 3:
+                I0 = float(tail[0])
+                DW = float(tail[1])
+                Bk = float(tail[2])
+                use_separate_dw = False
+            elif len(tail) == 4:
+                I0 = float(tail[0])
+                DWz = float(tail[1])
+                DWr = float(tail[2])
+                Bk = float(tail[3])
+                use_separate_dw = True
+            else:
+                raise ValueError(f"SimPar tail must contain 3 (I0,DW,Bk) or 4 (I0,DWz,DWr,Bk) elements, got {len(tail)}")
             
             # Calculate form factor
             F1 = self.ConeFourierTransformOpt(PARs, layers, Qz, Qr, Discretization)
@@ -747,7 +816,10 @@ class CylinderModel(CDSAXS_Model):
                 raise RuntimeError("Failed to calculate form factor in ConeFourierTransformOpt")
             
             # Calculate Debye-Waller factor
-            M = np.power(np.exp(-1 * (np.power(Qr, 2) + np.power(Qz, 2)) * np.power(DW, 2)), 0.5)
+            if not use_separate_dw:
+                M = np.exp(-0.5 * ((np.power(Qr, 2) + np.power(Qz, 2)) * np.power(DW, 2)))
+            else:
+                M = np.exp(-0.5 * (np.power(Qr, 2) * np.power(DWr, 2) + np.power(Qz, 2) * np.power(DWz, 2)))
             
             # Apply Debye-Waller factor to form factor
             Formfactor = F1 * M
@@ -767,38 +839,7 @@ class CylinderModel(CDSAXS_Model):
             print(f"Error in SimCyl_GF: {str(e)}")
             return float('inf')  # Return infinity as worst-case fit
     
-    def _cylinder_optimization_wrapper(self, optimization_values):
-        """
-        Wrapper function for cylindrical optimization that can be pickled.
-        """
-        # Create PAR array from optimization values
-        temp_PAR = np.zeros((self.layers + 1, 2))
-        temp_DW = self.DW
-        temp_I0 = self.I0
-        temp_Bk = self.Bk
-        
-        for i, param_name in enumerate(self.param_names):
-            if param_name.startswith('cyl_'):
-                parts = param_name.split('_')
-                cyl_idx = int(parts[1])
-                param_type = parts[2]
-                
-                if param_type == 'radius':
-                    temp_PAR[cyl_idx, 0] = optimization_values[i]
-                elif param_type == 'height':
-                    temp_PAR[cyl_idx, 1] = optimization_values[i]
-            elif param_name == 'DW':
-                temp_DW = optimization_values[i]
-            elif param_name == 'I0':
-                temp_I0 = optimization_values[i]
-            elif param_name == 'Bk':
-                temp_Bk = optimization_values[i]
-        
-        # Create SimPar array for cylindrical GF function
-        SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
-        
-        # Call cylindrical GF function
-        return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
+    
     
     def _initialize_sld_values(self):
         """
@@ -844,6 +885,29 @@ class CylinderModel(CDSAXS_Model):
                 # FIXED: Ensure float dtype after resize
                 self.sld_values = np.resize(self.sld_values, n_sld_values).astype(float)
                 print(f"Warning: Resized SLD array to {n_sld_values} elements for {self.layers} layers")
+
+
+    def _initialize_dw_values(self):
+        """
+        Initialize Debye-Waller (DW) values. Supports legacy single `DW`
+        or separate `DWz` and `DWr`. Ensures float dtype and sensible defaults.
+        """
+        # Default: copy legacy DW to both directions if present
+        if hasattr(self, 'model_params') and ('DWz' in self.model_params or 'DWr' in self.model_params):
+            self.DWz = float(self.model_params.get('DWz', self.model_params.get('DW', 0.0)))
+            self.DWr = float(self.model_params.get('DWr', self.model_params.get('DW', 0.0)))
+            # Keep legacy DW as average if not provided
+            self.DW = float(self.model_params.get('DW', np.sqrt((self.DWz**2 + self.DWr**2)/2)))
+        elif hasattr(self, 'DW') and self.DW is not None:
+            # propagate single DW to both components
+            self.DW = float(self.DW)
+            self.DWz = float(self.DW)
+            self.DWr = float(self.DW)
+        else:
+            # sensible default: no disorder
+            self.DW = 0.0
+            self.DWz = 0.0
+            self.DWr = 0.0
 
 
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
@@ -1258,7 +1322,9 @@ class CylinderModel(CDSAXS_Model):
             
             # Create PAR array from optimization values
             temp_PAR = np.zeros((self.layers + 1, 2))
-            temp_DW = self.DW
+            temp_DW = getattr(self, 'DW', None)
+            temp_DWz = getattr(self, 'DWz', None)
+            temp_DWr = getattr(self, 'DWr', None)
             temp_I0 = self.I0
             temp_Bk = self.Bk
             
@@ -1273,14 +1339,22 @@ class CylinderModel(CDSAXS_Model):
                     elif param_type == 'height':
                         temp_PAR[cyl_idx, 1] = optimization_values[i]
                 elif param_name == 'DW':
-                    temp_DW = optimization_values[i]
+                    temp_DW = float(optimization_values[i])
+                elif param_name == 'DWz':
+                    temp_DWz = float(optimization_values[i])
+                elif param_name == 'DWr':
+                    temp_DWr = float(optimization_values[i])
                 elif param_name == 'I0':
                     temp_I0 = optimization_values[i]
                 elif param_name == 'Bk':
                     temp_Bk = optimization_values[i]
             
             # Create SimPar array for cylindrical GF function
-            SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
+            # If both DWz and DWr are available, include them in the tail
+            if (temp_DWz is not None) and (temp_DWr is not None):
+                SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DWz, temp_DWr, temp_Bk])
+            else:
+                SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW if temp_DW is not None else 0.0, temp_Bk])
             
             # Call cylindrical GF function
             return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
