@@ -1,7 +1,7 @@
 import cdsaxs.data.data_image
 import cdsaxs.data.data2d
-import cdsaxs.data.qslice
 import cdsaxs.data.reduced_data1d
+import cdsaxs.data.reduced_slice
 import cdsaxs.data.dataset
 import cdsaxs.calculators
 import cdsaxs.loaders.load_data
