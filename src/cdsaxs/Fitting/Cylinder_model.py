@@ -137,7 +137,7 @@ class CylinderModel(CDSAXS_Model):
             self.PAR[i, 1] = cyl['height']
         
         # Update global parameters
-        self.DW = self.model_params['DW']
+        # self.DW = self.model_params['DW']
         self.I0 = self.model_params['I0']
         self.Bk = self.model_params['Bk']
         
