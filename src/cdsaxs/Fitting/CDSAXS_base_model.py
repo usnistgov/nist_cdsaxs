@@ -1108,7 +1108,7 @@ class CDSAXS_Model:
                                 f"{colored_value:<12} {upper_str:<12}")
             
             # Print global parameters (DW, I0)
-            for param in ['DW', 'I0']:
+            for param in ['DW', 'DWr', 'DWz', 'I0']:
                 if param in initial_model_params and param in self.model_params:
                     initial_val = initial_model_params[param]
                     current_val = self.model_params[param]
