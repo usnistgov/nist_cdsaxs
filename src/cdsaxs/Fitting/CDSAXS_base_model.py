@@ -2072,7 +2072,7 @@ class CDSAXS_Model:
         
         return opt_params
     
-    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
+    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes', show_legend=False):
         """
         Plots intensity vs Qz for specific cuts (Qx for trapezoid, Qr for cylinder)
         
@@ -2115,8 +2115,8 @@ class CDSAXS_Model:
             axes = [ax]
         else:
             # Multiple plots
-            fig_width = min(16, n_cuts * 5)  # Limit maximum width
-            fig_height = min(10, n_cuts * 3)  # Limit maximum height
+            fig_width = min(32, n_cuts * 5)  # Limit maximum width
+            fig_height = min(20, n_cuts * 3)  # Limit maximum height
             
             if n_cuts <= 4:
                 # Use a single row for 2-4 plots
@@ -2166,7 +2166,8 @@ class CDSAXS_Model:
             ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (counts)')
             ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
+            if show_legend:
+                ax.legend()
         
         # Hide unused subplots
         for i in range(len(cut_indices), len(axes)):

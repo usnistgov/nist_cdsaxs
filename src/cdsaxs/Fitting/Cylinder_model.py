@@ -719,11 +719,16 @@ class CylinderModel(CDSAXS_Model):
             
             # Calculate Debye-Waller factor
             # For cylindrical geometry, prefer separate components if available
-            if hasattr(self, "DW") and self.DW is not None:
+            if hasattr(self, "DW") and self.DW is not None and not (hasattr(self, 'DWr') and hasattr(self, 'DWz')):
+                print("Calculating Sim Int from DW")
                 M = np.exp(-0.5 * ((np.power(self.Qr, 2) + np.power(self.Qz, 2)) * np.power(self.DW, 2)))
             else:
                 # Use directional components DWz (z) and DWr (radial)
+                print("Calculating Sim Int from DWz and DWr")
+                print("DWz = ", self.DWz)
+                print("DWr = ", self.DWr)
                 M = np.exp(-0.5 * (np.power(self.Qr, 2) * np.power(self.DWr, 2) + np.power(self.Qz, 2) * np.power(self.DWz, 2)))
+                print ("M= ", M)
             # Apply Debye-Waller factor to form factor
             Formfactor = self.form * M
             Formfactor = abs(Formfactor)
@@ -762,6 +767,9 @@ class CylinderModel(CDSAXS_Model):
         float
             Chi-square value representing goodness of fit
         """
+        
+        #print("using SimCyl_GF function")
+        
         try:
             # Validate input parameters
             if SimPar is None or not isinstance(SimPar, np.ndarray):
@@ -807,6 +815,11 @@ class CylinderModel(CDSAXS_Model):
                 DWr = float(tail[2])
                 Bk = float(tail[3])
                 use_separate_dw = True
+                
+                print ("I0 ", tail[0])
+                print ("DWz ",tail[1] )
+                print ("DWr ",tail[2] )
+                print ("Bk ",tail[3] )
             else:
                 raise ValueError(f"SimPar tail must contain 3 (I0,DW,Bk) or 4 (I0,DWz,DWr,Bk) elements, got {len(tail)}")
             
@@ -820,6 +833,7 @@ class CylinderModel(CDSAXS_Model):
                 M = np.exp(-0.5 * ((np.power(Qr, 2) + np.power(Qz, 2)) * np.power(DW, 2)))
             else:
                 M = np.exp(-0.5 * (np.power(Qr, 2) * np.power(DWr, 2) + np.power(Qz, 2) * np.power(DWz, 2)))
+                print("M = ", M)
             
             # Apply Debye-Waller factor to form factor
             Formfactor = F1 * M
@@ -1356,6 +1370,8 @@ class CylinderModel(CDSAXS_Model):
             else:
                 SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW if temp_DW is not None else 0.0, temp_Bk])
             
+            #print("Calling SimCyl_GF function")
+            print (SimPar)
             # Call cylindrical GF function
             return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
             
