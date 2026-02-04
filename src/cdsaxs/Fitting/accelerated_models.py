@@ -85,18 +85,13 @@ class AcceleratedTrapezoidModel(TrapezoidModelArray):
         """
         Accelerated goodness of fit calculation with fallback.
         """
-        print("using the accelerated GF calc function")
-        
         if self._use_acceleration and CYTHON_AVAILABLE:
             result = gf_calc_accelerated(SimInt, Intensity or self.Intensity)
             if result is not None:
-                
-                print("returning result from gf_calc_accelerated ", result)
                 self._acceleration_status['gf_calculation'] = True
                 return result
         
         # Fallback to original implementation
-        print("Attempted to run accelerated GF_Calc, reverting to unaccelerated")
         self._acceleration_status['gf_calculation'] = False
         return super().GF_calc(SimInt, Intensity)
     
@@ -278,8 +273,6 @@ class AcceleratedCylinderModel(CylinderModel):
         """
         Accelerated goodness of fit calculation with fallback.
         """
-        print("Using second instance of accelerated GF_Calc")
-        
         if self._use_acceleration and CYTHON_AVAILABLE:
             result = gf_calc_accelerated(SimInt, Intensity or self.Intensity)
             if result is not None:
@@ -379,9 +372,6 @@ class AcceleratedCylinderModel(CylinderModel):
         """
         Accelerated GF calculation with fallback.
         """
-        
-        print("Using accelerated SimCyl_GF")
-        
         # Get SLD values
         if hasattr(self, 'sld_values'):
             sld_values = self.sld_values
@@ -393,8 +383,6 @@ class AcceleratedCylinderModel(CylinderModel):
             discretization_array = np.array(Discretization, dtype=np.int32)
             result = sim_cyl_gf_accelerated(SimPar, layers, Intensity, Qr, Qz, discretization_array, sld_values)
             if result is not None:
-                
-                print("returning result from sim_cyl_gf_accelerated ", result)
                 
                 self._acceleration_status['gf_calculation'] = True
                 return result
