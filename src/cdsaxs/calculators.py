@@ -84,6 +84,7 @@ def sample_size_correction(sample_phi_deg, fwhm_mm, center_mm, sample_size_mm):
         Units are degrees.
     fwhm_mm : float
     center_mm : float
+        Offset between the beam center position and the sample center position.
     sample_size_mm : float
 
     Returns
