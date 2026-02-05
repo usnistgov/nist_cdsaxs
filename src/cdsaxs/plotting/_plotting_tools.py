@@ -298,8 +298,8 @@ def generate_interpolated_reduced_data(
         qsx,
         qsz,
         Iq,
-        wavelength_nm,
-        sample_phi_deg_range,
+        # wavelength_nm,
+        # sample_phi_deg_range,
         grid_size=1000,
 ):
 
@@ -314,16 +314,16 @@ def generate_interpolated_reduced_data(
     )
     grid_Iq = griddata((qsx, qsz), Iq, (grid_x, grid_z), method='cubic')
 
-    sample_phi_grid = np.array(
-        diffraction.qx_qz_to_sample_theta(wavelength_nm, grid_x, grid_z))
-    sample_phi_grid = np.rad2deg(sample_phi_grid[0, :, :])
+    # sample_phi_grid = np.array(
+    #     diffraction.qx_qz_to_sample_theta(wavelength_nm, grid_x, grid_z))
+    # sample_phi_grid = np.rad2deg(sample_phi_grid[0, :, :])
 
-    filter_out = (
-            sample_phi_grid > np.max(sample_phi_deg_range)
-        ) | (
-            sample_phi_grid < np.min(sample_phi_deg_range)
-        )
+    # filter_out = (
+    #         sample_phi_grid > np.max(sample_phi_deg_range)
+    #     ) | (
+    #         sample_phi_grid < np.min(sample_phi_deg_range)
+    #     )
 
-    grid_Iq[filter_out] = np.nan
+    # grid_Iq[filter_out] = np.nan
 
-    return grid_x, grid_z, grid_Iq, filter_out
+    return grid_x, grid_z, grid_Iq #, filter_out
