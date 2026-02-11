@@ -446,9 +446,10 @@ class CDSAXS_Model:
             elif 'q_r' in col_lower:
                 q_r_indices.append(idx)
             # Check for intensity
-            elif col_lower.startswith('i'):
+            elif 'i' in col_lower:
                 I_indices.append(idx)
-        
+            else:
+                print("Header does not match expected formatting: {col_lower}")
         # Validate that we have the minimum required columns
         if not (q_x_indices and q_y_indices and q_z_indices and I_indices):
             print(f"Warning: Missing required columns")
