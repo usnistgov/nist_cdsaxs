@@ -263,6 +263,9 @@ class CDSAXS_Model:
         Expected file format with columns:
         q_x, q_y, q_z, [q_r], I (repeating pattern)
         
+        This function now physically checks the header strings to identify the presence
+        and position of q_x, q_y, q_z, q_r, and I columns.
+        
         Parameters:
         -----------
         Datafile : str
@@ -285,45 +288,36 @@ class CDSAXS_Model:
             if Data.empty:
                 raise ValueError("The data file is empty")
             
-            # Check the number of cuts
-            num_columns = len(Data.columns)
-            if num_columns < 4:
-                raise ValueError("Data must have at least 4 columns")
+            # Extract and analyze header strings
+            header_mapping = self._analyze_csv_header(Data.columns)
             
-            #check to see if qr is present in the exported data
-            has_qr = (num_columns % 5 == 0)
-            cols_per_slice = 5 if has_qr else 4
+            if not header_mapping:
+                raise ValueError("Could not identify required columns (q_x, q_y, q_z, q_r (optional), I) in header")
             
-            if num_columns % cols_per_slice != 0:
-                raise ValueError(f"Number of columns ({num_columns}) is not divisible by {cols_per_slice}")
+            print(f"Header analysis results:")
+            print(f"  q_x columns: {header_mapping['q_x_indices']}")
+            print(f"  q_y columns: {header_mapping['q_y_indices']}")
+            print(f"  q_z columns: {header_mapping['q_z_indices']}")
+            print(f"  q_r columns: {header_mapping['q_r_indices']}")
+            print(f"  I columns: {header_mapping['I_indices']}")
+            print(f"  Number of cuts detected: {header_mapping['numbercuts']}")
             
-            numbercuts = num_columns // cols_per_slice
+            numbercuts = header_mapping['numbercuts']
             
-            #Convert to numpy array
+            # Convert to numpy array
             Data1 = Data.to_numpy()
-
-            # Remove header row and get actual data
-            # First row contains headers like '$q_x (\AA^{-1})$', '$q_y (\AA^{-1})$', etc.
-            # Actual numeric data starts from second row
             
-            # Collect data from all slices
+            # Collect data from all slices using identified column positions
             all_qx = []
             all_qy = []
             all_qz = []
             all_intensity = []
             
             for i in range(numbercuts):
-                if has_qr:
-                    qx_col = i * 5
-                    qy_col = i * 5 + 1
-                    qz_col = i * 5 + 2
-                    qr_col = i * 5 + 3  # Not used currently, but available
-                    I_col = i * 5 + 4
-                else:
-                    qx_col = i * 4
-                    qy_col = i * 4 + 1
-                    qz_col = i * 4 + 2
-                    I_col = i * 4 + 3
+                qx_col = header_mapping['q_x_indices'][i]
+                qy_col = header_mapping['q_y_indices'][i]
+                qz_col = header_mapping['q_z_indices'][i]
+                I_col = header_mapping['I_indices'][i]
                 
                 # Extract columns and convert to float
                 qx_data = Data1[:, qx_col]
@@ -411,6 +405,83 @@ class CDSAXS_Model:
             raise RuntimeError(f"Error processing data: {str(e)}")
         
         return True  # Return success
+    
+    def _analyze_csv_header(self, columns):
+        """
+        Analyze the CSV header to identify column positions for q_x, q_y, q_z, q_r, and I.
+        
+        Parameters:
+        -----------
+        columns : Index or list
+            Column names/headers from the CSV file
+            
+        Returns:
+        --------
+        dict or None
+            Dictionary with identified column indices and number of cuts,
+            or None if required columns cannot be identified
+        """
+        # Convert columns to list of lowercase strings for case-insensitive matching
+        col_list = [str(col).lower() for col in columns]
+        
+        # Find all indices for each column type
+        q_x_indices = []
+        q_y_indices = []
+        q_z_indices = []
+        q_r_indices = []
+        I_indices = []
+        
+        # Search for each column type in the header
+        for idx, col_lower in enumerate(col_list):
+            # Check for q_x
+            if 'q_x' in col_lower:
+                q_x_indices.append(idx)
+            # Check for q_y
+            elif 'q_y' in col_lower:
+                q_y_indices.append(idx)
+            # Check for q_z
+            elif 'q_z' in col_lower:
+                q_z_indices.append(idx)
+            # Check for q_r (radius - optional)
+            elif 'q_r' in col_lower:
+                q_r_indices.append(idx)
+            # Check for intensity
+            elif col_lower.startswith('i'):
+                I_indices.append(idx)
+        
+        # Validate that we have the minimum required columns
+        if not (q_x_indices and q_y_indices and q_z_indices and I_indices):
+            print(f"Warning: Missing required columns")
+            print(f"  q_x found: {len(q_x_indices)}, q_y found: {len(q_y_indices)}, q_z found: {len(q_z_indices)}, I found: {len(I_indices)}")
+            return None
+        
+        # Verify that all column types have the same count (repeated pattern)
+        q_x_count = len(q_x_indices)
+        q_y_count = len(q_y_indices)
+        q_z_count = len(q_z_indices)
+        I_count = len(I_indices)
+        
+        if not (q_x_count == q_y_count == q_z_count == I_count):
+            print(f"Warning: Column counts are inconsistent:")
+            print(f"  q_x: {q_x_count}, q_y: {q_y_count}, q_z: {q_z_count}, I: {I_count}")
+            return None
+        
+        # Check if q_r count matches (it's optional)
+        if q_r_indices and len(q_r_indices) != q_x_count:
+            print(f"Warning: q_r column count ({len(q_r_indices)}) doesn't match other columns ({q_x_count})")
+            print(f"Ignoring q_r data")
+            q_r_indices = []  # Ignore q_r if counts don't match
+        
+        numbercuts = q_x_count
+        
+        return {
+            'q_x_indices': q_x_indices,
+            'q_y_indices': q_y_indices,
+            'q_z_indices': q_z_indices,
+            'q_r_indices': q_r_indices,
+            'I_indices': I_indices,
+            'numbercuts': numbercuts
+        }
     
     def importCDSAXS_txtlegacy(self, intensity_file, qx_file, qz_file):
         """
