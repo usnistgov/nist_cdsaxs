@@ -821,7 +821,7 @@ class ReducedSlices():
             q_axis='qsz',
             integrated_axis='qsx',
             offset_axis ='qsy',
-            header_axis = None,
+            export_qr = False,
             decimals=5):
         """
         Outputs the slected reduced slices set currently stored in the
@@ -839,17 +839,7 @@ class ReducedSlices():
         Datas
             Numpy array in the format used to export the data.
         """
-
-        if header_axis is None:
-            header_axis = integrated_axis
-        elif (header_axis != integrated_axis) and (header_axis != 'qsr'):
-            warnings.warn(
-                "Currently only qsr or the integrated axis can be used as the header "
-                "for exporting reduced slices. The header has been set to "
-                "the integrated axis."
-            )
-            header_axis = integrated_axis
-
+        
         filtered_slices = self.data.copy()
         for key, value in filter_by_q.items():
             keep = []
@@ -906,7 +896,7 @@ class ReducedSlices():
             datas.append(new_qy)
             datas.append(new_qz)
             
-            if header_axis == 'qsr':
+            if export_qr:
                 qsr = np.hypot(q_int,q_offset)
                 new_qr = np.hstack(
                     ([r'$q_r (\AA^{-1})$'],
