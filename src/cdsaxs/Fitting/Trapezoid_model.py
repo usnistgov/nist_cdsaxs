@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
+from matplotlib.patches import Polygon, Patch
 from scipy.optimize import (
     differential_evolution, 
     dual_annealing, 
@@ -1224,7 +1225,20 @@ class TrapezoidModelArray(CDSAXS_Model):
         if plot_combined:
             self._plot_qzcut_combined(initial_simInt)
     
-    def _plot_trapezoid_structure(self, model_params, linestyle='-', color='black', alpha=1.0, label=None, linewidth=2, equal_aspect=True, **kwargs):
+    def _plot_trapezoid_structure(
+        self,
+        model_params,
+        linestyle='-',
+        color='black',
+        alpha=1.0,
+        label=None,
+        linewidth=2,
+        equal_aspect=True,
+        shade_by_sld=False,
+        grey_range=(0.85, 0.05),
+        shading_alpha=0.6,
+        **kwargs
+    ):
         """
         Plot the trapezoid structure from the given model parameters.
         
@@ -1244,14 +1258,96 @@ class TrapezoidModelArray(CDSAXS_Model):
             Width of the lines
         equal_aspect : bool, optional
             Whether to use equal aspect ratio
+        shade_by_sld : bool, optional
+            If True, fills each trapezoid with a greyscale shade based on per-layer SLD values
+            from `model_params['slds']` (or `self.sld_values` fallback). Default: False.
+        grey_range : tuple(float, float), optional
+            (light, dark) greyscale intensities in [0, 1], where 0=black and 1=white.
+            Default (0.85, 0.05) is light grey → near-black.
+        shading_alpha : float, optional
+            Alpha for the trapezoid fill when `shade_by_sld=True`. Default: 0.6.
         **kwargs : dict
             Additional keyword arguments passed to matplotlib plot functions
         """
+        ax = plt.gca()
         trapezoids = model_params['trapezoids']
         layers = model_params['layers']
+
+        # Validate/clip shading params
+        try:
+            grey_light, grey_dark = float(grey_range[0]), float(grey_range[1])
+        except Exception:
+            grey_light, grey_dark = 0.85, 0.05
+        grey_light = float(np.clip(grey_light, 0.0, 1.0))
+        grey_dark = float(np.clip(grey_dark, 0.0, 1.0))
+        shading_alpha = float(np.clip(float(shading_alpha), 0.0, 1.0))
+
+        # Optional greyscale fill (draw first so outline stays on top)
+        if shade_by_sld and layers > 0 and len(trapezoids) >= layers + 1:
+            if 'slds' in model_params:
+                slds = np.array(model_params['slds'], dtype=float)
+            elif hasattr(self, 'sld_values'):
+                slds = np.array(self.sld_values, dtype=float)
+            else:
+                slds = np.ones(layers, dtype=float)
+
+            if len(slds) == layers + 1:
+                slds = slds[:layers]
+            elif len(slds) == 1 and layers > 1:
+                slds = np.full(layers, float(slds[0]), dtype=float)
+            elif len(slds) != layers:
+                slds = np.resize(slds, layers).astype(float)
+
+            finite_slds = slds[np.isfinite(slds)]
+            if finite_slds.size == 0:
+                sld_min, sld_max = 0.0, 1.0
+            else:
+                sld_min, sld_max = float(np.min(finite_slds)), float(np.max(finite_slds))
+            denom = (sld_max - sld_min) if not np.isclose(sld_max, sld_min) else None
+
+            base_w = float(trapezoids[0]['width'])
+            height0 = 0.0
+            for i in range(int(layers)):
+                h = float(trapezoids[i]['height'])
+                if h <= 0:
+                    continue
+
+                w0 = float(trapezoids[i]['width'])
+                w1 = float(trapezoids[i + 1]['width'])
+
+                xL0 = (base_w - w0) / 2.0
+                xR0 = xL0 + w0
+                xL1 = (base_w - w1) / 2.0
+                xR1 = xL1 + w1
+
+                y0 = height0
+                y1 = height0 + h
+
+                sld_val = float(slds[i])
+                if denom is None:
+                    t = 0.5
+                else:
+                    t = (sld_val - sld_min) / denom
+                t = float(np.clip(t, 0.0, 1.0))
+
+                grey = grey_light + t * (grey_dark - grey_light)  # larger SLD -> darker (by default)
+                grey = float(np.clip(grey, 0.0, 1.0))
+
+                ax.add_patch(
+                    Polygon(
+                        [(xL0, y0), (xR0, y0), (xR1, y1), (xL1, y1)],
+                        closed=True,
+                        facecolor=(grey, grey, grey),
+                        edgecolor='none',
+                        alpha=shading_alpha,
+                        zorder=1,
+                    )
+                )
+
+                height0 = y1
         
         # Plot base
-        plt.plot([0, trapezoids[0]['width']], [0, 0], 
+        ax.plot([0, trapezoids[0]['width']], [0, 0], 
                 linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
         
         height = 0
@@ -1263,7 +1359,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             x_left = (trapezoids[0]['width'] - width) / 2
             x_right = x_left + width
             
-            plt.plot([x_left, x_right], [height, height], 
+            ax.plot([x_left, x_right], [height, height], 
                     linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
             
             if i < layers:
@@ -1271,24 +1367,24 @@ class TrapezoidModelArray(CDSAXS_Model):
                 x_next_left = (trapezoids[0]['width'] - next_width) / 2
                 x_next_right = x_next_left + next_width
                 
-                plt.plot([x_left, x_next_left], [height, height + trapezoids[i]['height']], 
+                ax.plot([x_left, x_next_left], [height, height + trapezoids[i]['height']], 
                         linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
-                plt.plot([x_right, x_next_right], [height, height + trapezoids[i]['height']], 
+                ax.plot([x_right, x_next_right], [height, height + trapezoids[i]['height']], 
                         linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
         
         # Add a line to the legend
         if label:
-            plt.plot([], [], linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, label=label)
+            ax.plot([], [], linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, label=label)
         
         # Set aspect ratio - only use equal if not overridden by user limits
         if equal_aspect:
-            plt.axis('equal')
+            ax.axis('equal')
         
-        plt.xlabel('Width (Å)')
-        plt.ylabel('Height (Å)')
-        plt.grid(True, linestyle='--', alpha=0.3)
+        ax.set_xlabel('Width (Å)')
+        ax.set_ylabel('Height (Å)')
+        ax.grid(True, linestyle='--', alpha=0.3)
         
-        return plt.gca()
+        return ax
     
     def _plot_qzcut_grid(self, initial_simInt):
         """
@@ -1405,8 +1501,24 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     
     
-    def plot_structure(self, figsize=(10, 6), xlim=None, ylim=None, title='Trapezoid Structure', 
-                      show_dimensions=False, color='blue', linewidth=2, equal_aspect=True, **kwargs):
+    def plot_structure(
+        self,
+        figsize=(10, 6),
+        xlim=None,
+        ylim=None,
+        title='Trapezoid Structure',
+        show_dimensions=False,
+        color='blue',
+        linewidth=2,
+        equal_aspect=True,
+        shade_by_sld=False,
+        grey_range=(0.85, 0.05),
+        shading_alpha=0.6,
+        sld_label_map=None,
+        show_sld_legend=True,
+        sld_legend_precision=3,
+        **kwargs
+    ):
         """
         Plots the current trapezoid structure with customizable figure properties.
         
@@ -1428,6 +1540,21 @@ class TrapezoidModelArray(CDSAXS_Model):
             Width of the structure lines. Default: 2
         equal_aspect : bool, optional
             Whether to use equal aspect ratio. Set to False if xlim/ylim are ignored. Default: True
+        shade_by_sld : bool, optional
+            If True, fills each trapezoid with a greyscale shade based on per-layer SLD values
+            from `model_params['slds']` (or `self.sld_values` fallback). Default: False.
+        grey_range : tuple(float, float), optional
+            (light, dark) greyscale intensities in [0, 1], where 0=black and 1=white.
+            Default (0.85, 0.05) is light grey → near-black.
+        shading_alpha : float, optional
+            Alpha for the trapezoid fill when `shade_by_sld=True`. Default: 0.6.
+        sld_label_map : dict | None, optional
+            Mapping from SLD value to label to display in the legend, e.g. {1.0: "SiO2", 1.28: "SiGe"}.
+            If provided, legend labels will be "{label} (SLD={value})".
+        show_sld_legend : bool, optional
+            If True and `shade_by_sld=True`, adds a legend entry for each unique SLD. Default: True.
+        sld_legend_precision : int, optional
+            Decimal rounding used for grouping and mapping float SLD values in the legend. Default: 3.
         **kwargs : dict
             Additional keyword arguments passed to matplotlib plot functions
             
@@ -1437,14 +1564,29 @@ class TrapezoidModelArray(CDSAXS_Model):
             The axes object containing the plot
         """
         plt.figure(figsize=figsize)
-        ax = self._plot_trapezoid_structure(self.model_params, 
-                                          linestyle='-', 
-                                          color=color, 
-                                          alpha=1.0,
-                                          linewidth=linewidth,
-                                          label=None,
-                                          equal_aspect=equal_aspect,
-                                          **kwargs)
+        layers = int(self.model_params.get('layers', 0))
+        # Validate/clip shading params (kept permissive to avoid breaking notebooks)
+        try:
+            grey_light, grey_dark = float(grey_range[0]), float(grey_range[1])
+        except Exception:
+            grey_light, grey_dark = 0.85, 0.05
+        grey_light = float(np.clip(grey_light, 0.0, 1.0))
+        grey_dark = float(np.clip(grey_dark, 0.0, 1.0))
+        shading_alpha = float(np.clip(float(shading_alpha), 0.0, 1.0))
+
+        ax = self._plot_trapezoid_structure(
+            self.model_params,
+            linestyle='-',
+            color=color,
+            alpha=1.0,
+            linewidth=linewidth,
+            label=None,
+            equal_aspect=equal_aspect,
+            shade_by_sld=shade_by_sld,
+            grey_range=(grey_light, grey_dark),
+            shading_alpha=shading_alpha,
+            **kwargs
+        )
         
         # Set axis limits if provided (after plotting to override equal aspect if needed)
         if xlim is not None:
@@ -1465,6 +1607,63 @@ class TrapezoidModelArray(CDSAXS_Model):
         # Add dimension annotations if requested
         if show_dimensions:
             self._add_dimension_annotations()
+
+        # Add SLD/material legend if requested
+        if shade_by_sld and show_sld_legend and layers > 0:
+            if 'slds' in self.model_params:
+                slds_all = np.array(self.model_params['slds'], dtype=float)
+            elif hasattr(self, 'sld_values'):
+                slds_all = np.array(self.sld_values, dtype=float)
+            else:
+                slds_all = np.ones(layers, dtype=float)
+
+            if len(slds_all) == layers + 1:
+                slds_all = slds_all[:layers]
+            elif len(slds_all) == 1 and layers > 1:
+                slds_all = np.full(layers, float(slds_all[0]), dtype=float)
+            elif len(slds_all) != layers:
+                slds_all = np.resize(slds_all, layers).astype(float)
+
+            finite_slds = slds_all[np.isfinite(slds_all)]
+            if finite_slds.size == 0:
+                sld_min, sld_max = 0.0, 1.0
+            else:
+                sld_min, sld_max = float(np.min(finite_slds)), float(np.max(finite_slds))
+            denom = (sld_max - sld_min) if not np.isclose(sld_max, sld_min) else None
+
+            # Normalize label map keys using the same rounding precision
+            normalized_label_map = {}
+            if isinstance(sld_label_map, dict):
+                for k, v in sld_label_map.items():
+                    try:
+                        rk = round(float(k), int(sld_legend_precision))
+                        normalized_label_map[rk] = v
+                    except Exception:
+                        continue
+
+            rounded = np.array([round(float(v), int(sld_legend_precision)) for v in slds_all], dtype=float)
+            unique_vals = sorted(set(rounded.tolist()))
+
+            handles = []
+            for rv in unique_vals:
+                if denom is None:
+                    t = 0.5
+                else:
+                    t = (rv - sld_min) / denom
+                t = float(np.clip(t, 0.0, 1.0))
+                grey = grey_light + t * (grey_dark - grey_light)
+                grey = float(np.clip(grey, 0.0, 1.0))
+
+                mapped = normalized_label_map.get(rv, None)
+                if mapped is None:
+                    lbl = f"SLD={rv:.{int(sld_legend_precision)}f}"
+                else:
+                    lbl = f"{mapped} (SLD={rv:.{int(sld_legend_precision)}f})"
+
+                handles.append(Patch(facecolor=(grey, grey, grey), edgecolor='black', linewidth=0.5, label=lbl))
+
+            if handles:
+                ax.legend(handles=handles, title="SLD", frameon=True)
         
         plt.title(title)
         plt.tight_layout()
