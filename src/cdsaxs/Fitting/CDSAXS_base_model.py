@@ -1898,7 +1898,7 @@ class CDSAXS_Model:
         
         return opt_params
     
-    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes'):
+    def PlotQzCut(self, cut_index=None, SimInt=None, log_scale='yes', show_legend=False):
         """
         Plots intensity vs Qz for specific cuts (Qx for trapezoid, Qr for cylinder)
         
@@ -1992,7 +1992,8 @@ class CDSAXS_Model:
             ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (counts)')
             ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
+            if show_legend:
+                ax.legend()
         
         # Hide unused subplots
         for i in range(len(cut_indices), len(axes)):
@@ -6854,7 +6855,8 @@ class CDSAXS_Model:
                                                    confidence_levels=[0.5, 0.9, 0.95], plot_results=True, 
                                                    figsize=(10, 6), show_best_fit=True, show_mean=True,
                                                    show_base=True, colors=None, layer_indices=None, layer_positions=None,
-                                                   arbitrary_heights=None):
+                                                   arbitrary_heights=None,
+                                                   return_figure=False):
         """
         Plot uncertainty envelope around structure from MCMC results with multiple confidence levels.
         
@@ -7092,13 +7094,16 @@ class CDSAXS_Model:
             
             # Plot results if requested
             if plot_results:
-                self._plot_uncertainty_envelope_percentile3(
+                fig = self._plot_uncertainty_envelope_percentile3(
                     results, confidence_levels, figsize, 
                     show_best_fit, show_mean, show_base, colors, mcmc_results,
-                    layer_heights, layer_info, center_line, xi, yi, confidence_levels
+                    layer_heights, layer_info, center_line, xi, yi, confidence_levels,
+                    return_figure=return_figure
                 )
-            
-            return results
+            if return_figure:
+                return results, fig
+            else:
+                return results
             
         finally:
             # Restore original parameters
@@ -7198,7 +7203,7 @@ class CDSAXS_Model:
         
         return layer_heights_dict, layer_info_list
     
-    def _calculate_distance_from_center_line(self, point, center_line):
+    def _calculate_distance_from_center_line(self, point, center_line, signed_distance=False):
         """
         Calculate the distance from a point to the nearest point on the center line.
         
@@ -7218,11 +7223,13 @@ class CDSAXS_Model:
         center_line = np.array(center_line)
         
         # Calculate distances to all points on center line
-        distances = np.sqrt(np.sum((center_line - point)**2, axis=1))
+        #distances = np.sqrt(np.sum((center_line - point)**2, axis=1))
         
         # Also check distances to line segments between consecutive points
-        min_dist = np.min(distances)
-        
+        #min_dist = np.min(distances)
+        min_dist = float('inf')
+        best_proj = None
+        best_v = None
         # Check line segments for potentially closer points
         for i in range(len(center_line) - 1):
             p1 = center_line[i]
@@ -7237,22 +7244,41 @@ class CDSAXS_Model:
             c1 = np.dot(w, v)
             if c1 <= 0:
                 # Closest to p1
-                dist = np.linalg.norm(point - p1)
+                proj = p1
             else:
                 c2 = np.dot(v, v)
                 if c2 <= c1:
                     # Closest to p2
-                    dist = np.linalg.norm(point - p2)
+                    proj = p2
                 else:
                     # Closest to point on segment
                     b = c1 / c2
                     proj = p1 + b * v
-                    dist = np.linalg.norm(point - proj)
+                
+            dist = np.linalg.norm(point - proj)
             
-            min_dist = min(min_dist, dist)
+            if dist < min_dist:
+                min_dist = dist
+                best_proj = proj
+                best_v = v
+
         
-        return min_dist
-    
+        if not signed_distance:
+            return min_dist 
+        else:
+            # Calculate Direction using the 2D Cross Product
+            # sign = (x2-x1)*(y-y1) - (y2-y1)*(x-x1)
+            # Use the 'best_v' (the segment the point was closest to)
+            direction_val = (best_v[0] * (point[1] - best_proj[1])) - (best_v[1] * (point[0] - best_proj[0]))
+            
+            # Return signed distance: positive for one side, negative for the other
+            if direction_val >= 0:
+                signed_dist = min_dist 
+            else:
+                signed_dist = -min_dist
+                
+            return signed_dist
+
     def _find_envelope_crossovers(self, envelope1, envelope2, center_line):
         """
         Find crossover points where two envelopes intersect based on distance from center line.
@@ -7323,6 +7349,9 @@ class CDSAXS_Model:
         n_points = len(envelope_lower)
         n_slices = n_points // 2
         
+        disp_flag = True  
+        disp_flag2=True      
+        
         # For the combined envelope, we need to use the full y range, especially extending
         # to the maximum y_outer. We'll use the upper envelope's y values as reference
         # since it has the highest y values, ensuring we capture the full extent.
@@ -7378,12 +7407,15 @@ class CDSAXS_Model:
                         combined[start_idx + i] = pt_lower
                     else:
                         # Calculate distances and select furthest from center
-                        dist_lower = self._calculate_distance_from_center_line(pt_lower, center_line)
-                        dist_middle = self._calculate_distance_from_center_line(pt_middle, center_line)
-                        dist_upper = self._calculate_distance_from_center_line(pt_upper, center_line)
+                        dist_lower = self._calculate_distance_from_center_line(pt_lower, center_line, signed_distance=True )
+                        dist_middle = self._calculate_distance_from_center_line(pt_middle, center_line, signed_distance=True )
+                        dist_upper = self._calculate_distance_from_center_line(pt_upper, center_line, signed_distance=True )
                         distances = [dist_lower, dist_middle, dist_upper]
                         points = [pt_lower, pt_middle, pt_upper]
-                        max_idx = np.argmax(distances)
+                            
+                        max_idx = np.argmin(distances)
+                        
+                        # Use the selected point, which preserves its y value                           
                         combined[start_idx + i] = points[max_idx]
                 else:
                     # For outer envelope: if we're at a high y value where upper envelope extends beyond others,
@@ -7393,14 +7425,15 @@ class CDSAXS_Model:
                         combined[start_idx + i] = pt_upper
                     else:
                         # Calculate distances from center line for all three points
-                        dist_lower = self._calculate_distance_from_center_line(pt_lower, center_line)
-                        dist_middle = self._calculate_distance_from_center_line(pt_middle, center_line)
-                        dist_upper = self._calculate_distance_from_center_line(pt_upper, center_line)
-                        
+                        dist_lower = self._calculate_distance_from_center_line(pt_lower, center_line, signed_distance=True)
+                        dist_middle = self._calculate_distance_from_center_line(pt_middle, center_line, signed_distance=True)
+                        dist_upper = self._calculate_distance_from_center_line(pt_upper, center_line, signed_distance=True)
+
                         # Select point with maximum distance
                         # This ensures we get the furthest point from center at each y level
                         distances = [dist_lower, dist_middle, dist_upper]
                         points = [pt_lower, pt_middle, pt_upper]
+                        
                         max_idx = np.argmax(distances)
                         
                         # Use the selected point, which preserves its y value
@@ -7628,9 +7661,9 @@ class CDSAXS_Model:
     def _plot_uncertainty_envelope_percentile3(self, results, confidence_levels, figsize,
                                                show_best_fit, show_mean, show_base, colors, mcmc_results,
                                                layer_heights=None, layer_info=None, center_line=None, 
-                                               xi=None, yi=None, conf_levels=None):
+                                               xi=None, yi=None, conf_levels=None, return_figure=False):
         """Plot multiple confidence level envelopes with increasingly light shades of blue."""
-        plt.figure(figsize=figsize)
+        fig = plt.figure(figsize=figsize)
         
         # Sort confidence levels from smallest to largest (inner to outer)
         sorted_levels = sorted(confidence_levels)
@@ -7704,6 +7737,9 @@ class CDSAXS_Model:
         # Add common plot elements
         self._add_common_plot_elements_v3(center_line, show_best_fit, show_mean, show_base, 
                                          colors, sorted_levels, mcmc_results)
+    
+        if return_figure:
+            return fig
     
     def _plot_layer_boundary_line(self, layer_height, center_line, label='Layer Boundary'):
         """
