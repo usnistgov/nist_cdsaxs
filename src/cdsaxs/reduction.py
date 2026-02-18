@@ -68,6 +68,7 @@ def slice_reduced_dataset(
                     and not np.isnan(data.Iq[selection]).any():
                 q.append(np.nanmean(getattr(data, q_axis)[selection]))
                 Iq.append(np.nanmean(data.Iq[selection]))
+                phi.append(data.sample_phi_deg)
                 # qsz.extend(list(data.qsz[selection]))
                 # Iq.extend(list(data.Iq[selection]))
 
@@ -76,7 +77,8 @@ def slice_reduced_dataset(
             Iq=np.array(Iq),
             q_axis=q_axis,
             integrated_axis=integrated_axis,
-            slice_width=qmax-qmin
+            slice_width=qmax-qmin,
+            sample_phi_deg=np.array(phi),
         )
         setattr(reduced_slice, integrated_axis,
                 q_values[i])

@@ -76,6 +76,7 @@ class Data1D():
             positioned normal to the incident beam, the lab and detector
             coordinates will align
         """
+        setattr(self, 'sample_phi_deg', np.array(kwargs.pop('sample_phi_deg', [None])))
         if q_axis in kwargs.keys():
             raise ValueError(
                 f"You have provided {q_axis} twice, once as the positional"

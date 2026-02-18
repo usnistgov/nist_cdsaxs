@@ -831,7 +831,8 @@ class ReducedSlices():
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
-            decimals=5):
+            decimals=5,
+            export_phi=False):
         """
         Returns the slected reduced slices set currently stored in the
         dataset. The user must specify the index of the set of slices
@@ -866,11 +867,13 @@ class ReducedSlices():
             q = getattr(r_slice, q_axis)
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
+            phi = getattr(r_slice, 'sample_phi_deg')
 
             # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]
             Iq = Iq[sorted_indexes]
+            phi = phi[sorted_indexes]
 
             select = (~np.isnan(Iq)) & (Iq > 0)
 
@@ -885,9 +888,16 @@ class ReducedSlices():
                     np.round(Iq, decimals=decimals).astype(str)[select],
                     [""]*(length-len(Iq[select])))
                     )
+            
+            new_phi = np.hstack(
+                ([f'phi (degrees)'],
+                    np.round(phi, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(phi[select])))
+                    )
 
             datas.append(new_q)
             datas.append(new_Iq)
+            datas.append(new_phi)
 
         datas = np.array(datas).T
         np.savetxt(filepath, datas, delimiter=',', fmt='%s')
