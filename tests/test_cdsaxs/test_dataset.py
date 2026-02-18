@@ -3,7 +3,7 @@ import unittest
 from cdsaxs.data.dataset import Dataset
 
 
-class Dataset(unittest.TestCase):
+class testDataset(unittest.TestCase):
 
     # TODO: implement Dataset tests, especially for metadata methods
 

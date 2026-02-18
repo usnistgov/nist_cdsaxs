@@ -345,12 +345,19 @@ class AcceleratedCylinderModel(CylinderModel):
         else:
             sld_values = np.ones(self.layers, dtype=np.float64)
         
+        if hasattr(self, 'DWr') and hasattr(self, 'DWz'):
+            DW = self.DWr
+            DW2 = self.DWz
+        else:
+            DW = self.DW
+            DW2 = -1.0    
+        
         # Try Cython acceleration
         if self._use_acceleration and CYTHON_AVAILABLE:
             discretization_array = np.array(Discretization, dtype=np.int32)
             result = sim_cyl_sm_accelerated(
-                self.PAR, self.layers, self.Qr, self.Qz, self.DW, self.I0, self.Bk, 
-                discretization_array, sld_values
+                self.PAR, self.layers, self.Qr, self.Qz, DW, self.I0, self.Bk, 
+                discretization_array, sld_values, DW2
             )
             if result is not None:
                 self._acceleration_status['simulation'] = True
@@ -376,6 +383,7 @@ class AcceleratedCylinderModel(CylinderModel):
             discretization_array = np.array(Discretization, dtype=np.int32)
             result = sim_cyl_gf_accelerated(SimPar, layers, Intensity, Qr, Qz, discretization_array, sld_values)
             if result is not None:
+                
                 self._acceleration_status['gf_calculation'] = True
                 return result
         

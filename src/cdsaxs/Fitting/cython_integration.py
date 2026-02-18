@@ -188,10 +188,10 @@ def cone_fourier_transform_accelerated(par, layers, qr, qz, discretization, sld_
     return None
 
 @cython_fallback("sim_cyl_sm_cython")
-def sim_cyl_sm_accelerated(par, layers, qr, qz, dw, i0, background, discretization, sld_values):
+def sim_cyl_sm_accelerated(par, layers, qr, qz, dw, i0, background, discretization, sld_values, dw2=-1.0):
     """Accelerated cylinder simulation with fallback."""
     if CYTHON_AVAILABLE and USE_CYTHON:
-        return cylinder_cython.sim_cyl_sm_cython(par, layers, qr, qz, dw, i0, background, discretization, sld_values)
+        return cylinder_cython.sim_cyl_sm_cython(par, layers, qr, qz, dw, i0, background, discretization, sld_values, dw2)
     return None
 
 @cython_fallback("sim_cyl_gf_cython")

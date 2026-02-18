@@ -3,7 +3,6 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # cython: profile=False
-
 import numpy as np
 cimport numpy as cnp
 cimport cython
@@ -11,6 +10,7 @@ from cython.parallel import prange
 from libc.math cimport exp, log, sqrt, pow, isfinite, fabs, sin, cos, atan2
 from libc.stdlib cimport malloc, free, calloc
 from libc.string cimport memset
+
 
 # Declare numpy array types
 ctypedef cnp.float64_t DTYPE_t
@@ -289,9 +289,12 @@ def sim_cyl_sm_cython_ultra(cnp.ndarray[DTYPE_t, ndim=2] par,
                            DTYPE_t i0,
                            DTYPE_t background,
                            cnp.ndarray[cnp.int32_t, ndim=1] discretization,
-                           cnp.ndarray[DTYPE_t, ndim=1] sld_values):
+                           cnp.ndarray[DTYPE_t, ndim=1] sld_values,
+                           DTYPE_t dw2=-1.0):
     """
     Ultra-optimized cylinder simulation with fused operations.
+    If dw2 >= 0, uses separate DWr (dw) and DWz (dw2).
+    Otherwise uses universal DW (dw).
     """
     # Get form factor
     cdef cnp.ndarray[CTYPE_t, ndim=2] form = cone_fourier_transform_cython_ultra(
@@ -301,27 +304,53 @@ def sim_cyl_sm_cython_ultra(cnp.ndarray[DTYPE_t, ndim=2] par,
     cdef int cols = qr.shape[1]
     cdef cnp.ndarray[DTYPE_t, ndim=2] sim_int = np.empty((rows, cols), dtype=np.float64)
     cdef int i, j
-    cdef DTYPE_t q_squared, dw_squared = dw * dw
+    cdef DTYPE_t q_squared, dw_squared, dwr_squared, dwz_squared
     cdef DTYPE_t m_val, real_part, imag_part, magnitude_squared
     cdef CTYPE_t form_val
+    cdef int use_separate_dw = 0
+    
+    # Determine DW mode
+    if dw2 >= 0.0:
+        use_separate_dw = 1
+        dwr_squared = dw * dw
+        dwz_squared = dw2 * dw2
+    else:
+        dw_squared = dw * dw
     
     # Fused loop: combine Debye-Waller factor, form factor, and intensity calculation
-    for i in range(rows):
-        for j in range(cols):
-            # Calculate Debye-Waller factor
-            q_squared = qr[i, j] * qr[i, j] + qz[i, j] * qz[i, j]
-            m_val = sqrt(exp(-q_squared * dw_squared))
-            
-            # Apply Debye-Waller factor to form factor and calculate intensity in one step
-            form_val = form[i, j] * m_val
-            real_part = form_val.real
-            imag_part = form_val.imag
-            magnitude_squared = real_part * real_part + imag_part * imag_part
-            
-            # Final intensity calculation
-            sim_int[i, j] = magnitude_squared * i0 + background
+    if use_separate_dw:        
+        for i in range(rows):
+            for j in range(cols):
+                # Calculate Debye-Waller factor with separate DWr and DWz
+                q_squared = qr[i, j] * qr[i, j] * dwr_squared + qz[i, j] * qz[i, j] * dwz_squared
+                m_val = sqrt(exp(-q_squared))
+                
+                # Apply Debye-Waller factor to form factor and calculate intensity in one step
+                form_val = form[i, j] * m_val
+                real_part = form_val.real
+                imag_part = form_val.imag
+                magnitude_squared = real_part * real_part + imag_part * imag_part
+                
+                # Final intensity calculation
+                sim_int[i, j] = magnitude_squared * i0 + background
+    else:
+        for i in range(rows):
+            for j in range(cols):
+                # Calculate Debye-Waller factor with universal DW
+                q_squared = qr[i, j] * qr[i, j] + qz[i, j] * qz[i, j]
+                m_val = sqrt(exp(-q_squared * dw_squared))
+                
+                # Apply Debye-Waller factor to form factor and calculate intensity in one step
+                form_val = form[i, j] * m_val
+                real_part = form_val.real
+                imag_part = form_val.imag
+                magnitude_squared = real_part * real_part + imag_part * imag_part
+                
+                # Final intensity calculation
+                sim_int[i, j] = magnitude_squared * i0 + background
     
     return sim_int
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -334,32 +363,52 @@ def sim_cyl_gf_cython_ultra(cnp.ndarray[DTYPE_t, ndim=1] sim_par,
                            cnp.ndarray[DTYPE_t, ndim=1] sld_values):
     """
     Ultra-optimized GF calculation with early termination and numerical stability.
+    Supports both universal DW and separate DWr/DWz.
+    Parameter order: pars, I0, DW (or DWz, DWr), background
     """
     # Pre-allocate PAR array
     cdef cnp.ndarray[DTYPE_t, ndim=2] pars = np.empty((layers + 1, 2), dtype=np.float64)
-    cdef DTYPE_t i0, dw, background_val
+    cdef DTYPE_t i0, dwr, dwz, background_val
     cdef int i, j
     cdef int rows = intensity.shape[0]
     cdef int cols = intensity.shape[1]
     cdef DTYPE_t gf = 0.0
     cdef DTYPE_t log_diff, sim_val, exp_val
     cdef DTYPE_t eps = 1e-15
-    cdef DTYPE_t max_gf = 1e10  # Early termination threshold
+    cdef DTYPE_t max_gf = 1e10
+    cdef int param_idx = 0
+    cdef int expected_params_1dw, expected_params_2dw
+    cdef cnp.ndarray[DTYPE_t, ndim=2] sim_int
     
     # Extract parameters efficiently
-    cdef int param_idx = 0
     for i in range(layers + 1):
         for j in range(2):
             pars[i, j] = sim_par[param_idx]
             param_idx += 1
     
     i0 = sim_par[param_idx]
-    dw = sim_par[param_idx + 1]
-    background_val = sim_par[param_idx + 2]
+    param_idx += 1
     
-    # Calculate simulated intensity
-    cdef cnp.ndarray[DTYPE_t, ndim=2] sim_int = sim_cyl_sm_cython_ultra(
-        pars, layers, qr, qz, dw, i0, background_val, discretization, sld_values)
+    # Determine if we have 1 or 2 DW values
+    expected_params_1dw = (layers + 1) * 2 + 3  # pars + i0 + dw + background
+    expected_params_2dw = (layers + 1) * 2 + 4  # pars + i0 + dwz + dwr + background
+    
+    if sim_par.shape[0] == expected_params_2dw:
+        # Two DW values: I0, DWz, DWr, background
+        dwz = sim_par[param_idx]      # dwz
+        dwr = sim_par[param_idx + 1]  # dwr
+        background_val = sim_par[param_idx + 2]
+        
+        # Pass dwr as first DW parameter, dwz as second
+        sim_int = sim_cyl_sm_cython_ultra(
+            pars, layers, qr, qz, dwr, i0, background_val, discretization, sld_values, dwz)
+    else:
+        # Single universal DW: I0, DW, background
+        dwr = sim_par[param_idx]  # universal DW
+        background_val = sim_par[param_idx + 1]
+        
+        sim_int = sim_cyl_sm_cython_ultra(
+            pars, layers, qr, qz, dwr, i0, background_val, discretization, sld_values)
     
     # Optimized GF calculation with early termination
     for i in range(rows):

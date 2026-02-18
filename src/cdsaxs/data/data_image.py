@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from cdsaxs.tools import default_mask, rotate_image
+from cdsaxs.tools import default_mask, rotate_image, rotate_image_pillow
 
 
 class DataImage():
@@ -118,7 +118,11 @@ class DataImage():
     def rotate_image(self,
                      rotation_angle_deg,
                      rotation_center=(0, 0),
-                     resampling_mode="bicubic"):
+                     resampling_mode="bicubic",
+                     fill_mode="constant",
+                     fill_constant=np.nan,
+                     use_pillow=False,
+                     **kwargs):
 
         """
         Rotate the image counterclockwise by the specified angle about
@@ -145,10 +149,22 @@ class DataImage():
             Default value is 'bicubic'.
         """
 
-        self.image = rotate_image(self._masked_image,
-                                  degrees=rotation_angle_deg,
-                                  rotation_center=rotation_center,
-                                  resampling_mode=resampling_mode)
+        if not use_pillow:
+            self.image = rotate_image(
+                self._masked_image,
+                degrees=rotation_angle_deg,
+                rotation_center=rotation_center,
+                resampling_mode=resampling_mode,
+                fill_mode=fill_mode,
+                fill_constant=fill_constant,
+                **kwargs)
+        else:
+            self.image = rotate_image_pillow(
+                self._masked_image,
+                degrees=rotation_angle_deg,
+                rotation_center=rotation_center,
+                resampling_mode=resampling_mode,
+                **kwargs)
         self.reset_mask()
 
     def rotate_image_ccw(self, steps=1):

@@ -78,4 +78,5 @@ SCATTER_KWARGS.extend(
     [x[4:]if x[:4] == 'set_' else x[5:]
      for x, y in matplotlib.collections.Collection.__dict__.items() if 'set_' in x]
 )
+
 SCATTER_KWARGS = list(set(SCATTER_KWARGS))
