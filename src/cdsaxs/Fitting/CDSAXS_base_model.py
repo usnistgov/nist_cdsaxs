@@ -2025,7 +2025,7 @@ class CDSAXS_Model:
             ax.set_xlabel('Qz (Å$^{-1}$)')
             ax.set_ylabel('Intensity (counts)')
             ax.grid(True, linestyle='--', alpha=0.7)
-            ax.legend()
+            #ax.legend()
         
         # Hide unused subplots
         for i in range(len(cut_indices), len(axes)):

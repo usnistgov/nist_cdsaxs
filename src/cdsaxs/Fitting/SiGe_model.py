@@ -153,9 +153,74 @@ class SiGeModelArray(CDSAXS_Model):
                 opt[f"trap_{i}_{field}"] = {'min': lo, 'max': hi}
         return opt
 
+    def _extract_inline_global_bounds(self, model_params):
+        """
+        Extract inline optimization bounds for global parameters (DW, I0, Bk) from model_params.
+
+        Expected inline schema (all optional):
+        - DW_bounds:  (min, max)
+        - I0_bounds:  (min, max)
+        - Bk_bounds:  (min, max)   (applies to scalar Bk or all elements of array Bk)
+
+        Returns a dict compatible with model_params['optimization'], e.g.
+        {'DW': {'min':..., 'max':...}, 'I0': {'min':..., 'max':...}, ...}
+        """
+        if model_params is None:
+            return {}
+
+        def _validate_bounds(val, key):
+            if val is None:
+                return None
+            if not isinstance(val, (list, tuple)) or len(val) != 2:
+                raise ValueError(f"{key} must be a 2-tuple/list (min,max); got {val!r}")
+            lo, hi = val[0], val[1]
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                raise ValueError(f"{key} bounds must be numeric; got {val!r}")
+            lo, hi = float(lo), float(hi)
+            if not lo < hi:
+                raise ValueError(f"{key} must satisfy min < max; got {val!r}")
+            return lo, hi
+
+        opt = {}
+
+        # Extract DW_bounds
+        if 'DW_bounds' in model_params:
+            lo_hi = _validate_bounds(model_params.get('DW_bounds'), 'DW_bounds')
+            if lo_hi is not None:
+                lo, hi = lo_hi
+                opt['DW'] = {'min': lo, 'max': hi}
+
+        # Extract I0_bounds
+        if 'I0_bounds' in model_params:
+            lo_hi = _validate_bounds(model_params.get('I0_bounds'), 'I0_bounds')
+            if lo_hi is not None:
+                lo, hi = lo_hi
+                opt['I0'] = {'min': lo, 'max': hi}
+
+        # Extract Bk_bounds
+        if 'Bk_bounds' in model_params:
+            lo_hi = _validate_bounds(model_params.get('Bk_bounds'), 'Bk_bounds')
+            if lo_hi is not None:
+                lo, hi = lo_hi
+                bk = model_params.get('Bk', None)
+                if isinstance(bk, (list, tuple, np.ndarray)):
+                    # Array background: apply bounds to each element (Bk_0, Bk_1, ...)
+                    bk_list = list(bk)
+                    for i in range(len(bk_list)):
+                        opt[f'Bk_{i}'] = {'min': lo, 'max': hi}
+                else:
+                    # Scalar background: apply to 'Bk'
+                    opt['Bk'] = {'min': lo, 'max': hi}
+
+        return opt
+
     def _merge_inline_bounds_into_optimization(self, param_limits=None):
         """
-        Merge inline trapezoid *_bounds into an optimization dict.
+        Merge inline bounds (trapezoid and global parameters) into an optimization dict.
+
+        Supports inline bounds for:
+        - Trapezoid parameters: width_bounds, height_bounds, twidth_bounds, depth_bounds (in trapezoid dicts)
+        - Global parameters: DW_bounds, I0_bounds, Bk_bounds (in model_params top-level)
 
         Precedence: explicit entries in `param_limits` (or model_params['optimization'])
         override inline bounds.
@@ -169,7 +234,14 @@ class SiGeModelArray(CDSAXS_Model):
         design_traps = self.model_params.get('design_trapezoids', None)
         traps = design_traps if isinstance(design_traps, list) else self.model_params.get('trapezoids', [])
 
-        inline_opt = self._extract_inline_trapezoid_bounds(traps)
+        # Extract inline bounds from trapezoids
+        inline_trap_opt = self._extract_inline_trapezoid_bounds(traps)
+
+        # Extract inline bounds from global parameters (DW, I0, Bk)
+        inline_global_opt = self._extract_inline_global_bounds(self.model_params)
+
+        # Merge all inline bounds
+        inline_opt = {**inline_trap_opt, **inline_global_opt}
 
         base = {}
         if isinstance(param_limits, dict):
@@ -179,6 +251,7 @@ class SiGeModelArray(CDSAXS_Model):
             if isinstance(existing, dict):
                 base = {k: v.copy() if isinstance(v, dict) else v for k, v in existing.items()}
 
+        # Add inline bounds only if not already in base (explicit config takes precedence)
         for k, v in inline_opt.items():
             if k not in base:
                 base[k] = v
@@ -577,15 +650,64 @@ class SiGeModelArray(CDSAXS_Model):
         if not hasattr(self, 'model_params') or self.model_params is None:
             return
 
-        # If we already expanded and current trapezoids contain no Layer_Type markers, do nothing
+        # Priority 1: If design_trapezoids exists, always use it as source (even if trapezoids is already expanded)
+        if 'design_trapezoids' in self.model_params:
+            design_traps = self.model_params['design_trapezoids']
+            design_layers = self.model_params.get('design_layers', len(design_traps) - 1)
+            design_slds_list = self.model_params.get('design_slds', self.model_params.get('slds', None))
+            
+            # Check if design_trapezoids has typed layers that need expansion
+            if self._has_typed_layers(design_traps):
+                # Build temporary model_params for expansion
+                tmp_model_params = {
+                    'trapezoids': [t.copy() for t in design_traps],
+                    'layers': design_layers,
+                    'slds': copy.deepcopy(design_slds_list) if design_slds_list is not None else None,
+                }
+                
+                # Apply constraints if they exist
+                constraints = self.model_params.get('constraints', None)
+                if constraints:
+                    self._apply_constraints(tmp_model_params, constraints)
+                    # IMPORTANT: Update design_trapezoids with constrained values
+                    # so that design_trapezoids always reflects the current constrained state
+                    self.model_params['design_trapezoids'] = [t.copy() for t in tmp_model_params['trapezoids']]
+                
+                # Expand from design_trapezoids (or constrained copy if constraints were applied)
+                (
+                    expanded_traps,
+                    expanded_slds,
+                    expanded_layers,
+                    _,
+                    _,
+                    _,
+                ) = self._expand_typed_layers(tmp_model_params)
+                
+                # Update expanded structure
+                self.model_params['layers'] = int(expanded_layers)
+                self.model_params['trapezoids'] = expanded_traps
+                self.model_params['slds'] = expanded_slds
+                self.model_params['_expanded_from_typed_layers'] = True
+            else:
+                # Design has no typed layers, so trapezoids = design_trapezoids
+                self.model_params['trapezoids'] = [t.copy() for t in design_traps]
+                self.model_params['layers'] = int(design_layers)
+                if design_slds_list is not None:
+                    self.model_params['slds'] = copy.deepcopy(design_slds_list)
+                self.model_params['_expanded_from_typed_layers'] = False
+            return
+
+        # Priority 2: If no design_trapezoids, check if current trapezoids has typed layers
         trapezoids = self.model_params.get('trapezoids', None)
         if not self._has_typed_layers(trapezoids):
+            # No typed layers, nothing to expand
             return
 
         # Avoid re-expanding an already-expanded structure unless the current list is still typed
         if self.model_params.get('_expanded_from_typed_layers', False) and not self._has_typed_layers(trapezoids):
             return
 
+        # Expand from current trapezoids (no design_trapezoids exists)
         (
             expanded_traps,
             expanded_slds,
@@ -1356,37 +1478,38 @@ class SiGeModelArray(CDSAXS_Model):
                     raise AttributeError("Missing required attribute: Bk")
                 Bk = self.Bk
 
-            # Apply constraints (forward simulation path) before coordinate generation.
-            # We enforce constraints on the design-level parameters, then expand typed layers.
+            # Always prefer design_trapezoids if it exists (regardless of constraints).
+            # Apply constraints if they exist, then expand typed layers.
             constraints = None
             if hasattr(self, 'model_params') and isinstance(self.model_params, dict):
                 constraints = self.model_params.get('constraints', None)
 
-            if constraints:
-                # Build design-level params dict for constraint application
-                if 'design_trapezoids' in self.model_params and 'design_slds' in self.model_params:
-                    tmp_design = {
-                        'design_trapezoids': [t.copy() for t in self.model_params['design_trapezoids']],
-                        'design_slds': copy.deepcopy(self.model_params.get('design_slds', [])),
-                        'DW': self.model_params.get('DW', DW),
-                        'I0': self.model_params.get('I0', I0),
-                        'Bk': self.model_params.get('Bk', Bk),
-                        'layers': self.model_params.get('design_layers', len(self.model_params['design_trapezoids']) - 1),
-                    }
+            # Check if we should use design_trapezoids (design_slds is optional)
+            use_design = 'design_trapezoids' in self.model_params
+            
+            if use_design:
+                # Get design_slds if available, otherwise fall back to slds
+                design_slds = self.model_params.get('design_slds', None)
+                if design_slds is None:
+                    design_slds = self.model_params.get('slds', None)
+                
+                # Build design-level params dict
+                tmp_design = {
+                    'design_trapezoids': [t.copy() for t in self.model_params['design_trapezoids']],
+                    'design_slds': copy.deepcopy(design_slds) if design_slds is not None else None,
+                    'DW': self.model_params.get('DW', DW),
+                    'I0': self.model_params.get('I0', I0),
+                    'Bk': self.model_params.get('Bk', Bk),
+                    'layers': self.model_params.get('design_layers', len(self.model_params['design_trapezoids']) - 1),
+                }
+                # Apply constraints if they exist
+                if constraints:
                     self._apply_constraints(tmp_design, constraints)
-                    tmp_model_params = {
-                        'trapezoids': tmp_design['design_trapezoids'],
-                        'layers': tmp_design['layers'],
-                        'slds': tmp_design.get('design_slds', None),
-                    }
-                else:
-                    tmp_model_params = {
-                        'trapezoids': [t.copy() for t in self.model_params.get('trapezoids', [])],
-                        'layers': int(self.model_params.get('layers', max(0, len(self.model_params.get('trapezoids', [])) - 1))),
-                        'slds': copy.deepcopy(self.model_params.get('slds', None)),
-                    }
-                    self._apply_constraints(tmp_model_params, constraints)
-
+                tmp_model_params = {
+                    'trapezoids': tmp_design['design_trapezoids'],
+                    'layers': tmp_design['layers'],
+                    'slds': tmp_design.get('design_slds', None),
+                }
                 expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
                 # Override PAR/layers for this simulation call
                 temp_PAR = np.zeros((expanded_layers + 1, 3))
@@ -1401,6 +1524,30 @@ class SiGeModelArray(CDSAXS_Model):
                 # Also override SLDs by passing through SymCoordAssign via sld_values
                 # (SimTrap_SM calls SymCoordAssign(PAR,layers) which will use self.sld_values;
                 # keep self.sld_values consistent for this call.)
+                try:
+                    self.sld_values = np.array(expanded_slds, dtype=float)
+                except Exception:
+                    pass
+            elif constraints:
+                # No design_trapezoids but constraints exist - apply to trapezoids
+                tmp_model_params = {
+                    'trapezoids': [t.copy() for t in self.model_params.get('trapezoids', [])],
+                    'layers': int(self.model_params.get('layers', max(0, len(self.model_params.get('trapezoids', [])) - 1))),
+                    'slds': copy.deepcopy(self.model_params.get('slds', None)),
+                }
+                self._apply_constraints(tmp_model_params, constraints)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                # Override PAR/layers for this simulation call
+                temp_PAR = np.zeros((expanded_layers + 1, 3))
+                for ii, trap in enumerate(expanded_traps):
+                    if ii <= expanded_layers:
+                        temp_PAR[ii, 0] = trap.get('width')
+                        temp_PAR[ii, 1] = trap.get('height')
+                        tw = trap.get('twidth', None)
+                        temp_PAR[ii, 2] = np.nan if tw is None else tw
+                PAR = temp_PAR
+                layers = expanded_layers
+                # Also override SLDs
                 try:
                     self.sld_values = np.array(expanded_slds, dtype=float)
                 except Exception:
@@ -1721,14 +1868,7 @@ class SiGeModelArray(CDSAXS_Model):
             self.optimization_result = result
             
             # Update model parameters with optimized values (design-level where available)
-            optimized_params = self.model_params.copy()
-
-            # Deep copies to avoid mutating originals
-            if 'design_trapezoids' in self.model_params:
-                optimized_params['design_trapezoids'] = [
-                    trap.copy() for trap in self.model_params['design_trapezoids']
-                ]
-            optimized_params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+            optimized_params = copy.deepcopy(self.model_params)
             
             # Initialize background array for updates
             if isinstance(self.Bk, np.ndarray):
@@ -1736,6 +1876,7 @@ class SiGeModelArray(CDSAXS_Model):
             else:
                 optimized_bk = self.Bk
             
+            # First pass: Write all optimized values to design_trapezoids (if exists) or trapezoids
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('trap_'):
                     # Parse trapezoid (design-layer) parameter
@@ -1767,6 +1908,31 @@ class SiGeModelArray(CDSAXS_Model):
                 else:
                     # Global parameter (DW, I0)
                     optimized_params[param_name] = result.x[i]
+            
+            # If design_trapezoids was updated, immediately re-expand trapezoids from it
+            if 'design_trapezoids' in optimized_params:
+                # Build a temporary model_params dict for expansion
+                tmp_model_params = {
+                    'trapezoids': [t.copy() for t in optimized_params['design_trapezoids']],
+                    'layers': optimized_params.get('design_layers', len(optimized_params['design_trapezoids']) - 1),
+                    'slds': optimized_params.get('design_slds', optimized_params.get('slds', None)),
+                }
+                
+                # Apply constraints if they exist (before expansion)
+                constraints = optimized_params.get('constraints', None)
+                if constraints:
+                    self._apply_constraints(tmp_model_params, constraints)
+                    # IMPORTANT: Copy constrained values back to optimized_params['design_trapezoids']
+                    # so that design_trapezoids reflects the constrained (final) values
+                    optimized_params['design_trapezoids'] = [t.copy() for t in tmp_model_params['trapezoids']]
+                
+                # Expand typed layers (ellipse -> many segments)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                
+                # Update optimized_params with expanded structure
+                optimized_params['trapezoids'] = expanded_traps
+                optimized_params['layers'] = int(expanded_layers)
+                optimized_params['slds'] = expanded_slds
             
             # Update background in optimized parameters
             optimized_params['Bk'] = optimized_bk.tolist() if isinstance(optimized_bk, np.ndarray) else optimized_bk
@@ -1828,6 +1994,58 @@ class SiGeModelArray(CDSAXS_Model):
         """
         import matplotlib.pyplot as plt
         
+        # Reconstruct optimized model_params directly from optimization_result.x
+        # This bypasses any write-back issues and ensures we use the actual optimized values
+        optimized_model_params_for_plot = None
+        if hasattr(self, 'optimization_result') and self.optimization_result is not None:
+            if hasattr(self, 'param_names') and self.param_names is not None:
+                # Reconstruct design_trapezoids from optimization_result.x
+                optimized_model_params_for_plot = copy.deepcopy(initial_model_params)
+                
+                # Get the optimized values from result.x
+                result_x = self.optimization_result.x
+                param_names = self.param_names
+                
+                # Update design_trapezoids (or trapezoids) with optimized values
+                if 'design_trapezoids' in optimized_model_params_for_plot:
+                    design_traps = optimized_model_params_for_plot['design_trapezoids']
+                elif 'trapezoids' in optimized_model_params_for_plot:
+                    design_traps = optimized_model_params_for_plot['trapezoids']
+                else:
+                    design_traps = None
+                
+                if design_traps is not None:
+                    for i, param_name in enumerate(param_names):
+                        if param_name.startswith('trap_'):
+                            parts = param_name.split('_')
+                            if len(parts) >= 3:
+                                try:
+                                    trap_idx = int(parts[1])
+                                    param_type = parts[2]
+                                    if trap_idx < len(design_traps):
+                                        design_traps[trap_idx][param_type] = result_x[i]
+                                except (ValueError, IndexError):
+                                    pass
+                        elif param_name in ('DW', 'I0', 'Bk'):
+                            optimized_model_params_for_plot[param_name] = result_x[i]
+                
+                # Apply constraints if they exist
+                constraints = optimized_model_params_for_plot.get('constraints', None)
+                if constraints and 'design_trapezoids' in optimized_model_params_for_plot:
+                    tmp_design = {
+                        'design_trapezoids': [t.copy() for t in optimized_model_params_for_plot['design_trapezoids']],
+                        'design_slds': copy.deepcopy(optimized_model_params_for_plot.get('design_slds', [])),
+                        'DW': optimized_model_params_for_plot.get('DW', getattr(self, 'DW', None)),
+                        'I0': optimized_model_params_for_plot.get('I0', getattr(self, 'I0', None)),
+                        'Bk': optimized_model_params_for_plot.get('Bk', getattr(self, 'Bk', None)),
+                        'layers': optimized_model_params_for_plot.get('design_layers', len(optimized_model_params_for_plot['design_trapezoids']) - 1),
+                    }
+                    self._apply_constraints(tmp_design, constraints)
+                    optimized_model_params_for_plot['design_trapezoids'] = tmp_design['design_trapezoids']
+        
+        # Use reconstructed optimized params if available, otherwise fall back to self.model_params
+        optimized_params_to_plot = optimized_model_params_for_plot if optimized_model_params_for_plot is not None else self.model_params
+        
         # Plot trapezoid structure comparison on the same plot
         if plot_structure:
             plt.figure(figsize=(10, 6))
@@ -1839,8 +2057,8 @@ class SiGeModelArray(CDSAXS_Model):
                                         alpha=0.7,
                                         label='Initial')
             
-            # Plot optimized trapezoid structure with solid lines
-            self._plot_trapezoid_structure(self.model_params, 
+            # Plot optimized trapezoid structure with solid lines (using reconstructed params)
+            self._plot_trapezoid_structure(optimized_params_to_plot, 
                                         linestyle='-', 
                                         color='red', 
                                         alpha=1.0,
@@ -1851,13 +2069,39 @@ class SiGeModelArray(CDSAXS_Model):
             plt.tight_layout()
             plt.show()
         
+        # Recalculate optimized intensity using reconstructed optimized parameters
+        # This ensures we're plotting the correct optimized intensity even if write-back failed
+        optimized_simInt = None
+        if hasattr(self, 'optimization_result') and self.optimization_result is not None:
+            if hasattr(self, 'param_names') and self.param_names is not None:
+                # Temporarily store current model_params
+                original_model_params = self.model_params.copy()
+                
+                try:
+                    # Use the reconstructed optimized_params we created for plotting
+                    if optimized_params_to_plot is not None:
+                        # Temporarily set model_params to optimized values for simulation
+                        self.model_params = copy.deepcopy(optimized_params_to_plot)
+                        # Recalculate intensity with optimized parameters
+                        optimized_simInt = self.SimTrap_SM()
+                except Exception as e:
+                    print(f"[WARNING] Could not recalculate optimized intensity: {e}")
+                    print("  Falling back to self.SimInt")
+                    optimized_simInt = self.SimInt
+                finally:
+                    # Restore original model_params
+                    self.model_params = original_model_params
+        
+        # Use recalculated intensity if available, otherwise fall back to self.SimInt
+        optimized_simInt_to_plot = optimized_simInt if optimized_simInt is not None else self.SimInt
+        
         # Plot QzCut comparisons - grid of individual cuts
         if plot_grid:
-            self._plot_qzcut_grid(initial_simInt)
+            self._plot_qzcut_grid(initial_simInt, optimized_simInt_to_plot)
         
         # Plot combined view with all cuts
         if plot_combined:
-            self._plot_qzcut_combined(initial_simInt)
+            self._plot_qzcut_combined(initial_simInt, optimized_simInt_to_plot)
     
     def _plot_trapezoid_structure(
         self,
@@ -1876,10 +2120,13 @@ class SiGeModelArray(CDSAXS_Model):
         """
         Plot the trapezoid structure from the given model parameters.
         
+        This function handles design_trapezoids, constraints, and typed layer expansion
+        to ensure the plotted structure reflects the actual model state.
+        
         Parameters:
         -----------
         model_params : dict
-            Dictionary containing model parameters
+            Dictionary containing model parameters (may include design_trapezoids)
         linestyle : str, optional
             Line style for the plot
         color : str, optional
@@ -1903,9 +2150,57 @@ class SiGeModelArray(CDSAXS_Model):
         **kwargs : dict
             Additional keyword arguments passed to matplotlib plot functions
         """
+        # Prepare model_params for plotting: handle design_trapezoids, constraints, expansion
+        plot_params = copy.deepcopy(model_params)
+        constraints = plot_params.get('constraints', None)
+        
+        # Always prefer design_trapezoids if it exists (regardless of constraints)
+        # Note: design_slds is optional - if not present, will use slds or default
+        if 'design_trapezoids' in plot_params:
+            # Get design_slds if available, otherwise fall back to slds
+            design_slds = plot_params.get('design_slds', None)
+            if design_slds is None:
+                design_slds = plot_params.get('slds', None)
+            
+            tmp_design = {
+                'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
+                'design_slds': copy.deepcopy(design_slds) if design_slds is not None else None,
+                'DW': plot_params.get('DW', getattr(self, 'DW', None)),
+                'I0': plot_params.get('I0', getattr(self, 'I0', None)),
+                'Bk': plot_params.get('Bk', getattr(self, 'Bk', None)),
+                'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
+            }
+            # Apply constraints if they exist
+            if constraints:
+                self._apply_constraints(tmp_design, constraints)
+            tmp_model_params = {
+                'trapezoids': tmp_design['design_trapezoids'],
+                'layers': tmp_design['layers'],
+                'slds': tmp_design.get('design_slds', None),
+            }
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+        elif constraints:
+            # No design_trapezoids; apply constraints directly and expand if typed layers exist
+            self._apply_constraints(plot_params, constraints)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            if expanded_traps:  # Only update if expansion occurred
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+        else:
+            # No design_trapezoids and no constraints; just expand if typed layers exist
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            if expanded_traps:  # Only update if expansion occurred
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+        
         ax = plt.gca()
-        trapezoids = model_params['trapezoids']
-        layers = model_params['layers']
+        trapezoids = plot_params['trapezoids']
+        layers = plot_params['layers']
 
         # Validate/clip shading params
         try:
@@ -2047,7 +2342,7 @@ class SiGeModelArray(CDSAXS_Model):
         
         return ax
     
-    def _plot_qzcut_grid(self, initial_simInt):
+    def _plot_qzcut_grid(self, initial_simInt, optimized_simInt=None):
         """
         Plot a grid of QzCut comparisons with both initial and optimized results.
         
@@ -2055,6 +2350,8 @@ class SiGeModelArray(CDSAXS_Model):
         -----------
         initial_simInt : numpy.ndarray
             Simulated intensity before optimization
+        optimized_simInt : numpy.ndarray, optional
+            Simulated intensity after optimization. If None, uses self.SimInt
         """
         import matplotlib.pyplot as plt
         import numpy as np
@@ -2091,7 +2388,8 @@ class SiGeModelArray(CDSAXS_Model):
                      linewidth=1.5, label='Initial')
             
             # Plot optimized simulation
-            ax.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=1.0, 
+            opt_intensity = optimized_simInt if optimized_simInt is not None else self.SimInt
+            ax.semilogy(qz_values, opt_intensity[:, i], 'r-', alpha=1.0, 
                      linewidth=1.5, label='Optimized')
             
             # Set labels and title
@@ -2115,7 +2413,7 @@ class SiGeModelArray(CDSAXS_Model):
         plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust for suptitle
         plt.show()
     
-    def _plot_qzcut_combined(self, initial_simInt):
+    def _plot_qzcut_combined(self, initial_simInt, optimized_simInt=None):
         """
         Plot all QzCuts on one axis with both initial and optimized results.
         
@@ -2123,6 +2421,8 @@ class SiGeModelArray(CDSAXS_Model):
         -----------
         initial_simInt : numpy.ndarray
             Simulated intensity before optimization
+        optimized_simInt : numpy.ndarray, optional
+            Simulated intensity after optimization. If None, uses self.SimInt
         """
         import matplotlib.pyplot as plt
         
@@ -2149,7 +2449,8 @@ class SiGeModelArray(CDSAXS_Model):
             plt.semilogy(qz_values, initial_simInt[:, i], 'b--', alpha=0.5, linewidth=1.5)
             
             # Plot optimized simulation
-            plt.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=0.6, linewidth=1.5)
+            opt_intensity = optimized_simInt if optimized_simInt is not None else self.SimInt
+            plt.semilogy(qz_values, opt_intensity[:, i], 'r-', alpha=0.6, linewidth=1.5)
         
         plt.title('Intensity Comparison - All Cuts')
         plt.xlabel('Qz (Å$^{-1}$)')
@@ -2237,31 +2538,40 @@ class SiGeModelArray(CDSAXS_Model):
         # Apply constraints for plotting on a copy of model_params, then expand typed layers
         plot_params = copy.deepcopy(self.model_params)
         constraints = plot_params.get('constraints', None)
-        if constraints:
-            # Prefer design-level when present
-            if 'design_trapezoids' in plot_params and 'design_slds' in plot_params:
-                tmp_design = {
-                    'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
-                    'design_slds': copy.deepcopy(plot_params.get('design_slds', [])),
-                    'DW': plot_params.get('DW', self.DW),
-                    'I0': plot_params.get('I0', self.I0),
-                    'Bk': plot_params.get('Bk', self.Bk),
-                    'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
-                }
+        
+        # Always prefer design_trapezoids if it exists (regardless of constraints)
+        if 'design_trapezoids' in plot_params and 'design_slds' in plot_params:
+            tmp_design = {
+                'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
+                'design_slds': copy.deepcopy(plot_params.get('design_slds', [])),
+                'DW': plot_params.get('DW', self.DW),
+                'I0': plot_params.get('I0', self.I0),
+                'Bk': plot_params.get('Bk', self.Bk),
+                'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
+            }
+            # Apply constraints if they exist
+            if constraints:
                 self._apply_constraints(tmp_design, constraints)
-                tmp_model_params = {
-                    'trapezoids': tmp_design['design_trapezoids'],
-                    'layers': tmp_design['layers'],
-                    'slds': tmp_design.get('design_slds', None),
-                }
-                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
-                plot_params['trapezoids'] = expanded_traps
-                plot_params['layers'] = expanded_layers
-                plot_params['slds'] = expanded_slds
-            else:
-                # No design_trapezoids; apply directly and expand if typed layers exist
-                self._apply_constraints(plot_params, constraints)
-                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            tmp_model_params = {
+                'trapezoids': tmp_design['design_trapezoids'],
+                'layers': tmp_design['layers'],
+                'slds': tmp_design.get('design_slds', None),
+            }
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+        elif constraints:
+            # No design_trapezoids; apply constraints directly and expand if typed layers exist
+            self._apply_constraints(plot_params, constraints)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+        else:
+            # No design_trapezoids and no constraints; just expand if typed layers exist
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            if expanded_traps:  # Only update if expansion occurred
                 plot_params['trapezoids'] = expanded_traps
                 plot_params['layers'] = expanded_layers
                 plot_params['slds'] = expanded_slds
