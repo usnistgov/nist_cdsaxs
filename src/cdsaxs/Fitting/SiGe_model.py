@@ -2,24 +2,18 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import copy
+from matplotlib.colors import LogNorm
 from matplotlib.patches import Polygon, Patch
-from scipy.optimize import (
-    differential_evolution, 
-    dual_annealing, 
-    shgo, 
-    basinhopping, 
-    minimize
-)
-from tqdm import tqdm
-import seaborn as sns
+import copy
+from scipy.optimize import differential_evolution
 
 from CDSAXS_base_model import CDSAXS_Model
 
-class TrapezoidModelArray(CDSAXS_Model):
+class SiGeModelArray(CDSAXS_Model):
     """
-    CDSAXS model for trapezoid structures with array-based background support.
+    CDSAXS model for SiGe trapezoid structures with array-based background support.
     Each column can have its own background value.
+    Includes twidth parameter support for trapezoid top width specification.
     """
     
     def __init__(self, model, layers, PAR=None, SLD=None, DW=None, I0=None, Bk=None, Pitch=None, model_params=None):
@@ -72,7 +66,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             self._full_background_array = None
         
         # Call parent constructor with scalar background
-        super().__init__('trapezoid', model, layers, PAR, SLD, DW, I0, Bk, Pitch, 
+        super().__init__('sige', model, layers, PAR, SLD, DW, I0, Bk, Pitch, 
                          modified_model_params if modified_model_params is not None else model_params)
         
         # Restore full background array after parent initialization
@@ -106,6 +100,342 @@ class TrapezoidModelArray(CDSAXS_Model):
         # Clean up temporary attribute
         if hasattr(self, '_full_background_array'):
             delattr(self, '_full_background_array')
+
+    def _extract_inline_trapezoid_bounds(self, trapezoids):
+        """
+        Extract inline optimization bounds from a list of (design-level) trapezoid dicts.
+
+        Expected inline schema per layer dict (all optional):
+        - width_bounds:  (min, max)
+        - height_bounds: (min, max)
+        - twidth_bounds: (min, max)
+        - depth_bounds:  (min, max)   (typically for Layer_Type='Ellipse')
+
+        Returns a dict compatible with model_params['optimization'], e.g.
+        {'trap_0_width': {'min':..., 'max':...}, ...}
+        """
+        if trapezoids is None:
+            return {}
+        if not isinstance(trapezoids, list):
+            raise TypeError("model_params['trapezoids'] must be a list of dicts")
+
+        def _validate_bounds(val, key):
+            if val is None:
+                return None
+            if not isinstance(val, (list, tuple)) or len(val) != 2:
+                raise ValueError(f"{key} must be a 2-tuple/list (min,max); got {val!r}")
+            lo, hi = val[0], val[1]
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                raise ValueError(f"{key} bounds must be numeric; got {val!r}")
+            lo, hi = float(lo), float(hi)
+            if not lo < hi:
+                raise ValueError(f"{key} must satisfy min < max; got {val!r}")
+            return lo, hi
+
+        bounds_map = {
+            'width_bounds': 'width',
+            'height_bounds': 'height',
+            'twidth_bounds': 'twidth',
+            'depth_bounds': 'depth',
+        }
+
+        opt = {}
+        for i, trap in enumerate(trapezoids):
+            if not isinstance(trap, dict):
+                continue
+            for bounds_key, field in bounds_map.items():
+                if bounds_key not in trap:
+                    continue
+                lo_hi = _validate_bounds(trap.get(bounds_key), f"trapezoids[{i}].{bounds_key}")
+                if lo_hi is None:
+                    continue
+                lo, hi = lo_hi
+                opt[f"trap_{i}_{field}"] = {'min': lo, 'max': hi}
+        return opt
+
+    def _extract_inline_global_bounds(self, model_params):
+        """
+        Extract inline optimization bounds for global parameters (DW, I0, Bk) from model_params.
+
+        Expected inline schema (all optional):
+        - DW_bounds:  (min, max)
+        - I0_bounds:  (min, max)
+        - Bk_bounds:  (min, max)   (applies to scalar Bk or all elements of array Bk)
+
+        Returns a dict compatible with model_params['optimization'], e.g.
+        {'DW': {'min':..., 'max':...}, 'I0': {'min':..., 'max':...}, ...}
+        """
+        if model_params is None:
+            return {}
+
+        def _validate_bounds(val, key):
+            if val is None:
+                return None
+            if not isinstance(val, (list, tuple)) or len(val) != 2:
+                raise ValueError(f"{key} must be a 2-tuple/list (min,max); got {val!r}")
+            lo, hi = val[0], val[1]
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                raise ValueError(f"{key} bounds must be numeric; got {val!r}")
+            lo, hi = float(lo), float(hi)
+            if not lo < hi:
+                raise ValueError(f"{key} must satisfy min < max; got {val!r}")
+            return lo, hi
+
+        opt = {}
+
+        # Extract DW_bounds
+        if 'DW_bounds' in model_params:
+            lo_hi = _validate_bounds(model_params.get('DW_bounds'), 'DW_bounds')
+            if lo_hi is not None:
+                lo, hi = lo_hi
+                opt['DW'] = {'min': lo, 'max': hi}
+
+        # Extract I0_bounds
+        if 'I0_bounds' in model_params:
+            lo_hi = _validate_bounds(model_params.get('I0_bounds'), 'I0_bounds')
+            if lo_hi is not None:
+                lo, hi = lo_hi
+                opt['I0'] = {'min': lo, 'max': hi}
+
+        # Extract Bk_bounds
+        if 'Bk_bounds' in model_params:
+            lo_hi = _validate_bounds(model_params.get('Bk_bounds'), 'Bk_bounds')
+            if lo_hi is not None:
+                lo, hi = lo_hi
+                bk = model_params.get('Bk', None)
+                if isinstance(bk, (list, tuple, np.ndarray)):
+                    # Array background: apply bounds to each element (Bk_0, Bk_1, ...)
+                    bk_list = list(bk)
+                    for i in range(len(bk_list)):
+                        opt[f'Bk_{i}'] = {'min': lo, 'max': hi}
+                else:
+                    # Scalar background: apply to 'Bk'
+                    opt['Bk'] = {'min': lo, 'max': hi}
+
+        return opt
+
+    def _merge_inline_bounds_into_optimization(self, param_limits=None):
+        """
+        Merge inline bounds (trapezoid and global parameters) into an optimization dict.
+
+        Supports inline bounds for:
+        - Trapezoid parameters: width_bounds, height_bounds, twidth_bounds, depth_bounds (in trapezoid dicts)
+        - Global parameters: DW_bounds, I0_bounds, Bk_bounds (in model_params top-level)
+
+        Precedence: explicit entries in `param_limits` (or model_params['optimization'])
+        override inline bounds.
+
+        Returns merged dict (does not guarantee defaults are present).
+        """
+        if not hasattr(self, 'model_params') or self.model_params is None:
+            return param_limits if param_limits is not None else {}
+
+        # Prefer design-level trapezoids when present (typed-layer models)
+        design_traps = self.model_params.get('design_trapezoids', None)
+        traps = design_traps if isinstance(design_traps, list) else self.model_params.get('trapezoids', [])
+
+        # Extract inline bounds from trapezoids
+        inline_trap_opt = self._extract_inline_trapezoid_bounds(traps)
+
+        # Extract inline bounds from global parameters (DW, I0, Bk)
+        inline_global_opt = self._extract_inline_global_bounds(self.model_params)
+
+        # Merge all inline bounds
+        inline_opt = {**inline_trap_opt, **inline_global_opt}
+
+        base = {}
+        if isinstance(param_limits, dict):
+            base = {k: v.copy() if isinstance(v, dict) else v for k, v in param_limits.items()}
+        else:
+            existing = self.model_params.get('optimization', {})
+            if isinstance(existing, dict):
+                base = {k: v.copy() if isinstance(v, dict) else v for k, v in existing.items()}
+
+        # Add inline bounds only if not already in base (explicit config takes precedence)
+        for k, v in inline_opt.items():
+            if k not in base:
+                base[k] = v
+
+        return base
+
+    def _get_param_by_name(self, params_dict, name):
+        """
+        Get a parameter value from a model_params-like dict by a string name.
+
+        Supported:
+        - trap_{i}_{field}   (design-level; prefers design_trapezoids when present)
+        - sld_{i}
+        - DW, I0
+        - Bk, Bk_{i}
+        """
+        if params_dict is None:
+            raise ValueError("params_dict cannot be None")
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+
+        if name.startswith('trap_'):
+            parts = name.split('_')
+            if len(parts) < 3:
+                raise ValueError(f"Invalid trap parameter name: {name}")
+            idx = int(parts[1])
+            field = parts[2]
+            traps = params_dict.get('design_trapezoids', None)
+            if not isinstance(traps, list):
+                traps = params_dict.get('trapezoids', None)
+            if not isinstance(traps, list) or idx >= len(traps):
+                raise IndexError(f"Trapezoid index {idx} out of range for {name}")
+            return traps[idx][field]
+
+        if name.startswith('sld_'):
+            idx = int(name.split('_')[1])
+            slds = params_dict.get('design_slds', None)
+            if slds is None:
+                slds = params_dict.get('slds', None)
+            if slds is None:
+                raise KeyError("No SLD array found in params_dict")
+            slds_list = list(slds) if isinstance(slds, (list, tuple, np.ndarray)) else [float(slds)]
+            if idx >= len(slds_list):
+                raise IndexError(f"SLD index {idx} out of range for {name}")
+            return slds_list[idx]
+
+        if name in ('DW', 'I0'):
+            return params_dict[name]
+
+        if name == 'Bk':
+            return params_dict.get('Bk', None)
+
+        if name.startswith('Bk_'):
+            idx = int(name.split('_')[1])
+            bk = params_dict.get('Bk', None)
+            if isinstance(bk, (list, tuple, np.ndarray)):
+                bk_list = list(bk)
+                if idx >= len(bk_list):
+                    raise IndexError(f"Bk index {idx} out of range for {name}")
+                return bk_list[idx]
+            return bk
+
+        raise ValueError(f"Unknown parameter name for constraints: {name}")
+
+    def _set_param_by_name(self, params_dict, name, value):
+        """
+        Set a parameter value in a model_params-like dict by a string name.
+        Mirrors `_get_param_by_name` supported names.
+        """
+        if params_dict is None:
+            raise ValueError("params_dict cannot be None")
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+
+        if name.startswith('trap_'):
+            parts = name.split('_')
+            if len(parts) < 3:
+                raise ValueError(f"Invalid trap parameter name: {name}")
+            idx = int(parts[1])
+            field = parts[2]
+            traps_key = 'design_trapezoids' if isinstance(params_dict.get('design_trapezoids', None), list) else 'trapezoids'
+            traps = params_dict.get(traps_key, None)
+            if not isinstance(traps, list) or idx >= len(traps):
+                raise IndexError(f"Trapezoid index {idx} out of range for {name}")
+            traps[idx][field] = value
+            return
+
+        if name.startswith('sld_'):
+            idx = int(name.split('_')[1])
+            key = 'design_slds' if params_dict.get('design_slds', None) is not None else 'slds'
+            slds = params_dict.get(key, None)
+            if slds is None:
+                raise KeyError("No SLD array found in params_dict")
+            slds_list = list(slds) if isinstance(slds, (list, tuple, np.ndarray)) else [float(slds)]
+            if idx >= len(slds_list):
+                raise IndexError(f"SLD index {idx} out of range for {name}")
+            slds_list[idx] = float(value)
+            params_dict[key] = slds_list
+            return
+
+        if name in ('DW', 'I0'):
+            params_dict[name] = float(value)
+            return
+
+        if name == 'Bk':
+            params_dict['Bk'] = value
+            return
+
+        if name.startswith('Bk_'):
+            idx = int(name.split('_')[1])
+            bk = params_dict.get('Bk', None)
+            if isinstance(bk, (list, tuple, np.ndarray)):
+                bk_list = list(bk)
+            else:
+                # Create a 1-element list if scalar
+                bk_list = [bk]
+            if idx >= len(bk_list):
+                # Extend with last value
+                last = bk_list[-1] if bk_list else 0.0
+                while len(bk_list) <= idx:
+                    bk_list.append(last)
+            bk_list[idx] = float(value)
+            params_dict['Bk'] = bk_list
+            return
+
+        raise ValueError(f"Unknown parameter name for constraints: {name}")
+
+    def _apply_constraints(self, params_dict, constraints):
+        """
+        Apply constraints to a model_params-like dict in-place.
+
+        Constraints format:
+          {'lhs': 'trap_0_width', 'op': '==', 'rhs': 'trap_1_width', 'offset': 0.0}
+          {'lhs': 'trap_2_depth', 'op': '<=', 'rhs': 'trap_2_width', 'offset': 5.0}
+
+        For '==': lhs is derived from rhs (+ offset).
+        For '<=': lhs is clipped to rhs (+ offset) if it violates.
+        """
+        if not constraints:
+            return params_dict
+        if not isinstance(constraints, list):
+            raise TypeError("model_params['constraints'] must be a list of dict rules")
+
+        # Normalize rules
+        eq_rules = []
+        le_rules = []
+        for rule in constraints:
+            if not isinstance(rule, dict):
+                continue
+            lhs = rule.get('lhs', None)
+            rhs = rule.get('rhs', None)
+            op = rule.get('op', None)
+            offset = float(rule.get('offset', 0.0) or 0.0)
+            if lhs is None or rhs is None or op is None:
+                continue
+            op = str(op).strip()
+            if op == '==':
+                eq_rules.append((lhs, rhs, offset))
+            elif op in ('<=', '<'):
+                le_rules.append((lhs, rhs, offset))
+            else:
+                raise ValueError(f"Unsupported constraint op: {op}")
+
+        # Resolve equalities (iterate to allow chained equalities)
+        for _ in range(10):
+            changed = False
+            for lhs, rhs, offset in eq_rules:
+                rhs_val = self._get_param_by_name(params_dict, rhs)
+                new_val = float(rhs_val) + float(offset)
+                old_val = self._get_param_by_name(params_dict, lhs)
+                if old_val != new_val:
+                    self._set_param_by_name(params_dict, lhs, new_val)
+                    changed = True
+            if not changed:
+                break
+
+        # Enforce inequalities by clipping lhs
+        for lhs, rhs, offset in le_rules:
+            rhs_val = float(self._get_param_by_name(params_dict, rhs)) + float(offset)
+            lhs_val = float(self._get_param_by_name(params_dict, lhs))
+            if lhs_val > rhs_val:
+                self._set_param_by_name(params_dict, lhs, rhs_val)
+
+        return params_dict
     
     
     
@@ -121,9 +451,11 @@ class TrapezoidModelArray(CDSAXS_Model):
         # Create trapezoids list from PAR
         trapezoids = []
         for i in range(self.layers + 1):
+            tw = self.PAR[i, 2] if (self.PAR.shape[1] >= 3) else np.nan
             trapezoid = {
                 'width': self.PAR[i, 0],
-                'height': self.PAR[i, 1]
+                'height': self.PAR[i, 1],
+                'twidth': None if (isinstance(tw, float) and np.isnan(tw)) else tw
             }
             trapezoids.append(trapezoid)
         
@@ -153,6 +485,249 @@ class TrapezoidModelArray(CDSAXS_Model):
             self.model_params['Pitch'] = self.Pitch
             
         return self.model_params
+
+    def _has_typed_layers(self, trapezoids):
+        """
+        Return True if any trapezoid dict indicates a non-standard (typed) layer.
+        Currently supports `Layer_Type: 'Ellipse'` (case-insensitive).
+        """
+        if trapezoids is None:
+            return False
+        for t in trapezoids:
+            if isinstance(t, dict) and t.get('Layer_Type', None) is not None:
+                return True
+        return False
+
+    def _expand_ellipse_layer(self, layer_dict, next_layer_dict=None):
+        """
+        Expand a single ellipse layer dict into a list of standard trapezoid segments.
+
+        Expected schema:
+        - width: bottom width
+        - height: total height
+        - twidth: top width (may be None; falls back to next layer width or bottom width)
+        - depth: semi-minor axis (indentation depth)
+        - num_layers: number of discretization segments
+        """
+        width0 = float(layer_dict.get('width', 0.0))
+        height = float(layer_dict.get('height', 0.0))
+        depth = float(layer_dict.get('depth', 0.0))
+        n = int(layer_dict.get('num_layers', 1))
+        if n < 1:
+            n = 1
+
+        # Top width can be independent (mismatch allowed)
+        # Default behavior: if `twidth` is not provided/None, set top width == bottom width.
+        twidth_val = layer_dict.get('twidth', None)
+        if twidth_val is None:
+            width1 = width0
+        else:
+            width1 = float(twidth_val)
+
+        if height < 0:
+            raise ValueError("Ellipse layer height must be non-negative")
+        if width0 <= 0 or width1 <= 0:
+            raise ValueError("Ellipse layer widths must be positive")
+        if depth < 0:
+            raise ValueError("Ellipse layer depth must be non-negative")
+        if depth >= min(width0, width1) / 2.0 and height > 0:
+            raise ValueError("Ellipse layer depth must be < min(width0,width1)/2 to keep positive widths")
+
+        # Zero-height layer: treat as a single degenerate segment
+        if height == 0:
+            return [{'width': width0, 'height': 0.0, 'twidth': width1}]
+
+        dy = height / n
+        y = np.linspace(0.0, height, n + 1)
+
+        # Base width transitions linearly between bottom and top widths
+        base_w = width0 + (width1 - width0) * (y / height)
+
+        # Ellipse indentation profile: horizontal ellipse, semi-major (vertical) = height/2, semi-minor (horizontal) = depth
+        if depth == 0:
+            w = base_w
+        else:
+            semi_major = height / 2.0
+            center_y = height / 2.0
+            norm = (y - center_y) / semi_major
+            indent = depth * np.sqrt(np.maximum(0.0, 1.0 - norm**2))
+            w = base_w - 2.0 * indent
+
+        # Safety clamp against tiny negatives from numeric noise
+        w = np.maximum(w, 1e-12)
+
+        segments = []
+        for i in range(n):
+            segments.append({'width': float(w[i]), 'height': float(dy), 'twidth': float(w[i + 1])})
+        return segments
+
+    def _expand_typed_layers(self, model_params):
+        """
+        Expand user-provided (design) layers into a pure trapezoid stack suitable for simulation.
+
+        Returns:
+        - expanded_trapezoids: list[dict] length = expanded_layers + 1
+        - expanded_slds: list[float] length = expanded_layers + 1
+        - expanded_layers: int (the `layers` parameter used everywhere else)
+        """
+        if model_params is None:
+            raise ValueError("model_params cannot be None")
+
+        design_traps = model_params.get('trapezoids', [])
+        if not isinstance(design_traps, list):
+            raise TypeError("model_params['trapezoids'] must be a list of dicts")
+
+        # Design layer count is informational; use provided value if present, else infer
+        design_layers = int(model_params.get('layers', max(0, len(design_traps))))
+
+        # Require explicit trapezoid count convention: len(trapezoids) == layers + 1
+        # We avoid injecting any height=0 boundary layers (h=0 should not occur in normal use).
+        if design_layers > 0 and len(design_traps) != design_layers + 1:
+            raise ValueError(
+                f"Typed-layer schema requires len(model_params['trapezoids']) == layers + 1. "
+                f"Got layers={design_layers} and trapezoids={len(design_traps)}. "
+                f"Please add the top (layers+1) trapezoid entry explicitly (with non-zero height)."
+            )
+
+        # SLDs: if missing, default to 1 per design entry; if provided, resize permissively
+        design_slds = model_params.get('slds', None)
+        if design_slds is None:
+            design_slds_list = [1.0] * max(1, len(design_traps))
+        else:
+            design_slds_list = list(design_slds) if isinstance(design_slds, (list, tuple, np.ndarray)) else [float(design_slds)]
+            if len(design_slds_list) != len(design_traps):
+                if len(design_slds_list) == 1:
+                    design_slds_list = [float(design_slds_list[0])] * max(1, len(design_traps))
+                else:
+                    design_slds_list = list(np.resize(np.array(design_slds_list, dtype=float), max(1, len(design_traps))))
+            # No implicit boundary insertion; keep SLD list aligned to user-provided trapezoids
+
+        expanded_traps = []
+        expanded_slds = []
+
+        for idx, trap in enumerate(design_traps):
+            if not isinstance(trap, dict):
+                raise TypeError(f"Each trapezoid entry must be a dict; got {type(trap)} at index {idx}")
+
+            layer_type = trap.get('Layer_Type', None)
+            layer_type_norm = str(layer_type).strip().lower() if layer_type is not None else 'trapezoid'
+            sld_val = float(design_slds_list[idx]) if idx < len(design_slds_list) else 1.0
+
+            # Ensure required keys exist for standard usage
+            trap_width = trap.get('width', None)
+            trap_height = trap.get('height', None)
+            trap_twidth = trap.get('twidth', None)
+
+            if layer_type_norm == 'ellipse':
+                next_trap = design_traps[idx + 1] if idx + 1 < len(design_traps) else None
+                ellipse_segments = self._expand_ellipse_layer(trap, next_layer_dict=next_trap)
+                for seg in ellipse_segments:
+                    expanded_traps.append(seg)
+                    expanded_slds.append(sld_val)
+            else:
+                if trap_width is None:
+                    raise ValueError(f"Trapezoid {idx} missing 'width'")
+                if trap_height is None:
+                    raise ValueError(f"Trapezoid {idx} missing 'height'")
+                expanded_traps.append({'width': trap_width, 'height': trap_height, 'twidth': trap_twidth})
+                expanded_slds.append(sld_val)
+
+        # Ensure the last segment has an explicit top width to avoid PAR[T+1] out-of-range in legacy logic
+        if expanded_traps:
+            if expanded_traps[-1].get('twidth', None) is None:
+                expanded_traps[-1]['twidth'] = expanded_traps[-1]['width']
+
+        expanded_layers = max(0, len(expanded_traps) - 1)
+
+        return expanded_traps, expanded_slds, expanded_layers, design_layers, design_traps, design_slds_list
+
+    def _ensure_expanded_model_params(self):
+        """
+        Ensure `self.model_params` is in expanded (simulation) form.
+        If typed layers are present, this mutates `self.model_params` in-place and preserves
+        the original user-provided design structure under `design_*` keys.
+        """
+        if not hasattr(self, 'model_params') or self.model_params is None:
+            return
+
+        # Priority 1: If design_trapezoids exists, always use it as source (even if trapezoids is already expanded)
+        if 'design_trapezoids' in self.model_params:
+            design_traps = self.model_params['design_trapezoids']
+            design_layers = self.model_params.get('design_layers', len(design_traps) - 1)
+            design_slds_list = self.model_params.get('design_slds', self.model_params.get('slds', None))
+            
+            # Check if design_trapezoids has typed layers that need expansion
+            if self._has_typed_layers(design_traps):
+                # Build temporary model_params for expansion
+                tmp_model_params = {
+                    'trapezoids': [t.copy() for t in design_traps],
+                    'layers': design_layers,
+                    'slds': copy.deepcopy(design_slds_list) if design_slds_list is not None else None,
+                }
+                
+                # Apply constraints if they exist
+                constraints = self.model_params.get('constraints', None)
+                if constraints:
+                    self._apply_constraints(tmp_model_params, constraints)
+                    # IMPORTANT: Update design_trapezoids with constrained values
+                    # so that design_trapezoids always reflects the current constrained state
+                    self.model_params['design_trapezoids'] = [t.copy() for t in tmp_model_params['trapezoids']]
+                
+                # Expand from design_trapezoids (or constrained copy if constraints were applied)
+                (
+                    expanded_traps,
+                    expanded_slds,
+                    expanded_layers,
+                    _,
+                    _,
+                    _,
+                ) = self._expand_typed_layers(tmp_model_params)
+                
+                # Update expanded structure
+                self.model_params['layers'] = int(expanded_layers)
+                self.model_params['trapezoids'] = expanded_traps
+                self.model_params['slds'] = expanded_slds
+                self.model_params['_expanded_from_typed_layers'] = True
+            else:
+                # Design has no typed layers, so trapezoids = design_trapezoids
+                self.model_params['trapezoids'] = [t.copy() for t in design_traps]
+                self.model_params['layers'] = int(design_layers)
+                if design_slds_list is not None:
+                    self.model_params['slds'] = copy.deepcopy(design_slds_list)
+                self.model_params['_expanded_from_typed_layers'] = False
+            return
+
+        # Priority 2: If no design_trapezoids, check if current trapezoids has typed layers
+        trapezoids = self.model_params.get('trapezoids', None)
+        if not self._has_typed_layers(trapezoids):
+            # No typed layers, nothing to expand
+            return
+
+        # Avoid re-expanding an already-expanded structure unless the current list is still typed
+        if self.model_params.get('_expanded_from_typed_layers', False) and not self._has_typed_layers(trapezoids):
+            return
+
+        # Expand from current trapezoids (no design_trapezoids exists)
+        (
+            expanded_traps,
+            expanded_slds,
+            expanded_layers,
+            design_layers,
+            design_traps,
+            design_slds_list,
+        ) = self._expand_typed_layers(self.model_params)
+
+        # Preserve original (design) structure
+        if 'design_trapezoids' not in self.model_params:
+            self.model_params['design_layers'] = design_layers
+            self.model_params['design_trapezoids'] = copy.deepcopy(design_traps)
+            self.model_params['design_slds'] = copy.deepcopy(design_slds_list)
+
+        # Replace with expanded (simulation) structure
+        self.model_params['layers'] = int(expanded_layers)
+        self.model_params['trapezoids'] = expanded_traps
+        self.model_params['slds'] = expanded_slds
+        self.model_params['_expanded_from_typed_layers'] = True
     
     def update_traditional_from_model_params(self):
         """
@@ -160,15 +735,23 @@ class TrapezoidModelArray(CDSAXS_Model):
         """
         if not hasattr(self, 'model_params'):
             return
+
+        # Expand any typed layers (e.g., ellipse) into standard trapezoid segments for simulation
+        self._ensure_expanded_model_params()
             
         # Update PAR from trapezoids
         trapezoids = self.model_params['trapezoids']
         if not hasattr(self, 'PAR') or self.PAR is None or self.PAR.shape[0] != len(trapezoids):
-            self.PAR = np.zeros((len(trapezoids), 2))
+            self.PAR = np.zeros((len(trapezoids), 3))
             
         for i, trap in enumerate(trapezoids):
-            self.PAR[i, 0] = trap['width']
-            self.PAR[i, 1] = trap['height']
+            self.PAR[i, 0] = trap.get('width')
+            self.PAR[i, 1] = trap.get('height')
+            tw = trap.get('twidth', None)
+            self.PAR[i, 2] = np.nan if tw is None else tw
+
+        # Ensure `self.layers` matches the simulation trapezoid count convention (len(trapezoids) == layers+1)
+        self.layers = int(self.model_params.get('layers', max(0, len(trapezoids) - 1)))
         
         # Update global parameters
         self.DW = self.model_params['DW']
@@ -244,13 +827,22 @@ class TrapezoidModelArray(CDSAXS_Model):
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
+
+        # Ensure typed layers (if any) are expanded before generating optimization params
+        self._ensure_expanded_model_params()
+
+        # Merge inline bounds (if present) into optimization config (explicit config wins)
+        param_limits = self._merge_inline_bounds_into_optimization(param_limits)
             
         # Create default limits if not provided
-        if param_limits is None:
+        auto_generated = False
+        if not param_limits:
+            auto_generated = True
             param_limits = {}
             
-            # Add trapezoid parameters
-            for i, trap in enumerate(self.model_params['trapezoids']):
+            # Add trapezoid parameters (design-level when available; otherwise current trapezoids)
+            traps_for_defaults = self.model_params.get('design_trapezoids', self.model_params['trapezoids'])
+            for i, trap in enumerate(traps_for_defaults):
                 param_limits[f'trap_{i}_width'] = {
                     'min': trap['width'] * 0.9,
                     'max': trap['width'] * 1.1,
@@ -262,6 +854,14 @@ class TrapezoidModelArray(CDSAXS_Model):
                     'max': trap['height'] * 1.1,
                     'default': trap['height']
                 }
+                
+                # Add twidth parameter if present (used by SiGe model)
+                if 'twidth' in trap and trap['twidth'] is not None:
+                    param_limits[f'trap_{i}_twidth'] = {
+                        'min': trap['twidth'] * 0.9,
+                        'max': trap['twidth'] * 1.1,
+                        'default': trap['twidth']
+                    }
             
             # Add global parameters
             param_limits['DW'] = {
@@ -307,16 +907,15 @@ class TrapezoidModelArray(CDSAXS_Model):
                         else:
                             raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
         
-        # Add SLD parameters - they're treated just like other parameters
-        if hasattr(self, 'sld_values'):
+        # Add SLD parameters only when auto-generating a full default optimization set.
+        # If the user provided explicit bounds (either via param_limits or inline *_bounds),
+        # we do NOT implicitly add extra optimizable parameters.
+        if auto_generated and hasattr(self, 'sld_values'):
             for i, sld_val in enumerate(self.sld_values):
                 param_name = f'sld_{i}'
-                
-                # Only add to optimization if not already specified
                 if param_name not in param_limits:
-                    # Set reasonable default bounds for SLD values
                     param_limits[param_name] = {
-                        'min': max(0.1, sld_val * 0.5),  # Positive SLD with 50% range
+                        'min': max(0.1, sld_val * 0.5),
                         'max': sld_val * 2.0,
                         'default': sld_val
                     }
@@ -378,15 +977,20 @@ class TrapezoidModelArray(CDSAXS_Model):
         if not hasattr(self, 'model_params'):
             raise AttributeError("Missing required attribute: model_params")
             
+        # Ensure any typed layers have been expanded before extracting PAR
+        self._ensure_expanded_model_params()
+
         trapezoids = self.model_params['trapezoids']
-        layers = self.model_params['layers']
+        layers = int(self.model_params['layers'])
         
         # Create PAR array
-        PAR = np.zeros([layers + 1, 2])
+        PAR = np.zeros([layers + 1, 3])
         for i, trap in enumerate(trapezoids):
             if i <= layers:
-                PAR[i, 0] = trap['width']
-                PAR[i, 1] = trap['height']
+                PAR[i, 0] = trap.get('width')
+                PAR[i, 1] = trap.get('height')
+                tw = trap.get('twidth', None)
+                PAR[i, 2] = np.nan if tw is None else tw
                 
         return PAR
     
@@ -440,20 +1044,33 @@ class TrapezoidModelArray(CDSAXS_Model):
                 raise ValueError(f"PAR must have at least 2 columns, but has shape {PAR.shape}")
             
             # Main calculation code
-            Coord = np.zeros([layers+1, 5, 1])
-            for T in range(layers+1):
-                if T == 0:
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
-                    Coord[T, 3, 0] = 0
-                    Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
+            # Center each segment independently about the global centerline, allowing width mismatches
+            center = 0.5 * float(PAR[0, 0])
+            Coord = np.zeros([layers + 1, 7, 1])
+            for T in range(layers + 1):
+                w_bottom = float(PAR[T, 0])
+                h = float(PAR[T, 1])
+                Coord[T, 2, 0] = h
+                Coord[T, 3, 0] = 0
+                Coord[T, 4, 0] = 1  # single material
+
+                # Bottom edges (x1,x4)
+                x_left = center - 0.5 * w_bottom
+                x_right = center + 0.5 * w_bottom
+                Coord[T, 0, 0] = x_left
+                Coord[T, 1, 0] = x_right
+
+                # Top width selection (twidth overrides; otherwise uses next width where available)
+                if not np.isnan(PAR[T, 2]):
+                    w_top = float(PAR[T, 2])
                 else:
-                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-                    Coord[T, 2, 0] = PAR[T, 1]
-                    Coord[T, 3, 0] = 0
-                    Coord[T, 4, 0] = 1  # SLD - assigned to be 1 for a single material
+                    if T < layers:
+                        w_top = float(PAR[T + 1, 0])
+                    else:
+                        w_top = w_bottom
+
+                Coord[T, 5, 0] = center - 0.5 * w_top
+                Coord[T, 6, 0] = center + 0.5 * w_top
             
             # If using self attributes, update self.Coord
             if using_self:
@@ -496,12 +1113,12 @@ class TrapezoidModelArray(CDSAXS_Model):
             elif hasattr(self, 'sld_values'):
                 sld_array = self.sld_values.copy()
             else:
-                sld_array = np.ones(layers, dtype=float)
+                sld_array = np.ones(layers+1, dtype=float)
             
             # STRICT VALIDATION
-            if len(sld_array) != layers:
+            if len(sld_array)-1 != layers:
                 raise ValueError(
-                    f"SLD array length ({len(sld_array)}) must exactly match number of layers ({layers}). "
+                    f"SLD array length ({len(sld_array)-1}) must exactly match number of layers ({layers}). "
                     f"Each layer requires its own SLD value."
                 )
             
@@ -510,36 +1127,34 @@ class TrapezoidModelArray(CDSAXS_Model):
                 raise ValueError("Invalid PAR array dimensions")
             
             # Initialize coordinate array
-            Coord = np.zeros([layers + 1, 5, 1])
+            Coord = np.zeros([layers + 1, 7, 1])
             
-            # Assign coordinates and SLD values
-            for layer_idx in range(layers):
-                # Each layer_idx corresponds to coordinate index layer_idx
-                T = layer_idx
-                
-                if T == 0:
-                    # Bottom layer
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
-                    Coord[T, 3, 0] = 0
+            # Center each segment independently about the global centerline, allowing width mismatches
+            center = 0.5 * float(PAR[0, 0])
+
+            for T in range(layers + 1):
+                w_bottom = float(PAR[T, 0])
+                h = float(PAR[T, 1])
+
+                # Bottom edges
+                Coord[T, 0, 0] = center - 0.5 * w_bottom
+                Coord[T, 1, 0] = center + 0.5 * w_bottom
+                Coord[T, 2, 0] = h
+                Coord[T, 3, 0] = 0
+
+                # Top width selection (twidth overrides; otherwise uses next width where available)
+                if not np.isnan(PAR[T, 2]):
+                    w_top = float(PAR[T, 2])
                 else:
-                    # Upper layers
-                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-                    Coord[T, 2, 0] = PAR[T, 1]
-                    Coord[T, 3, 0] = 0
-                
-                # CLEAR SLD ASSIGNMENT: layer_idx gets sld_array[layer_idx]
-                Coord[T, 4, 0] = sld_array[layer_idx]
-            
-            # Handle the top vertex (T = layers)
-            T = layers
-            Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-            Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-            Coord[T, 2, 0] = PAR[T, 1]
-            Coord[T, 3, 0] = 0
-            Coord[T, 4, 0] = 0.0  # Top vertex - no layer associated
+                    if T < layers:
+                        w_top = float(PAR[T + 1, 0])
+                    else:
+                        w_top = w_bottom
+                Coord[T, 5, 0] = center - 0.5 * w_top
+                Coord[T, 6, 0] = center + 0.5 * w_top
+
+                # SLD assignment: one value per trapezoid entry
+                Coord[T, 4, 0] = sld_array[T]
             
             if using_self:
                 self.Coord = Coord
@@ -566,10 +1181,26 @@ class TrapezoidModelArray(CDSAXS_Model):
                 raise ValueError(f"SLD index {sld_idx} out of range")
         
         elif param_name.startswith('trap_'):
+            # Trapezoid (design-layer) parameter: width, height, twidth, depth, etc.
             parts = param_name.split('_')
             trap_idx = int(parts[1])
             param_type = parts[2]
-            return self.model_params['trapezoids'][trap_idx][param_type]
+
+            if not hasattr(self, 'model_params'):
+                raise AttributeError("Missing required attribute: model_params")
+
+            # Prefer design_trapezoids if present (typed-layer aware, including ellipse depth)
+            if 'design_trapezoids' in self.model_params:
+                design_traps = self.model_params['design_trapezoids']
+                if trap_idx >= len(design_traps):
+                    raise IndexError(f"design_trapezoids index {trap_idx} out of range")
+                return design_traps[trap_idx][param_type]
+
+            # Fallback: use current trapezoids list (pure trapezoid models)
+            traps = self.model_params.get('trapezoids', None)
+            if traps is None or trap_idx >= len(traps):
+                raise IndexError(f"trapezoids index {trap_idx} out of range")
+            return traps[trap_idx][param_type]
         
         elif param_name.startswith('Bk_'):
             bk_idx = int(param_name.split('_')[1])
@@ -609,11 +1240,26 @@ class TrapezoidModelArray(CDSAXS_Model):
                 raise ValueError(f"SLD index {sld_idx} out of range")
         
         elif param_name.startswith('trap_'):
-            # Trapezoid parameter
+            # Trapezoid (design-layer) parameter
             parts = param_name.split('_')
             trap_idx = int(parts[1])
             param_type = parts[2]
-            self.model_params['trapezoids'][trap_idx][param_type] = value
+
+            if not hasattr(self, 'model_params'):
+                raise AttributeError("Missing required attribute: model_params")
+
+            # Prefer updating design_trapezoids if present so that typed layers (ellipse)
+            # remain under design control and are re-expanded consistently.
+            if 'design_trapezoids' in self.model_params:
+                design_traps = self.model_params['design_trapezoids']
+                if trap_idx >= len(design_traps):
+                    raise IndexError(f"design_trapezoids index {trap_idx} out of range")
+                design_traps[trap_idx][param_type] = value
+            else:
+                traps = self.model_params.get('trapezoids', None)
+                if traps is None or trap_idx >= len(traps):
+                    raise IndexError(f"trapezoids index {trap_idx} out of range")
+                traps[trap_idx][param_type] = value
             
         elif param_name.startswith('Bk_'):
             # Background parameter for specific column
@@ -637,7 +1283,7 @@ class TrapezoidModelArray(CDSAXS_Model):
             if hasattr(self, 'model_params'):
                 self.model_params[param_name] = value
         
-        # Update traditional parameters
+        # Update traditional/expanded parameters from model_params after any change
         self.update_traditional_from_model_params()
             
     def _initialize_sld_values(self):
@@ -646,7 +1292,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         FIXED: Ensures SLD values are always float dtype for mathematical operations.
         """
         # For trapezoids, we need SLD values for each LAYER (trapezoid), not each vertex
-        n_sld_values = self.layers  # Number of actual trapezoids/layers
+        n_sld_values = self.layers + 1 # Number of actual trapezoids/layers
         
         # Priority order: model_params['slds'] > SLD parameter > default values
         if hasattr(self, 'model_params') and 'slds' in self.model_params:
@@ -750,15 +1396,15 @@ class TrapezoidModelArray(CDSAXS_Model):
             form = np.zeros([len(Qx[:,1]), len(Qx[1,:])])
             
             # Calculate form factor
-            for i in range(int(layers)):
+            for i in range(int(layers)+1):
                 H2 = H2 + Coord[i, 2, 0]
                 if i > 0:
                     H1 = H1 + Coord[i-1, 2, 0]
                     
                 x1 = Coord[i, 0, 0]
                 x4 = Coord[i, 1, 0]
-                x2 = Coord[i+1, 0, 0]
-                x3 = Coord[i+1, 1, 0]
+                x2 = Coord[i, 5, 0]
+                x3 = Coord[i, 6, 0]
                 
                 # Avoid division by zero
                 x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
@@ -831,6 +1477,81 @@ class TrapezoidModelArray(CDSAXS_Model):
                 if not hasattr(self, 'Bk'):
                     raise AttributeError("Missing required attribute: Bk")
                 Bk = self.Bk
+
+            # Always prefer design_trapezoids if it exists (regardless of constraints).
+            # Apply constraints if they exist, then expand typed layers.
+            constraints = None
+            if hasattr(self, 'model_params') and isinstance(self.model_params, dict):
+                constraints = self.model_params.get('constraints', None)
+
+            # Check if we should use design_trapezoids (design_slds is optional)
+            use_design = 'design_trapezoids' in self.model_params
+            
+            if use_design:
+                # Get design_slds if available, otherwise fall back to slds
+                design_slds = self.model_params.get('design_slds', None)
+                if design_slds is None:
+                    design_slds = self.model_params.get('slds', None)
+                
+                # Build design-level params dict
+                tmp_design = {
+                    'design_trapezoids': [t.copy() for t in self.model_params['design_trapezoids']],
+                    'design_slds': copy.deepcopy(design_slds) if design_slds is not None else None,
+                    'DW': self.model_params.get('DW', DW),
+                    'I0': self.model_params.get('I0', I0),
+                    'Bk': self.model_params.get('Bk', Bk),
+                    'layers': self.model_params.get('design_layers', len(self.model_params['design_trapezoids']) - 1),
+                }
+                # Apply constraints if they exist
+                if constraints:
+                    self._apply_constraints(tmp_design, constraints)
+                tmp_model_params = {
+                    'trapezoids': tmp_design['design_trapezoids'],
+                    'layers': tmp_design['layers'],
+                    'slds': tmp_design.get('design_slds', None),
+                }
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                # Override PAR/layers for this simulation call
+                temp_PAR = np.zeros((expanded_layers + 1, 3))
+                for ii, trap in enumerate(expanded_traps):
+                    if ii <= expanded_layers:
+                        temp_PAR[ii, 0] = trap.get('width')
+                        temp_PAR[ii, 1] = trap.get('height')
+                        tw = trap.get('twidth', None)
+                        temp_PAR[ii, 2] = np.nan if tw is None else tw
+                PAR = temp_PAR
+                layers = expanded_layers
+                # Also override SLDs by passing through SymCoordAssign via sld_values
+                # (SimTrap_SM calls SymCoordAssign(PAR,layers) which will use self.sld_values;
+                # keep self.sld_values consistent for this call.)
+                try:
+                    self.sld_values = np.array(expanded_slds, dtype=float)
+                except Exception:
+                    pass
+            elif constraints:
+                # No design_trapezoids but constraints exist - apply to trapezoids
+                tmp_model_params = {
+                    'trapezoids': [t.copy() for t in self.model_params.get('trapezoids', [])],
+                    'layers': int(self.model_params.get('layers', max(0, len(self.model_params.get('trapezoids', [])) - 1))),
+                    'slds': copy.deepcopy(self.model_params.get('slds', None)),
+                }
+                self._apply_constraints(tmp_model_params, constraints)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                # Override PAR/layers for this simulation call
+                temp_PAR = np.zeros((expanded_layers + 1, 3))
+                for ii, trap in enumerate(expanded_traps):
+                    if ii <= expanded_layers:
+                        temp_PAR[ii, 0] = trap.get('width')
+                        temp_PAR[ii, 1] = trap.get('height')
+                        tw = trap.get('twidth', None)
+                        temp_PAR[ii, 2] = np.nan if tw is None else tw
+                PAR = temp_PAR
+                layers = expanded_layers
+                # Also override SLDs
+                try:
+                    self.sld_values = np.array(expanded_slds, dtype=float)
+                except Exception:
+                    pass
             
             # Generate coordinates if PAR is provided - uses current SLD values
             if PAR is not None:
@@ -924,29 +1645,35 @@ class TrapezoidModelArray(CDSAXS_Model):
             else:
                 temp_Bk = self.Bk
             
-            # Initialize SLD array
-            if hasattr(self, 'sld_values'):
-                temp_sld_values = self.sld_values.copy()
-            else:
-                temp_sld_values = np.ones(self.layers + 1)
+            # Initialize design-level SLD array placeholder (filled below)
+            temp_sld_values = None
             
             # Update parameters with optimization values
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('trap_'):
-                    # Parse trapezoid parameter
+                    # Parse trapezoid (design-layer) parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width' or 'height'
-                    
-                    # Make sure we have a deep copy of trapezoids to avoid modifying the original
-                    if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
-                        params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
-                    
-                    params['trapezoids'][trap_idx][param_type] = optimization_values[i]
-                    
+                    param_type = parts[2]
+
+                    # We do not mutate self.model_params here; changes are applied to
+                    # a local design-level trapezoid list constructed below.
+                    if 'design_trapezoids' in params:
+                        # Ensure local copy exists
+                        if 'design_trapezoids' not in params or params['design_trapezoids'] is self.model_params.get('design_trapezoids'):
+                            params['design_trapezoids'] = [t.copy() for t in self.model_params['design_trapezoids']]
+                        params['design_trapezoids'][trap_idx][param_type] = optimization_values[i]
+                    else:
+                        if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
+                            params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+                        params['trapezoids'][trap_idx][param_type] = optimization_values[i]
+
                 elif param_name.startswith('sld_'):
-                    # SLD parameter - treat just like any other parameter
+                    # SLD parameter at design-layer index
                     sld_idx = int(param_name.split('_')[1])
+                    if temp_sld_values is None:
+                        # Will be sized properly once design_slds_list is created; just record index/value pair.
+                        temp_sld_values = {}
                     temp_sld_values[sld_idx] = optimization_values[i]
                     
                 elif param_name.startswith('Bk_'):
@@ -966,24 +1693,68 @@ class TrapezoidModelArray(CDSAXS_Model):
                     # Global parameter (DW, I0)
                     params[param_name] = optimization_values[i]
             
-            # Create temporary PAR array for compatibility
-            temp_PAR = np.zeros((self.layers + 1, 2))
-            for i, trap in enumerate(params['trapezoids']):
-                if i <= self.layers:
+            # Build a local design-level trapezoid/SRD list for this evaluation
+            if 'design_trapezoids' in params:
+                design_traps = [t.copy() for t in params['design_trapezoids']]
+                design_layers = params.get('design_layers', len(design_traps) - 1)
+                design_slds_list = list(params.get('design_slds', []))
+            else:
+                # Fall back to treating current trapezoids as design-level
+                design_traps = [t.copy() for t in params['trapezoids']]
+                design_layers = len(design_traps) - 1
+                if 'slds' in params:
+                    slds_val = params['slds']
+                    if isinstance(slds_val, (list, tuple, np.ndarray)):
+                        design_slds_list = list(slds_val)
+                    else:
+                        design_slds_list = [float(slds_val)] * len(design_traps)
+                elif hasattr(self, 'sld_values'):
+                    design_slds_list = list(self.sld_values)
+                else:
+                    design_slds_list = [1.0] * len(design_traps)
+
+            # Apply any optimized SLDs at design index level
+            if isinstance(temp_sld_values, dict):
+                for idx, val in temp_sld_values.items():
+                    if 0 <= idx < len(design_slds_list):
+                        design_slds_list[idx] = float(val)
+
+            # Use existing typed-layer expansion logic on a temporary model_params-like dict
+            tmp_model_params = {
+                'trapezoids': design_traps,
+                'layers': design_layers,
+                'slds': design_slds_list,
+            }
+
+            # Apply constraints on the design parameters before expansion/coordinates
+            constraints = self.model_params.get('constraints', None) if hasattr(self, 'model_params') else None
+            if constraints:
+                self._apply_constraints(tmp_model_params, constraints)
+
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+
+            # Create temporary PAR array and effective SLD array for compatibility
+            temp_PAR = np.zeros((expanded_layers + 1, 3))
+            sld_eff = np.ones(expanded_layers + 1, dtype=float)
+
+            for i, trap in enumerate(expanded_traps):
+                if i <= expanded_layers:
                     temp_PAR[i, 0] = trap['width']
                     temp_PAR[i, 1] = trap['height']
+                    temp_PAR[i, 2] = trap.get('twidth', trap['width'])
+                    sld_eff[i] = float(expanded_slds[i]) if i < len(expanded_slds) else 1.0
             
             # Extract global parameters
             temp_DW = params['DW']
             temp_I0 = params['I0']
             
-            # Use SymCoordAssign with current SLD values
-            Coord = self.SymCoordAssign(temp_PAR, self.layers, sld_values=temp_sld_values)
+            # Use SymCoordAssign with expanded SLD values
+            Coord = self.SymCoordAssign(temp_PAR, expanded_layers, sld_values=sld_eff)
             if Coord is None:
                 raise RuntimeError("Failed to assign coordinates with SLD values")
             
             # Calculate form factor
-            form = self.FreeFormTrapezoid(Coord, self.layers, Qx, Qz)
+            form = self.FreeFormTrapezoid(Coord, expanded_layers, Qx, Qz)
             if form is None:
                 raise RuntimeError("Failed to calculate form factor")
             
@@ -1096,11 +1867,8 @@ class TrapezoidModelArray(CDSAXS_Model):
             # Store the optimization result
             self.optimization_result = result
             
-            # Update model parameters with optimized values
-            optimized_params = self.model_params.copy()
-            
-            # Make a deep copy of trapezoids to avoid modifying the original
-            optimized_params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+            # Update model parameters with optimized values (design-level where available)
+            optimized_params = copy.deepcopy(self.model_params)
             
             # Initialize background array for updates
             if isinstance(self.Bk, np.ndarray):
@@ -1108,14 +1876,22 @@ class TrapezoidModelArray(CDSAXS_Model):
             else:
                 optimized_bk = self.Bk
             
+            # First pass: Write all optimized values to design_trapezoids (if exists) or trapezoids
             for i, param_name in enumerate(param_names):
                 if param_name.startswith('trap_'):
-                    # Parse trapezoid parameter
+                    # Parse trapezoid (design-layer) parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width' or 'height'
-                    
-                    optimized_params['trapezoids'][trap_idx][param_type] = result.x[i]
+                    param_type = parts[2]
+
+                    if 'design_trapezoids' in optimized_params:
+                        # Store best-fit values on the design geometry
+                        if trap_idx < len(optimized_params['design_trapezoids']):
+                            optimized_params['design_trapezoids'][trap_idx][param_type] = result.x[i]
+                    else:
+                        # Pure trapezoid case: write directly to trapezoids
+                        if trap_idx < len(optimized_params['trapezoids']):
+                            optimized_params['trapezoids'][trap_idx][param_type] = result.x[i]
                 elif param_name.startswith('Bk_'):
                     # Background parameter for specific column
                     bk_idx = int(param_name.split('_')[1])
@@ -1132,6 +1908,31 @@ class TrapezoidModelArray(CDSAXS_Model):
                 else:
                     # Global parameter (DW, I0)
                     optimized_params[param_name] = result.x[i]
+            
+            # If design_trapezoids was updated, immediately re-expand trapezoids from it
+            if 'design_trapezoids' in optimized_params:
+                # Build a temporary model_params dict for expansion
+                tmp_model_params = {
+                    'trapezoids': [t.copy() for t in optimized_params['design_trapezoids']],
+                    'layers': optimized_params.get('design_layers', len(optimized_params['design_trapezoids']) - 1),
+                    'slds': optimized_params.get('design_slds', optimized_params.get('slds', None)),
+                }
+                
+                # Apply constraints if they exist (before expansion)
+                constraints = optimized_params.get('constraints', None)
+                if constraints:
+                    self._apply_constraints(tmp_model_params, constraints)
+                    # IMPORTANT: Copy constrained values back to optimized_params['design_trapezoids']
+                    # so that design_trapezoids reflects the constrained (final) values
+                    optimized_params['design_trapezoids'] = [t.copy() for t in tmp_model_params['trapezoids']]
+                
+                # Expand typed layers (ellipse -> many segments)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                
+                # Update optimized_params with expanded structure
+                optimized_params['trapezoids'] = expanded_traps
+                optimized_params['layers'] = int(expanded_layers)
+                optimized_params['slds'] = expanded_slds
             
             # Update background in optimized parameters
             optimized_params['Bk'] = optimized_bk.tolist() if isinstance(optimized_bk, np.ndarray) else optimized_bk
@@ -1192,7 +1993,58 @@ class TrapezoidModelArray(CDSAXS_Model):
             Whether to plot the combined view with all cuts
         """
         import matplotlib.pyplot as plt
-        import numpy as np
+        
+        # Reconstruct optimized model_params directly from optimization_result.x
+        # This bypasses any write-back issues and ensures we use the actual optimized values
+        optimized_model_params_for_plot = None
+        if hasattr(self, 'optimization_result') and self.optimization_result is not None:
+            if hasattr(self, 'param_names') and self.param_names is not None:
+                # Reconstruct design_trapezoids from optimization_result.x
+                optimized_model_params_for_plot = copy.deepcopy(initial_model_params)
+                
+                # Get the optimized values from result.x
+                result_x = self.optimization_result.x
+                param_names = self.param_names
+                
+                # Update design_trapezoids (or trapezoids) with optimized values
+                if 'design_trapezoids' in optimized_model_params_for_plot:
+                    design_traps = optimized_model_params_for_plot['design_trapezoids']
+                elif 'trapezoids' in optimized_model_params_for_plot:
+                    design_traps = optimized_model_params_for_plot['trapezoids']
+                else:
+                    design_traps = None
+                
+                if design_traps is not None:
+                    for i, param_name in enumerate(param_names):
+                        if param_name.startswith('trap_'):
+                            parts = param_name.split('_')
+                            if len(parts) >= 3:
+                                try:
+                                    trap_idx = int(parts[1])
+                                    param_type = parts[2]
+                                    if trap_idx < len(design_traps):
+                                        design_traps[trap_idx][param_type] = result_x[i]
+                                except (ValueError, IndexError):
+                                    pass
+                        elif param_name in ('DW', 'I0', 'Bk'):
+                            optimized_model_params_for_plot[param_name] = result_x[i]
+                
+                # Apply constraints if they exist
+                constraints = optimized_model_params_for_plot.get('constraints', None)
+                if constraints and 'design_trapezoids' in optimized_model_params_for_plot:
+                    tmp_design = {
+                        'design_trapezoids': [t.copy() for t in optimized_model_params_for_plot['design_trapezoids']],
+                        'design_slds': copy.deepcopy(optimized_model_params_for_plot.get('design_slds', [])),
+                        'DW': optimized_model_params_for_plot.get('DW', getattr(self, 'DW', None)),
+                        'I0': optimized_model_params_for_plot.get('I0', getattr(self, 'I0', None)),
+                        'Bk': optimized_model_params_for_plot.get('Bk', getattr(self, 'Bk', None)),
+                        'layers': optimized_model_params_for_plot.get('design_layers', len(optimized_model_params_for_plot['design_trapezoids']) - 1),
+                    }
+                    self._apply_constraints(tmp_design, constraints)
+                    optimized_model_params_for_plot['design_trapezoids'] = tmp_design['design_trapezoids']
+        
+        # Use reconstructed optimized params if available, otherwise fall back to self.model_params
+        optimized_params_to_plot = optimized_model_params_for_plot if optimized_model_params_for_plot is not None else self.model_params
         
         # Plot trapezoid structure comparison on the same plot
         if plot_structure:
@@ -1205,8 +2057,8 @@ class TrapezoidModelArray(CDSAXS_Model):
                                         alpha=0.7,
                                         label='Initial')
             
-            # Plot optimized trapezoid structure with solid lines
-            self._plot_trapezoid_structure(self.model_params, 
+            # Plot optimized trapezoid structure with solid lines (using reconstructed params)
+            self._plot_trapezoid_structure(optimized_params_to_plot, 
                                         linestyle='-', 
                                         color='red', 
                                         alpha=1.0,
@@ -1217,13 +2069,39 @@ class TrapezoidModelArray(CDSAXS_Model):
             plt.tight_layout()
             plt.show()
         
+        # Recalculate optimized intensity using reconstructed optimized parameters
+        # This ensures we're plotting the correct optimized intensity even if write-back failed
+        optimized_simInt = None
+        if hasattr(self, 'optimization_result') and self.optimization_result is not None:
+            if hasattr(self, 'param_names') and self.param_names is not None:
+                # Temporarily store current model_params
+                original_model_params = self.model_params.copy()
+                
+                try:
+                    # Use the reconstructed optimized_params we created for plotting
+                    if optimized_params_to_plot is not None:
+                        # Temporarily set model_params to optimized values for simulation
+                        self.model_params = copy.deepcopy(optimized_params_to_plot)
+                        # Recalculate intensity with optimized parameters
+                        optimized_simInt = self.SimTrap_SM()
+                except Exception as e:
+                    print(f"[WARNING] Could not recalculate optimized intensity: {e}")
+                    print("  Falling back to self.SimInt")
+                    optimized_simInt = self.SimInt
+                finally:
+                    # Restore original model_params
+                    self.model_params = original_model_params
+        
+        # Use recalculated intensity if available, otherwise fall back to self.SimInt
+        optimized_simInt_to_plot = optimized_simInt if optimized_simInt is not None else self.SimInt
+        
         # Plot QzCut comparisons - grid of individual cuts
         if plot_grid:
-            self._plot_qzcut_grid(initial_simInt)
+            self._plot_qzcut_grid(initial_simInt, optimized_simInt_to_plot)
         
         # Plot combined view with all cuts
         if plot_combined:
-            self._plot_qzcut_combined(initial_simInt)
+            self._plot_qzcut_combined(initial_simInt, optimized_simInt_to_plot)
     
     def _plot_trapezoid_structure(
         self,
@@ -1242,10 +2120,13 @@ class TrapezoidModelArray(CDSAXS_Model):
         """
         Plot the trapezoid structure from the given model parameters.
         
+        This function handles design_trapezoids, constraints, and typed layer expansion
+        to ensure the plotted structure reflects the actual model state.
+        
         Parameters:
         -----------
         model_params : dict
-            Dictionary containing model parameters
+            Dictionary containing model parameters (may include design_trapezoids)
         linestyle : str, optional
             Line style for the plot
         color : str, optional
@@ -1269,9 +2150,57 @@ class TrapezoidModelArray(CDSAXS_Model):
         **kwargs : dict
             Additional keyword arguments passed to matplotlib plot functions
         """
+        # Prepare model_params for plotting: handle design_trapezoids, constraints, expansion
+        plot_params = copy.deepcopy(model_params)
+        constraints = plot_params.get('constraints', None)
+        
+        # Always prefer design_trapezoids if it exists (regardless of constraints)
+        # Note: design_slds is optional - if not present, will use slds or default
+        if 'design_trapezoids' in plot_params:
+            # Get design_slds if available, otherwise fall back to slds
+            design_slds = plot_params.get('design_slds', None)
+            if design_slds is None:
+                design_slds = plot_params.get('slds', None)
+            
+            tmp_design = {
+                'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
+                'design_slds': copy.deepcopy(design_slds) if design_slds is not None else None,
+                'DW': plot_params.get('DW', getattr(self, 'DW', None)),
+                'I0': plot_params.get('I0', getattr(self, 'I0', None)),
+                'Bk': plot_params.get('Bk', getattr(self, 'Bk', None)),
+                'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
+            }
+            # Apply constraints if they exist
+            if constraints:
+                self._apply_constraints(tmp_design, constraints)
+            tmp_model_params = {
+                'trapezoids': tmp_design['design_trapezoids'],
+                'layers': tmp_design['layers'],
+                'slds': tmp_design.get('design_slds', None),
+            }
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+        elif constraints:
+            # No design_trapezoids; apply constraints directly and expand if typed layers exist
+            self._apply_constraints(plot_params, constraints)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            if expanded_traps:  # Only update if expansion occurred
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+        else:
+            # No design_trapezoids and no constraints; just expand if typed layers exist
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            if expanded_traps:  # Only update if expansion occurred
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+        
         ax = plt.gca()
-        trapezoids = model_params['trapezoids']
-        layers = model_params['layers']
+        trapezoids = plot_params['trapezoids']
+        layers = plot_params['layers']
 
         # Validate/clip shading params
         try:
@@ -1291,12 +2220,15 @@ class TrapezoidModelArray(CDSAXS_Model):
             else:
                 slds = np.ones(layers, dtype=float)
 
+            # Keep all layers+1 SLD values if provided (one per trapezoid entry including top)
             if len(slds) == layers + 1:
-                slds = slds[:layers]
-            elif len(slds) == 1 and layers > 1:
-                slds = np.full(layers, float(slds[0]), dtype=float)
-            elif len(slds) != layers:
-                slds = np.resize(slds, layers).astype(float)
+                # Keep all values - one SLD per trapezoid entry
+                pass
+            elif len(slds) == 1 and layers > 0:
+                slds = np.full(layers + 1, float(slds[0]), dtype=float)
+            elif len(slds) != layers + 1:
+                # Resize to match trapezoid count (layers + 1)
+                slds = np.resize(slds, layers + 1).astype(float)
 
             finite_slds = slds[np.isfinite(slds)]
             if finite_slds.size == 0:
@@ -1307,13 +2239,20 @@ class TrapezoidModelArray(CDSAXS_Model):
 
             base_w = float(trapezoids[0]['width'])
             height0 = 0.0
-            for i in range(int(layers)):
+            # Shade all trapezoids including the top one (layers + 1 total)
+            for i in range(int(layers) + 1):
                 h = float(trapezoids[i]['height'])
                 if h <= 0:
                     continue
 
                 w0 = float(trapezoids[i]['width'])
-                w1 = float(trapezoids[i + 1]['width'])
+                if trapezoids[i]['twidth'] is None:
+                    if i < layers:
+                        w1 = float(trapezoids[i + 1]['width'])
+                    else:
+                        w1 = w0  # Top trapezoid: use same width if no twidth
+                else:
+                    w1 = float(trapezoids[i]['twidth'])
 
                 xL0 = (base_w - w0) / 2.0
                 xR0 = xL0 + w0
@@ -1323,7 +2262,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                 y0 = height0
                 y1 = height0 + h
 
-                sld_val = float(slds[i])
+                sld_val = float(slds[i]) if i < len(slds) else 1.0
                 if denom is None:
                     t = 0.5
                 else:
@@ -1349,6 +2288,12 @@ class TrapezoidModelArray(CDSAXS_Model):
         # Plot base
         ax.plot([0, trapezoids[0]['width']], [0, 0], 
                 linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
+        if trapezoids[0]['twidth'] is None:
+            ax.plot([0.5*(trapezoids[0]['width']-trapezoids[1]['width']), 0.5*(trapezoids[0]['width']+trapezoids[1]['width'])], [trapezoids[0]['height'], trapezoids[0]['height']], 
+                     linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
+        else:
+            ax.plot([0.5*(trapezoids[0]['width']-trapezoids[0]['twidth']), 0.5*(trapezoids[0]['width']+trapezoids[0]['twidth'])], [trapezoids[0]['height'], trapezoids[0]['height']], 
+                     linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
         
         height = 0
         for i in range(layers + 1):
@@ -1358,12 +2303,23 @@ class TrapezoidModelArray(CDSAXS_Model):
             width = trapezoids[i]['width']
             x_left = (trapezoids[0]['width'] - width) / 2
             x_right = x_left + width
+            if trapezoids[i]['twidth'] is None:
+                twidth = trapezoids[i+1]['width']
+            else:
+                twidth = trapezoids[i]['twidth']
+            x_tleft = (trapezoids[0]['width'] - twidth) / 2
+            x_tright = x_tleft + twidth
             
             ax.plot([x_left, x_right], [height, height], 
                     linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
+            ax.plot([x_tleft, x_tright], [height+trapezoids[i]['height'], height+trapezoids[i]['height']], 
+                    linestyle=linestyle, color=color, alpha=alpha, linewidth=linewidth, **kwargs)
             
-            if i < layers:
-                next_width = trapezoids[i+1]['width']
+            if i < layers+1:
+                if trapezoids[i]['twidth'] is None:
+                    next_width = trapezoids[i+1]['width']
+                else:
+                    next_width = trapezoids[i]['twidth']
                 x_next_left = (trapezoids[0]['width'] - next_width) / 2
                 x_next_right = x_next_left + next_width
                 
@@ -1386,7 +2342,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         
         return ax
     
-    def _plot_qzcut_grid(self, initial_simInt):
+    def _plot_qzcut_grid(self, initial_simInt, optimized_simInt=None):
         """
         Plot a grid of QzCut comparisons with both initial and optimized results.
         
@@ -1394,6 +2350,8 @@ class TrapezoidModelArray(CDSAXS_Model):
         -----------
         initial_simInt : numpy.ndarray
             Simulated intensity before optimization
+        optimized_simInt : numpy.ndarray, optional
+            Simulated intensity after optimization. If None, uses self.SimInt
         """
         import matplotlib.pyplot as plt
         import numpy as np
@@ -1430,7 +2388,8 @@ class TrapezoidModelArray(CDSAXS_Model):
                      linewidth=1.5, label='Initial')
             
             # Plot optimized simulation
-            ax.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=1.0, 
+            opt_intensity = optimized_simInt if optimized_simInt is not None else self.SimInt
+            ax.semilogy(qz_values, opt_intensity[:, i], 'r-', alpha=1.0, 
                      linewidth=1.5, label='Optimized')
             
             # Set labels and title
@@ -1454,7 +2413,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust for suptitle
         plt.show()
     
-    def _plot_qzcut_combined(self, initial_simInt):
+    def _plot_qzcut_combined(self, initial_simInt, optimized_simInt=None):
         """
         Plot all QzCuts on one axis with both initial and optimized results.
         
@@ -1462,6 +2421,8 @@ class TrapezoidModelArray(CDSAXS_Model):
         -----------
         initial_simInt : numpy.ndarray
             Simulated intensity before optimization
+        optimized_simInt : numpy.ndarray, optional
+            Simulated intensity after optimization. If None, uses self.SimInt
         """
         import matplotlib.pyplot as plt
         
@@ -1488,7 +2449,8 @@ class TrapezoidModelArray(CDSAXS_Model):
             plt.semilogy(qz_values, initial_simInt[:, i], 'b--', alpha=0.5, linewidth=1.5)
             
             # Plot optimized simulation
-            plt.semilogy(qz_values, self.SimInt[:, i], 'r-', alpha=0.6, linewidth=1.5)
+            opt_intensity = optimized_simInt if optimized_simInt is not None else self.SimInt
+            plt.semilogy(qz_values, opt_intensity[:, i], 'r-', alpha=0.6, linewidth=1.5)
         
         plt.title('Intensity Comparison - All Cuts')
         plt.xlabel('Qz (Å$^{-1}$)')
@@ -1564,7 +2526,6 @@ class TrapezoidModelArray(CDSAXS_Model):
             The axes object containing the plot
         """
         plt.figure(figsize=figsize)
-        layers = int(self.model_params.get('layers', 0))
         # Validate/clip shading params (kept permissive to avoid breaking notebooks)
         try:
             grey_light, grey_dark = float(grey_range[0]), float(grey_range[1])
@@ -1574,8 +2535,49 @@ class TrapezoidModelArray(CDSAXS_Model):
         grey_dark = float(np.clip(grey_dark, 0.0, 1.0))
         shading_alpha = float(np.clip(float(shading_alpha), 0.0, 1.0))
 
+        # Apply constraints for plotting on a copy of model_params, then expand typed layers
+        plot_params = copy.deepcopy(self.model_params)
+        constraints = plot_params.get('constraints', None)
+        
+        # Always prefer design_trapezoids if it exists (regardless of constraints)
+        if 'design_trapezoids' in plot_params and 'design_slds' in plot_params:
+            tmp_design = {
+                'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
+                'design_slds': copy.deepcopy(plot_params.get('design_slds', [])),
+                'DW': plot_params.get('DW', self.DW),
+                'I0': plot_params.get('I0', self.I0),
+                'Bk': plot_params.get('Bk', self.Bk),
+                'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
+            }
+            # Apply constraints if they exist
+            if constraints:
+                self._apply_constraints(tmp_design, constraints)
+            tmp_model_params = {
+                'trapezoids': tmp_design['design_trapezoids'],
+                'layers': tmp_design['layers'],
+                'slds': tmp_design.get('design_slds', None),
+            }
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+        elif constraints:
+            # No design_trapezoids; apply constraints directly and expand if typed layers exist
+            self._apply_constraints(plot_params, constraints)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+        else:
+            # No design_trapezoids and no constraints; just expand if typed layers exist
+            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            if expanded_traps:  # Only update if expansion occurred
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+
         ax = self._plot_trapezoid_structure(
-            self.model_params,
+            plot_params,
             linestyle='-',
             color=color,
             alpha=1.0,
@@ -1609,9 +2611,10 @@ class TrapezoidModelArray(CDSAXS_Model):
             self._add_dimension_annotations()
 
         # Add SLD/material legend if requested
+        layers = plot_params['layers']
         if shade_by_sld and show_sld_legend and layers > 0:
-            if 'slds' in self.model_params:
-                slds_all = np.array(self.model_params['slds'], dtype=float)
+            if 'slds' in plot_params:
+                slds_all = np.array(plot_params['slds'], dtype=float)
             elif hasattr(self, 'sld_values'):
                 slds_all = np.array(self.sld_values, dtype=float)
             else:
@@ -1772,7 +2775,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         min_width = results['width_values'][min_idx[1]]
         min_dw = results['dw_values'][min_idx[0]]
         
-        print(f"\n1-Layer Width+DW Sweep Summary:")
+        print("\n1-Layer Width+DW Sweep Summary:")
         print(f"Grid size: {len(results['width_values'])} x {len(results['dw_values'])}")
         print(f"Width range: {results['width_values'][0]:.1f} to {results['width_values'][-1]:.1f}")
         print(f"DW range: {results['dw_values'][0]:.1f} to {results['dw_values'][-1]:.1f}")
@@ -1920,5 +2923,5 @@ class TrapezoidModelArray(CDSAXS_Model):
         
     
 # Create an alias for backward compatibility
-TrapezoidModel = TrapezoidModelArray
+SiGeModel = SiGeModelArray
 
