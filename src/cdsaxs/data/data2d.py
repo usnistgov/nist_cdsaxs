@@ -1006,6 +1006,24 @@ class Data2D(DataImage):
                 nearest
                 bilinear
                 bicubic
+        resampling_mode_q : str, optional
+            Set the resampling method used during the rotation of the
+            q component arrays.
+            The box rotation works by rotating the array underneath then
+            extracting the box for integration. Resampling modes are
+            chosen from the sklearn.transform.warp method. Options are:
+                nearest_neighbor
+                bilinear (default)
+                biquadratic
+                bicubic
+                biquartic
+                biquintic
+            Default value is 'bilinear'.
+            If use_pillow is set to True, then the options for the
+            PILLOW package rotation algorithm are different:
+                nearest
+                bilinear
+                bicubic
         fill_mode : str, optional
             Determine how pixels outside the boundaries of the input image
             are filled after the rotation. Options match those from np.pad.
@@ -2212,14 +2230,72 @@ class Data2D(DataImage):
         return peaks, peaks_q, fig
 
     def plot_data(
-            self,
-            **kwargs
+        self,
+        log_scale=True,
+        show_q=True,
+        cmap='viridis',
+        aspect='equal',
+        vmin=None,
+        vmax=None,
+        color_mask='transparent',
+        color_inf='black',
+        color_nan='red',
+        **kwargs
     ):
         """
-        Plot the scattering image.
+        Plot the scattering image with matplotlib.pyplot.imshow().
+
+        Parameters
+        ----------
+        log_scale : bool
+            If set to True, intensity values are plotted on a log scale.
+            Default value is True.
+        show_q : bool
+            Shows the q components along x and y axes if available.
+            If set to False, the pixel indices will be shown instead.
+        cmap : str
+            Matplotlib colormap name for the image intensity.
+            Default is 'viridis'.
+        aspect : str, float
+            Define the aspect ratio of the pixels.
+            'equal' : default, ensures that the pixels are square
+            'auto' : changes the aspect ratio to fit within the plotting
+                area of the figure
+            float : manually set the aspct ratio of the pixel height vs width
+        vmin : float
+            Set the minimum value of the intensity color range.
+        vmax : float
+            Set the maximum value of the intensity color range.
+        color_mask : str
+            Set the color of the masked pixels. Default is 'transparent'.
+            Other accepted strings are any of the matplotlib color names.
+        color_inf : str
+            Set the color of the pixels that have a value of inf or -inf.
+            Accepted string are any of the matplotlib color names as well as
+            'transparent'.
+            Default is 'black'.
+        color_nan : str
+            Set the color of the pixels that have a value of nan.
+            Accepted strings are any of the matplotlib color names as well as
+            'transparent'.
+            Default is 'red'.
+
+        **kwargs
+        --------
+        Any of the keyword arguments for matplotlib.pyplot.imshow can be
+        used. See the matplotlib documentation for more information.
         """
         fig = plotting.plot_data2d(
             self,
+            log_scale=log_scale,
+            show_q=show_q,
+            cmap=cmap,
+            aspect=aspect,
+            vmin=vmin,
+            vmax=vmax,
+            color_mask=color_mask,
+            color_inf=color_inf,
+            color_nan=color_nan,
             **kwargs
         )
 

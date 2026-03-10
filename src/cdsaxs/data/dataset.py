@@ -38,21 +38,6 @@ class Dataset():
         when collecting the dataset. Information such as sample
         thickness and attenuation coefficients should be added here to
         enable the relevant data corrections.
-
-    Optional Attributes
-    -------------------
-    integrated_datasets : dict
-        Dictionary of dictionaries containing integrated data. The key
-        corresponds to an index (ordered by integration).
-        For each inner ditionary, the keys align with the datas.keys() and
-        the values are instances of IntegratedDataSlices. These
-        dictionaries are produced by the cdsaxs integrators.
-
-    reduced_datastets : dict
-
-    reduced_slices : dict
-
-
     """
 
     def __init__(
@@ -401,6 +386,16 @@ class Dataset():
             data.rotate_image_ccw(steps)
 
     def flip_all_data_horizontally(self, keys=None):
+        """
+        Flip images horizontally.
+        
+        Parameters
+        ----------
+        keys : list
+            List of datas keys that identify which data this method
+            should be applied to. If not provided, this method will be
+            applied to all Data2D instances in datas.
+        """
         if keys is None:
             keys = list(self.datas.keys())
 
@@ -409,6 +404,16 @@ class Dataset():
             data.flip_horizontally()
 
     def flip_all_data_vertically(self, keys=None):
+        """
+        Flip images vertically.
+
+        Parameters
+        ----------
+        keys : list
+            List of datas keys that identify which data this method
+            should be applied to. If not provided, this method will be
+            applied to all Data2D instances in datas.
+        """
         if keys is None:
             keys = list(self.datas.keys())
 
@@ -417,6 +422,25 @@ class Dataset():
             data.flip_vertically()
 
     def reset_all_data(self, keys=None):
+        """
+        Reset the scattering images to their original orientation
+        removing any rotations or flips that may have been performed.
+
+        All transfomraitons to the scattering intensity will also be
+        undone, including scale, normalize, add and subtract functions.
+
+        This function will reset the images to their raw image and so
+        the beam center will also be reset to the default of (0, 0).
+        The masks will be reset to default conditions of masking any nan,
+        inf, or -inf values.
+
+        Parameters
+        ----------
+        keys : list
+            List of datas keys that identify which data this method
+            should be applied to. If not provided, this method will be
+            applied to all Data2D instances in datas.
+        """
         if keys is None:
             keys = list(self.datas.keys())
 
@@ -724,7 +748,34 @@ class ReducedDataset():
             interpolated_data=False,
             **kwargs
     ):
+        """
+        Plot the reduced data using matplotlib.pyplot.imshow.
 
+        Parameters
+        ----------
+        log_scale : bool
+            If set to True, intensities are plotted on a log scale.
+        cmap : str
+            Matplotlib colormap name used for the intensity color.
+        vmin : float
+            Minimum intensity value of the colormap.
+        vmax : float
+            Maximum intensity value of the colormap.
+        filter_by_q : dict
+            Key: value pairs of q-component: (min, max) to filter out
+            the reduced data.
+        filter_by_metadata : dict
+            Key: value pairs of metadata key: (min, max) to filter out
+            the reduced data.
+        interpolated_data : bool
+            If set to True, the data will be interpolated onto a grid for
+            viewing.
+
+        **kwargs
+        --------
+        Any keyword arguments for imshow can be passed through this function.
+
+        """
         fig = plotting.plot_reduced_dataset(
             self,
             log_scale=log_scale,
@@ -802,6 +853,32 @@ class ReducedSlices():
                   offset_order=0,
                   offset_value=0,
                   ):
+        """
+        Plot the reduced slices using matplotlib.pyplot.errorbar().
+
+        Parameters
+        ----------
+        reduced_slices : ReducedSlices
+            Instance of ReducedSlices that contains the 1d data to be
+            plotted.
+        q_axis : str
+            Primary q-axis to plot along the x-axis.
+            Default is 'qsz'.
+        integrated_axis : str
+            Q-axis that was integrated to generate slices. This will
+            provide the legend labels.
+            Default value is 'qsx'.
+        filter_by_q : dict
+            Key: value pairs of q-component: (min, max) to filter which
+            slices should be plotted from reduced_slices.
+        log_scale : bool
+            Plot the data on a log scale in y.
+            Default is True.
+        offset_order : int, float
+            Offset the data by a set number of orders of magnitude.
+        offset_value : int, float
+            Offset the data by a constant value on a linear scale.
+        """
 
         fig = plotting.plot_reduced_slices(
             self,
@@ -820,19 +897,35 @@ class ReducedSlices():
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
-            offset_axis ='qsy',
-            export_qr = False,
+            offset_axis='qsy',
+            export_qr=False,
             decimals=5):
         """
         Outputs the slected reduced slices set currently stored in the
-        dataset. The user must specify the index of the set of slices
-        as well as the q_slice_axis. The number of decimal places the
-        slice positions are rounded at can be changed with the
-        decimals keyword argument.
+        dataset to a csv file.
 
         NOTE: currently only a q_slice_axis of 'qsx' is accepted or
         formatted appropriately in the output file.
         TODO: generalize this in the future.
+
+        Parameters
+        ----------
+        filepath : str
+            File location to save the data.
+        filter_by_q : dict
+            Dictionary of q component and range (min, max) to filter
+            the slices by.
+        q_axis : str
+            Currently only 'qsz' is accepted.
+        integrated_axis : str
+            Currently only 'qsx' is accepted.
+        offset_axis : str
+            Currently only 'qsy' is accepted.
+        export_qr : bool
+            If set to True, qsr will also be exported in the file.
+        decimals : int
+            How many decimal places to round to for all values exported
+            in the csv file.
 
         Returns
         -------
