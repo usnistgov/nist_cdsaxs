@@ -1006,7 +1006,7 @@ class Data2D(DataImage):
         if rotation_center is None:
             rotation_center = self.metadata.get('center_px', (0, 0))
 
-        for q in ['qs', 'qsx', 'qsy', 'qsz']:
+        for q in ['qs', 'qsx', 'qsy', 'qsz', 'qsr']:
             q_image = getattr(self, q)
             if q_image is not None:
                 if not use_pillow:
