@@ -30,11 +30,25 @@ def slice_reduced_dataset(
     ----------
     dataset : ReducedDataset
     q_values : list
+        List of the slice locations along the specified q_axis.
     q_widths : float | list
+        Width of each slice bin. This can be a single value or a
+        different value for each value in q_values.
     q_axis : str
+        Q axis over which to integrate the data.
+        Default is 'qsx'.
     slice_axis : str
+        Q axis that will become the primary axis of the one-dimensional
+        sliced data.
+        Default value is 'qsz'.
+    offset_axis : str
+        The q-axis that was integrated over to produce the reduced
+        data. Default is 'qsy'.
     show_plot : bool
-    interpolated_image : bool
+        If True, a plot of the slices overlaid on the reduced data
+        image will be shown.
+    plotting_kwargs : dict
+        Any keyword arguments to pass to the relevant plotting function.
 
     Returns
     -------
@@ -69,12 +83,9 @@ def slice_reduced_dataset(
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
                 q.append(np.nanmean(getattr(data, q_axis)[selection]))
-                q_offset.append(np.nanmean(getattr(data,offset_axis)[selection]))
+                q_offset.append(
+                    np.nanmean(getattr(data, offset_axis)[selection]))
                 Iq.append(np.nanmean(data.Iq[selection]))
-
-                                
-                # qsz.extend(list(data.qsz[selection]))
-                # Iq.extend(list(data.Iq[selection]))
 
         reduced_slice = ReducedData1DSlice(
             q=np.array(q),
@@ -84,9 +95,10 @@ def slice_reduced_dataset(
             offset_axis=offset_axis,
             slice_width=qmax-qmin
         )
+        # TODO: removing rounding to maintain data integrity
         setattr(reduced_slice, integrated_axis,
-                np.round(np.mean([qmin, qmax]), 4)) #TODO: removing rounding to maintain data integrity
-        setattr(reduced_slice, offset_axis, 
+                np.round(np.mean([qmin, qmax]), 4))
+        setattr(reduced_slice, offset_axis,
                 np.array(q_offset))
         slices.append(reduced_slice)
 
