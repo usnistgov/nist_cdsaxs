@@ -208,6 +208,59 @@ def plot_errorbar(
         title=None,
         **kwargs
 ):
+    """
+    Plot the 1D data x, y using matplotlib.pyplot.errorbar().
+
+    Parameters
+    ----------
+    x, y : array-like
+        The data points to be plotted.
+    log_scale_y : bool, optional
+        Convert y-axis to a log scale by setting to true.
+        Default value is False.
+    log_scale_x : bool, optional
+        Convert x-axis to a log scale by setting to true.
+        Default value is False.
+    show_legend : bool, optional
+        Show the legend on the plot by setting to True.
+        Default value is True.
+    xlim : tuple, list, optional
+        Set the plotting range along the x-axis, (xmin, xmax).
+        Default is None.
+    ylim : tuple, list, optional
+        Set the plotting range along the y-axis, (ymin, ymax).
+        Default is None.
+    xlabel : str, optional
+        Set the label on the x-axis.
+        Default is None.
+    ylabel : str, optional
+        Set the label on the y-axis.
+        Default is None.
+    xticks : list, optional
+        Specify the tick locations along the x-axis.
+        Default is None.
+    xticks_labels : list, optional
+        Specify the labels for each tick location specified in xticks.
+        Default is None.
+    yticks : list, optional
+        Specify the tick locations along the y-axis.
+        Default is None.
+    yticks_labels : list, optional
+        Specify the labels for each tick location specified in yticks.
+        Default is None.
+    fig : matplotlib.figure, optional
+        Pass along the matplotlib figure instance if the trace should
+        be added to the figure rather than craeting a new one.
+        Default is None.
+    title : str, optional
+        Set the plot title.
+        Default is None.
+
+    **kwargs
+    --------
+    Any additional keyword arguments accepted by
+    matplotlib.pyplot.errorbar can be provided.
+    """
 
     fig = plt.figure(fig)
 
@@ -221,9 +274,9 @@ def plot_errorbar(
         plt.xscale('log')
 
     if xlim is not None:
-        plt.xlim(xlim)
+        plt.xlim(*xlim)
     if ylim is not None:
-        plt.ylim(ylim)
+        plt.ylim(*ylim)
 
     if show_legend:
         plt.legend()
@@ -286,13 +339,78 @@ def plot_data2d(
 def plot_data1d(
         data1d,
         q_axis=None,
-        log_scale=True,
+        log_scale_y=False,
+        log_scale_x=False,
         show_legend=True,
         xlim=None,
         ylim=None,
+        xlabel=None,
+        ylabel="Intensity",
+        xticks=None,
+        xticks_labels=None,
+        yticks=None,
+        yticks_labels=None,
         fig=None,
+        title=None,
         **kwargs
 ):
+    """
+    Plot the 1D data x, y using matplotlib.pyplot.errorbar().
+
+    Parameters
+    ----------
+    data1d : Data1D, list[Data1D]
+        Instance(s) of Data1D that contains the I vs. q data to be plotted.
+    q_axis : str
+        Set the q component to be used along the x-axis of the plot.
+        If left as the default, None, the primary q_axis of data1d
+        will be used.
+    log_scale_y : bool, optional
+        Convert y-axis to a log scale by setting to true.
+        Default value is False.
+    log_scale_x : bool, optional
+        Convert x-axis to a log scale by setting to true.
+        Default value is False.
+    show_legend : bool, optional
+        Show the legend on the plot by setting to True.
+        Default value is True.
+    xlim : tuple, list, optional
+        Set the plotting range along the x-axis, (xmin, xmax).
+        Default is None.
+    ylim : tuple, list, optional
+        Set the plotting range along the y-axis, (ymin, ymax).
+        Default is None.
+    xlabel : str, optional
+        Set the label on the x-axis.
+        Default will be a formatted name of the selected q_axis.
+    ylabel : str, optional
+        Set the label on the y-axis.
+        Default is None.
+    xticks : list, optional
+        Specify the tick locations along the x-axis.
+        Default is None.
+    xticks_labels : list, optional
+        Specify the labels for each tick location specified in xticks.
+        Default is None.
+    yticks : list, optional
+        Specify the tick locations along the y-axis.
+        Default is None.
+    yticks_labels : list, optional
+        Specify the labels for each tick location specified in yticks.
+        Default is None.
+    fig : matplotlib.figure, optional
+        Pass along the matplotlib figure instance if the trace should
+        be added to the figure rather than craeting a new one.
+        Default is None.
+    title : str, optional
+        Set the plot title.
+        Default is None.
+
+    **kwargs
+    --------
+    Any additional keyword arguments accepted by
+    matplotlib.pyplot.errorbar can be provided.
+    """
     fig = plt.figure(fig)
 
     if type(data1d) is not list:
@@ -302,16 +420,25 @@ def plot_data1d(
         if q_axis is None:
             q_axis = data.q_axis
 
+        if xlabel is None:
+            xlabel = plotting_tools.generate_formatted_axis_label(q_axis)
+
         plot_errorbar(
             x=getattr(data, q_axis),
             y=data._masked_Iq,
             fig=fig,
-            log_scale_y=log_scale,
+            log_scale_y=log_scale_y,
+            log_scale_x=log_scale_x,
             show_legend=show_legend,
             xlim=xlim,
             ylim=ylim,
-            xlabel=plotting_tools.generate_formatted_axis_label(q_axis),
-            ylabel="Intensity",
+            xlabel=xlabel,
+            ylabel=ylabel,
+            xticks=xticks,
+            xticks_labels=xticks_labels,
+            yticks=yticks,
+            yticks_labels=yticks_labels,
+            title=title,
             **kwargs
         )
 

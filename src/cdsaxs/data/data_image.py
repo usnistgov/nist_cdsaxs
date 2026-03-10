@@ -24,11 +24,11 @@ class DataImage():
         mask : NDArray, optional
             Two-dimensional boolean array of same dimensions as image
             that are True at pixel values that should be masked out
-            for all operations.
-            All pixels that are nan, inf, or -inf will be masked by
-            default unless overwritten by the user (be careful doing
-            this as many operations are untested without masking the
-            nan, inf, and -inf values).
+            for all operations. These pixels will be masked in addition
+            to the default masked pixels of nan, inf, -inf. The user
+            can overwrite these defaults using the overwrite_mask
+            method but we caution against this as not all operations
+            are tested without masking nan, inf, and -inf.
 
         Protected Attributes
         --------------------
@@ -118,7 +118,7 @@ class DataImage():
     def rotate_image(self,
                      rotation_angle_deg,
                      rotation_center=(0, 0),
-                     resampling_mode="bicubic",
+                     resampling_mode="bilinear",
                      fill_mode="constant",
                      fill_constant=np.nan,
                      use_pillow=False,
@@ -138,15 +138,49 @@ class DataImage():
             Angle in degrees by which to rotate the image
             counterclockwise.
         rotation_center : tuple
-            Center of rotatation.
+            Center of rotatation (y, x).
             Default is the upper left pixel.
-        resampling_mode: str
+        resampling_mode : str, optional
             Set the resampling method used during the rotation.
             The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
+            extracting the box for integration. Resampling modes are
+            chosen from the sklearn.transform.warp method. Options are:
+                nearest_neighbor
+                bilinear (default)
+                biquadratic
+                bicubic
+                biquartic
+                biquintic
+            Default value is 'bilinear'.
+            If use_pillow is set to True, then the options for the
+            PILLOW package rotation algorithm are different:
+                nearest
+                bilinear
+                bicubic
+        fill_mode : str, optional
+            Determine how pixels outside the boundaries of the input image
+            are filled after the rotation. Options match those from np.pad.
+            Options are:
+                constant (default)
+                edge
+                symmetric
+                reflect
+                wrap
+            Default value is "constant".
+        fill_constant : float, optional
+            Specifies the constant value used to fill pixels outside the
+            image boundaries after rotation. Only applies when resampling_mode
+            is set to 'constant'.
+        log_scale : bool, optional
+            Rotate the log-scale of your image. This could help resolve
+            some artifacts caused by certain rotation sampling algorithms
+            but you will lose any pixels that are negative (turned to nan).
+            Deafult value is False.
+        use_pillow : bool, optional
+            If set to True, the algorithm will use the PILLOW package
+            image rotation function instead of sklearn.transform.rotate.
+            The fill_mode argument is not used and the resampling_mode
+            options are slightly different, see the above description.
         """
 
         if not use_pillow:

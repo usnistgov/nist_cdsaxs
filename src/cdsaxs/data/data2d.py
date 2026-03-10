@@ -119,6 +119,8 @@ class Data2D(DataImage):
         The x-component of qb.
     qbz : NDArray
         The z-component of qb.
+    qbr : NDArray
+        The radial q component of qb derived from sqrt(qbx^2 + qby^2).
     qs : NDArray
         Scattering vector for each pixel in sample corodinate space.
     qsy : NDArray
@@ -127,13 +129,17 @@ class Data2D(DataImage):
         The x-component of qs.
     qsz : NDArray
         The z-component of qs.
+    qsr : NDArray
+        The radial q component of qs derived from sqrt(qsx^2 + qsy^2).
     sample_rotation : dict
         Metadata that describes the sample rotations in the CD-SAXS
         experiment. Includes keys of:
-            rotation_type : 'extrinsic' or 'intrinsic'
-            first_axis : 'x', 'y', or 'z'; default is 'y'
-            second_axis : 'x', 'y', or 'z'; default is None
-            third_axis : 'x', 'y', or 'z'; default is None
+            rotation_type : 'extrinsic' or 'intrinsic', default is 'extrinsic'
+            first_axis : 'x', 'y', or 'z'; default is 'x'
+            second_axis : 'x', 'y', or 'z'; default is 'z'
+            third_axis : 'x', 'y', or 'z'; default is 'y'
+        This is required for the proper calculation of the q components,
+        especially when chi and omega are not zero.
     metadata : dict
         Relevant scattering metadata to the image acquisition. These are
         key : value paris where the key must be selected from the
@@ -166,8 +172,6 @@ class Data2D(DataImage):
     _masked_image : NDArray
         Retrieve the current image of the DataImage instance with
         all masked points replaced with np.nan.
-    _x_px : NDArray
-        Pixels from 
     """
 
     def __init__(
@@ -620,9 +624,9 @@ class Data2D(DataImage):
             # check that the rotation information is present
             # this check is most relevant during the init
             if 'rotation_type' not in self._sample_rotation.keys() or\
-                'first_axis' not in self._sample_rotation.keys() or\
-                'second_axis' not in self._sample_rotation.keys() or\
-                'third_axis' not in self._sample_rotation.keys():
+                    'first_axis' not in self._sample_rotation.keys() or\
+                    'second_axis' not in self._sample_rotation.keys() or\
+                    'third_axis' not in self._sample_rotation.keys():
                 if not suppress_errors:
                     raise ValueError(
                         "Sample rotation information is missing"
@@ -983,24 +987,49 @@ class Data2D(DataImage):
             Angle in degrees by which to rotate the image
             counterclockwise.
         rotation_center : tuple
-            Center of rotatation.
-            Default is the beam center if available, otherwise (0, 0).
-        resampling_mode: str
+            Center of rotatation (y, x).
+            Default is the upper left pixel.
+        resampling_mode : str, optional
             Set the resampling method used during the rotation.
             The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
-        resampling_mode_q: str
-            Set the resampling method used during the rotation of the
-            scattering vector components in the sample coordinate
-            space.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling of the
-            image intensities can be performed with the 'nearest',
-            'bilinear', or 'bicubic' methods in the PILLOW package.
-            Default value is 'bicubic'.
+            extracting the box for integration. Resampling modes are
+            chosen from the sklearn.transform.warp method. Options are:
+                nearest_neighbor
+                bilinear (default)
+                biquadratic
+                bicubic
+                biquartic
+                biquintic
+            Default value is 'bilinear'.
+            If use_pillow is set to True, then the options for the
+            PILLOW package rotation algorithm are different:
+                nearest
+                bilinear
+                bicubic
+        fill_mode : str, optional
+            Determine how pixels outside the boundaries of the input image
+            are filled after the rotation. Options match those from np.pad.
+            Options are:
+                constant (default)
+                edge
+                symmetric
+                reflect
+                wrap
+            Default value is "constant".
+        fill_constant : float, optional
+            Specifies the constant value used to fill pixels outside the
+            image boundaries after rotation. Only applies when resampling_mode
+            is set to 'constant'.
+        log_scale : bool, optional
+            Rotate the log-scale of your image. This could help resolve
+            some artifacts caused by certain rotation sampling algorithms
+            but you will lose any pixels that are negative (turned to nan).
+            Deafult value is False.
+        use_pillow : bool, optional
+            If set to True, the algorithm will use the PILLOW package
+            image rotation function instead of sklearn.transform.rotate.
+            The fill_mode argument is not used and the resampling_mode
+            options are slightly different, see the above description.
         """
 
         if rotation_center is None:
@@ -1276,7 +1305,7 @@ class Data2D(DataImage):
         Find the pixel index limits in half open ranges [min, max) that
         define a region of interest based on a box with set q ranges
         on both axes.
-        
+
         If your q-range selection results in pixels that do not form
         a rectangular region of interest, the algorithm will try to
         find the largest rectangular region of interest that still
@@ -1311,7 +1340,7 @@ class Data2D(DataImage):
                 f" function: {invalid_kwargs}. Please see the relevant "
                 "doc strings for more details."
             )
-    
+
         selection_mask = self.get_pixels_qrange(**ranges)
 
         limits = tools.find_maximum_rectangular_roi(selection_mask)
@@ -1521,7 +1550,10 @@ class Data2D(DataImage):
         # dimensions along y or axis 0
         if width_qdy_px is not None:
             if center_qdy is not None:
-                center_qdy = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdy[0].lower())-center_qdy[1])))[0]
+                center_qdy = np.unravel_index(
+                    np.nanargmin(np.abs(
+                        getattr(self, center_qdy[0].lower())
+                        - center_qdy[1])))[0]
             min_y, max_y = self._get_box_dims_size_y(
                 size_qdy_px=width_qdy_px,
                 center=center_qdy,
@@ -1535,7 +1567,9 @@ class Data2D(DataImage):
         # dimensions along x or axis 1
         if width_qdx_px is not None:
             if center_qdx is not None:
-                center_qdx = np.unravel_index(np.nanargmin(np.abs(getattr(self, center_qdx[0].lower())-center_qdx[1])))[1]
+                center_qdx = np.unravel_index(np.nanargmin(np.abs(
+                    getattr(self, center_qdx[0].lower())
+                    - center_qdx[1])))[1]
             min_x, max_x = self._get_box_dims_size_x(
                 size_qdx_px=width_qdx_px,
                 center=center_qdx,
