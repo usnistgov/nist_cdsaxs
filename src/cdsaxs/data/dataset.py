@@ -833,13 +833,13 @@ class ReducedSlices():
         NOTE: currently only a q_slice_axis of 'qsx' is accepted or
         formatted appropriately in the output file.
         TODO: generalize this in the future.
-        
+
         Returns
         -------
         Datas
             Numpy array in the format used to export the data.
         """
-        
+
         filtered_slices = self.data.copy()
         for key, value in filter_by_q.items():
             keep = []
@@ -863,19 +863,18 @@ class ReducedSlices():
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
             q_offset = getattr(r_slice, offset_axis)
-            
-            
+
             # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]
-            q_offset=q_offset[sorted_indexes]
+            q_offset = q_offset[sorted_indexes]
             Iq = Iq[sorted_indexes]
-        
+
             select = (~np.isnan(Iq)) & (Iq > 0)
             num_points = len(q[select])
 
-            #Create columns for qx,qy,qr(if header axis == qsr is specified)
-  
+            # Create columns for qx,qy,qr(if header axis == qsr is specified)
+
             new_qx = np.hstack(                 #integration axis
                 ([r'$q_x (\AA^{-1})$'],
                     [str(np.round(q_int, decimals))]*num_points,
@@ -895,23 +894,24 @@ class ReducedSlices():
             datas.append(new_qx)
             datas.append(new_qy)
             datas.append(new_qz)
-            
+
             if export_qr:
-                qsr = np.hypot(q_int,q_offset)
+                qsr = getattr(r_slice, offset_axis)
+                qsr = qsr[sorted_indexes]
                 new_qr = np.hstack(
                     ([r'$q_r (\AA^{-1})$'],
                         np.round(qsr, decimals=decimals).astype(str)[select],
                         [""]*(length-len(qsr[select])))
                 )
-                
+
                 datas.append(new_qr)
-            
+
             new_Iq = np.hstack(
                 ([r'$I (A.U.)$'],
                     np.round(Iq, decimals=decimals).astype(str)[select],
                     [""]*(length-len(Iq[select])))
                     )
-            
+
             datas.append(new_Iq)
 
         datas = np.array(datas).T
