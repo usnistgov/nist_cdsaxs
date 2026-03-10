@@ -1507,20 +1507,32 @@ class TrapezoidModelArray(CDSAXS_Model):
         xlim=None,
         ylim=None,
         title='Trapezoid Structure',
+        # geometry / styling
         show_dimensions=False,
         color='blue',
         linewidth=2,
         equal_aspect=True,
+        # material shading
         shade_by_sld=False,
         grey_range=(0.85, 0.05),
         shading_alpha=0.6,
+        # SLD legend options
         sld_label_map=None,
         show_sld_legend=True,
         sld_legend_precision=3,
+        # Pitch / vacuum / periodic visualization
+        show_vacuum_region=True,
+        n_trapezoid_stacks=2,
+        vacuum_edgecolor='tab:blue',
+        vacuum_linestyle='-',
+        vacuum_linewidth=1.5,
+        vacuum_alpha=0.08,
         **kwargs
     ):
         """
         Plots the current trapezoid structure with customizable figure properties.
+        Optionally extends the x-axis to the full pitch and visually indicates the
+        vacuum/air region that occupies the rest of the period, as in a line–space grating.
         
         Parameters:
         -----------
@@ -1555,6 +1567,23 @@ class TrapezoidModelArray(CDSAXS_Model):
             If True and `shade_by_sld=True`, adds a legend entry for each unique SLD. Default: True.
         sld_legend_precision : int, optional
             Decimal rounding used for grouping and mapping float SLD values in the legend. Default: 3.
+        show_vacuum_region : bool, optional
+            If True and a pitch can be determined (from `model_params['Pitch']`,
+            `self.Pitch`, or inferred from the Qx sampling), the x‑axis is extended
+            to cover the requested number of trapezoid stacks and the vacuum/air
+            regions between neighboring stacks are implicitly shown as the gaps
+            between them.
+        n_trapezoid_stacks : int, optional
+            Number of trapezoid stacks (periods) to draw, including the original
+            one at x=0. Must be ≥ 1. Default: 2.
+        vacuum_edgecolor : str, optional
+            Edge color for the outline of the vacuum region. Default: 'tab:blue'.
+        vacuum_linestyle : str, optional
+            Line style for the vacuum region outline. Default: '-'.
+        vacuum_linewidth : float, optional
+            Line width for the vacuum region outline. Default: 1.5.
+        vacuum_alpha : float, optional
+            Alpha for the light shading of the vacuum region. Default: 0.08.
         **kwargs : dict
             Additional keyword arguments passed to matplotlib plot functions
             
@@ -1587,6 +1616,201 @@ class TrapezoidModelArray(CDSAXS_Model):
             shading_alpha=shading_alpha,
             **kwargs
         )
+
+        # ------------------------------------------------------------------
+        # Optional: show neighboring cell at +Pitch so vacuum is flush
+        # ------------------------------------------------------------------
+        trapezoids = self.model_params.get('trapezoids', [])
+        base_width = float(trapezoids[0]['width']) if trapezoids else None
+
+        pitch = None
+        # 1) Explicit pitch from model_params
+        if 'Pitch' in self.model_params and self.model_params['Pitch'] is not None:
+            try:
+                pitch = float(self.model_params['Pitch'])
+            except Exception:
+                pitch = None
+        # 2) Fallback to attribute
+        if pitch is None and hasattr(self, 'Pitch') and self.Pitch is not None:
+            try:
+                pitch = float(self.Pitch)
+            except Exception:
+                pitch = None
+        # 3) As a last resort, estimate pitch from Qx sampling (ΔQx ≈ 2π / pitch)
+        if (
+            pitch is None
+            and hasattr(self, 'Qx')
+            and self.Qx is not None
+            and isinstance(self.Qx, np.ndarray)
+            and self.Qx.size > 1
+        ):
+            try:
+                qx_line = self.Qx[0, :]
+                qx_line = qx_line[np.isfinite(qx_line)]
+                # Use non‑zero values and unique sampling points
+                qx_line = qx_line[np.abs(qx_line) > 1e-6]
+                qx_unique = np.unique(np.round(qx_line, decimals=6))
+                if qx_unique.size >= 2:
+                    dq = np.median(np.diff(np.sort(qx_unique)))
+                    if dq > 0:
+                        pitch = float(2 * np.pi / dq)
+                        # Cache for later use
+                        self.Pitch = pitch
+                        self.model_params['Pitch'] = pitch
+            except Exception:
+                pitch = None
+
+        # Draw a copy of the structure at x + Pitch so the vacuum/air region
+        # between the two stacks is exactly the modeled line-space gap.
+        # This neighboring cell is drawn with the *same* color scheme as the
+        # primary structure so the periodicity is clear.
+        if (
+            show_vacuum_region
+            and pitch is not None
+            and base_width is not None
+        ):
+            # Ensure valid, at least one extra stack
+            try:
+                n_stacks = int(max(1, n_trapezoid_stacks))
+            except Exception:
+                n_stacks = 2
+
+            rightmost_x = base_width
+
+            for stack_idx in range(1, n_stacks):
+                offset = stack_idx * pitch
+                rightmost_x = max(rightmost_x, offset + base_width)
+
+            height = 0.0
+            # Precompute SLD-based greys if needed (same mapping as primary)
+            if shade_by_sld and layers > 0 and len(trapezoids) >= layers + 1:
+                if 'slds' in self.model_params:
+                    slds_all = np.array(self.model_params['slds'], dtype=float)
+                elif hasattr(self, 'sld_values'):
+                    slds_all = np.array(self.sld_values, dtype=float)
+                else:
+                    slds_all = np.ones(layers, dtype=float)
+
+                if len(slds_all) == layers + 1:
+                    slds_all = slds_all[:layers]
+                elif len(slds_all) == 1 and layers > 1:
+                    slds_all = np.full(layers, float(slds_all[0]), dtype=float)
+                elif len(slds_all) != layers:
+                    slds_all = np.resize(slds_all, layers).astype(float)
+
+                finite_slds = slds_all[np.isfinite(slds_all)]
+                if finite_slds.size == 0:
+                    sld_min, sld_max = 0.0, 1.0
+                else:
+                    sld_min, sld_max = float(np.min(finite_slds)), float(np.max(finite_slds))
+                denom = (sld_max - sld_min) if not np.isclose(sld_max, sld_min) else None
+            else:
+                slds_all = None
+                denom = None
+                sld_min = sld_max = 0.0
+
+            # Draw each additional stack
+            for stack_idx in range(1, n_stacks):
+                offset = stack_idx * pitch
+
+                # Optional shading for this stack
+                if slds_all is not None:
+                    base_w_n = base_width
+                    height0_n = 0.0
+                    for i in range(int(layers)):
+                        h = float(trapezoids[i]['height'])
+                        if h <= 0:
+                            continue
+
+                        w0 = float(trapezoids[i]['width'])
+                        w1 = float(trapezoids[i + 1]['width'])
+
+                        xL0 = (base_w_n - w0) / 2.0 + offset
+                        xR0 = xL0 + w0
+                        xL1 = (base_w_n - w1) / 2.0 + offset
+                        xR1 = xL1 + w1
+
+                        y0 = height0_n
+                        y1 = height0_n + h
+
+                        sld_val = float(slds_all[i])
+                        if denom is None:
+                            t = 0.5
+                        else:
+                            t = (sld_val - sld_min) / denom
+                        t = float(np.clip(t, 0.0, 1.0))
+
+                        grey = grey_range[0] + t * (grey_range[1] - grey_range[0])
+                        grey = float(np.clip(grey, 0.0, 1.0))
+
+                        ax.add_patch(
+                            Polygon(
+                                [(xL0, y0), (xR0, y0), (xR1, y1), (xL1, y1)],
+                                closed=True,
+                                facecolor=(grey, grey, grey),
+                                edgecolor='none',
+                                alpha=shading_alpha,
+                                zorder=1,
+                            )
+                        )
+
+                        height0_n = y1
+
+                # Outline of neighboring stack
+                height = 0.0
+                ax.plot(
+                    [offset, offset + base_width],
+                    [0.0, 0.0],
+                    linestyle='-',
+                    color=color,
+                    linewidth=linewidth,
+                    alpha=1.0,
+                )
+
+                for i in range(int(layers) + 1):
+                    if i > 0:
+                        height += trapezoids[i - 1]['height']
+
+                    width_i = trapezoids[i]['width']
+                    x_left = (base_width - width_i) / 2.0 + offset
+                    x_right = x_left + width_i
+
+                    # Horizontal segment at this height
+                    ax.plot(
+                        [x_left, x_right],
+                        [height, height],
+                        linestyle='-',
+                        color=color,
+                        linewidth=linewidth,
+                        alpha=1.0,
+                    )
+
+                    # Vertical/diagonal sides up to next layer
+                    if i < layers:
+                        next_width = trapezoids[i + 1]['width']
+                        x_next_left = (base_width - next_width) / 2.0 + offset
+                        x_next_right = x_next_left + next_width
+
+                        ax.plot(
+                            [x_left, x_next_left],
+                            [height, height + trapezoids[i]['height']],
+                            linestyle='-',
+                            color=color,
+                            linewidth=linewidth,
+                            alpha=1.0,
+                        )
+                        ax.plot(
+                            [x_right, x_next_right],
+                            [height, height + trapezoids[i]['height']],
+                            linestyle='-',
+                            color=color,
+                            linewidth=linewidth,
+                            alpha=1.0,
+                        )
+
+            # If user did not explicitly request x-limits, extend to include all stacks
+            if xlim is None:
+                plt.xlim(0.0, rightmost_x)
         
         # Set axis limits if provided (after plotting to override equal aspect if needed)
         if xlim is not None:
