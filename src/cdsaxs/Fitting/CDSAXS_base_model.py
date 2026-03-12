@@ -839,6 +839,7 @@ class CDSAXS_Model:
 
                 # Group optimizable trap fields by index: {idx: {field, ...}, ...}
                 trap_opt_fields = {}
+                trap2_opt_fields = {}
                 for pname in optimization_params.keys():
                     if pname.startswith('trap_'):
                         parts = pname.split('_')
@@ -846,6 +847,13 @@ class CDSAXS_Model:
                             idx = int(parts[1])
                             field = parts[2]
                             trap_opt_fields.setdefault(idx, set()).add(field)
+                    elif pname.startswith('trap2_'):
+                        # Second-stack trapezoid fields for SRM models
+                        parts = pname.split('_')
+                        if len(parts) >= 3 and parts[1].isdigit():
+                            idx = int(parts[1])
+                            field = parts[2]
+                            trap2_opt_fields.setdefault(idx, set()).add(field)
 
                 # If no trap_* parameters are optimizable, skip detailed trapezoid printing
                 if trap_opt_fields:
@@ -905,6 +913,52 @@ class CDSAXS_Model:
                                     f"Trap {i} {field_label:<8} {initial_val:<12.4f} {lower_str:<12} "
                                     f"{colored_value:<12} {upper_str:<12}"
                                 )
+
+                # If second-stack trapezoids are optimizable, print them too
+                if trap2_opt_fields:
+                    initial_traps2 = initial_model_params.get('trapezoids_2', [])
+                    current_traps2 = self.model_params.get('trapezoids_2', [])
+
+                    label_map2 = {
+                        'width': 'Width',
+                        'height': 'Height',
+                    }
+
+                    for i in sorted(trap2_opt_fields.keys()):
+                        if i < len(initial_traps2) and i < len(current_traps2):
+                            initial_trap2 = initial_traps2[i]
+                            current_trap2 = current_traps2[i]
+
+                            for field in sorted(trap2_opt_fields[i]):
+                                if field not in initial_trap2 or field not in current_trap2:
+                                    continue
+
+                                param_name = f"trap2_{i}_{field}"
+                                initial_val = initial_trap2[field]
+
+                                if param_name in optimized_values:
+                                    current_val = optimized_values[param_name]
+                                else:
+                                    current_val = current_trap2[field]
+
+                                if initial_val is None or current_val is None:
+                                    continue
+
+                                param_info = optimization_params.get(param_name, {})
+                                lower_bound = param_info.get('min')
+                                upper_bound = param_info.get('max')
+                                colored_value = self._get_colored_value(
+                                    current_val, lower_bound, upper_bound, boundary_threshold, use_colors
+                                )
+
+                                lower_str = f"{lower_bound:.4f}" if lower_bound is not None else "N/A"
+                                upper_str = f"{upper_bound:.4f}" if upper_bound is not None else "N/A"
+
+                                field_label = label_map2.get(field, field.capitalize())
+                                print(
+                                    f"Trap2 {i} {field_label:<6} {initial_val:<12.4f} {lower_str:<12} "
+                                    f"{colored_value:<12} {upper_str:<12}"
+                                )
             
             # Print cylinder parameters
             elif self.geometry == 'cylinder':
@@ -954,8 +1008,9 @@ class CDSAXS_Model:
                             print(f"Cyl {i} Height{'':<8} {initial_val:<12.4f} {lower_str:<12} "
                                 f"{colored_value:<12} {upper_str:<12}")
             
-            # Print global parameters (DW, I0)
-            for param in ['DW', 'I0']:
+            # Print global parameters (DW, I0) and SRM scalars if present
+            for param in ['DW', 'I0', 'n_stacks', 'stack_spacing',
+                          'n_stacks_2', 'stack_spacing_2', 'x_offset_2']:
                 if param in initial_model_params and param in self.model_params:
                     initial_val = initial_model_params[param]
 
@@ -6941,11 +6996,28 @@ class CDSAXS_Model:
             self.model_params = original_params
             self.update_traditional_from_model_params()
     
-    def plot_mcmc_uncertainty_envelope_percentile3(self, mcmc_results, n_samples=100, n_slices=101, 
-                                                   confidence_levels=[0.5, 0.9, 0.95], plot_results=True, 
-                                                   figsize=(10, 6), show_best_fit=True, show_mean=True,
-                                                   show_base=True, colors=None, layer_indices=None, layer_positions=None,
-                                                   arbitrary_heights=None):
+    def plot_mcmc_uncertainty_envelope_percentile3(
+        self,
+        mcmc_results,
+        n_samples=100,
+        n_slices=101,
+        confidence_levels=[0.5, 0.9, 0.95],
+        plot_results=True,
+        figsize=(10, 6),
+        show_best_fit=True,
+        show_mean=True,
+        show_base=True,
+        colors=None,
+        layer_indices=None,
+        layer_positions=None,
+        arbitrary_heights=None,
+        n_trapezoid_stacks=1,
+        x_label=None,
+        y_label=None,
+        title=None,
+        xlim=None,
+        ylim=None,
+    ):
         """
         Plot uncertainty envelope around structure from MCMC results with multiple confidence levels.
         
@@ -7184,9 +7256,26 @@ class CDSAXS_Model:
             # Plot results if requested
             if plot_results:
                 self._plot_uncertainty_envelope_percentile3(
-                    results, confidence_levels, figsize, 
-                    show_best_fit, show_mean, show_base, colors, mcmc_results,
-                    layer_heights, layer_info, center_line, xi, yi, confidence_levels
+                    results,
+                    confidence_levels,
+                    figsize,
+                    show_best_fit,
+                    show_mean,
+                    show_base,
+                    colors,
+                    mcmc_results,
+                    layer_heights,
+                    layer_info,
+                    center_line,
+                    xi,
+                    yi,
+                    confidence_levels,
+                    n_trapezoid_stacks=n_trapezoid_stacks,
+                    x_label=x_label,
+                    y_label=y_label,
+                    title=title,
+                    xlim=xlim,
+                    ylim=ylim,
                 )
             
             return results
@@ -7716,10 +7805,29 @@ class CDSAXS_Model:
                                       colors, conf_percent, mcmc_results, 
                                       'Combined Envelopes')
     
-    def _plot_uncertainty_envelope_percentile3(self, results, confidence_levels, figsize,
-                                               show_best_fit, show_mean, show_base, colors, mcmc_results,
-                                               layer_heights=None, layer_info=None, center_line=None, 
-                                               xi=None, yi=None, conf_levels=None):
+    def _plot_uncertainty_envelope_percentile3(
+        self,
+        results,
+        confidence_levels,
+        figsize,
+        show_best_fit,
+        show_mean,
+        show_base,
+        colors,
+        mcmc_results,
+        layer_heights=None,
+        layer_info=None,
+        center_line=None,
+        xi=None,
+        yi=None,
+        conf_levels=None,
+        n_trapezoid_stacks=1,
+        x_label=None,
+        y_label=None,
+        title=None,
+        xlim=None,
+        ylim=None,
+    ):
         """Plot multiple confidence level envelopes with increasingly light shades of blue."""
         plt.figure(figsize=figsize)
         
@@ -7737,7 +7845,7 @@ class CDSAXS_Model:
         else:
             fill_colors = base_colors[:n_levels]
         
-        # Plot envelopes from inner to outer (smallest to largest confidence level)
+        # Plot envelopes from inner to outer (smallest to largest confidence level) for the base stack
         for idx, conf_level in enumerate(sorted_levels):
             conf_percent = int(conf_level * 100)
             result = results[conf_level]
@@ -7777,6 +7885,81 @@ class CDSAXS_Model:
                             color='steelblue', linewidth=1, linestyle='--', 
                             alpha=0.8, zorder=n_levels + 2)
         
+        # Optional: repeat envelopes for additional trapezoid stacks, shifted by Pitch
+        try:
+            n_stacks = int(max(1, n_trapezoid_stacks))
+        except Exception:
+            n_stacks = 1
+
+        pitch = None
+        if n_stacks > 1:
+            # 1) Explicit pitch from model_params
+            if hasattr(self, "model_params") and isinstance(self.model_params, dict):
+                if "Pitch" in self.model_params and self.model_params["Pitch"] is not None:
+                    try:
+                        pitch = float(self.model_params["Pitch"])
+                    except Exception:
+                        pitch = None
+            # 2) Fallback to attribute
+            if pitch is None and hasattr(self, "Pitch") and self.Pitch is not None:
+                try:
+                    pitch = float(self.Pitch)
+                except Exception:
+                    pitch = None
+            # 3) As a last resort, estimate from Qx sampling (ΔQx ≈ 2π / Pitch)
+            if (
+                pitch is None
+                and hasattr(self, "Qx")
+                and self.Qx is not None
+                and isinstance(self.Qx, np.ndarray)
+                and self.Qx.size > 1
+            ):
+                try:
+                    qx_line = self.Qx[0, :]
+                    qx_line = qx_line[np.isfinite(qx_line)]
+                    qx_line = qx_line[np.abs(qx_line) > 1e-6]
+                    qx_unique = np.unique(np.round(qx_line, decimals=6))
+                    if qx_unique.size >= 2:
+                        dq = np.median(np.diff(np.sort(qx_unique)))
+                        if dq > 0:
+                            pitch = float(2 * np.pi / dq)
+                            # cache
+                            self.Pitch = pitch
+                            if hasattr(self, "model_params") and isinstance(self.model_params, dict):
+                                self.model_params["Pitch"] = pitch
+                except Exception:
+                    pitch = None
+
+        if n_stacks > 1 and pitch is not None:
+            for stack_idx in range(1, n_stacks):
+                offset = stack_idx * pitch
+                for idx, conf_level in enumerate(sorted_levels):
+                    conf_percent = int(conf_level * 100)
+                    result = results[conf_level]
+                    inner_combined = result["inner_combined"]
+                    outer_combined = result["outer_combined"]
+
+                    fill_color = fill_colors[idx]
+
+                    if outer_combined is not None and inner_combined is not None:
+                        shifted_outer = outer_combined.copy()
+                        shifted_inner = inner_combined.copy()
+                        shifted_outer[:, 0] += offset
+                        shifted_inner[:, 0] += offset
+
+                        combined_polygon = np.vstack(
+                            [shifted_outer, shifted_inner[::-1]]
+                        )
+                        plt.fill(
+                            combined_polygon[:, 0],
+                            combined_polygon[:, 1],
+                            alpha=0.3,
+                            color=fill_color,
+                            label=None,
+                            zorder=n_levels - idx,
+                            edgecolor=None,
+                        )
+
         # Use the center line from the first (or any) result
         if center_line is None:
             center_line = results[sorted_levels[0]]['center_line']
@@ -7793,8 +7976,22 @@ class CDSAXS_Model:
                 self._print_layer_x_positions(layer_info, center_line, xi, yi, conf_levels)
         
         # Add common plot elements
-        self._add_common_plot_elements_v3(center_line, show_best_fit, show_mean, show_base, 
-                                         colors, sorted_levels, mcmc_results)
+        self._add_common_plot_elements_v3(
+            center_line,
+            show_best_fit,
+            show_mean,
+            show_base,
+            colors,
+            sorted_levels,
+            mcmc_results,
+            x_label=x_label,
+            y_label=y_label,
+            title=title,
+            n_trapezoid_stacks=n_stacks,
+            pitch=pitch,
+            xlim=xlim,
+            ylim=ylim,
+        )
     
     def _plot_layer_boundary_line(self, layer_height, center_line, label='Layer Boundary'):
         """
@@ -7980,70 +8177,225 @@ class CDSAXS_Model:
         
         print("\n" + "=" * 80)
     
-    def _add_common_plot_elements_v3(self, center_line, show_best_fit, show_mean, show_base,
-                                    colors, confidence_levels, mcmc_results):
+    def _add_common_plot_elements_v3(
+        self,
+        center_line,
+        show_best_fit,
+        show_mean,
+        show_base,
+        colors,
+        confidence_levels,
+        mcmc_results,
+        x_label=None,
+        y_label=None,
+        title=None,
+        n_trapezoid_stacks=1,
+        pitch=None,
+        xlim=None,
+        ylim=None,
+    ):
         """Add common plot elements for V3 (mean structure, base line, best fit) with filtered legend."""
-        # Plot mean structure if requested
+        # Determine number of stacks and pitch for replication
+        try:
+            n_stacks = int(max(1, n_trapezoid_stacks))
+        except Exception:
+            n_stacks = 1
+
+        if n_stacks <= 1:
+            offsets = [0.0]
+        else:
+            if pitch is None:
+                # Try to get pitch from attributes if not provided
+                if hasattr(self, "model_params") and isinstance(self.model_params, dict):
+                    if "Pitch" in self.model_params and self.model_params["Pitch"] is not None:
+                        try:
+                            pitch = float(self.model_params["Pitch"])
+                        except Exception:
+                            pitch = None
+                if pitch is None and hasattr(self, "Pitch") and self.Pitch is not None:
+                    try:
+                        pitch = float(self.Pitch)
+                    except Exception:
+                        pitch = None
+            if pitch is None:
+                offsets = [0.0]
+                n_stacks = 1
+            else:
+                offsets = [i * pitch for i in range(n_stacks)]
+
+        # Plot mean structure if requested (replicated over stacks)
         if show_mean:
-            plt.plot(center_line[:, 0], center_line[:, 1], 
-                    color=colors['mean'], linewidth=1.5, 
-                    label='Mean Structure', zorder=100)
+            for offset in offsets:
+                shifted_center = center_line.copy()
+                shifted_center[:, 0] = shifted_center[:, 0] + offset
+                plt.plot(
+                    shifted_center[:, 0],
+                    shifted_center[:, 1],
+                    color=colors["mean"],
+                    linewidth=1.5,
+                    label="Mean Structure" if offset == 0 else None,
+                    zorder=100,
+                )
         
         # Add base line connecting left and right sides
         if show_base:
-            # Find the leftmost and rightmost points at the base (y=0)
+            # Find the leftmost and rightmost points at the base (y=0) for the base stack
             base_indices = np.where(np.abs(center_line[:, 1]) < 1e-6)[0]
             if len(base_indices) >= 2:
                 base_x_coords = center_line[base_indices, 0]
-                x_left = np.min(base_x_coords)
-                x_right = np.max(base_x_coords)
-                plt.plot([x_left, x_right], [0, 0], 
-                        color=colors['structure'], linewidth=1.5, 
-                        alpha=0.8, zorder=1)
+                base_x_left = np.min(base_x_coords)
+                base_x_right = np.max(base_x_coords)
             else:
                 # Fallback: use the width of the structure at the base
                 n_slices = len(center_line) // 2
-                x_left = center_line[0, 0]
-                x_right = center_line[n_slices, 0]
-                plt.plot([x_left, x_right], [0, 0], 
-                        color=colors['structure'], linewidth=1.5, 
-                        alpha=0.8, zorder=1)
+                base_x_left = center_line[0, 0]
+                base_x_right = center_line[n_slices, 0]
+
+            for offset in offsets:
+                x_left = base_x_left + offset
+                x_right = base_x_right + offset
+                plt.plot(
+                    [x_left, x_right],
+                    [0, 0],
+                    color=colors["structure"],
+                    linewidth=1.5,
+                    alpha=0.8,
+                    zorder=1,
+                )
         
-        # Optionally overlay the best-fit structure from MCMC (no label)
+        # Optionally overlay the best-fit structure from MCMC (replicated over stacks, no label)
         if show_best_fit:
             try:
-                best_params = mcmc_results.get('best_params', None)
+                best_params = mcmc_results.get("best_params", None)
                 if best_params is not None:
-                    param_names = mcmc_results['param_names']
+                    param_names = mcmc_results["param_names"]
                     original_params = self.model_params.copy()
                     try:
                         self._apply_mcmc_parameters(best_params, param_names)
                         # Extract best-fit structure
-                        if self.geometry in ['trapezoid', 'sige']:
+                        if self.geometry in ["trapezoid", "sige"]:
                             heights, widths = self._extract_structure_for_uncertainty()
-                            # Plot trapezoid outline using existing method (no label)
-                            self._plot_trapezoid_outline(widths, heights, 
-                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
-                                                       label='', zorder=101)
-                        elif self.geometry == 'cylinder':
+                            # Calculate cumulative heights
+                            trap_heights = np.zeros(len(heights) + 1)
+                            for i in range(len(heights)):
+                                trap_heights[i + 1] = trap_heights[i] + heights[i]
+
+                            for offset in offsets:
+                                x_coords = []
+                                y_coords = []
+
+                                # Bottom edge
+                                x_coords.extend(
+                                    [-widths[0] / 2 + offset, widths[0] / 2 + offset]
+                                )
+                                y_coords.extend([0, 0])
+
+                                # Right edge going up
+                                for i in range(len(heights)):
+                                    x_coords.extend(
+                                        [
+                                            widths[i] / 2 + offset,
+                                            widths[i + 1] / 2 + offset,
+                                        ]
+                                    )
+                                    y_coords.extend(
+                                        [trap_heights[i], trap_heights[i + 1]]
+                                    )
+
+                                # Top edge
+                                x_coords.extend(
+                                    [
+                                        widths[-1] / 2 + offset,
+                                        -widths[-1] / 2 + offset,
+                                    ]
+                                )
+                                y_coords.extend([trap_heights[-1], trap_heights[-1]])
+
+                                # Left edge going down
+                                for i in range(len(heights) - 1, -1, -1):
+                                    x_coords.extend(
+                                        [
+                                            -widths[i + 1] / 2 + offset,
+                                            -widths[i] / 2 + offset,
+                                        ]
+                                    )
+                                    y_coords.extend(
+                                        [trap_heights[i + 1], trap_heights[i]]
+                                    )
+
+                                # Close the shape
+                                x_coords.append(-widths[0] / 2 + offset)
+                                y_coords.append(0)
+
+                                plt.plot(
+                                    x_coords,
+                                    y_coords,
+                                    color=colors["best_fit"],
+                                    linewidth=1.0,
+                                    linestyle="-",
+                                    label="",
+                                    zorder=101,
+                                )
+                        elif self.geometry == "cylinder":
                             heights, radii = self._extract_structure_for_uncertainty()
-                            # Plot cylinder outline using existing method (no label)
-                            self._plot_cylinder_outline(radii, heights,
-                                                       color=colors['best_fit'], linewidth=1.0, linestyle='-',
-                                                       label='', zorder=101)
+                            cyl_heights = np.zeros(len(heights) + 1)
+                            for i in range(len(heights)):
+                                cyl_heights[i + 1] = cyl_heights[i] + heights[i]
+
+                            for offset in offsets:
+                                # Right side
+                                for i in range(len(heights)):
+                                    plt.plot(
+                                        [radii[i] + offset, radii[i + 1] + offset],
+                                        [cyl_heights[i], cyl_heights[i + 1]],
+                                        color=colors["best_fit"],
+                                        linewidth=1.0,
+                                        linestyle="-",
+                                        label="" if (i == 0 and offset == 0) else None,
+                                        zorder=101,
+                                    )
+                                # Left side
+                                for i in range(len(heights)):
+                                    plt.plot(
+                                        [-radii[i] + offset, -radii[i + 1] + offset],
+                                        [cyl_heights[i], cyl_heights[i + 1]],
+                                        color=colors["best_fit"],
+                                        linewidth=1.0,
+                                        linestyle="-",
+                                        label=None,
+                                        zorder=101,
+                                    )
+                                # Horizontal lines
+                                for i in range(len(radii)):
+                                    plt.plot(
+                                        [-radii[i] + offset, radii[i] + offset],
+                                        [cyl_heights[i], cyl_heights[i]],
+                                        color=colors["best_fit"],
+                                        linewidth=1.0,
+                                        linestyle="-",
+                                        label=None,
+                                        zorder=101,
+                                    )
                     finally:
                         self.model_params = original_params
                         self.update_traditional_from_model_params()
             except Exception as e:
                 print(f"Warning: Could not plot best-fit structure: {e}")
         
-        # Get max confidence level for title
+        # Get max confidence level for default title
         max_conf = int(max(confidence_levels) * 100)
         
-        plt.xlabel('x (Å)')
-        plt.ylabel('y (Å)')
-        plt.title(f'MCMC Uncertainty Envelopes (Percentile-based, up to {max_conf}% CI)')
-        
+        if x_label is None:
+            x_label = "x (Å)"
+        if y_label is None:
+            y_label = "y (Å)"
+        if title is None:
+            title = f"MCMC Uncertainty Envelopes (Percentile-based, up to {max_conf}% CI)"
+
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        plt.title(title)
+
         # Filter legend to only show mean structure and uncertainty envelopes (no layer boundaries)
         handles, labels = plt.gca().get_legend_handles_labels()
         filtered_handles = []
@@ -8055,7 +8407,16 @@ class CDSAXS_Model:
         plt.legend(filtered_handles, filtered_labels, loc='best', fontsize=8)
         
         plt.grid(True, alpha=0.3)
-        plt.axis('equal')
+
+        # Use equal aspect only if user did not specify explicit axis limits
+        if xlim is None and ylim is None:
+            plt.axis('equal')
+        else:
+            # Respect user-provided limits, optionally fill in missing one from equal
+            if xlim is not None:
+                plt.xlim(xlim)
+            if ylim is not None:
+                plt.ylim(ylim)
         plt.tight_layout()
         plt.show()
     
