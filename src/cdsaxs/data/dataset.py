@@ -820,9 +820,11 @@ class ReducedSlices():
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
+            offset_axis ='qsy',
+            export_qr = False,
             decimals=5):
         """
-        Returns the slected reduced slices set currently stored in the
+        Outputs the slected reduced slices set currently stored in the
         dataset. The user must specify the index of the set of slices
         as well as the q_slice_axis. The number of decimal places the
         slice positions are rounded at can be changed with the
@@ -831,6 +833,11 @@ class ReducedSlices():
         NOTE: currently only a q_slice_axis of 'qsx' is accepted or
         formatted appropriately in the output file.
         TODO: generalize this in the future.
+
+        Returns
+        -------
+        Datas
+            Numpy array in the format used to export the data.
         """
 
         filtered_slices = self.data.copy()
@@ -855,28 +862,58 @@ class ReducedSlices():
             q = getattr(r_slice, q_axis)
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
+            q_offset = getattr(r_slice, offset_axis)
 
             # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]
+            q_offset = q_offset[sorted_indexes]
             Iq = Iq[sorted_indexes]
 
             select = (~np.isnan(Iq)) & (Iq > 0)
+            num_points = len(q[select])
 
-            new_q = np.hstack(
+            # Create columns for qx,qy,qr(if header axis == qsr is specified)
+
+            new_qx = np.hstack(                 #integration axis
+                ([r'$q_x (\AA^{-1})$'],
+                    [str(np.round(q_int, decimals))]*num_points,
+                    [""]*(length-len(q[select])))
+            )
+            new_qy = np.hstack(                 #offset axis
+                ([r'$q_y (\AA^{-1})$'],
+                    np.round(q_offset, decimals).astype(str)[select],
+                    [""]*(length-len(q_offset[select])))
+            )
+            new_qz = np.hstack(                 #q axis that data are plotted along
                 ([r'$q_z (\AA^{-1})$'],
                     np.round(q, decimals=decimals).astype(str)[select],
                     [""]*(length-len(q[select])))
-                    )
+            )
+
+            datas.append(new_qx)
+            datas.append(new_qy)
+            datas.append(new_qz)
+
+            if export_qr:
+                qsr = getattr(r_slice, 'qsr')
+                qsr = qsr[sorted_indexes]
+                new_qr = np.hstack(
+                    ([r'$q_r (\AA^{-1})$'],
+                        np.round(qsr, decimals=decimals).astype(str)[select],
+                        [""]*(length-len(qsr[select])))
+                )
+
+                datas.append(new_qr)
 
             new_Iq = np.hstack(
-                ([f'qx = {np.round(q_int, decimals)}'],
+                ([r'$I (A.U.)$'],
                     np.round(Iq, decimals=decimals).astype(str)[select],
                     [""]*(length-len(Iq[select])))
                     )
 
-            datas.append(new_q)
             datas.append(new_Iq)
 
         datas = np.array(datas).T
         np.savetxt(filepath, datas, delimiter=',', fmt='%s')
+        return datas

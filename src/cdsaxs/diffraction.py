@@ -324,6 +324,18 @@ def _detector_px_gamma_to_delta_rad(
     return delta
 
 
+def qyx_to_qr(qy, qx):
+    """
+    Calculates the radial q component from the x and y components.
+    """
+    qy = np.array(qy)
+    qx = np.array(qx)
+
+    qr = np.sqrt(qy**2 + qx**2)
+
+    return qr
+
+
 def detector_px_to_qbyxz(
         center_px: tuple,
         detector_shape_px: tuple,

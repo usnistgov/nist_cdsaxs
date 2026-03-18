@@ -19,6 +19,7 @@ def slice_reduced_dataset(
     q_widths=0.001,
     q_axis='qsx',
     slice_axis='qsz',
+    offset_axis='qsy',
     show_plot=True,
     plotting_kwargs={}
 ) -> ReducedSlices:
@@ -49,14 +50,21 @@ def slice_reduced_dataset(
         )
 
     integrated_axis = q_axis
-    q_axis = slice_axis
+    q_axis = slice_axis         #TODO: FIX arbitrary renaming to match rest of q conventions
 
     q_ranges = [
         (val-width/2, val+width/2) for val, width in zip(q_values, q_widths)
     ]
     slices = []
     for i, (qmin, qmax) in enumerate(q_ranges):
-        q = []
+        q_components = {
+            'qsx': [],
+            'qsy': [],
+            'qsz': [],
+            'qsr': [],
+            'qs': [],
+        }
+        # q_offset = []
         Iq = []
         for data in dataset.datas:
             selection = np.where(
@@ -66,20 +74,27 @@ def slice_reduced_dataset(
             if len(selection) > 0\
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
-                q.append(np.nanmean(getattr(data, q_axis)[selection]))
+                for qstr, qlist in q_components.items(): 
+                    qlist.append(
+                        np.nanmean(getattr(data, qstr)[selection]))
+                # q_offset.append(np.nanmean(getattr(data,offset_axis)[selection]))
                 Iq.append(np.nanmean(data.Iq[selection]))
                 # qsz.extend(list(data.qsz[selection]))
                 # Iq.extend(list(data.Iq[selection]))
 
         reduced_slice = ReducedData1DSlice(
-            q=np.array(q),
+            q=np.array(q_components[q_axis]),
             Iq=np.array(Iq),
             q_axis=q_axis,
             integrated_axis=integrated_axis,
+            offset_axis=offset_axis,
             slice_width=qmax-qmin
         )
         setattr(reduced_slice, integrated_axis,
-                np.round(np.mean([qmin, qmax]), 4))
+                np.round(np.mean([qmin, qmax]), 4)) #TODO: removing rounding to maintain data integrity
+        for qstr, qlist in q_components.items():
+            if qstr != integrated_axis:
+                setattr(reduced_slice, qstr, np.array(qlist))
         slices.append(reduced_slice)
 
     reduced_slices = ReducedSlices(slices=slices)

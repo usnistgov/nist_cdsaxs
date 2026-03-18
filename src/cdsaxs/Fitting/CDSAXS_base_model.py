@@ -259,6 +259,234 @@ class CDSAXS_Model:
         
         return True  # Return success
     
+    def importCDSAXS_reductionCode(self, Datafile):
+        """
+        Imports CDSAXS data from a reduction code file with input validation
+        
+        Expected file format with columns:
+        q_x, q_y, q_z, [q_r], I (repeating pattern)
+        
+        This function now physically checks the header strings to identify the presence
+        and position of q_x, q_y, q_z, q_r, and I columns.
+        
+        Parameters:
+        -----------
+        Datafile : str
+            Path to the data file (CSV format)
+            
+        """
+        # Check if input variable exists and is valid
+        if Datafile is None or not isinstance(Datafile, str):
+            raise ValueError("Datafile must be a valid file path")
+        
+        # Check if file exists
+        if not os.path.isfile(Datafile):
+            raise FileNotFoundError(f"File not found: {Datafile}")
+        
+        try:
+            # Import data using pandas
+            Data = pd.read_csv(Datafile)
+            
+            # Check if file has content
+            if Data.empty:
+                raise ValueError("The data file is empty")
+            
+            # Extract and analyze header strings
+            header_mapping = self._analyze_csv_header(Data.columns)
+            
+            if not header_mapping:
+                raise ValueError("Could not identify required columns (q_x, q_y, q_z, q_r (optional), I) in header")
+            
+            print(f"Header analysis results:")
+            print(f"  q_x columns: {header_mapping['q_x_indices']}")
+            print(f"  q_y columns: {header_mapping['q_y_indices']}")
+            print(f"  q_z columns: {header_mapping['q_z_indices']}")
+            print(f"  q_r columns: {header_mapping['q_r_indices']}")
+            print(f"  I columns: {header_mapping['I_indices']}")
+            print(f"  Number of cuts detected: {header_mapping['numbercuts']}")
+            
+            numbercuts = header_mapping['numbercuts']
+            
+            # Convert to numpy array
+            Data1 = Data.to_numpy()
+            
+            # Collect data from all slices using identified column positions
+            all_qx = []
+            all_qy = []
+            all_qz = []
+            all_intensity = []
+            
+            for i in range(numbercuts):
+                qx_col = header_mapping['q_x_indices'][i]
+                qy_col = header_mapping['q_y_indices'][i]
+                qz_col = header_mapping['q_z_indices'][i]
+                I_col = header_mapping['I_indices'][i]
+                
+                # Extract columns and convert to float
+                qx_data = Data1[:, qx_col]
+                qy_data = Data1[:, qy_col]
+                qz_data = Data1[:, qz_col]
+                I_data = Data1[:, I_col]
+                    
+                # Filter out empty strings and convert to float
+                valid_mask = (qz_data != '') & (I_data != '')
+                
+                if np.any(valid_mask):
+                    qx_vals = qx_data[valid_mask].astype(float)
+                    qy_vals = qy_data[valid_mask].astype(float)
+                    qz_vals = qz_data[valid_mask].astype(float)
+                    I_vals = I_data[valid_mask].astype(float)
+                    
+                    all_qx.append(qx_vals)
+                    all_qy.append(qy_vals)
+                    all_qz.append(qz_vals)
+                    all_intensity.append(I_vals)
+            
+            if not all_qz:
+                raise ValueError("No valid data found in file")
+            
+            # Find the maximum length to create properly sized arrays
+            max_length = max(len(arr) for arr in all_qz)
+            
+            # Initialize arrays with NaN
+            self.Qx = np.full([max_length, numbercuts], np.nan)
+            self.Qy = np.full([max_length, numbercuts], np.nan)
+            self.Qz = np.full([max_length, numbercuts], np.nan)
+            self.Intensity = np.full([max_length, numbercuts], np.nan)
+            
+            # Fill arrays with data
+            for i in range(numbercuts):
+                n_points = len(all_qz[i])
+                self.Qx[:n_points, i] = all_qx[i]
+                self.Qy[:n_points, i] = all_qy[i]
+                self.Qz[:n_points, i] = all_qz[i]
+                self.Intensity[:n_points, i] = all_intensity[i]
+            
+            # Check if Qx values are increasing along the columns and sort if needed
+            # Get the first row with valid data to check order
+            for row_idx in range(self.Qx.shape[0]):
+                valid_qx = self.Qx[row_idx, :][np.isfinite(self.Qx[row_idx, :])]
+                if len(valid_qx) > 0:
+                    # Check if Qx is not in ascending order
+                    if not np.all(np.diff(valid_qx) >= 0):
+                        # Get sort indices based on first valid row
+                        qx_first_valid = self.Qx[row_idx, :]
+                        # Create sort indices only for non-NaN values
+                        finite_mask = np.isfinite(qx_first_valid)
+                        finite_indices = np.where(finite_mask)[0]
+                        finite_values = qx_first_valid[finite_mask]
+                        
+                        # Get the order of finite values
+                        finite_sort_order = np.argsort(finite_values)
+                        
+                        # Create full sort indices
+                        sort_indices = np.arange(self.Qx.shape[1])
+                        sort_indices[finite_indices] = finite_indices[finite_sort_order]
+                        
+                        # Apply sorting to all arrays
+                        self.Qx = self.Qx[:, sort_indices]
+                        self.Qy = self.Qy[:, sort_indices]
+                        self.Qz = self.Qz[:, sort_indices]
+                        self.Intensity = self.Intensity[:, sort_indices]
+                    break
+            
+            # Calculate number of valid points
+            self.numberpoints = np.sum(np.isfinite(self.Intensity))
+            
+            # Check if we have valid data
+            if self.numberpoints == 0:
+                raise ValueError("No valid data points found after processing")
+            
+            # Process data according to geometry (implemented by subclasses)
+            self.process_imported_data()
+                
+        except pd.errors.EmptyDataError:
+            raise ValueError("The data file is empty or not properly formatted")
+        except pd.errors.ParserError:
+            raise ValueError("Error parsing the CSV file. Check the file format")
+        except Exception as e:
+            raise RuntimeError(f"Error processing data: {str(e)}")
+        
+        return True  # Return success
+    
+    def _analyze_csv_header(self, columns):
+        """
+        Analyze the CSV header to identify column positions for q_x, q_y, q_z, q_r, and I.
+        
+        Parameters:
+        -----------
+        columns : Index or list
+            Column names/headers from the CSV file
+            
+        Returns:
+        --------
+        dict or None
+            Dictionary with identified column indices and number of cuts,
+            or None if required columns cannot be identified
+        """
+        # Convert columns to list of lowercase strings for case-insensitive matching
+        col_list = [str(col).lower() for col in columns]
+        
+        # Find all indices for each column type
+        q_x_indices = []
+        q_y_indices = []
+        q_z_indices = []
+        q_r_indices = []
+        I_indices = []
+        
+        # Search for each column type in the header
+        for idx, col_lower in enumerate(col_list):
+            # Check for q_x
+            if 'q_x' in col_lower:
+                q_x_indices.append(idx)
+            # Check for q_y
+            elif 'q_y' in col_lower:
+                q_y_indices.append(idx)
+            # Check for q_z
+            elif 'q_z' in col_lower:
+                q_z_indices.append(idx)
+            # Check for q_r (radius - optional)
+            elif 'q_r' in col_lower:
+                q_r_indices.append(idx)
+            # Check for intensity
+            elif 'i' in col_lower:
+                I_indices.append(idx)
+            else:
+                print("Header does not match expected formatting: {col_lower}")
+        # Validate that we have the minimum required columns
+        if not (q_x_indices and q_y_indices and q_z_indices and I_indices):
+            print(f"Warning: Missing required columns")
+            print(f"  q_x found: {len(q_x_indices)}, q_y found: {len(q_y_indices)}, q_z found: {len(q_z_indices)}, I found: {len(I_indices)}")
+            return None
+        
+        # Verify that all column types have the same count (repeated pattern)
+        q_x_count = len(q_x_indices)
+        q_y_count = len(q_y_indices)
+        q_z_count = len(q_z_indices)
+        I_count = len(I_indices)
+        
+        if not (q_x_count == q_y_count == q_z_count == I_count):
+            print(f"Warning: Column counts are inconsistent:")
+            print(f"  q_x: {q_x_count}, q_y: {q_y_count}, q_z: {q_z_count}, I: {I_count}")
+            return None
+        
+        # Check if q_r count matches (it's optional)
+        if q_r_indices and len(q_r_indices) != q_x_count:
+            print(f"Warning: q_r column count ({len(q_r_indices)}) doesn't match other columns ({q_x_count})")
+            print(f"Ignoring q_r data")
+            q_r_indices = []  # Ignore q_r if counts don't match
+        
+        numbercuts = q_x_count
+        
+        return {
+            'q_x_indices': q_x_indices,
+            'q_y_indices': q_y_indices,
+            'q_z_indices': q_z_indices,
+            'q_r_indices': q_r_indices,
+            'I_indices': I_indices,
+            'numbercuts': numbercuts
+        }
+    
     def importCDSAXS_txtlegacy(self, intensity_file, qx_file, qz_file):
         """
         Imports CDSAXS data from three separate tab-delimited .txt files with input validation

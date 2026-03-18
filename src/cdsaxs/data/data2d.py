@@ -11,7 +11,8 @@ from cdsaxs.data.data_image import DataImage
 from cdsaxs.data.metadata import (
     METADATA_KEYWORDS,
     check_metadata,
-    correct_metadata_dtype
+    correct_metadata_dtype,
+    ACCEPTED_Q_AXES
 )
 from cdsaxs.data.reduced_data1d import ReducedData1D
 import cdsaxs.plotting.plotting as plotting
@@ -36,11 +37,7 @@ UPDATE_QS_TRIGGERS = [
     "sample_chi_deg", "sample_chi_offset_deg",
 ]
 
-ACCEPTED_Q_KEYWORDS = [
-    'qb', 'qbx', 'qby', 'qbz',
-    'qs', 'qsx', 'qsy', 'qsz',
-    'qd', 'qdx', 'qdy', 'qdz',
-]
+ACCEPTED_Q_KEYWORDS = ACCEPTED_Q_AXES
 
 
 def combine_data2d(*data2d: Data2D, name=None):
@@ -292,8 +289,8 @@ class Data2D(DataImage):
 
         # initialize all q attributes as None
         q_attributes = ['qby_1d', 'qbx_1d',
-                        'qb', 'qby', 'qbx', 'qbz',
-                        'qs', 'qsy', 'qsx', 'qsz']
+                        'qb', 'qby', 'qbx', 'qbz', 'qbr',
+                        'qs', 'qsy', 'qsx', 'qsz', 'qsr']
         for q_key in q_attributes:
             setattr(self, q_key, None)
 
@@ -532,6 +529,7 @@ class Data2D(DataImage):
             self.qby = None
             self.qbx = None
             self.qbz = None
+            self.qbr = None
             self.qby_1d = None
             self.qbx_1d = None
 
@@ -558,10 +556,13 @@ class Data2D(DataImage):
                 detector_y0_mm=self.metadata['detector_y0_mm'],
                 detector_phi_scale=self.metadata['detector_phi_scale'],
             )
+            qbr = diffraction.qyx_to_qr(qby, qbx)
+
             self.qb = qb
             self.qby = qby
             self.qbx = qbx
             self.qbz = qbz
+            self.qbr = qbr
 
             self.update_metadata({'center_px_detector': cd})
 
@@ -608,6 +609,7 @@ class Data2D(DataImage):
             self.qsy = None
             self.qsx = None
             self.qsz = None
+            self.qsr = None
             if not suppress_errors:
                 raise ValueError(
                     "The beam-based scattering vectors qb are not"
@@ -644,10 +646,12 @@ class Data2D(DataImage):
                     second_axis=self._sample_rotation['second_axis'],
                     third_axis=self._sample_rotation['third_axis'],
                 )
+                qsr = diffraction.qyx_to_qr(qsy, qsx)
                 self.qs = qs
                 self.qsy = qsy
                 self.qsx = qsx
                 self.qsz = qsz
+                self.qsr = qsr
 
     def scale_data(self, value, keyword=None):
         """
@@ -1002,7 +1006,7 @@ class Data2D(DataImage):
         if rotation_center is None:
             rotation_center = self.metadata.get('center_px', (0, 0))
 
-        for q in ['qs', 'qsx', 'qsy', 'qsz']:
+        for q in ['qs', 'qsx', 'qsy', 'qsz', 'qsr']:
             q_image = getattr(self, q)
             if q_image is not None:
                 if not use_pillow:
@@ -1718,7 +1722,7 @@ class Data2D(DataImage):
         )
 
         q_rois = {}
-        q_keys = ['qb', 'qby', 'qbx', 'qbz', 'qs', 'qsy', 'qsx', 'qsz']
+        q_keys = ['qb', 'qby', 'qbx', 'qbz', 'qs', 'qsy', 'qsx', 'qsz', 'qsr', 'qbr']
         for key in q_keys:
             q_roi = getattr(self, key)[
                 limits_qdy_px[0]: limits_qdy_px[1],
