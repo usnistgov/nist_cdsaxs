@@ -896,7 +896,7 @@ class ReducedSlices():
             datas.append(new_qz)
 
             if export_qr:
-                qsr = getattr(r_slice, offset_axis)
+                qsr = getattr(r_slice, 'qsr')
                 qsr = qsr[sorted_indexes]
                 new_qr = np.hstack(
                     ([r'$q_r (\AA^{-1})$'],
