@@ -50,7 +50,7 @@ def slice_reduced_dataset(
         )
 
     integrated_axis = q_axis
-    q_axis = slice_axis
+    q_axis = slice_axis         #TODO: FIX arbitrary renaming to match rest of q conventions
 
     q_ranges = [
         (val-width/2, val+width/2) for val, width in zip(q_values, q_widths)
@@ -93,7 +93,7 @@ def slice_reduced_dataset(
         setattr(reduced_slice, integrated_axis,
                 np.round(np.mean([qmin, qmax]), 4)) #TODO: removing rounding to maintain data integrity
         for qstr, qlist in q_components.items():
-            if qstr != q_axis:
+            if qstr != integrated_axis:
                 setattr(reduced_slice, qstr, np.array(qlist))
         slices.append(reduced_slice)
 
