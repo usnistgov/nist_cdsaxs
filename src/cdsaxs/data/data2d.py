@@ -61,7 +61,7 @@ def combine_data2d(*data2d: Data2D, name=None):
     instance provided. The exception is exposure_time_s which will
     be summed across the instances to accurately reflect the total
     measurement time. If only some of the instances have exposure time
-    in the metadata dictionary, this could give an artifically low value
+    in the metadata dictionary, this could give an artificially low value
     for exposure time.
 
     Parameters
@@ -122,7 +122,7 @@ class Data2D(DataImage):
     qbr : NDArray
         The radial q component of qb derived from sqrt(qbx^2 + qby^2).
     qs : NDArray
-        Scattering vector for each pixel in sample corodinate space.
+        Scattering vector for each pixel in sample coordinate space.
     qsy : NDArray
         The y-component of qs.
     qsx : NDArray
@@ -142,7 +142,7 @@ class Data2D(DataImage):
         especially when chi and omega are not zero.
     metadata : dict
         Relevant scattering metadata to the image acquisition. These are
-        key : value paris where the key must be selected from the
+        key : value pairs where the key must be selected from the
         metadata list below and the value format depends on the
         requirements of the specific parameter. See the user
         documentation for a thorough description of each of these
@@ -209,7 +209,7 @@ class Data2D(DataImage):
         of omega (rotationa about x-axis), chi (rotation about z-axis),
         and phi (rotation about y-axis).
 
-        If the sample undergoes a different series of rotaiton, this
+        If the sample undergoes a different series of rotation, this
         can be changed using _set_sample_rotation method, but we caution
         the user to only use this with a full understanding of its
         implications on the conversion from detector/beam-based
@@ -473,7 +473,7 @@ class Data2D(DataImage):
         overwrite : bool
             If set to True, any parameters provided to this method will
             overwrite the existing value in this instance if it already
-            exists in self.uer_params.
+            exists in self.user_params.
             Default value is True.
         """
         for key, value in params.items():
@@ -668,7 +668,7 @@ class Data2D(DataImage):
 
     def normalize_data(self, value, keyword=None):
         """
-        Scale the data by the recipricol of the specified value.or array
+        Scale the data by the reciprocal of the specified value.or array
         of values that match the dimensions of the data image.
         """
 
@@ -987,8 +987,8 @@ class Data2D(DataImage):
             Angle in degrees by which to rotate the image
             counterclockwise.
         rotation_center : tuple
-            Center of rotatation (y, x).
-            Default is the upper left pixel.
+            Center of rotation (y, x).
+            Default is the upper left pixel, (0,0).
         resampling_mode : str, optional
             Set the resampling method used during the rotation.
             The box rotation works by rotating the image underneath then
@@ -1042,7 +1042,7 @@ class Data2D(DataImage):
             Rotate the log-scale of your image. This could help resolve
             some artifacts caused by certain rotation sampling algorithms
             but you will lose any pixels that are negative (turned to nan).
-            Deafult value is False.
+            Default value is False.
         use_pillow : bool, optional
             If set to True, the algorithm will use the PILLOW package
             image rotation function instead of sklearn.transform.rotate.
@@ -1449,7 +1449,7 @@ class Data2D(DataImage):
 
             The center position can be set to a custom value in either
             the beam or sample-coordinate spaces. For example, you can
-            set the box center along the verticla y-axis by setting
+            set the box center along the vertical y-axis by setting
             'center_qdy' to either ('qby', value) or ('qsy', value).
             For example, you can selection a region of interest along
             the line where 'qsy' is equal to 0.1 by setting ('qsy', 0.1).
@@ -1659,13 +1659,13 @@ class Data2D(DataImage):
             intensity of an integrated box offset by the set number of
             pixels. If a single integer is provided, only one offset
             box will be used in the subtraction. If multiple are
-            provided, the average signal from mulitple integrated offset
+            provided, the average signal from multiple integrated offset
             boxes will be used in the subtraction.
             Note that the integration mode for these boxes will align
             with the selected mode for this integration function.
         interactive_plot : bool, optional
             If set to True, the plots returned will be interactive plots
-            built via Plotly. If set to False, the plots returned will be
+            built via matplotlib. If set to False, the plots returned will be
             static matplotlib figures.
             TODO: currently this is disabled and only True is accepted.
             Default value is True.
@@ -1889,20 +1889,20 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-        limits_qdy_px : iterable of int | int
-            Pixel range along qdy axis for integration box.
-            Half open range of [min, max).
-            If an integer value is given instead, the box limits will
-            be determined internally for a box of that width centered
-            around the beam center and offset by shift_box_qdy_px.
-        limits_qdx_px : iterable of int | int
-            Pixel range along qdx axis for integration box.
-            Half open range of [min, max).
-            If an integer value is given instead, the box limits will
-            be determined internally for a box of that width centered
-            around the beam center and offset by shift_box_qdx_px.
-            If an integer was given for qdy, an integer must be given
-            for qdx.
+        width_qdy_px : int, optional
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int, optional
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max), optional
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max), optional
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
         shift_box_qdy_px : int, optional
             Number of pixels to shift the box by in the positive qdy
             direction. A negative value will shift the box in the
@@ -1913,6 +1913,14 @@ class Data2D(DataImage):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
+     exclude_qdy : tuple[float, float], optional
+         Exclude an inclusive region of q from the calculation. 
+         This is generally used to exclude the immediate region 
+         around the beamstop.
+     exclude_qdx : tuple[float, float], optional
+         Exclude an inclusive region of q from the calculation. 
+         This is generally used to exclude the immediate region 
+         around the beamstop.
         log_scale : bool, optional
             If set to True, the image will be passed to the peak finding
             algorithm on a log sale of intensity. If set to False, the image
@@ -2052,7 +2060,7 @@ class Data2D(DataImage):
         to the nearest pixel.
 
         The old version of this function used scipy.signal find_peaks()
-        to determine the intiial peak position. It is possible to use
+        to determine the initial peak position. It is possible to use
         this algorithm by siwtching the algorithm keyword argument to
         'scipy'.
 
@@ -2069,13 +2077,11 @@ class Data2D(DataImage):
         otherwise specified.
 
         Parameters
-        ----------
-        box_dims : tuple[int, int], tuple[int, int]
-            Tuples that define the bounds along axis 0 and axis 1 of the
-            image, respectively, in pixel indices. The get_box_dims...
-            methods can be used to determine these bounds based on a
-            q-range or a specific box size.
-            The ranges are half open intervals [min, max).
+        ----------            
+         exclude_q : tuple[float, float], optional
+             Exclude an inclusive region of q along the peak axis from 
+             the calculation. This is generally used to exclude the immediate 
+             region around the beamstop.
         peak_axis : int, optional
             The axis along which the peaks are found. If axis 0 (qdy) is
             selected, the image will be integrated along axis 1 (qdx).
@@ -2104,6 +2110,54 @@ class Data2D(DataImage):
             locate the peaks. If set instead to 'scipy', the scipy.signal
             find_peaks() algorithm will be used instead.
 
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. Please see documentation
+        for the data2d.get_box_dims() method for more details.
+            
+        width_qdy_px : int, optional
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int, optional
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max), optional
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max), optional
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value), optional
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value), optional
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+            
         Other Parameters
         ----------------
         **kwargs
@@ -2333,11 +2387,6 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-
-        size_qdy_px : int
-            Box size in pixels along the qdy axis.
-        size_qdx_px : int
-            Box size in pixels along the qdx axis.
         update : bool
             If set to True, the found beam center will be updated in
             the data metadata as well as returned. If set to False,
@@ -2351,6 +2400,58 @@ class Data2D(DataImage):
             If no beam_center_guess is provided, this method will use
             the existing beam_center_px which will result in an error
             if it is not close enough to the actual center.
+         exclude_q : tuple[float, float], optional
+             Exclude an inclusive region of q from the calculation. 
+             This is generally used to exclude the immediate region 
+             around the beamstop.
+             
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. Please see documentation
+        for the data2d.get_box_dims() method for more details.
+            
+        width_qdy_px : int, optional
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int, optional
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max), optional
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max), optional
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value), optional
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value), optional
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
 
         Other Parameters
         ----------------
@@ -2523,10 +2624,6 @@ class Data2D(DataImage):
         ----------
         pitch_nm : float
             Known pitch of a reference sample in nanometers.
-        size_qdy_px : int
-            Box size in pixels along the qdy axis.
-        size_qdx_px : int
-            Box size in pixels along the qdx axis.
         update : bool
             If set to True, the found sdd will be updated in
             the data metadata as well as returned. If set to False,
@@ -2544,6 +2641,58 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
+         exclude_q : tuple[float, float], optional
+             Exclude an inclusive region of q from the calculation. 
+             This is generally used to exclude the immediate region 
+             around the beamstop.
+
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. Please see documentation
+        for the data2d.get_box_dims() method for more details.
+            
+        width_qdy_px : int, optional
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int, optional
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max), optional
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max), optional
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value), optional
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value), optional
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
 
         Other Parameters
         ----------------
@@ -2683,15 +2832,6 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-        size_qdy_px : int
-            Box size in pixels along the qdy axis.
-        size_qdx_px : int
-            Box size in pixels along the qdx axis.
-        peak_orders : list
-            A list of integers that specfies the peak orders found.
-            Default behavior is orders will start at n=1 and increase
-            by one order for every peak found on either side of beam
-            center.
         show_plot : bool
             If set to True, a first figure will display the scattering
             image overlaid with the integration box and markers on each
@@ -2699,6 +2839,58 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
+         exclude_q : tuple[float, float], optional
+             Exclude an inclusive region of q from the calculation. 
+             This is generally used to exclude the immediate region 
+             around the beamstop.
+
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. Please see documentation
+        for the data2d.get_box_dims() method for more details.
+            
+        width_qdy_px : int, optional
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int, optional
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max), optional
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max), optional
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value), optional
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value), optional
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
 
         Other Parameters
         ----------------
@@ -2819,15 +3011,6 @@ class Data2D(DataImage):
 
         Parameters
         ----------
-        size_qdy_px : int
-            Box size in pixels along the qdy axis.
-        size_qdx_px : int
-            Box size in pixels along the qdx axis.
-        peak_orders : list
-            A list of integers that specfies the peak orders found.
-            Default behavior is orders will start at n=1 and increase
-            by one order for every peak found on either side of beam
-            center.
         show_plot : bool
             If set to True, a first figure will display the scattering
             image overlaid with the integration box and markers on each
@@ -2835,7 +3018,55 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
-
+            
+        Parameters for Box Refinement
+        -----------------------------
+        The following keyword arguments are specific to defining the
+        box limits of the region of interest for integration. We caution
+        the user to consider which keyword arguments to select as not
+        all should be used simultaneously. Please see documentation
+        for the data2d.get_box_dims() method for more details.
+            
+        width_qdy_px : int, optional
+            Set the box width along the vertical axis of the
+            detector (qdy). It will be centered at the beam center
+            unless otherwise set.
+        width_qdx_px : int, optional
+            Set the box width along the horizontal axis of the
+            detector (qdx). It will be centered at the beam center
+            unless otherwise set.
+        range_qdy_px : (min, max), optional
+            Set the box pixel range along the vertical axis of the
+            detector (qdy). This is a half open range [min, max).
+        range_qdx_px : (min, max), optional
+            Set the box pixel range along the horizontal axis of the
+            detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value), optional
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value), optional
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
+        shift_box_qdy_px : int, optional
+            Number of pixels to shift the box by in the positive qdy
+            direction. A negative value will shift the box in the
+            negative qdy direction.
+            This is the last step performed in determining the box
+            dimensions, so all other limitations will be taken into
+            account first.
+            Default value is 0.
+        shift_box_qdx_px : int, optional
+            Number of pixels to shift the box by in the positive qdx
+            direction. A negative value will shift the box in the
+            negative qdx direction.
+            Default value is 0.
+            
         Other Parameters
         ----------------
         **kwargs
