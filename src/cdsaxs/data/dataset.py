@@ -426,7 +426,7 @@ class Dataset():
         Reset the scattering images to their original orientation
         removing any rotations or flips that may have been performed.
 
-        All transfomraitons to the scattering intensity will also be
+        All transformaitons to the scattering intensity will also be
         undone, including scale, normalize, add and subtract functions.
 
         This function will reset the images to their raw image and so
@@ -591,27 +591,27 @@ class Dataset():
         overdefined by the user, this method will prioritize the
         parameters in order of this list:
 
-        width_qdy_px : int
+        width_qdy_px : int | dict(int)
             Set the box width along the vertical axis of the
             detector (qdy). It will be centered at the beam center
             unless otherwise set.
-        width_qdx_px : int
+        width_qdx_px : int | dict(int)
             Set the box width along the horizontal axis of the
             detector (qdx). It will be centered at the beam center
             unless otherwise set.
-        range_qdy_px : (min, max)
+        range_qdy_px : (min, max) | dict((min,max))
             Set the box pixel range along the vertical axis of the
             detector (qdy). This is a half open range [min, max).
-        range_qdx_px : (min, max)
+        range_qdx_px : (min, max) | dict((min,max))
             Set the box pixel range along the horizontal axis of the
             detector (qdx). This is a half open range [min, max).
-        center_qdy : (keyword, value)
+        center_qdy : (keyword, value) | dict((keyword, value))
             Center the horizontal positioning of the box at another
             value other than qdy=0.
             This assumes that qby and qsy align with the horizontal
             image axis.
             The keyword should be 'qby' or 'qsy'.
-        center_qdx : (keyword, value)
+        center_qdx : (keyword, value) | dict((keyword, value))
             Center the vertical positioning of the box at another
             value other than qdx=0.
             This assumes that qbx and qsx align with the vertical
@@ -915,12 +915,16 @@ class ReducedSlices():
         filter_by_q : dict
             Dictionary of q component and range (min, max) to filter
             the slices by.
+        TODO: Add more options for exporting axis. Currently hardcoded.
         q_axis : str
             Currently only 'qsz' is accepted.
+            Default is 'qsz'.
         integrated_axis : str
             Currently only 'qsx' is accepted.
+            Default is 'qsx'.
         offset_axis : str
             Currently only 'qsy' is accepted.
+            Default is 'qsy'.
         export_qr : bool
             If set to True, qsr will also be exported in the file.
         decimals : int
