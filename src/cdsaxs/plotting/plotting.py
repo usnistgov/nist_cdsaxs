@@ -1602,7 +1602,8 @@ def plot_reduced_slices(
         filter_by_q={},
         log_scale=True,
         offset_order=0,
-        offset_value=0):
+        offset_value=0,
+        **kwargs):
     """
     Plot the reduced slices using matplotlib.pyplot.errorbar().
 
@@ -1656,7 +1657,7 @@ def plot_reduced_slices(
         ax.errorbar(q[sort_q],
                     Iq[sort_q]*10**(i*-1*offset_order) + offset_value*i,
                     label=getattr(data, integrated_axis),
-                    fmt='o-')
+                    fmt='o-', **kwargs)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1),
               title=plotting_tools.generate_formatted_axis_label(integrated_axis))
@@ -1668,4 +1669,4 @@ def plot_reduced_slices(
     ax.set_xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
 
     plt.close()
-    return fig
+    return fig, ax
