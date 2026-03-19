@@ -67,11 +67,15 @@ class Data1D():
         qsy : Scattering vector component along y axis of sample frame.
         qsx : Scattering vector component along x axis of sample frame.
         qsz : Scattering vector component along z axis of sample frame.
+        qsr : Scattering vector component derived from
+            sqrt(qsx^2 + qsy^2).
         qs  : Scattering vector in the sample frame.
         qby : Scattering vector component along y axis of the lab frame
         qbx : Scattering vector component along x axis of the lab frame
         qbz : Scattering vector comopnent along z axis of the lab frame; in
             the lab frame the beam path is aligned to the z-axis
+        qbr : Scattering vector component derived from
+            sqrt(qbx^2 + qby^2).
         qb  : Scattering vector in the beam/lab frame; when the detector is
             positioned normal to the incident beam, the lab and detector
             coordinates will align
@@ -157,7 +161,7 @@ class Data1D():
             mode='linear',
             q_axis=None):
         """
-        Linearly interpolatexs the one-dimensional dataset and extract
+        Linearly interpolates the one-dimensional dataset and extract
         intensity values at the specified interpolated q-values. Please
         refer to the numpy.interp documentation for in-depth description
         of the interpolation method used.
@@ -371,20 +375,95 @@ class Data1D():
     def plot_data(
             self,
             q_axis=None,
-            log_scale=True,
+            log_scale_y=False,
+            log_scale_x=False,
             show_legend=True,
             xlim=None,
             ylim=None,
+            xlabel=None,
+            ylabel="Intensity",
+            xticks=None,
+            xticks_labels=None,
+            yticks=None,
+            yticks_labels=None,
+            fig=None,
+            title=None,
             **kwargs
     ):
+        """
+        Plot the 1D data using matplotlib.pyplot.errorbar.
+
+        Parameters
+        ----------
+        q_axis : str
+            Set the q component to be used along the x-axis of the plot.
+            If left as the default, None, the primary q_axis of data1d
+            will be used.
+        log_scale_y : bool, optional
+            Convert y-axis to a log scale by setting to true.
+            Default value is False.
+        log_scale_x : bool, optional
+            Convert x-axis to a log scale by setting to true.
+            Default value is False.
+        show_legend : bool, optional
+            Show the legend on the plot by setting to True.
+            Default value is True.
+        xlim : tuple, list, optional
+            Set the plotting range along the x-axis, (xmin, xmax).
+            Default is None.
+        ylim : tuple, list, optional
+            Set the plotting range along the y-axis, (ymin, ymax).
+            Default is None.
+        xlabel : str, optional
+            Set the label on the x-axis.
+            Default will be a formatted name of the selected q_axis.
+        ylabel : str, optional
+            Set the label on the y-axis.
+            Default is None.
+        xticks : list, optional
+            Specify the tick locations along the x-axis.
+            Default is None.
+        xticks_labels : list, optional
+            Specify the labels for each tick location specified in xticks.
+            Default is None.
+        yticks : list, optional
+            Specify the tick locations along the y-axis.
+            Default is None.
+        yticks_labels : list, optional
+            Specify the labels for each tick location specified in yticks.
+            Default is None.
+        fig : matplotlib.figure, optional
+            Pass along the matplotlib figure instance if the trace should
+            be added to the figure rather than craeting a new one.
+            Default is None.
+        title : str, optional
+            Set the plot title.
+            Default is None.
+
+        **kwargs
+        --------
+        Any additional keyword arguments accepted by the
+        matplotlib.pyplot.errorbar() method will be passed through
+        to the plotting function. See the matplotlib documentation
+        for more information.
+        """
 
         fig = plotting.plot_data1d(
             self,
             q_axis=q_axis,
-            log_scale=log_scale,
+            log_scale_y=log_scale_y,
+            log_scale_x=log_scale_x,
             show_legend=show_legend,
             xlim=xlim,
             ylim=ylim,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            xticks=xticks,
+            xticks_labels=xticks_labels,
+            yticks=yticks,
+            yticks_labels=yticks_labels,
+            fig=fig,
+            title=title,
             **kwargs
         )
 

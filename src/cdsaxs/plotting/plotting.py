@@ -1,14 +1,10 @@
 """
 Plotting functions for cdsaxs data classes.
 """
-
-import warnings
-
 import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
 import numpy as np
 
-from cdsaxs.data.metadata import METADATA_KEYWORDS
 import cdsaxs.plotting._plotting_tools as plotting_tools
 from cdsaxs.plotting._plotting_kwargs import (
     ERRORBAR_KWARGS,
@@ -36,6 +32,64 @@ def plot_image(
         color_nan='red',
         **kwargs
         ):
+    """
+    Plot image data using matplotlib.pyplot.imshow().
+
+    Parameters
+    ----------
+    image : NDArray
+        Two dimensional array of intensities; image to be displayed.
+    fig : matplotlib.figure
+        Pass a figure instance to add to an existing plot rather than
+        creating a new one with this function.
+    mask : NDArray
+        Two dimensional boolean array where pixels set to True are
+        masked.
+    log_scale : bool
+        If set to True, intensity values are plotted on a log scale.
+        Default value is True.
+    axis0_vals : list, NDArray
+        One dimensional list of values that cooresponds to axis 0 of
+        the image.
+    axis0_type : str
+        Defines the y-axis q-component or the label for the y-axis.
+    axis1_vals : list, NDArray
+        One dimensional list of values that corresponds to axis 1 of
+        the image.
+    axis1_type : str
+        Defines the x-axis q-component or the label for the x-axis.
+    cmap : str
+        Matplotlib colormap name for the image intensity.
+        Default is 'viridis'.
+    aspect : str, float
+        Define the aspect ratio of the pixels. 
+        'equal' : default, ensures that the pixels are square
+        'auto' : changes the aspect ratio to fit within the plotting
+            area of the figure
+        float : manually set the aspct ratio of the pixel height vs width
+    vmin : float
+        Set the minimum value of the intensity color range.
+    vmax : float
+        Set the maximum value of the intensity color range.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+
+    **kwargs
+    --------
+    Any of the keyword arguments for matplotlib.pyplot.imshow can be
+    used. See the matplotlib documentation for more information.
+    """
 
     # determine colorbar range
     # if log_scale make sure that vmin is 0.1 at a minimum
@@ -158,6 +212,27 @@ def plot_image_add_roi(
         fmt='-',
         **kwargs
 ):
+    """
+    Add a region of interest outline onto a scattering image plot.
+
+    Parameters
+    ----------
+    limits_axis0 : list
+        Indices range to specify the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Indices range to specify the ROI along axis 1, [min, max).
+    fig : matplotlib.figure
+        The figure object with an image plot that the ROI should be
+        added to.
+    show_legend : bool
+        If set to True, the legend will be shown.
+    zorder : int
+        Set the layering of different traces in the figure.
+    fmt : str
+        The line format for the region outline.
+        Default is '-'.
+        Use accepted formats for matplotlib.errorbar.
+    """
     fig = plt.figure(fig)
 
     xmin, xmax = limits_axis1
@@ -208,6 +283,59 @@ def plot_errorbar(
         title=None,
         **kwargs
 ):
+    """
+    Plot the 1D data x, y using matplotlib.pyplot.errorbar().
+
+    Parameters
+    ----------
+    x, y : array-like
+        The data points to be plotted.
+    log_scale_y : bool, optional
+        Convert y-axis to a log scale by setting to true.
+        Default value is False.
+    log_scale_x : bool, optional
+        Convert x-axis to a log scale by setting to true.
+        Default value is False.
+    show_legend : bool, optional
+        Show the legend on the plot by setting to True.
+        Default value is True.
+    xlim : tuple, list, optional
+        Set the plotting range along the x-axis, (xmin, xmax).
+        Default is None.
+    ylim : tuple, list, optional
+        Set the plotting range along the y-axis, (ymin, ymax).
+        Default is None.
+    xlabel : str, optional
+        Set the label on the x-axis.
+        Default is None.
+    ylabel : str, optional
+        Set the label on the y-axis.
+        Default is None.
+    xticks : list, optional
+        Specify the tick locations along the x-axis.
+        Default is None.
+    xticks_labels : list, optional
+        Specify the labels for each tick location specified in xticks.
+        Default is None.
+    yticks : list, optional
+        Specify the tick locations along the y-axis.
+        Default is None.
+    yticks_labels : list, optional
+        Specify the labels for each tick location specified in yticks.
+        Default is None.
+    fig : matplotlib.figure, optional
+        Pass along the matplotlib figure instance if the trace should
+        be added to the figure rather than craeting a new one.
+        Default is None.
+    title : str, optional
+        Set the plot title.
+        Default is None.
+
+    **kwargs
+    --------
+    Any additional keyword arguments accepted by
+    matplotlib.pyplot.errorbar can be provided.
+    """
 
     fig = plt.figure(fig)
 
@@ -221,9 +349,9 @@ def plot_errorbar(
         plt.xscale('log')
 
     if xlim is not None:
-        plt.xlim(xlim)
+        plt.xlim(*xlim)
     if ylim is not None:
-        plt.ylim(ylim)
+        plt.ylim(*ylim)
 
     if show_legend:
         plt.legend()
@@ -248,7 +376,9 @@ def plot_errorbar(
 
 def plot_data2d(
         data2d,
+        fig=None,
         log_scale=True,
+        show_q=True,
         cmap='viridis',
         aspect='equal',
         vmin=None,
@@ -256,18 +386,65 @@ def plot_data2d(
         color_mask='transparent',
         color_inf='black',
         color_nan='red',
-        fig=None,
         **kwargs
         ):
+    """
+    Plot the 2D data in Data2D using matplotlib.pyplot.imshow().
+
+    Parameters
+    ----------
+    data2d : Data2D
+        Instance of Data2D that contains the scattering image for plotting.
+    fig : matplotlib.figure
+        Pass a figure instance to add to an existing plot rather than
+        creating a new one with this function.
+    log_scale : bool
+        If set to True, intensity values are plotted on a log scale.
+        Default value is True.
+    show_q : bool
+        Shows the q components along x and y axes if available.
+        If set to False, the pixel indices will be shown instead.
+    cmap : str
+        Matplotlib colormap name for the image intensity.
+        Default is 'viridis'.
+    aspect : str, float
+        Define the aspect ratio of the pixels. 
+        'equal' : default, ensures that the pixels are square
+        'auto' : changes the aspect ratio to fit within the plotting
+            area of the figure
+        float : manually set the aspct ratio of the pixel height vs width
+    vmin : float
+        Set the minimum value of the intensity color range.
+    vmax : float
+        Set the maximum value of the intensity color range.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+
+    **kwargs
+    --------
+    Any of the keyword arguments for matplotlib.pyplot.imshow can be
+    used. See the matplotlib documentation for more information.
+    """
 
     fig = plot_image(
         data2d.image,
         mask=data2d.mask,
         log_scale=log_scale,
         title=f"Data2D: {data2d.name}",
-        axis0_vals=data2d.qby_1d,
+        axis0_vals=data2d.qby_1d if show_q else None,
         axis0_type='qdy',
-        axis1_vals=data2d.qbx_1d,
+        axis1_vals=data2d.qbx_1d if show_q else None,
         axis1_type='qdx',
         cmap=cmap,
         aspect=aspect,
@@ -286,13 +463,78 @@ def plot_data2d(
 def plot_data1d(
         data1d,
         q_axis=None,
-        log_scale=True,
+        log_scale_y=False,
+        log_scale_x=False,
         show_legend=True,
         xlim=None,
         ylim=None,
+        xlabel=None,
+        ylabel="Intensity",
+        xticks=None,
+        xticks_labels=None,
+        yticks=None,
+        yticks_labels=None,
         fig=None,
+        title=None,
         **kwargs
 ):
+    """
+    Plot the 1D data x, y using matplotlib.pyplot.errorbar().
+
+    Parameters
+    ----------
+    data1d : Data1D, list[Data1D]
+        Instance(s) of Data1D that contains the I vs. q data to be plotted.
+    q_axis : str
+        Set the q component to be used along the x-axis of the plot.
+        If left as the default, None, the primary q_axis of data1d
+        will be used.
+    log_scale_y : bool, optional
+        Convert y-axis to a log scale by setting to true.
+        Default value is False.
+    log_scale_x : bool, optional
+        Convert x-axis to a log scale by setting to true.
+        Default value is False.
+    show_legend : bool, optional
+        Show the legend on the plot by setting to True.
+        Default value is True.
+    xlim : tuple, list, optional
+        Set the plotting range along the x-axis, (xmin, xmax).
+        Default is None.
+    ylim : tuple, list, optional
+        Set the plotting range along the y-axis, (ymin, ymax).
+        Default is None.
+    xlabel : str, optional
+        Set the label on the x-axis.
+        Default will be a formatted name of the selected q_axis.
+    ylabel : str, optional
+        Set the label on the y-axis.
+        Default is None.
+    xticks : list, optional
+        Specify the tick locations along the x-axis.
+        Default is None.
+    xticks_labels : list, optional
+        Specify the labels for each tick location specified in xticks.
+        Default is None.
+    yticks : list, optional
+        Specify the tick locations along the y-axis.
+        Default is None.
+    yticks_labels : list, optional
+        Specify the labels for each tick location specified in yticks.
+        Default is None.
+    fig : matplotlib.figure, optional
+        Pass along the matplotlib figure instance if the trace should
+        be added to the figure rather than craeting a new one.
+        Default is None.
+    title : str, optional
+        Set the plot title.
+        Default is None.
+
+    **kwargs
+    --------
+    Any additional keyword arguments accepted by
+    matplotlib.pyplot.errorbar can be provided.
+    """
     fig = plt.figure(fig)
 
     if type(data1d) is not list:
@@ -302,16 +544,25 @@ def plot_data1d(
         if q_axis is None:
             q_axis = data.q_axis
 
+        if xlabel is None:
+            xlabel = plotting_tools.generate_formatted_axis_label(q_axis)
+
         plot_errorbar(
             x=getattr(data, q_axis),
             y=data._masked_Iq,
             fig=fig,
-            log_scale_y=log_scale,
+            log_scale_y=log_scale_y,
+            log_scale_x=log_scale_x,
             show_legend=show_legend,
             xlim=xlim,
             ylim=ylim,
-            xlabel=plotting_tools.generate_formatted_axis_label(q_axis),
-            ylabel="Intensity",
+            xlabel=xlabel,
+            ylabel=ylabel,
+            xticks=xticks,
+            xticks_labels=xticks_labels,
+            yticks=yticks,
+            yticks_labels=yticks_labels,
+            title=title,
             **kwargs
         )
 
@@ -335,6 +586,58 @@ def plot_qslice(
         color_slice='darkcyan',
         color_avg_background='grey',
         **kwargs):
+    """
+    Create the individual plots that show the integration of a scattering
+    image into a one-dimensional slice.
+
+    Parameters
+    ----------
+    qslice : ReducedData1D
+        Instance of ReducedData1D that is created when Data2D is
+        integrated along one of the axes.
+    log_scale : bool
+        If set to True, the data will be plotted on a log scale.
+    cmap : str
+        Colormap for intensity in image plots.
+        Any matplotlib colormap name is accepted.
+    vmin : float
+        Minimum value of the colormap.
+    vmax : float
+        Maximum value of the colormap.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+    xlim : tuple, list
+        Range along the x-axis for the 1D data.
+    ylim : tuple, list
+        Range along the y-axis for the 1D data.
+    show_backgrounds : bool
+        If set to True, the background slice information will also
+        be shown in the blots.
+    show_legend : bool
+        If set to True, the legends will be shown on the plots.
+    color_integration_box : str
+        Set the color of the region of interest outline.
+    color_background_box : str
+        Set the color of the region of interest outlines for the
+        background slices.
+    color_slice : str
+        Set the color of the trace for the one dimensional slice.
+    color_avg_background : str
+        Set the color of the background traces. Currently only one
+        color is accepted and all backgrounds will be displayed as
+        this color.
+    """
 
     # plot the image roi used in the integration
     fig_box = plot_image(
@@ -442,7 +745,68 @@ def plot_data2d_integrate_box(
         **kwargs
 ):
     """
+    Create all the plots that show the integration of a scattering image
+    into a one-dimensional slice.
+
+    Parameters
+    ----------
+    qslice : ReducedData1D
+        Instance of ReducedData1D that is created when Data2D is
+        integrated along one of the axes.
+    log_scale : bool
+        If set to True, the data will be plotted on a log scale.
+    cmap : str
+        Colormap for intensity in image plots.
+        Any matplotlib colormap name is accepted.
+    aspect : str
+        Set the aspect ratio of the pixels in the first imshow figure
+        where the entire scattering images is displayed.
+        Default is 'auto'. See matplotlib.pyplot.imshow for more
+        information.
+    aspect_box : str
+        Set he aspect ratio of the pixels in the second imshow figure
+        that only shows the region of interest from the scattering image.
+        Default is 'auto'.
+    vmin : float
+        Minimum value of the colormap.
+    vmax : float
+        Maximum value of the colormap.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+    xlim : tuple, list
+        Range along the x-axis for the 1D data.
+    ylim : tuple, list
+        Range along the y-axis for the 1D data.
+    show_backgrounds : bool
+        If set to True, the background slice information will also
+        be shown in the blots.
+    show_legend : bool
+        If set to True, the legends will be shown on the plots.
+    color_integration_box : str
+        Set the color of the region of interest outline.
+    color_background_box : str
+        Set the color of the region of interest outlines for the
+        background slices.
+    color_slice : str
+        Set the color of the trace for the one dimensional slice.
+    color_avg_background : str
+        Set the color of the background traces. Currently only one
+        color is accepted and all backgrounds will be displayed as
+        this color.
+
     **kwargs
+    --------
         Accepted keyword arguments to matplotlib.pyplot.errorbar
         function.
     """
@@ -522,6 +886,64 @@ def plot_data2d_find_peaks2d(
         color_integration_box='yellow',
         **kwargs
 ):
+    """
+    Plot of a scattering image overlaid with a region of interest
+    outline and points where a peak has been found.
+
+    Parameters
+    ----------
+    data2d : Data2D
+        Instance of Data2D that contains the scattering image for plotting.
+    peaks : NDArray
+        Two dimensional data of peak positions in y, x of the image.
+        These are in units of pixels and so they can be flaot values
+        and are not restricted to index integers.
+    limits_axis0 : list
+        Index range of the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Index range of the ROI along axis 1, [min, max).
+    log_scale : bool
+        If set to True, intensity values are plotted on a log scale.
+        Default value is True.
+    zoom_plot : bool
+        if set to True, the scattering image will be 'zoomed in' on a
+        region around the ROI so the peaks can be easily seen.
+    cmap : str
+        Matplotlib colormap name for the image intensity.
+        Default is 'viridis'.
+    aspect : str, float
+        Define the aspect ratio of the pixels. 
+        'equal' : default, ensures that the pixels are square
+        'auto' : changes the aspect ratio to fit within the plotting
+            area of the figure
+        float : manually set the aspct ratio of the pixel height vs width
+    vmin : float
+        Set the minimum value of the intensity color range.
+    vmax : float
+        Set the maximum value of the intensity color range.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+    color_peaks : str
+        Color of the markers that show where the located peaks are on
+        the scattering image.
+        Accepted strings are any of the matplotlib color names.
+        Default is 'yellow'.
+    color_integration_box : str
+        Color of the ROI outline that shows the search area for the
+        peaks. Accepted strings are any of the matplotlib color names.
+        Default value is 'yellow'.
+    """
 
     fig = plot_data2d(
         data2d,
@@ -586,6 +1008,66 @@ def plot_data2d_find_detector_rotation_correction(
         color_integration_box='yellow',
         **kwargs
 ):
+    """
+    Plot the peaks located in the region of interest of a scattering
+    image overlaid with a line fit to those peaks.
+
+    Parameters
+    ----------
+    data2d : Data2D
+        Instance of Data2D that contains the scattering image for plotting.
+    peaks : NDArray
+        Two dimensional data of peak positions in y, x of the image.
+        These are in units of pixels and so they can be flaot values
+        and are not restricted to index integers.
+    line : list
+        Angle, slope, and intercept of the fit line.
+    limits_axis0 : list
+        Index range of the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Index range of the ROI along axis 1, [min, max).
+    log_scale : bool
+        If set to True, intensity values are plotted on a log scale.
+        Default value is True.
+    zoom_plot : bool
+        if set to True, the scattering image will be 'zoomed in' on a
+        region around the ROI so the peaks can be easily seen.
+    cmap : str
+        Matplotlib colormap name for the image intensity.
+        Default is 'viridis'.
+    aspect : str, float
+        Define the aspect ratio of the pixels. 
+        'equal' : default, ensures that the pixels are square
+        'auto' : changes the aspect ratio to fit within the plotting
+            area of the figure
+        float : manually set the aspct ratio of the pixel height vs width
+    vmin : float
+        Set the minimum value of the intensity color range.
+    vmax : float
+        Set the maximum value of the intensity color range.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+    color_peaks : str
+        Color of the markers that show where the located peaks are on
+        the scattering image.
+        Accepted strings are any of the matplotlib color names.
+        Default is 'yellow'.
+    color_integration_box : str
+        Color of the ROI outline that shows the search area for the
+        peaks. Accepted strings are any of the matplotlib color names.
+        Default value is 'yellow'.
+    """
 
     fig = plot_data2d(
         data2d,
@@ -679,6 +1161,71 @@ def plot_data2d_find_beam_center(
         show_beam_center=True,
         **kwargs
 ):
+    """
+    Plot the peaks found in a region of interest of a scattering image
+    along with the determined beam center position based on those peaks.
+
+    Parameters
+    ----------
+    data2d : Data2D
+        Instance of Data2D that contains the scattering image for plotting.
+    peaks : NDArray
+        Two dimensional data of peak positions in y, x of the image.
+        These are in units of pixels and so they can be flaot values
+        and are not restricted to index integers.
+    limits_axis0 : list
+        Index range of the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Index range of the ROI along axis 1, [min, max).
+    log_scale : bool
+        If set to True, intensity values are plotted on a log scale.
+        Default value is True.
+    zoom_plot : bool
+        if set to True, the scattering image will be 'zoomed in' on a
+        region around the ROI so the peaks can be easily seen.
+    cmap : str
+        Matplotlib colormap name for the image intensity.
+        Default is 'viridis'.
+    aspect : str, float
+        Define the aspect ratio of the pixels. 
+        'equal' : default, ensures that the pixels are square
+        'auto' : changes the aspect ratio to fit within the plotting
+            area of the figure
+        float : manually set the aspct ratio of the pixel height vs width
+    vmin : float
+        Set the minimum value of the intensity color range.
+    vmax : float
+        Set the maximum value of the intensity color range.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+    color_peaks : str
+        Color of the markers that show where the located peaks are on
+        the scattering image.
+        Accepted strings are any of the matplotlib color names.
+        Default is 'yellow'.
+    color_integration_box : str
+        Color of the ROI outline that shows the search area for the
+        peaks. Accepted strings are any of the matplotlib color names.
+        Default value is 'yellow'.
+    color_beam_center : str
+        Color of the beam center crosshairs on the image. Accepted
+        strings are any of the matplotlib color names.
+        Default value is 'yellow'.
+    show_beam_center : bool
+        If set to True, the beam center crosshairs are shown on the
+        scattering image. Default is True.
+    """
     fig = plot_data2d_find_peaks2d(
         data2d,
         peaks=peaks,
@@ -740,6 +1287,64 @@ def plot_data2d_find_sdd(
         color_integration_box='yellow',
         **kwargs
 ):
+    """
+    Plot a scattering image and found peaks as part of the find_sdd
+    method.
+
+    Parameters
+    ----------
+    data2d : Data2D
+        Instance of Data2D that contains the scattering image for plotting.
+    peaks : NDArray
+        Two dimensional data of peak positions in y, x of the image.
+        These are in units of pixels and so they can be flaot values
+        and are not restricted to index integers.
+    limits_axis0 : list
+        Index range of the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Index range of the ROI along axis 1, [min, max).
+    log_scale : bool
+        If set to True, intensity values are plotted on a log scale.
+        Default value is True.
+    zoom_plot : bool
+        if set to True, the scattering image will be 'zoomed in' on a
+        region around the ROI so the peaks can be easily seen.
+    cmap : str
+        Matplotlib colormap name for the image intensity.
+        Default is 'viridis'.
+    aspect : str, float
+        Define the aspect ratio of the pixels. 
+        'equal' : default, ensures that the pixels are square
+        'auto' : changes the aspect ratio to fit within the plotting
+            area of the figure
+        float : manually set the aspct ratio of the pixel height vs width
+    vmin : float
+        Set the minimum value of the intensity color range.
+    vmax : float
+        Set the maximum value of the intensity color range.
+    color_mask : str
+        Set the color of the masked pixels. Default is 'transparent'.
+        Other accepted strings are any of the matplotlib color names.
+    color_inf : str
+        Set the color of the pixels that have a value of inf or -inf.
+        Accepted string are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'black'.
+    color_nan : str
+        Set the color of the pixels that have a value of nan.
+        Accepted strings are any of the matplotlib color names as well as
+        'transparent'.
+        Default is 'red'.
+    color_peaks : str
+        Color of the markers that show where the located peaks are on
+        the scattering image.
+        Accepted strings are any of the matplotlib color names.
+        Default is 'yellow'.
+    color_integration_box : str
+        Color of the ROI outline that shows the search area for the
+        peaks. Accepted strings are any of the matplotlib color names.
+        Defaulkt value is 'yellow'.
+    """
     if type(sdd_cm) is tuple:
         title = f"Sample to Detector Distance:\n{sdd_cm[0]} cm +/- {sdd_cm[1]} cm"
     else:
@@ -767,104 +1372,6 @@ def plot_data2d_find_sdd(
     return fig
 
 
-# def plot_integrated_dataset(
-#         integrated_dataset,
-#         q_axis='qbx',
-#         y_axis='sample_phi_deg',
-#         log_scale=True,
-#         cmap='viridis',
-#         vmin=None,
-#         vmax=None,
-#         filter_by_q={},
-#         filter_by_metadata={},
-#         **kwargs):
-
-#     filtered_slices = integrated_dataset.qslices.copy()
-
-#     if filter_by_metadata:
-#         for key, value in filter_by_metadata.items():
-#             keep = []
-#             for data in filtered_slices:
-#                 if key in METADATA_KEYWORDS:
-#                     test = data.data2d.metadata[key]
-#                 elif key in data.data2d.user_params.keys():
-#                     test = data.data2d.user_params[key]
-#                 else:
-#                     keep.append(False)
-#                     continue
-#                 if isinstance(value, tuple):
-#                     if np.nanmin(test) >= np.nanmin(value)\
-#                             and np.nanmax(test) <= np.nanmax(value):
-#                         keep.append(True)
-#                     else:
-#                         keep.append(False)
-#                 elif isinstance(value, float) or isinstance(value, int) or isinstance(value, str):
-#                     if value == test:
-#                         keep.append(True)
-#                     else:
-#                         keep.append(False)
-#                 elif isinstance(value, list):
-#                     if test in value:
-#                         keep.append(True)
-#                     else:
-#                         keep.append(False)
-#                 else:
-#                     # could not interpret filter
-#                     keep.append(False)
-#             filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
-
-#     if filter_by_q:
-#         for q, qrange in filter_by_q.items():
-#             keep = []
-#             for data in filtered_slices:
-#                 test = getattr(data, q)
-#                 if np.nanmin(test) >= qrange[0]\
-#                         and np.nanmax(test) <= qrange[1]:
-#                     keep.append(True)
-#                 else:
-#                     keep.append(False)
-#             filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
-
-#     x_vals = []
-#     y_vals = []
-#     color_vals = []
-#     order_vals = []
-
-#     for data in filtered_slices:
-#         x_vals.extend(list(getattr(data, q_axis)))
-#         order_vals.append(data.data2d.metadata[y_axis]
-#                           if y_axis in data.data2d.metadata.keys()
-#                           else data.data2d.user_params[y_axis])
-#         y_vals.extend(list(np.ones_like(getattr(data, q_axis))*order_vals[-1]))
-#         color_vals.extend(list(data.Iq))
-
-#     if vmin is None:
-#         vmin = np.max(
-#             [np.nanmin(color_vals), 0.1]
-#             ) if log_scale else 0
-#     if vmax is None:
-#         vmax = np.nanmax(color_vals)
-
-#     fig = plt.figure()
-#     if log_scale:
-#         norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
-#     else:
-#         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
-
-#     data_plot = plt.scatter(
-#         x_vals, y_vals, c=color_vals,
-#         cmap=cmap, norm=norm,
-#         **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
-#     colorbar = plt.colorbar(data_plot)
-#     colorbar.set_label('Intensity')
-
-#     plt.title(integrated_dataset.name, wrap=True)
-#     plt.xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
-#     plt.ylabel(plotting_tools.generate_formatted_axis_label(y_axis))
-
-#     return fig
-
-
 def plot_reduced_dataset(
         reduced_dataset,
         log_scale=True,
@@ -875,6 +1382,36 @@ def plot_reduced_dataset(
         filter_by_metadata={},
         interpolated_data=False,
         **kwargs):
+    """
+    Plot the reduced dataset as 'qsz' vs 'qsx' using
+    matplotlib.pyplot.imshow().
+
+    Parameters
+    ----------
+    reduced_dataset : ReducedDataset
+        Instance of ReducedDataset that contains the data to be plotted.
+    log_scale : bool
+        If set to True, intensities are plotted on a log scale.
+    cmap : str
+        Matplotlib colormap name used for the intensity color.
+    vmin : float
+        Minimum intensity value of the colormap.
+    vmax : float
+        Maximum intensity value of the colormap.
+    filter_by_q : dict
+        Key: value pairs of q-component: (min, max) to filter out
+        the reduced data.
+    filter_by_metadata : dict
+        Key: value pairs of metadata key: (min, max) to filter out
+        the reduced data.
+    interpolated_data : bool
+        If set to True, the data will be interpolated onto a grid for
+        viewing.
+
+    **kwargs
+    --------
+    Any keyword arguments for imshow can be passed through this function.
+    """
 
     filtered_slices = reduced_dataset.datas.copy()
 
@@ -1010,6 +1547,33 @@ def plot_slice_reduced_dataset(
         slice_color='red',
         slice_lw=2,
         **kwargs):
+    """
+    Plot the reduced dataset overlaid with the slice locations and
+    their box width.
+    
+    Parameters
+    ----------
+    reduced_dataset : ReducedDataset
+        Instance of ReducedDataset that contains the data to be plotted.
+    q_bins : list[tuple]
+        Each item in the list is a tuple that is (min_q, q, max_q) for
+        each slice.
+    log_scale : bool
+        If set to True, intensities are plotted on a log scale.
+    cmap : str
+        Matplotlib colormap name used for the intensity color.
+    vmin : float
+        Minimum intensity value of the colormap.
+    vmax : float
+        Maximum intensity value of the colormap.
+    interpolated_data : bool
+        If set to True, the data will be interpolated onto a grid for
+        viewing.
+    slice_color : str
+        Set the color of the slice overlaid on the scattering image.
+    slice_lw : float
+        Set the linewidth of the slice marker line.
+    """
 
     fig = plot_reduced_dataset(
         reduced_dataset=reduced_dataset,
@@ -1039,6 +1603,32 @@ def plot_reduced_slices(
         log_scale=True,
         offset_order=0,
         offset_value=0):
+    """
+    Plot the reduced slices using matplotlib.pyplot.errorbar().
+
+    Parameters
+    ----------
+    reduced_slices : ReducedSlices
+        Instance of ReducedSlices that contains the 1d data to be
+        plotted.
+    q_axis : str
+        Primary q-axis to plot along the x-axis.
+        Default is 'qsz'.
+    integrated_axis : str
+        Q-axis that was integrated to generate slices. This will
+        provide the legend labels.
+        Default value is 'qsx'.
+    filter_by_q : dict
+        Key: value pairs of q-component: (min, max) to filter which
+        slices should be plotted from reduced_slices.
+    log_scale : bool
+        Plot the data on a log scale in y.
+        Default is True.
+    offset_order : int, float
+        Offset the data by a set number of orders of magnitude.
+    offset_value : int, float
+        Offset the data by a constant value on a linear scale.
+    """
 
     filtered_slices = reduced_slices.data.copy()
     for key, value in filter_by_q.items():

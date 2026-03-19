@@ -267,7 +267,7 @@ def rotate_image(image,
 
 
 def rotate_image_pillow(
-        image, degrees, rotation_center, resampling_mode="bilinear", 
+        image, degrees, rotation_center, resampling_mode="bilinear",
         log_scale=False, fillcolor=-9999):
     """
 
@@ -282,7 +282,7 @@ def rotate_image_pillow(
         Center of rotation. Indices should be provided as [row, column]
         keeping in mind that numpy index orders rows from top to
         bottom and columns from left to right.
-    rotation_sampling_mode : str, optional
+    resampling_mode : str, optional
         Set the resampling method used during the rotation.
         The box rotation works by rotating the image underneath then
         extracting the box for integration. Resampling of the
