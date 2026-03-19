@@ -138,7 +138,7 @@ class DataImage():
             Angle in degrees by which to rotate the image
             counterclockwise.
         rotation_center : tuple
-            Center of rotatation (y, x).
+            Center of rotation (y, x).
             Default is the upper left pixel.
         resampling_mode : str, optional
             Set the resampling method used during the rotation.
@@ -203,7 +203,7 @@ class DataImage():
 
     def rotate_image_ccw(self, steps=1):
         """
-        Rotate the image counterclockwise by 90 degree, or by a
+        Rotate the image counterclockwise by 90 degrees, or by a
         specified number of 90 degree steps.
 
         The original image can be recalled using reset_image(), but this
@@ -364,13 +364,13 @@ class DataImage():
 
         Returns
         -------
-        ndarray
+        sum_intensity : ndarray
             One dimensional array of summed intensity of the defined
             region of interest summed over the selected axis or axes.
-        ndarray
+        image_box : ndarray
             The two dimensional region of interest selected from the
             data image used in the summation.
-        ndarray
+        mask_box : ndarray
             The corresponding region of interest selected from the mask
             and used in the summation.
         """
@@ -418,13 +418,13 @@ class DataImage():
 
         Returns
         -------
-        ndarray
+        mean_intensity : ndarray
             One dimensional array of mean intensity of the defined
             region of interest over the selected axis or axes.
-        ndarray
+        image_box : ndarray
             The two dimensional region of interest selected from the
             data image used in the mean operation.
-        ndarray
+        max_box : ndarray
             The corresponding region of interest selected from the mask
             and used in the mean operation.
         """
@@ -473,13 +473,13 @@ class DataImage():
 
         Returns
         -------
-        ndarray
+        slice_i : ndarray
             One dimensional array of mean or summed intensity of the
             defined region of interest over the selected axis or axes.
-        ndarray
+        slice_box : ndarray
             The two dimensional region of interest selected from the
             data image used in the mean or sum operation.
-        ndarray
+        mask_box : ndarray
             The corresponding region of interest selected from the mask
             and used in the mean or sum operation.
         """
