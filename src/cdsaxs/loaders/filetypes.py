@@ -1,5 +1,6 @@
 import os
 
+import fabio as fabio
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
@@ -88,5 +89,54 @@ def read_nist_bin(filepath):
     metadata['wavelength_nm'] = float(sample_meta['Wavelength (nm) '])
     metadata['exposure_time_s'] = float(sample_meta['LiveTime '])
     metadata['pixel_size_um'] = float(sample_meta['Pixel Size '])
+
+    return image, filepath, metadata
+
+
+def read_nist_edf(filepath):
+    """
+    Load an image and metadata from the Xenocs Xeuss Pro instrument
+    at NIST that stores data in edf files.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the bin file to be loaded.
+        The paired info file should be in the same directory and have
+        the same filename (apart from the different extension).
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
+    """
+
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    # read image and header from the file
+    with fabio.open(filepath) as file:
+        image = file.data
+        header = file.header
+
+    # extact required information and insert into clean dictionary
+    metadata = {}
+    metadata['wavelength_nm'] = float(header['Wavelength']) * 1e9  # m to Ang
+    metadata['exposure_time_s'] = float(header['ExposureTime'])
+    metadata['pixel_size_um'] = float(header['PSize_1']) * 1e6  # m to um
+    metadata['sample_phi_deg'] = float(header['CD_Phi'])
+    metadata['sample_chi_deg'] = float(header['CD_Ry'])
+    metadata['sample_omega_deg'] = float(header['CD_Rx'])
+    metadata['center_px'] = (float(header["Center_2"], header["Center_1"]))
+    metadata['sdd_cm'] = float(header["SampleDistance"]) * 1e2  # m to cm
+    metadata['sample_reference'] = header["sample_reference"]
+    metadata['sample_name'] = header['sample_name']
+    metadata['sample_comment'] = header['sample_comment']
+    metadata['date'] = header["Date"]
+    metadata['sample_stage_x'] = float(header["x"])
+    metadata['sample_stage_z'] = float(header["y"])
 
     return image, filepath, metadata
