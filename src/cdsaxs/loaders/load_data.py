@@ -16,7 +16,8 @@ import cdsaxs.loaders._loader_tools as loader_tools
 from cdsaxs.loaders.detectors import read_pilatus
 from cdsaxs.loaders.filetypes import (
     read_tiff,
-    read_nist_bin
+    read_nist_bin,
+    read_nist_edf
 )
 
 
@@ -135,6 +136,7 @@ def LoadData(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'nist-edf'
     detector_type : str
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
@@ -151,6 +153,8 @@ def LoadData(
             filetype = 'tiff'
         elif extension == 'bin':
             filetype = 'nist-bin'
+        elif extension == 'edf':
+            filetype = 'nist-edf'
         else:
             raise ValueError(
                 "Did not recognize the filtype extension:"
@@ -186,6 +190,21 @@ def LoadData(
 
     elif filetype.lower() in ['nist-bin', 'nist_bin']:
         image, data_filepath, metadata_add = read_nist_bin(filepath=filepath)
+        for key, value in metadata_add.items():
+            if key in metadata.keys():
+                warnings.warn(
+                    f"Metadata for {key} was provided by the user and"
+                    "also extracted from the data files. I will not"
+                    "overwrite the information provided by the user"
+                    "but please make sure this is correct."
+                )
+            else:
+                metadata[key] = value
+        # handle negative values between detector panels in the images as nan
+        image[image < 0] = np.nan
+
+    elif filetype.lower() in ['nist-edf', 'nist_edf']:
+        image, data_filepath, metadata_add = read_nist_edf(filepath=filepath)
         for key, value in metadata_add.items():
             if key in metadata.keys():
                 warnings.warn(
@@ -305,6 +324,7 @@ def LoadDataset(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'nist-edf'
     detector_type : str
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
@@ -443,6 +463,7 @@ def LoadDataset_MetadataCSV(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'nist-edf'
     detector_type : str
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
