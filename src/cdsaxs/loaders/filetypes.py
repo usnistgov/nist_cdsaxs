@@ -124,19 +124,19 @@ def read_nist_edf(filepath):
 
     # extact required information and insert into clean dictionary
     metadata = {}
-    metadata['wavelength_nm'] = float(header['Wavelength']) * 1e9  # m to Ang
+    metadata['wavelength_nm'] = float(header['WaveLength']) * 1e9  # m to Ang
     metadata['exposure_time_s'] = float(header['ExposureTime'])
     metadata['pixel_size_um'] = float(header['PSize_1']) * 1e6  # m to um
     metadata['sample_phi_deg'] = float(header['CD_Phi'])
     metadata['sample_chi_deg'] = float(header['CD_Ry'])
     metadata['sample_omega_deg'] = float(header['CD_Rx'])
-    metadata['center_px'] = (float(header["Center_2"], header["Center_1"]))
+    metadata['center_px'] = (float(header["Center_2"]), float(header["Center_1"]))
     metadata['sdd_cm'] = float(header["SampleDistance"]) * 1e2  # m to cm
     metadata['sample_reference'] = header["sample_reference"]
     metadata['sample_name'] = header['sample_name']
     metadata['sample_comment'] = header['sample_comment']
     metadata['date'] = header["Date"]
     metadata['sample_stage_x'] = float(header["x"])
-    metadata['sample_stage_z'] = float(header["y"])
+    metadata['sample_stage_y'] = float(header["z"])
 
     return image, filepath, metadata
