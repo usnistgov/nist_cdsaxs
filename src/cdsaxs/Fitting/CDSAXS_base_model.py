@@ -5608,12 +5608,8 @@ class CDSAXS_Model:
                 chains_final = chains_burned[::thin]
                 log_prob_final = log_prob_burned[::thin]
             else:
-                chains_burned = chains
-                log_prob_burned = log_prob
-            
-            # Thinning is already handled by emcee, so no need for post-processing thinning
-            chains_final = chains_burned
-            log_prob_final = log_prob_burned
+                chains_final = chains_burned
+                log_prob_final = log_prob_burned
             
             # Flatten chains for analysis
             flat_chains = chains_final.reshape(-1, n_params)
@@ -5681,6 +5677,227 @@ class CDSAXS_Model:
             
         except Exception as e:
             print(f"Error in CDSAXS_MCMC: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def CDSAXS_MCMC_GPU(self, params_to_sample=None, n_walkers=50, n_steps=1000,
+                        burn_in=200, thin=1, progress=True, plot_results=True,
+                        plot_chains=True, plot_corner=True, plot_structure=False,
+                        save_chains=False, chain_filename=None, verbose=True,
+                        prior_type='uniform', sigma_multiplier=10.0,
+                        seed=None, **emcee_kwargs):
+        """
+        Perform vectorized MCMC sampling using emcee and the batched trapezoid objective.
+
+        This entry point mirrors ``CDSAXS_MCMC`` but evaluates log probabilities in
+        batches via ``vectorize=True``. It is intended for GPU-oriented trapezoid
+        workflows where the model uses a batched objective, while preserving the
+        same return schema and plotting helpers as the incumbent scalar path.
+        """
+        try:
+            try:
+                import emcee
+            except ImportError:
+                raise ImportError("emcee package is required. Install with: pip install emcee")
+
+            if self.geometry not in ['trapezoid', 'sige']:
+                raise NotImplementedError(
+                    "CDSAXS_MCMC_GPU currently supports trapezoid-style models only"
+                )
+
+            if not hasattr(self, 'Intensity'):
+                raise AttributeError("Missing required attribute: Intensity")
+
+            if not hasattr(self, 'Qx') or not hasattr(self, 'Qz'):
+                raise AttributeError("Missing required scattering vector attributes")
+
+            if not hasattr(self, 'model_params') or 'optimization' not in self.model_params:
+                self.initialize_optimization_params()
+
+            if params_to_sample is None:
+                params_to_sample = self.model_params['optimization']
+
+            params_to_sample = self._ensure_defaults_in_params(params_to_sample)
+
+            derived = set()
+            constraints = getattr(self, 'model_params', {}).get('constraints', None)
+            if isinstance(constraints, list):
+                for rule in constraints:
+                    if isinstance(rule, dict) and str(rule.get('op', '')).strip() == '==':
+                        lhs = rule.get('lhs', None)
+                        if isinstance(lhs, str):
+                            derived.add(lhs)
+
+            if derived:
+                filtered = {}
+                for k, v in params_to_sample.items():
+                    if k in derived:
+                        if verbose:
+                            print(f"WARNING: Dropping derived constrained parameter from GPU MCMC sampling: {k}")
+                        continue
+                    filtered[k] = v
+                params_to_sample = filtered
+
+            param_names = list(params_to_sample.keys())
+            n_params = len(param_names)
+
+            if verbose:
+                print(f"Setting up vectorized MCMC with {n_params} parameters and {n_walkers} walkers")
+                print(f"Parameters to sample: {param_names}")
+                if not bool(getattr(self, '_freeform_use_cupy', False)):
+                    print("Warning: _freeform_use_cupy is False; running vectorized MCMC without GPU acceleration")
+
+            self.mcmc_param_names = param_names
+            self.mcmc_param_info = params_to_sample
+
+            rng = np.random.RandomState(seed) if seed is not None else None
+
+            bounds, initial_positions, _ = self._setup_mcmc_priors(
+                params_to_sample, n_walkers, prior_type, sigma_multiplier, rng=rng
+            )
+            defaults = np.array(
+                [params_to_sample[name]['default'] for name in param_names],
+                dtype=float,
+            )
+            sigmas = None
+            if prior_type == 'gaussian':
+                sigmas = (bounds[:, 1] - bounds[:, 0]) / sigma_multiplier
+                sigmas = np.where(sigmas == 0, 1.0, sigmas)
+
+            def log_probability_batch(theta_batch):
+                batch = np.asarray(theta_batch, dtype=float)
+                squeeze = batch.ndim == 1
+                if squeeze:
+                    batch = batch[None, :]
+
+                log_prob = np.full(batch.shape[0], -np.inf, dtype=float)
+                in_bounds = np.all((batch >= bounds[:, 0]) & (batch <= bounds[:, 1]), axis=1)
+                if not np.any(in_bounds):
+                    return float(log_prob[0]) if squeeze else log_prob
+
+                if prior_type == 'uniform':
+                    log_prior = np.zeros(np.count_nonzero(in_bounds), dtype=float)
+                elif prior_type == 'gaussian':
+                    centered = (batch[in_bounds] - defaults) / sigmas
+                    log_prior = -0.5 * np.sum(centered ** 2, axis=1)
+                else:
+                    raise ValueError(f"Unknown prior_type: {prior_type}")
+
+                objective_values = np.asarray(
+                    self._trapezoid_optimization_wrapper(batch[in_bounds]),
+                    dtype=float,
+                ).reshape(-1)
+                valid_objective = np.isfinite(objective_values) & (objective_values > 0)
+
+                if np.any(valid_objective):
+                    valid_indices = np.flatnonzero(in_bounds)[valid_objective]
+                    log_prob[valid_indices] = log_prior[valid_objective] - 0.5 * objective_values[valid_objective]
+
+                return float(log_prob[0]) if squeeze else log_prob
+
+            emcee_kwargs_clean = emcee_kwargs.copy()
+            if 'thin' in emcee_kwargs_clean:
+                del emcee_kwargs_clean['thin']
+
+            sampler = emcee.EnsembleSampler(
+                n_walkers,
+                n_params,
+                log_probability_batch,
+                vectorize=True,
+                **emcee_kwargs_clean,
+            )
+            if rng is not None:
+                sampler.random_state = rng.get_state()
+
+            if verbose:
+                print(f"Running vectorized MCMC: {n_steps} steps with {n_walkers} walkers")
+                print(f"Burn-in: {burn_in} steps, Thinning: {thin}")
+
+            if progress:
+                with tqdm(total=n_steps, desc="GPU MCMC Progress") as pbar:
+                    for i, state in enumerate(sampler.sample(initial_positions, iterations=n_steps)):
+                        pbar.update(1)
+                        if i % 100 == 0 and verbose:
+                            acceptance = np.mean(sampler.acceptance_fraction)
+                            pbar.set_postfix({"Accept": f"{acceptance:.3f}"})
+            else:
+                sampler.run_mcmc(initial_positions, n_steps)
+
+            chains = sampler.get_chain()
+            log_prob = sampler.get_log_prob()
+
+            if burn_in > 0:
+                chains_burned = chains[burn_in:]
+                log_prob_burned = log_prob[burn_in:]
+            else:
+                chains_burned = chains
+                log_prob_burned = log_prob
+
+            if thin > 1:
+                chains_final = chains_burned[::thin]
+                log_prob_final = log_prob_burned[::thin]
+            else:
+                chains_final = chains_burned
+                log_prob_final = log_prob_burned
+
+            flat_chains = chains_final.reshape(-1, n_params)
+            flat_log_prob = log_prob_final.flatten()
+
+            param_stats = self._calculate_mcmc_statistics(flat_chains, param_names)
+
+            best_idx = np.argmax(flat_log_prob)
+            best_params = flat_chains[best_idx]
+
+            results = {
+                'chains': chains,
+                'chains_burned': chains_burned,
+                'chains_final': chains_final,
+                'flat_chains': flat_chains,
+                'log_prob': log_prob,
+                'log_prob_final': log_prob_final,
+                'param_names': param_names,
+                'param_stats': param_stats,
+                'best_params': best_params,
+                'best_log_prob': flat_log_prob[best_idx],
+                'n_walkers': n_walkers,
+                'n_steps': n_steps,
+                'burn_in': burn_in,
+                'thin': thin,
+                'seed': seed,
+                'acceptance_fraction': sampler.acceptance_fraction,
+                'mean_acceptance': np.mean(sampler.acceptance_fraction),
+                'autocorr_time': None,
+                'effective_samples': len(flat_chains)
+            }
+
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    autocorr_time = sampler.get_autocorr_time(quiet=True)
+                    results['autocorr_time'] = autocorr_time
+                    results['mean_autocorr_time'] = np.mean(autocorr_time)
+            except Exception:
+                if verbose:
+                    print("Warning: Could not calculate autocorrelation time")
+
+            self._apply_mcmc_parameters(best_params, param_names)
+
+            if verbose:
+                self._print_mcmc_summary(results)
+
+            if plot_results:
+                self._plot_mcmc_results(results, plot_chains, plot_corner, plot_structure)
+
+            if save_chains:
+                filename = self._save_mcmc_chains(results, chain_filename)
+                if verbose:
+                    print(f"Chains saved to: {filename}")
+
+            return results
+
+        except Exception as e:
+            print(f"Error in CDSAXS_MCMC_GPU: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
