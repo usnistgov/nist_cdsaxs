@@ -49,6 +49,8 @@ FLOATS = [
     "pitch_nm", "image_rotation_angle",
     "detector_phi_deg", "detector_phi0_deg", "detector_phi_scale",
     "detector_y_mm", "detector_y0_mm",
+    "beam_center_mm", "beam_fwhm_mm",
+    "footprint_factor", "sample_size_factor", "substrate_absorption_factor"
 ]
 
 INTEGERS = [

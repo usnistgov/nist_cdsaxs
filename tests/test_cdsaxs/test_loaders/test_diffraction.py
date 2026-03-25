@@ -16,7 +16,7 @@ class TestDetectorPhiCorr(unittest.TestCase):
         actual_phi_corr_rad = diffraction._detector_phi_corr(
             detector_phi_deg=phi,
             detector_phi0_deg=phi0,
-            detector_phiscale=scale
+            detector_phi_scale=scale
         )
 
         self.assertAlmostEqual(expected_phi_corr_rad, actual_phi_corr_rad)
@@ -42,7 +42,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
         detector_y_mm = 0.3
         detector_phi0_deg = 0.76466980564
         detector_y0_mm = 0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (8.5, 174.0)
         actual_center = diffraction.center_px_beam_to_detector(
@@ -51,7 +51,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -74,7 +74,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
         detector_y_mm = 0.3
         detector_phi0_deg = -0.76466980564
         detector_y0_mm = 0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (8.5, -170.0)
         actual_center = diffraction.center_px_beam_to_detector(
@@ -83,7 +83,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -106,7 +106,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
         detector_y_mm = -0.3
         detector_phi0_deg = 0.76466980564
         detector_y0_mm = -0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (4.5, 174.0)
         actual_center = diffraction.center_px_beam_to_detector(
@@ -115,7 +115,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -138,7 +138,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
         detector_y_mm = -0.3
         detector_phi0_deg = -0.76466980564
         detector_y0_mm = -0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (4.5, -170.0)
         actual_center = diffraction.center_px_beam_to_detector(
@@ -147,7 +147,7 @@ class TestCenterPxBeamToDetector(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -173,7 +173,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
         detector_y_mm = 0.3
         detector_phi0_deg = 0.76466980564
         detector_y0_mm = 0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (6.5, 2)
         actual_center = diffraction.center_px_detector_to_beam(
@@ -182,7 +182,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -205,7 +205,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
         detector_y_mm = 0.3
         detector_phi0_deg = -0.76466980564
         detector_y0_mm = 0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (6.5, 2)
         actual_center = diffraction.center_px_detector_to_beam(
@@ -214,7 +214,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -237,7 +237,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
         detector_y_mm = -0.3
         detector_phi0_deg = 0.76466980564
         detector_y0_mm = -0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (6.5, 2)
         actual_center = diffraction.center_px_detector_to_beam(
@@ -246,7 +246,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -269,7 +269,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
         detector_y_mm = -0.3
         detector_phi0_deg = -0.76466980564
         detector_y0_mm = -0.1
-        detector_phiscale = 1.05
+        detector_phi_scale = 1.05
 
         expected_center = (6.5, 2)
         actual_center = diffraction.center_px_detector_to_beam(
@@ -278,7 +278,7 @@ class TestCenterPxDetectorToBeam(unittest.TestCase):
             sdd_cm=sdd_cm,
             detector_phi_deg=detector_phi_deg,
             detector_phi0_deg=detector_phi0_deg,
-            detector_phiscale=detector_phiscale,
+            detector_phi_scale=detector_phi_scale,
             detector_y_mm=detector_y_mm,
             detector_y0_mm=detector_y0_mm,
         )
@@ -316,7 +316,7 @@ class TestDetectorPxToGammaRad(unittest.TestCase):
             sdd_cm=500,
             detector_phi_deg=0.95238095238,
             detector_phi0_deg=0.76466980564,
-            detector_phiscale=1.05
+            detector_phi_scale=1.05
         )
 
         np.testing.assert_almost_equal(
@@ -380,7 +380,7 @@ class TestDetectorPxGammaToDeltaRad(unittest.TestCase):
             sdd_cm=500,
             detector_phi_deg=0.95238095238,
             detector_phi0_deg=0.76466980564,
-            detector_phiscale=1.05
+            detector_phi_scale=1.05
         )
 
         np.testing.assert_almost_equal(
@@ -418,7 +418,7 @@ class TestDetectorPxGammaToDeltaRad(unittest.TestCase):
             sdd_cm=500,
             detector_phi_deg=0.95238095238,
             detector_phi0_deg=0.76466980564,
-            detector_phiscale=1.05
+            detector_phi_scale=1.05
         )
 
         np.testing.assert_almost_equal(
@@ -482,7 +482,7 @@ class TestDetectorPxToQbyxz(unittest.TestCase):
             center_coordinate_space='beam',
             detector_phi_deg=0.95238095238,
             detector_phi0_deg=0.76466980564,
-            detector_phiscale=1.05,
+            detector_phi_scale=1.05,
             detector_y_mm=0.3,
             detector_y0_mm=0.1,
         )
@@ -562,7 +562,7 @@ class TestDetectorPxToQbyxz(unittest.TestCase):
             center_coordinate_space='detector',
             detector_phi_deg=0.95238095238,
             detector_phi0_deg=0.76466980564,
-            detector_phiscale=1.05,
+            detector_phi_scale=1.05,
             detector_y_mm=0.3,
             detector_y0_mm=0.1,
         )
@@ -2040,7 +2040,7 @@ class TestDetectorPxToQ(unittest.TestCase):
             sample_rotation_third_axis='y',
             detector_phi_deg=0.95238095238,
             detector_phi0_deg=0.76466980564,
-            detector_phiscale=1.05,
+            detector_phi_scale=1.05,
             detector_y_mm=0.3,
             detector_y0_mm=0.1,
         )
