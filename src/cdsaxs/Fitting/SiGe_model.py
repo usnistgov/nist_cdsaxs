@@ -7,7 +7,7 @@ from matplotlib.patches import Polygon, Patch
 import copy
 from scipy.optimize import differential_evolution
 
-from CDSAXS_base_model import CDSAXS_Model
+from .CDSAXS_base_model import CDSAXS_Model
 
 class SiGeModelArray(CDSAXS_Model):
     """
@@ -2924,4 +2924,3 @@ class SiGeModelArray(CDSAXS_Model):
     
 # Create an alias for backward compatibility
 SiGeModel = SiGeModelArray
-

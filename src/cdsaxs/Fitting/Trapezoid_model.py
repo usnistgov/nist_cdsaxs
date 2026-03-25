@@ -14,7 +14,7 @@ from scipy.optimize import (
 from tqdm import tqdm
 import seaborn as sns
 
-from CDSAXS_base_model import CDSAXS_Model
+from .CDSAXS_base_model import CDSAXS_Model
 
 class TrapezoidModelArray(CDSAXS_Model):
     """
@@ -2145,4 +2145,3 @@ class TrapezoidModelArray(CDSAXS_Model):
     
 # Create an alias for backward compatibility
 TrapezoidModel = TrapezoidModelArray
-
