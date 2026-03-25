@@ -65,9 +65,13 @@ from .dean_optimization_trapezoid_realistic import (
     describe_realistic_trapezoid_profile,
     get_realistic_population_sizes,
     get_realistic_trapezoid_profile_spec,
+    run_realistic_batch_initialize_smoke,
     run_realistic_candidate_budget_trial,
+    run_realistic_dual_annealing_trial,
     run_realistic_gpu_scaling_matrix,
+    run_realistic_mcmc_profile,
     run_realistic_optimizer_profile,
+    run_realistic_sweep_replay_smoke,
 )
 
 from .cython_integration import (
@@ -158,9 +162,13 @@ __all__ = [
     "describe_realistic_trapezoid_profile",
     "get_realistic_population_sizes",
     "get_realistic_trapezoid_profile_spec",
+    "run_realistic_batch_initialize_smoke",
     "run_realistic_candidate_budget_trial",
+    "run_realistic_dual_annealing_trial",
     "run_realistic_gpu_scaling_matrix",
+    "run_realistic_mcmc_profile",
     "run_realistic_optimizer_profile",
+    "run_realistic_sweep_replay_smoke",
     "enable_cython",
     "disable_cython",
     "cython_fallback",

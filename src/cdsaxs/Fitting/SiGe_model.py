@@ -3688,26 +3688,16 @@ class SiGeModelArray(CDSAXS_Model):
             """
             try:
                 # CRITICAL FIX: Always convert to numpy array first
-                if not isinstance(optimization_values, np.ndarray):
-                    optimization_values = np.array(optimization_values, dtype=float)
+                values = optimization_values if isinstance(optimization_values, np.ndarray) else np.array(optimization_values, dtype=float)
+                param_names = self._resolve_active_parameter_names(values)
                 
-                # Get parameter names from available sources
-                if hasattr(self, 'param_names'):
-                    param_names = self.param_names
-                elif hasattr(self, 'mcmc_param_names'):
-                    param_names = self.mcmc_param_names
-                else:
-                    # Generate parameter names from optimization parameters
-                    param_names = list(self.model_params.get('optimization', {}).keys())
-                
-                if len(optimization_values) != len(param_names):
-                    raise ValueError(f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}")
+                if len(values) != len(param_names):
+                    raise ValueError(f"Parameter count mismatch: got {len(values)}, expected {len(param_names)}")
                 
                 # Call SimTrap_GF with numpy array
-                return self.SimTrap_GF(optimization_values, param_names, self.Intensity, self.Qx, self.Qz)
+                return self.SimTrap_GF(values, param_names, self.Intensity, self.Qx, self.Qz)
                 
-            except Exception as e:
-                print(f"Error in trapezoid wrapper: {e}")
+            except Exception:
                 return float('inf')
 
         

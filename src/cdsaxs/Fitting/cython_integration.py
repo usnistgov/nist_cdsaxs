@@ -10,15 +10,14 @@ from functools import wraps
 # Global flag to control Cython usage
 USE_CYTHON = True
 CYTHON_AVAILABLE = False
+CYTHON_IMPORT_ERROR = None
 
 # Try to import Cython modules
 try:
     from cdsaxs_cython import base_cython, trapezoid_cython, cylinder_cython
     CYTHON_AVAILABLE = True
-    print("Cython modules loaded successfully - accelerated functions available")
 except ImportError as e:
-    print(f"Cython modules not available: {e}")
-    print("Falling back to pure Python implementations")
+    CYTHON_IMPORT_ERROR = str(e)
     CYTHON_AVAILABLE = False
     
 def enable_cython():

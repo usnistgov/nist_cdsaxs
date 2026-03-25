@@ -1243,29 +1243,6 @@ class TrapezoidModelArray(CDSAXS_Model):
             # Run differential evolution optimization
             if verbose:  # Only print if verbose=True
                 print(f"Starting optimization with {len(param_names)} parameters...")
-            
-            print(f'bounds: {bounds}')
-            print(f'optimization_params: {optimization_params}')
-            import types, pickle
-
-            # 1) Find module objects stored on self
-            mod_attrs = [name for name, val in self.__dict__.items() if isinstance(val, types.ModuleType)]
-            print("Module attributes on self:", mod_attrs)
-
-            # 2) Find non-pickleable attrs on self (will show the offending ones and their types)
-            for name, val in self.__dict__.items():
-                try:
-                    pickle.dumps(val)
-                except Exception as e:
-                    print(f"Non-pickleable attr: {name} ({type(val)}): {e}")
-
-            # 3) Check the objective args tuple you pass to DE
-            obj_args = (param_names, self.Intensity, self.Qx, self.Qz, getattr(self, '_freeform_use_cupy', False))
-            for idx, val in enumerate(obj_args):
-                try:
-                    pickle.dumps(val)
-                except Exception as e:
-                    print(f"Non-pickleable arg[{idx}]: {type(val)}: {e}")
 
             result = differential_evolution(
                 self.SimTrap_GF,
@@ -2303,14 +2280,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                 values = optimization_values if isinstance(optimization_values, np.ndarray) else np.array(optimization_values, dtype=float)
                 # Ensure C-contiguous for optimal performance
 
-                # Get parameter names from available sources
-                if hasattr(self, 'param_names'):
-                    param_names = self.param_names
-                elif hasattr(self, 'mcmc_param_names'):
-                    param_names = self.mcmc_param_names
-                else:
-                    # Generate parameter names from optimization parameters
-                    param_names = list(self.model_params.get('optimization', {}).keys())
+                param_names = self._resolve_active_parameter_names(values)
 
                 # Single vector path (existing behavior)
                 if values.ndim == 1:
@@ -2340,8 +2310,7 @@ class TrapezoidModelArray(CDSAXS_Model):
 
                 raise ValueError("optimization_values must be a 1D or 2D numpy array")
                 
-            except Exception as e:
-                print(f"Error in trapezoid wrapper: {e}")
+            except Exception:
                 if isinstance(optimization_values, np.ndarray) and optimization_values.ndim == 2:
                     return np.full(optimization_values.shape[0], float('inf'))
                 return float('inf')

@@ -18,10 +18,13 @@ Added so far:
 - `DEAN_OPTIMIZATION.md`
 - `DEAN_OPTIMIZATION_LEDGER.MD`
 - `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
 - `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
 - `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py`
 - `tests/test_fitting/test_dean_optimization_trapezoid.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
 - `tests/test_fitting/test_dean_optimization_structure_similarity.py`
+- `tests/test_fitting/test_dean_workflow_semantics.py`
 
 Environment used so far:
 
@@ -533,7 +536,8 @@ Files touched:
 
 Implementation notes:
 
-- Added realistic profile builders that derive notebook-parallel `model_params` on the baseline trapezoid model and then re-instantiate the requested fitting variant.
+- Initial version added realistic profile builders that derived notebook-parallel `model_params` on the baseline trapezoid model and then re-instantiated the requested fitting variant.
+- That initial builder was later superseded by the workflow-native refactor recorded below.
 - Implemented four routine realistic profiles:
   - `notebook_4param`
   - `notebook_layer10_8param`
@@ -553,7 +557,8 @@ Bug found and fixed:
 - Layer-addition helpers left `slds` at length `1` even when the new model had multiple layers.
 - That allowed some objective-only timing paths to run, but broke later end-to-end optimizer simulation with:
   - `SLD array length (1) must exactly match number of layers`
-- Fixed by expanding the single-material `slds` list to one value per layer in the realistic builder before re-instantiating the target model class.
+- Fixed in the initial harness by expanding the single-material `slds` list to one value per layer before re-instantiating the target model class.
+- That repair later moved into the core layer-growth API so the harness no longer has to own it.
 
 Benchmark protocol:
 
@@ -718,3 +723,159 @@ Optimization implication:
   - memory traffic reduction
   - occupancy and batch-shape tuning
   - avoiding scalar-path work entirely where possible
+
+## 2026-03-25: Workflow Surface Stabilization Before Harness Refactor
+
+Goal:
+
+- make layer-growth and stateful workflow APIs usable without harness-only workarounds
+- remove unconditional debug noise from routine optimizer and import paths
+- clear the way for a workflow-native harness refactor
+
+Files touched:
+
+- `src/cdsaxs/Fitting/CDSAXS_base_model.py`
+- `src/cdsaxs/Fitting/Trapezoid_model.py`
+- `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
+- `src/cdsaxs/Fitting/SiGe_model.py`
+- `src/cdsaxs/Fitting/Cylinder_model.py`
+- `src/cdsaxs/Fitting/cython_integration.py`
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+
+Implementation notes:
+
+- `_create_new_model_from_params(...)` now prefers the concrete runtime class before falling back to package-level factories.
+- `_copy_model_data(...)` now propagates `_freeform_use_cupy` and re-runs `process_imported_data()` on the copied-data model so caches and baseline simulation state are rebuilt.
+- `add_layer_at_percentage(...)` now normalizes `slds` to the new layer count instead of leaving that repair to the realistic harness.
+- added a backward-compatible `parameter_sweep_2d(...)` entry point that delegates to `parameter_sweep_2d_clean(...)`.
+- added `_resolve_active_parameter_names(...)` and updated the trapezoid, Dean trapezoid, SiGe, and cylinder wrappers to choose the parameter-name set that matches the active workflow state.
+- removed unconditional debug prints from the optimizer hot path and removed import-time Cython status prints.
+
+Validation:
+
+- runtime smoke checks in `cdsax-dev` confirmed:
+  - `TrapezoidModelArrayDeanGPUFused.add_layer_at_percentage(10)` returns `TrapezoidModelArrayDeanGPUFused`
+  - the grown model now has `len(model.model_params['slds']) == model.layers`
+  - `parameter_sweep_2d(...)` executes successfully on a tiny 2x2 smoke case
+  - `batch_initialize_and_fit(...)` no longer emits the old optimizer debug spam in quiet mode
+  - a short `CDSAXS_MCMC(...)` smoke run now proceeds with a nonzero mean acceptance fraction in the tested case
+
+Outcome:
+
+- keep
+
+Notes:
+
+- this supersedes the earlier harness-only `slds` repair as the long-term fix point
+- the realistic trapezoid harness was later refactored to stop re-instantiating from cloned parameters
+
+## 2026-03-25: Workflow-Native Trapezoid Harness Refactor
+
+Goal:
+
+- stop building realistic trapezoid profiles by cloning `model_params`
+- drive the realistic harness through the same layer-growth APIs that real workflows use
+- add the missing workflow-native trapezoid runners and structured metadata
+
+Files touched:
+
+- `src/cdsaxs/Fitting/CDSAXS_base_model.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+- `src/cdsaxs/Fitting/__init__.py`
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+
+Implementation notes:
+
+- `build_realistic_trapezoid_model(...)` now constructs the requested model class first and then applies the profile through:
+  - `add_layer_at_percentage(...)`
+  - `add_multiple_layers(...)`
+- profile descriptions now record workflow semantics such as:
+  - `layer_growth_path`
+  - `height_percentage`
+  - `height_percentages`
+  - `sequential`
+  - `freeform_use_cupy`
+- existing realistic candidate-budget and DE runners now emit structured workflow metadata.
+- added trapezoid workflow-native runners for:
+  - `run_realistic_dual_annealing_trial(...)`
+  - `run_realistic_batch_initialize_smoke(...)`
+  - `run_realistic_mcmc_profile(...)`
+  - `run_realistic_sweep_replay_smoke(...)`
+- `_run_scipy_optimizer(...)` now strips `vectorized` before non-DE optimizers so `dual_annealing` can run through `CDSAXS_Optimize(...)`.
+
+Validation:
+
+- smoke execution in `cdsax-dev` confirmed:
+  - realistic layer-growth now preserves the requested class on the direct builder path
+  - realistic DE coverage still runs
+  - dual annealing returns finite `GF`
+  - batch initialization smoke returns finite best-fit metrics
+  - MCMC smoke returns a nonzero mean acceptance fraction in the tested case
+  - sweep replay smoke successfully applies best-fit parameters through `show_best_fit_results(...)`
+
+Outcome:
+
+- keep
+
+Notes:
+
+- the harness now reflects current repo workflow semantics much more closely
+- the test split follow-on described here was completed in the next entry
+
+## 2026-03-25: Semantic Workflow Regression And Smoke Test Reorganization
+
+Goal:
+
+- split trapezoid fitting coverage by purpose: workflow semantics versus benchmark smoke
+- lock the notebook-parallel realistic profiles to the intended `4`/`8`/`12` optimization ladders
+- remove stale assumptions from existing regression coverage before resuming GPU optimization
+
+Files touched:
+
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
+- `tests/test_fitting/test_dean_optimization_structure_similarity.py`
+- `tests/test_fitting/test_dean_workflow_semantics.py`
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+
+Implementation notes:
+
+- realistic profile normalization now assigns the notebook-parallel optimization surface directly so layered profiles keep geometry plus `DW`, `I0`, and scalar `Bk` without auto-appending `sld_*`
+- realistic profile tests now assert the exact parameter-name ladders for:
+  - `notebook_4param`
+  - `notebook_layer10_8param`
+  - `notebook_layer90_8param`
+  - `notebook_multilayer_12param`
+- added `tests/test_fitting/test_dean_workflow_semantics.py` to separate semantic workflow regressions from benchmark smoke coverage
+- the new semantic suite covers:
+  - class preservation through layer growth
+  - `parameter_sweep_2d(...)` compatibility
+  - dual annealing smoke
+  - batch initialization smoke schema
+  - MCMC smoke metrics
+  - sweep replay smoke
+  - stateful sweep-to-MCMC parameter-name consistency
+- the structure-similarity regression no longer assumes GPU must win wall time on a tiny run; it now checks timing sanity plus structural parity
+
+Validation:
+
+- `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
+  - `10 passed`
+- `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_workflow_semantics.py -q`
+  - `7 passed`
+- `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_structure_similarity.py -q`
+  - `1 passed`
+- `mamba run -n cdsax-dev python -m pytest tests/test_fitting -q`
+  - `27 passed`
+
+Outcome:
+
+- keep
+
+Notes:
+
+- the harness and test prerequisite for resuming trapezoid GPU optimization is now complete
+- stale documentation that still described the realistic builder as cloned-parameter re-instantiation or the test split as future work was updated in this step

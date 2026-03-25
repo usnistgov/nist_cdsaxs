@@ -1241,20 +1241,11 @@ class CylinderModel(CDSAXS_Model):
         """
         try:
             # CRITICAL FIX: Always convert to numpy array first
-            if not isinstance(optimization_values, np.ndarray):
-                optimization_values = np.array(optimization_values, dtype=float)
+            values = optimization_values if isinstance(optimization_values, np.ndarray) else np.array(optimization_values, dtype=float)
+            param_names = self._resolve_active_parameter_names(values)
             
-            # Get parameter names from available sources
-            if hasattr(self, 'param_names'):
-                param_names = self.param_names
-            elif hasattr(self, 'mcmc_param_names'):
-                param_names = self.mcmc_param_names
-            else:
-                # Generate parameter names from optimization parameters
-                param_names = list(self.model_params.get('optimization', {}).keys())
-            
-            if len(optimization_values) != len(param_names):
-                raise ValueError(f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}")
+            if len(values) != len(param_names):
+                raise ValueError(f"Parameter count mismatch: got {len(values)}, expected {len(param_names)}")
             
             # Create PAR array from optimization values
             temp_PAR = np.zeros((self.layers + 1, 2))
@@ -1269,15 +1260,15 @@ class CylinderModel(CDSAXS_Model):
                     param_type = parts[2]
                     
                     if param_type == 'radius':
-                        temp_PAR[cyl_idx, 0] = optimization_values[i]
+                        temp_PAR[cyl_idx, 0] = values[i]
                     elif param_type == 'height':
-                        temp_PAR[cyl_idx, 1] = optimization_values[i]
+                        temp_PAR[cyl_idx, 1] = values[i]
                 elif param_name == 'DW':
-                    temp_DW = optimization_values[i]
+                    temp_DW = values[i]
                 elif param_name == 'I0':
-                    temp_I0 = optimization_values[i]
+                    temp_I0 = values[i]
                 elif param_name == 'Bk':
-                    temp_Bk = optimization_values[i]
+                    temp_Bk = values[i]
             
             # Create SimPar array for cylindrical GF function
             SimPar = np.append(temp_PAR.ravel(), [temp_I0, temp_DW, temp_Bk])
@@ -1285,6 +1276,5 @@ class CylinderModel(CDSAXS_Model):
             # Call cylindrical GF function
             return self.SimCyl_GF(SimPar, self.layers, self.Intensity, self.Qr, self.Qz, self.discretization)
             
-        except Exception as e:
-            print(f"Error in cylinder wrapper: {e}")
+        except Exception:
             return float('inf')

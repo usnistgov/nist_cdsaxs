@@ -30,15 +30,71 @@ def _gpu_available():
 
 
 @pytest.mark.parametrize(
-    ("profile", "expected_params", "expected_layers"),
+    ("profile", "expected_params", "expected_layers", "expected_names"),
     [
-        ("notebook_4param", 4, 1),
-        ("notebook_layer10_8param", 8, 2),
-        ("notebook_layer90_8param", 8, 2),
-        ("notebook_multilayer_12param", 12, 4),
+        (
+            "notebook_4param",
+            4,
+            1,
+            ("trap_0_width", "trap_0_height", "trap_1_width", "DW"),
+        ),
+        (
+            "notebook_layer10_8param",
+            8,
+            2,
+            (
+                "trap_0_width",
+                "trap_0_height",
+                "trap_1_width",
+                "trap_1_height",
+                "trap_2_width",
+                "DW",
+                "I0",
+                "Bk",
+            ),
+        ),
+        (
+            "notebook_layer90_8param",
+            8,
+            2,
+            (
+                "trap_0_width",
+                "trap_0_height",
+                "trap_1_width",
+                "trap_1_height",
+                "trap_2_width",
+                "DW",
+                "I0",
+                "Bk",
+            ),
+        ),
+        (
+            "notebook_multilayer_12param",
+            12,
+            4,
+            (
+                "trap_0_width",
+                "trap_0_height",
+                "trap_1_width",
+                "trap_1_height",
+                "trap_2_width",
+                "trap_2_height",
+                "trap_3_width",
+                "trap_3_height",
+                "trap_4_width",
+                "DW",
+                "I0",
+                "Bk",
+            ),
+        ),
     ],
 )
-def test_describe_realistic_trapezoid_profile_matches_expected_shape(profile, expected_params, expected_layers):
+def test_describe_realistic_trapezoid_profile_matches_expected_shape(
+    profile,
+    expected_params,
+    expected_layers,
+    expected_names,
+):
     spec = get_realistic_trapezoid_profile_spec(profile)
     description = describe_realistic_trapezoid_profile(profile=profile)
 
@@ -46,20 +102,31 @@ def test_describe_realistic_trapezoid_profile_matches_expected_shape(profile, ex
     assert description["label"] == spec["label"]
     assert description["parameter_count"] == expected_params
     assert description["layers"] == expected_layers
-    assert len(description["parameter_names"]) == expected_params
+    assert description["layer_growth_path"]
+    assert description["parameter_names"] == expected_names
     assert description["default_vector"].shape == (expected_params,)
 
 
 def test_build_realistic_trapezoid_model_preserves_requested_class():
     model = build_realistic_trapezoid_model(
         profile="notebook_layer10_8param",
-        model_cls=TrapezoidModelArray,
+        model_cls=TrapezoidModelArrayDeanGPUFused,
     )
 
-    assert isinstance(model, TrapezoidModelArray)
+    assert isinstance(model, TrapezoidModelArrayDeanGPUFused)
     assert model.layers == 2
     assert len(model.model_params["optimization"]) == 8
     assert len(model.model_params["slds"]) == model.layers
+    assert tuple(model.model_params["optimization"]) == (
+        "trap_0_width",
+        "trap_0_height",
+        "trap_1_width",
+        "trap_1_height",
+        "trap_2_width",
+        "DW",
+        "I0",
+        "Bk",
+    )
 
 
 def test_realistic_candidate_budget_trial_runs_on_small_population_sizes():
@@ -73,6 +140,8 @@ def test_realistic_candidate_budget_trial_runs_on_small_population_sizes():
 
     assert trial["profile"] == "notebook_layer10_8param"
     assert trial["model_class"] == "TrapezoidModelArray"
+    assert trial["workflow"]["workflow_api"] == "objective_batch"
+    assert trial["workflow"]["layer_growth_path"] == "add_layer_at_percentage(10)"
     assert len(trial["results"]) == 2
 
     candidate_counts = [row["candidate_count"] for row in trial["results"]]
@@ -100,6 +169,8 @@ def test_realistic_optimizer_profile_runs_on_small_population_sizes():
 
     assert trial["family"] == "one_generation"
     assert trial["model_class"] == "TrapezoidModelArray"
+    assert trial["workflow"]["optimizer"] == "differential_evolution"
+    assert trial["workflow"]["vectorized"] is True
     assert len(trial["results"]) == 1
 
     row = trial["results"][0]
@@ -124,6 +195,7 @@ def test_realistic_optimizer_profile_runs_on_layered_profile():
     )
 
     row = trial["results"][0]
+    assert trial["workflow"]["height_percentage"] == 10
     assert row["population_size"] == 2
     assert row["candidate_count_hint"] == 16
     assert math.isfinite(row["gf"])

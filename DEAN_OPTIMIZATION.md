@@ -43,6 +43,139 @@ Added optimization and harness files:
 - `tests/test_fitting/test_dean_optimization_trapezoid.py`
 - `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
 - `tests/test_fitting/test_dean_optimization_structure_similarity.py`
+- `tests/test_fitting/test_dean_workflow_semantics.py`
+
+## Current Harness And Test Status
+
+The prerequisite harness and test refactor for resuming trapezoid GPU work is now in place.
+
+Completed:
+
+- layer-growth now preserves the concrete runtime class, including Dean CPU and GPU variants
+- layer-growth normalizes `slds` to the new layer count instead of requiring a harness-only repair
+- copied-data layer-growth models re-run their normal data initialization path
+- `parameter_sweep_2d` is exposed again as a compatibility entry point for the notebooks
+- trapezoid wrapper parameter resolution now selects the name set that matches the active workflow state
+- unconditional optimizer and Cython import debug prints have been removed from routine runs
+- realistic trapezoid profiles now build through `add_layer_at_percentage(...)` and `add_multiple_layers(...)` instead of cloned parameter dictionaries
+- notebook-parallel realistic optimization ladders are now fixed at:
+  - `notebook_4param`: geometry plus `DW`
+  - layered `8`- and `12`-parameter profiles: geometry plus `DW`, `I0`, and scalar `Bk`, without auto-added `sld_*`
+- workflow-native runners now cover DE, dual annealing, batch initialization, MCMC, and sweep replay smoke paths
+- fitting coverage is now split between:
+  - semantic workflow regressions in `tests/test_fitting/test_dean_workflow_semantics.py`
+  - benchmark and harness smoke coverage in the existing Dean optimization test modules
+- current local validation baseline:
+  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting -q`
+  - `27 passed`
+
+Remaining follow-on work after GPU optimization resumes:
+
+- strengthen regression coverage only for workflow-native paths that prove benchmark value
+- extend opt-in MCMC benchmarking beyond smoke/trial level where it remains informative
+
+## Current Harness Tuning Surface
+
+This is what the current trapezoid harness can and cannot tune directly.
+
+### Objective Batch Tuning
+
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py` can sweep raw batched objective size independently of any optimizer budget.
+- named batch-size profiles already exist for:
+  - `smoke`
+  - `broadcast`
+  - `gpu_candidate`
+- use this path when the question is:
+  - GPU launch overhead versus useful work
+  - vectorization crossover point
+  - sensitivity to candidate-matrix chunk size alone
+
+### Realistic DE Tuning
+
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py` exposes realistic DE tuning through:
+  - profile
+  - model class
+  - `freeform_use_cupy`
+  - `population_sizes`
+  - `maxiter`
+  - `tol`
+  - `polish`
+  - `seed`
+  - `repeats`
+- in the realistic DE harness, `population_size` plays two roles at once:
+  - SciPy DE `popsize`
+  - generation-sized vectorized evaluation chunk
+- the current realistic candidate-budget harness formalizes this as:
+  - `candidate_count = parameter_count * population_size`
+- the older lightweight DE harness still exposes:
+  - `vectorized`
+  - CPU `workers`
+  - `popsize`
+  for scalar-versus-vectorized and CPU-parallel comparisons
+
+Current DE limitation:
+
+- the realistic harness cannot yet decouple optimizer `popsize` from vectorized evaluation chunk size
+- DE `mutation` and `recombination` are still fixed inside the realistic helper instead of being first-class tuning knobs
+
+### Realistic MCMC Tuning
+
+- the current realistic MCMC harness exposes:
+  - profile
+  - family: `mcmc_smoke` or `mcmc_trial`
+  - model class
+  - `n_walkers`
+  - `n_steps`
+  - `burn_in`
+  - `thin`
+- the core `CDSAXS_MCMC(...)` API still accepts additional `emcee` kwargs, but the realistic harness wrapper does not yet surface them directly
+
+Current MCMC limitation:
+
+- the current MCMC path is not walker-vectorized in the same sense that DE generations are vectorized
+- changing `n_walkers` changes total sampler work, but does not currently create a clean DE-like GPU batch-chunk control
+- this means current MCMC runs are useful for workflow validation and coarse throughput trends, but not yet as a strong GPU chunk-shape tuning harness
+
+### Current Validation State
+
+What is already valid:
+
+- DE speed harnesses exist for:
+  - raw objective batch timing
+  - realistic candidate-budget timing
+  - realistic short DE timing
+- DE validation exists through:
+  - exact realistic profile-shape assertions
+  - objective-value parity checks
+  - fixed-seed structure-similarity regression
+- MCMC validation exists through:
+  - smoke and trial runners
+  - positive acceptance and effective-sample checks
+  - finite `GF` and `BIC`
+  - stateful sweep-to-MCMC workflow-consistency coverage
+
+What is still missing:
+
+- a robust wall-clock-to-convergence harness
+- a time-to-threshold comparison such as:
+  - first finite fit below a target `GF`
+  - best `GF` reached after equal wall-clock budget
+- a stronger CPU-versus-GPU MCMC parity regression comparable to the current DE structure-similarity check
+
+### Current Interpretation Rule
+
+- the current harness can answer:
+  - which path evaluates more candidates per second
+  - which path is faster under the same short DE or MCMC budget
+  - whether core workflow semantics still hold
+- the current harness cannot yet answer:
+  - which path gets to fit convergence first in a robust optimizer-level sense
+
+Working inference, not yet a gated conclusion:
+
+- current results already show that GPU advantage grows as vectorized candidate sets or DE generation sizes grow
+- because of that, if a GPU path already beats the scalar incumbent under the current short fixed-budget comparisons, it is reasonable to expect the advantage to widen at larger `popsize` and longer runs
+- treat that as a planning assumption, not as a proven convergence claim, until the harness includes explicit time-to-threshold measurements
 
 Rebase and compatibility updates already applied:
 
@@ -425,9 +558,16 @@ Keep:
 - `Trapezoid_model_dean_gpu.py`
 - current realistic trapezoid harness
 
-Immediate cleanup items:
+Completed stabilization items:
 
-- remove unconditional optimizer debug prints from `CDSAXS_base_model._run_scipy_optimizer`
+- removed unconditional optimizer debug prints from `CDSAXS_base_model._run_scipy_optimizer`
+- removed import-time Cython status prints from routine package loads
+- restored `parameter_sweep_2d` notebook compatibility
+- fixed stale wrapper parameter-name leakage across stateful workflows such as MCMC
+- preserved optimized runtime classes through layer-growth APIs
+
+Remaining cleanup items:
+
 - keep benchmark output deterministic and machine-readable
 - keep scalar and batched incumbents explicit in results
 
@@ -435,17 +575,20 @@ Immediate cleanup items:
 
 Refactor the current trapezoid harness so it interacts more elegantly with the updated repo.
 
-Required changes:
+Completed:
 
-- build realistic profiles by calling current model APIs such as:
+- realistic profiles now build through the target model class and call:
   - `add_layer_at_percentage`
   - `add_multiple_layers`
-- expose benchmark families in the same language the repo uses:
+- layered realistic profiles now keep the notebook-parallel `4`/`8`/`12` optimization surfaces instead of inheriting `sld_*` or per-column `Bk_i` parameters
+- workflow-native runners now exist for:
+  - candidate-budget objective timing
   - DE
   - dual annealing
-  - batch initialization
-  - MCMC
-- log the exact workflow knobs:
+  - batch initialization smoke
+  - MCMC smoke and trial
+  - sweep replay smoke
+- workflow metadata now records:
   - `optimizer`
   - `vectorized`
   - `workers`
@@ -457,6 +600,14 @@ Required changes:
   - `n_steps`
   - `burn_in`
   - `thin`
+- tests are now split into:
+  - semantic workflow regressions in `test_dean_workflow_semantics.py`
+  - benchmark smoke coverage in the Dean trapezoid benchmark suites
+
+Remaining follow-on:
+
+- strengthen high-value semantic regressions around the new workflow runners
+- extend the workflow-native families beyond smoke level where they are worth timing routinely
 
 ### Stage T2: Keep The Current GPU Lead Valid
 
@@ -622,11 +773,6 @@ Recommended direction:
 
 ### Next Files To Add
 
-Trapezoid:
-
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid_mcmc.py`
-- `tests/test_fitting/test_dean_optimization_trapezoid_mcmc.py`
-
 SiGe:
 
 - `src/cdsaxs/Fitting/dean_optimization_sige.py`
@@ -644,6 +790,9 @@ These are required, not optional.
 1. Stop treating raw parameter cloning as the main realistic builder mechanism.
    Prefer the current model APIs for workflow-derived model construction.
 
+   Status:
+   complete for the realistic trapezoid harness.
+
 2. Split incumbent reporting by workload class.
    Every result should state whether the comparator is:
    - scalar CPU incumbent
@@ -656,6 +805,9 @@ These are required, not optional.
    - `mcmc_smoke`
    - `mcmc_trial`
 
+   Status:
+   complete for the trapezoid harness at smoke/trial level.
+
 4. Make benchmark metadata match repo semantics.
    Include:
    - geometry
@@ -663,6 +815,10 @@ These are required, not optional.
    - layer-growth path
    - constraint presence
    - typed-layer presence
+
+   Status:
+   complete for the current trapezoid workflow metadata.
+   SiGe and future typed-layer workflows still need to fill in the typed-layer and constraint cases.
 
 5. Keep the existing component-level Cython benchmark separate.
    It is useful support tooling, but it is not a workflow benchmark.
@@ -688,8 +844,9 @@ These are required, not optional.
 
 ## Known Caveats And Follow-Up Items
 
-- the current repo still has some internal rough edges in package exposure and optimizer logging
-- the realistic benchmark harness is stronger than before, but it still centers DE more than batch initialization and MCMC
+- the current repo still has some internal rough edges in workflow propagation, especially where older helpers still call `CDSAXS_DiffEvolution`
+- routine timed coverage still centers DE more than batch initialization and MCMC
+- the harness still does not measure time-to-convergence directly; current comparisons are fixed-budget rather than time-to-threshold
 - `optimization_logger.py` should be treated as a workflow to integrate with, not yet as the main benchmark scaffold
 - current mainline CuPy hooks in the base trapezoid model should not be trusted as the GPU baseline
 
@@ -715,8 +872,8 @@ If continuing from a fresh context, do this first:
    - Dean fused GPU path
 
 5. implement the next harness expansion in this order
-   - trapezoid MCMC smoke
-   - trapezoid MCMC trial
+   - strengthen regression coverage for the workflow-native trapezoid runners that are worth keeping
+   - add trapezoid MCMC benchmark coverage beyond smoke/trial if it still reveals useful scaling
    - SiGe helper module
    - SiGe objective and tiny-DE tests
 
@@ -726,8 +883,7 @@ If continuing from a fresh context, do this first:
 
 Immediate next work should be:
 
-1. stabilize the rebased branch surface and keep it pushable
-2. refactor the harness around current repo workflows, not just old notebook assumptions
-3. add trapezoid MCMC benchmark coverage
-4. start a dedicated SiGe benchmark and optimization track
-5. continue GPU optimization only on realistic vectorized workflows and only against valid incumbents
+1. add stronger regression coverage for the new trapezoid workflow-native harness families
+2. add trapezoid MCMC benchmark coverage beyond smoke level where it remains informative
+3. start a dedicated SiGe benchmark and optimization track
+4. continue GPU optimization only on realistic vectorized workflows and only against valid incumbents

@@ -312,12 +312,7 @@ class TrapezoidModelArrayDean(TrapezoidModelArray):
         """
         try:
             values = np.asarray(optimization_values, dtype=float)
-            if hasattr(self, "param_names"):
-                param_names = self.param_names
-            elif hasattr(self, "mcmc_param_names"):
-                param_names = self.mcmc_param_names
-            else:
-                param_names = list(self.model_params.get("optimization", {}).keys())
+            param_names = self._resolve_active_parameter_names(values)
 
             if values.ndim == 1:
                 return self.SimTrap_GF(values, param_names, self.Intensity, self.Qx, self.Qz)

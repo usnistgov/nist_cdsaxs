@@ -1711,7 +1711,28 @@ class CDSAXS_Model:
             self._save_sweep_results(results, filename or f"{sweep_params[0]}_{sweep_params[1]}_sweep_2d")
         
         return results
-    
+
+    def parameter_sweep_2d(self, sweep_params, sweep_ranges, n_points=(10, 10),
+                      exclude_from_fit=None, plot_results=True,
+                      figsize=(10, 8), save_results=False, filename=None,
+                      optimization_kwargs=None, verbose=True, metric='GF'):
+        """
+        Backward-compatible 2D sweep entry point used by the notebooks.
+        """
+        return self.parameter_sweep_2d_clean(
+            sweep_params=sweep_params,
+            sweep_ranges=sweep_ranges,
+            n_points=n_points,
+            exclude_from_fit=exclude_from_fit,
+            plot_results=plot_results,
+            figsize=figsize,
+            save_results=save_results,
+            filename=filename,
+            optimization_kwargs=optimization_kwargs,
+            verbose=verbose,
+            metric=metric,
+        )
+
     def _plot_1d_sweep_results(self, results, figsize):
         """Plot 1D sweep results."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
@@ -3242,9 +3263,64 @@ class CDSAXS_Model:
         for attr in data_attributes:
             if hasattr(self, attr):
                 setattr(target_model, attr, getattr(self, attr))
+
+        if hasattr(self, '_freeform_use_cupy'):
+            target_model._freeform_use_cupy = bool(self._freeform_use_cupy)
         
         # Store reference to source model for optimization parameter inheritance
         target_model._source_model = self
+
+        if hasattr(target_model, 'Intensity') and hasattr(target_model, 'process_imported_data'):
+            target_model.process_imported_data()
+
+    def _resolve_active_parameter_names(self, optimization_values=None, fallback_key='optimization'):
+        """
+        Resolve the parameter-name set that matches the active workflow state.
+        """
+        values = None
+        if optimization_values is not None:
+            values = np.asarray(optimization_values)
+
+        candidates = []
+        for attr_name in ('param_names', 'mcmc_param_names'):
+            names = getattr(self, attr_name, None)
+            if names:
+                normalized = list(names)
+                if normalized not in candidates:
+                    candidates.append(normalized)
+
+        fallback_names = list(getattr(self, 'model_params', {}).get(fallback_key, {}).keys())
+        if fallback_names and fallback_names not in candidates:
+            candidates.append(fallback_names)
+
+        if not candidates:
+            return []
+
+        if values is None or values.ndim == 0:
+            return candidates[0]
+
+        if values.ndim == 1:
+            matches = [names for names in candidates if len(names) == values.shape[0]]
+        elif values.ndim == 2:
+            expected_dims = {values.shape[0], values.shape[1]}
+            matches = [names for names in candidates if len(names) in expected_dims]
+        else:
+            raise ValueError("optimization_values must be a 1D or 2D array")
+
+        for attr_name in ('mcmc_param_names', 'param_names'):
+            names = getattr(self, attr_name, None)
+            if names and list(names) in matches:
+                return list(names)
+
+        if matches:
+            return matches[0]
+
+        if len(candidates) == 1:
+            return candidates[0]
+
+        shape = getattr(values, 'shape', None)
+        sizes = ', '.join(str(len(names)) for names in candidates)
+        raise ValueError(f"Could not resolve active parameter names for shape {shape}; candidate lengths: {sizes}")
 
     def _create_new_model_from_params(self, new_model_params):
         """
@@ -3253,7 +3329,18 @@ class CDSAXS_Model:
         """
         # Try different approaches to create the new model
         
-        # Method 1: Try using the create_model static method if available
+        # Method 1: Prefer the concrete runtime class to preserve optimized variants.
+        try:
+            new_model = self.__class__(
+                model=self.model,
+                layers=new_model_params['layers'],
+                model_params=new_model_params
+            )
+            return new_model
+        except:
+            pass
+        
+        # Method 2: Try using the create_model static method if available.
         if hasattr(self.__class__, 'create_model'):
             try:
                 return self.__class__.create_model(
@@ -3264,17 +3351,6 @@ class CDSAXS_Model:
                 )
             except:
                 pass
-        
-        # Method 2: Try creating using the class constructor directly
-        try:
-            new_model = self.__class__(
-                model=self.model,
-                layers=new_model_params['layers'],
-                model_params=new_model_params
-            )
-            return new_model
-        except:
-            pass
         
         # Method 3: Try using cdsaxs.create_model if available
         try:
@@ -3479,6 +3555,18 @@ class CDSAXS_Model:
             new_model_params['discretization'] = new_discretization
         
         new_model_params['layers'] = len(new_heights)
+
+        if self.geometry in ['trapezoid', 'sige']:
+            new_layers = new_model_params['layers']
+            slds = list(new_model_params.get('slds', []))
+            if not slds:
+                new_model_params['slds'] = [1.0] * new_layers
+            elif len(slds) == 1 and new_layers > 1:
+                new_model_params['slds'] = slds * new_layers
+            elif len(slds) == new_layers + 1:
+                new_model_params['slds'] = slds[:new_layers]
+            elif len(slds) != new_layers:
+                new_model_params['slds'] = np.resize(np.asarray(slds, dtype=float), new_layers).astype(float).tolist()
         
         # Create new model
         new_model = self._create_new_model_from_params(new_model_params)
@@ -5156,6 +5244,8 @@ class CDSAXS_Model:
             Optimization result object
         """
         
+        vectorized = kwargs.pop('vectorized', False)
+
         if optimizer == 'differential_evolution':
             # Default parameters for differential_evolution
             default_params = {
@@ -5163,14 +5253,15 @@ class CDSAXS_Model:
                 'x0': np.array(initial_values),
                 'maxiter': 100,
                 'popsize': 15,
-                'vectorized': kwargs.pop('vectorized', False)
+                'vectorized': bool(vectorized)
             }
             # Strip any unsupported keys before passing to SciPy
             kwargs.pop('use_cupy', None)
             default_params.update(kwargs)
-            print(f'default_params: {default_params}')
-            print(f'bounds: {bounds}')
-            print(objective_func)
+            if verbose:
+                print(f'default_params: {default_params}')
+                print(f'bounds: {bounds}')
+                print(objective_func)
             result = differential_evolution(
                 objective_func, bounds, **default_params
             )
