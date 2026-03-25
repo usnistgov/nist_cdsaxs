@@ -107,6 +107,23 @@ Interpretation:
 - the scalar path is still not a GPU win, so the accelerated path should remain explicitly batch-oriented
 - the next optimization work should stay focused on vectorized / broadcasted fitting rather than scalar GPU use
 
+3. Cython status after installation and scalar benchmarking
+   - the repo-local `cdsaxs_cython` package was built and installed into `cdsax-dev`
+   - the existing `AcceleratedTrapezoidModel` is a valid scalar CPU acceleration path after fixing an array-truth-value bug in its `GF_calc` wrapper
+   - scalar objective throughput improved materially over the incumbent:
+     - roughly `1.7x` to `2.0x` faster per scalar candidate
+   - scalar tiny DE also improved materially over the incumbent:
+     - about `1.58x` faster in the tested run
+   - however, the current Cython path is not a usable batched/vectorized fitting path:
+     - batched Cython kernels fall back because they expect lower-dimensional inputs
+     - the current compiled implementation therefore does not compete with the leading vectorized GPU workflow
+
+Interpretation:
+
+- keep Cython as a scalar CPU option
+- do not treat it as the mainline optimization direction for trapezoid fitting
+- the mainline path remains Dean-style vectorized fitting, especially the fused GPU branch
+
 ## Current Read On The Code
 
 - The main optimization entry point is `CDSAXS_Optimize` in `src/cdsaxs/Fitting/CDSAXS_base_model.py`.
@@ -138,6 +155,16 @@ Interpretation:
    - final GF / BIC
    - parameter drift
    - derived structure similarity
+   - comparison against the current incumbent path
+
+Incumbent policy:
+
+- For future GPU benchmark work, treat the installed scalar Cython path
+  `AcceleratedTrapezoidModel` as the incumbent CPU comparator because it is
+  currently the fastest non-GPU path we have measured for valid scalar fitting.
+- Keep `TrapezoidModelArrayDean` as a secondary batched CPU reference because it
+  better matches the vectorized workflow shape, even though it is not the scalar
+  incumbent.
 
 4. Separate "hot-loop speed" from "optimizer behavior".
    We need both:
@@ -360,6 +387,363 @@ This is the current execution order, combining the earlier roadmap with the deep
 9. Structure-similarity gating and broader regression hardening
    - tighten only for candidates that materially improve speed
    - keep early-stage scientific checks lightweight but real
+
+## Concrete Next Steps
+
+The immediate next sequence should be:
+
+1. Install and verify the repo's existing Cython extension package.
+   - build `cdsaxs_cython` from `src/cdsaxs/Fitting/setup.py`
+   - confirm imports succeed without the current fallback spam
+   - benchmark the existing accelerated model path before changing it
+
+2. Compare four trapezoid baselines on the same DeRocher example:
+   - incumbent `TrapezoidModelArray`
+   - Cython-backed `AcceleratedTrapezoidModel`
+   - Dean CPU `TrapezoidModelArrayDean`
+   - leading GPU path `TrapezoidModelArrayDeanGPUFused`
+
+3. Keep the benchmark split explicit:
+   - function-level comparison for:
+     - `GF_calc`
+     - `SymCoordAssign`
+     - `FreeFormTrapezoid`
+   - objective-level comparison across named batch profiles
+   - tiny end-to-end vectorized DE comparison
+
+4. Use the Cython result to decide the next branch point:
+   - if Cython beats Dean CPU materially, use it as the CPU-side reference path
+   - if it does not, keep Dean CPU as the reference and avoid further Cython investment for trapezoid
+   - if Cython ideas are strong at the kernel level, consider combining them with the Dean mapping approach later
+
+Current decision:
+
+- keep the Cython path as a scalar fallback / reference option
+- keep Dean CPU as the batched CPU reference
+- keep Dean fused GPU as the leading vectorized optimization branch
+
+5. After the Cython comparison, prioritize one of:
+   - persistent GPU workspaces
+   - larger-batch optimizer strategy
+   - CPU compiled-kernel integration into the Dean path
+   based on measured gains rather than preference
+
+## Harness Upgrade Proposal
+
+The current tiny workflow is still useful as a smoke benchmark, but it is too
+small to serve as the main decision-maker for further GPU work. The next harness
+upgrade should mimic the notebook workflows more directly while keeping runtime
+below the multi-minute regime.
+
+### Principles
+
+- Keep the DeRocher notebooks as the source of "realistic" workflow shape.
+- Separate:
+  - objective-throughput scaling
+  - one-generation optimizer behavior
+  - short multi-generation optimizer behavior
+- Compare every GPU candidate against:
+  - scalar Cython incumbent
+  - Dean batched CPU reference
+- Report both:
+  - absolute wall time
+  - throughput in candidates per second or objective calls per second
+
+### Notebook-Derived Profiles
+
+1. Four-parameter trapezoid profile
+   - source: `CDSAXS_DeRocher_V3.ipynb`
+   - same model/data already used in the current harness
+   - use popsize ladders that echo the notebook trend but remain affordable:
+     - `128`
+     - `256`
+     - `512`
+     - `1024`
+   - use:
+     - objective-only candidate sweeps
+     - `maxiter=1`
+     - `maxiter=2`
+
+2. Higher-parameter trapezoid profile
+   - source: later DeRocher V3 notebook cells that optimize `27` parameters
+   - build a notebook-parallel helper for that configuration
+   - use smaller popsize ladders because dimension is higher:
+     - `32`
+     - `64`
+     - `128`
+     - `256`
+   - this profile is important because the optimization geometry is more realistic
+     than the current four-parameter toy path
+
+3. Sweep-style workflow profile
+   - source: notebook `parameter_sweep_1d(...)` usage
+   - benchmark a short sweep with:
+     - small `n_points`
+     - reduced optimizer budget per point
+   - compare total wall time across:
+     - scalar Cython
+     - Dean batched CPU where applicable
+     - Dean fused GPU
+
+### Benchmark Families To Add
+
+1. Candidate-budget benchmark
+   - Evaluate exactly `N` candidates from a deterministic matrix.
+   - Run:
+     - scalar Cython loop
+     - Dean CPU batched objective
+     - Dean fused GPU objective
+   - This is the cleanest scaling comparison because it removes optimizer noise.
+
+2. One-generation DE benchmark
+   - Use the real optimizer entry point.
+   - Configure `maxiter=1`.
+   - This gives a "real workflow" benchmark that is still bounded.
+   - It is the best next step for understanding scaling without committing to long runs.
+
+3. Short multi-generation DE benchmark
+   - Use `maxiter=2` or `3`.
+   - Run only selected mid-size profiles, not the whole matrix.
+   - This captures some optimizer adaptation behavior without drifting into minute-scale runs.
+
+4. Periodic offline scale benchmark
+   - Not part of routine pytest.
+   - Run a larger popsize ladder occasionally, especially on the GPU host.
+   - Use notebook-like settings but cap runtime by:
+     - limiting generations
+     - limiting the number of population sizes tested
+
+### Target Runtime Envelope
+
+- default pytest-like smoke: a few seconds
+- realistic benchmark scripts: tens of seconds
+- offline scaling study: roughly under one minute per model profile
+
+### Proposed File/Layout Additions
+
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+  - notebook-parallel model builders for:
+    - `notebook_4param`
+    - `notebook_layer10_8param`
+    - `notebook_layer90_8param`
+    - `notebook_multilayer_12param`
+  - fixed candidate-budget runners
+  - one-generation and short-DE benchmark helpers
+
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
+  - smoke coverage for the realistic builders and benchmark helpers
+
+- optional offline script or marked test
+  - for the larger notebook-like scaling matrix
+
+### Implemented Harness Status
+
+- The realistic harness is now implemented beside the existing trapezoid helper as:
+  - `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+- The new helpers keep the public calling style parallel to the current repo:
+  - build a model variant
+  - run a deterministic batched objective benchmark
+  - run a short vectorized DE benchmark
+- Candidate-budget sizing is now defined in a principled way:
+  - `candidate_count = population_size * parameter_count`
+  - this mirrors the way the DE workflow scales with dimensionality
+- The routine realistic profile ladder now uses:
+  - `notebook_4param`
+  - `notebook_layer10_8param`
+  - `notebook_layer90_8param`
+  - `notebook_multilayer_12param`
+- The layered builders required one real workflow fix:
+  - after layer insertion, `slds` must be expanded to one value per layer for the single-material model
+  - without that fix, objective-only timing worked, but end-to-end optimizer runs failed during later structure simulation
+- Current active benchmark focus is GPU-only by request:
+  - fused GPU path is the baseline under active optimization
+  - scalar Cython remains the incumbent CPU reference for future cross-device comparisons, but it is not in the routine matrix right now
+- The short-DE families now use:
+  - one-generation: `maxiter=1`, `tol=0.5`
+  - multi-generation: `maxiter=2`, `tol=0.0`
+  - the stricter multi-generation tolerance avoids accidental early exit after the initial population
+- The notebook cell that reaches a much larger parameter count is still a follow-on target:
+  - keep that as an offline scale study after the 4/8/12-parameter ladder is exhausted
+
+### Current Realistic GPU Scaling Snapshot
+
+- Candidate-budget throughput on the current fused GPU path is broadly stable across the realistic ladder:
+  - `notebook_4param`: about `7.7k` to `9.1k` candidates/s
+  - `notebook_layer10_8param`: about `7.8k` to `8.3k` candidates/s
+  - `notebook_layer90_8param`: about `7.7k` to `8.3k` candidates/s
+  - `notebook_multilayer_12param`: about `7.4k` to `10.5k` candidates/s, with the smallest batch benefiting most from fixed-overhead amortization
+- Objective cost per candidate stays in a narrow band:
+  - roughly `95 us` to `136 us` per candidate over the tested realistic matrix
+- End-to-end one-generation DE timing also scales cleanly:
+  - `4` parameters: about `0.13 s` to `0.59 s`
+  - `8` parameters: about `0.07 s` to `0.27 s`
+  - `12` parameters: about `0.06 s` to `0.23 s`
+- Short multi-generation DE is now distinct from the one-generation family:
+  - `4` parameters: about `0.40 s` to `0.91 s`
+  - `8` parameters: about `0.21 s` to `0.42 s`
+  - `12` parameters: about `0.18 s` to `0.35 s`
+- Fit quality still improves modestly in the stricter short-DE family on some profiles:
+  - `notebook_4param`: best `GF` improved from about `1267.6` to `1229.4`
+  - `notebook_layer10_8param`: best `GF` improved from about `3938.1` to `3919.5`
+  - `notebook_layer90_8param`: best `GF` improved from about `3954.7` to `3890.6`
+  - `notebook_multilayer_12param`: no material improvement yet under the short budget
+
+### Realistic GPU Versus Incumbent Snapshot
+
+The realistic fused-GPU baseline has now been benchmarked directly against the
+current scalar Cython incumbent.
+
+- Candidate-budget objective speedup versus scalar Cython:
+  - `notebook_4param`: about `3.6x` to `5.2x`
+  - `notebook_layer10_8param`: about `6.3x` to `7.1x`
+  - `notebook_layer90_8param`: about `7.0x` to `7.6x`
+  - `notebook_multilayer_12param`: about `12.0x` to `17.2x`
+- One-generation DE wall-time speedup versus scalar Cython:
+  - `notebook_4param`: about `3.7x` to `4.1x`
+  - `notebook_layer10_8param`: about `6.1x` to `6.5x`
+  - `notebook_layer90_8param`: about `6.6x` to `7.0x`
+  - `notebook_multilayer_12param`: about `10.5x` to `11.4x`
+- Short multi-generation DE wall-time speedup versus scalar Cython:
+  - `notebook_4param`: about `3.6x` to `3.9x`
+  - `notebook_layer10_8param`: about `6.3x` to `6.4x`
+  - `notebook_layer90_8param`: about `7.0x` to `7.1x`
+  - `notebook_multilayer_12param`: about `10.9x` to `11.3x`
+
+### Tuning Implications From The Realistic Comparison
+
+- Small workloads:
+  - vectorization still helps, but the gains are limited by fixed overhead
+  - around very small candidate counts, the main levers are:
+    - CPU fallback threshold
+    - launch overhead
+    - host/device transfer overhead
+    - avoiding unnecessary batching setup
+- Measured small-workload crossover examples:
+  - `notebook_4param`, `4` candidates:
+    - fused GPU only about `1.3x` faster than scalar Cython
+  - `notebook_4param`, `8` candidates:
+    - fused GPU about `2.1x` faster
+  - `notebook_layer10_8param`, `8` candidates:
+    - fused GPU about `2.3x` faster
+- Medium workloads:
+  - vectorized tuning matters a lot
+  - once the batch reaches a few tens of candidates, the GPU path already opens a clear lead
+  - measured examples:
+    - `notebook_4param`, `16` candidates: about `3.3x`
+    - `notebook_layer10_8param`, `16` candidates: about `4.1x`
+    - `notebook_layer10_8param`, `32` candidates: about `4.3x`
+- Large realistic workloads:
+  - the key factor is bulk vectorized throughput, not scalar micro-optimization
+  - future wins should come from:
+    - reducing per-candidate GPU math cost
+    - reducing memory traffic
+    - increasing device-resident fusion
+    - tuning large-batch occupancy and batching shape
+  - at this scale, scalar incumbent improvements are unlikely to close the gap materially
+
+Practical prioritization:
+
+- For tiny or interactive workloads:
+  - preserve and tune the small-batch CPU fallback
+  - optimize transition thresholds carefully
+- For anything notebook-like or optimization-heavy:
+  - prioritize vectorized GPU-path improvements over scalar-path cleanup
+- For future GPU work, use the realistic incumbent comparison files as the decision baseline:
+  - `.dean_realistic_gpu_scaling.json`
+  - `.dean_realistic_incumbent_scaling.json`
+  - `.dean_realistic_gpu_vs_incumbent.json`
+
+### GPU Optimization Handoff
+
+This section is meant to make the current state portable to a fresh context.
+
+Environment assumptions:
+
+- branch: `feature/dean_optimization`
+- env: `cdsax-dev`
+- GPU library: `cupy-cuda12x`
+- incumbent CPU comparator:
+  - `AcceleratedTrapezoidModel`
+- active GPU baseline:
+  - `TrapezoidModelArrayDeanGPUFused`
+
+Primary source files for the current trapezoid GPU path:
+
+- `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py`
+  - fused/vectorized GPU implementation
+  - contains the current small-batch CPU fallback behavior
+- `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
+  - CPU-side parameter mapping and batched candidate plumbing
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
+  - original tiny benchmark and helper layer
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+  - realistic notebook-derived harness
+- `tests/test_fitting/test_dean_optimization_trapezoid.py`
+  - tiny-path regression coverage
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
+  - realistic-harness regression coverage
+- `tests/test_fitting/test_dean_optimization_structure_similarity.py`
+  - structure-similarity scaffold
+
+Current realistic benchmark artifacts:
+
+- `.dean_realistic_gpu_scaling.json`
+  - fused GPU realistic matrix
+- `.dean_realistic_incumbent_scaling.json`
+  - scalar Cython incumbent realistic matrix
+- `.dean_realistic_gpu_vs_incumbent.json`
+  - precomputed speedup comparison
+
+How to rerun the realistic GPU matrix:
+
+- run:
+  - `mamba run -n cdsax-dev python - <<'PY'`
+  - `from cdsaxs.Fitting.dean_optimization_trapezoid_realistic import run_realistic_gpu_scaling_matrix`
+  - `print(run_realistic_gpu_scaling_matrix(candidate_repeats=3, candidate_warmups=1, optimizer_tol=0.5, multi_generation_tol=0.0, optimizer_polish=False, optimizer_seed=1234))`
+  - `PY`
+
+How to rerun the realistic harness smoke tests:
+
+- `mamba run -n cdsax-dev pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
+- `mamba run -n cdsax-dev pytest tests/test_fitting/test_dean_optimization_trapezoid.py tests/test_fitting/test_dean_optimization_structure_similarity.py -q`
+
+Expected extension points for future GPU work:
+
+- `Trapezoid_model_dean_gpu.py`
+  - more device-resident fusion
+  - lower host/device traffic
+  - better large-batch memory layout
+  - threshold tuning for small-batch fallback
+- `dean_optimization_trapezoid_realistic.py`
+  - add larger offline notebook-derived profiles
+  - add optional sweep-style workflow benchmarks
+  - add future GPU candidates to the same matrix for A/B comparison
+
+What should not be used as the main decision-maker anymore:
+
+- the tiny DE smoke benchmark by itself
+- scalar-only microbenchmarks without realistic candidate budgets
+
+Current decision standard for GPU changes:
+
+- beat the fused GPU realistic baseline on the saved 4/8/12-parameter ladder
+- preserve or improve fit quality on the short-DE profiles
+- only after that, tighten structure-similarity gating
+
+### Next Steps
+
+- Treat the saved realistic GPU matrix as the new optimization baseline for trapezoid GPU work.
+- Run future GPU candidates against the same 4/8/12-parameter ladder before promoting them.
+- Add structure-similarity regression only for candidates that beat this realistic GPU baseline by a meaningful margin.
+- Add an offline larger notebook-derived profile after the current GPU path stops yielding wins on the 4/8/12-parameter ladder.
+
+### Decision Rule For Future GPU Work
+
+For future GPU optimization attempts, a candidate should be considered strong if:
+
+- it beats the scalar Cython incumbent on realistic candidate-budget comparisons
+- it also beats the Dean batched CPU reference on batched objective throughput
+- it preserves fit parity on at least one short real-optimizer notebook-derived profile
 
 ### Lower-Priority Or Dependent Work
 

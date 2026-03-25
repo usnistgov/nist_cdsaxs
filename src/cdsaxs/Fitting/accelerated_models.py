@@ -86,7 +86,8 @@ class AcceleratedTrapezoidModel(TrapezoidModelArray):
         Accelerated goodness of fit calculation with fallback.
         """
         if self._use_acceleration and CYTHON_AVAILABLE:
-            result = gf_calc_accelerated(SimInt, Intensity or self.Intensity)
+            target_intensity = self.Intensity if Intensity is None else Intensity
+            result = gf_calc_accelerated(SimInt, target_intensity)
             if result is not None:
                 self._acceleration_status['gf_calculation'] = True
                 return result
@@ -274,7 +275,8 @@ class AcceleratedCylinderModel(CylinderModel):
         Accelerated goodness of fit calculation with fallback.
         """
         if self._use_acceleration and CYTHON_AVAILABLE:
-            result = gf_calc_accelerated(SimInt, Intensity or self.Intensity)
+            target_intensity = self.Intensity if Intensity is None else Intensity
+            result = gf_calc_accelerated(SimInt, target_intensity)
             if result is not None:
                 self._acceleration_status['gf_calculation'] = True
                 return result

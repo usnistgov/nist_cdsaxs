@@ -1,0 +1,460 @@
+{
+  "profiles": [
+    {
+      "profile": "notebook_4param",
+      "description": {
+        "profile": "notebook_4param",
+        "label": "Notebook base trapezoid",
+        "layers": 1,
+        "trapezoid_count": 2,
+        "parameter_count": 4,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "DW"
+        ],
+        "default_vector": [
+          400.0,
+          700.0,
+          83.0,
+          15.0
+        ]
+      },
+      "candidate_budget": [
+        {
+          "population_size": 128,
+          "candidate_count": 512,
+          "gpu_seconds_per_candidate": 0.00011016605882711399,
+          "incumbent_seconds_per_candidate": 0.0005757873053274428,
+          "gpu_speedup_over_incumbent": 5.226539929426345
+        },
+        {
+          "population_size": 256,
+          "candidate_count": 1024,
+          "gpu_seconds_per_candidate": 0.0001139060204877751,
+          "incumbent_seconds_per_candidate": 0.0005331022991110027,
+          "gpu_speedup_over_incumbent": 4.68019422351971
+        },
+        {
+          "population_size": 512,
+          "candidate_count": 2048,
+          "gpu_seconds_per_candidate": 0.00012133339502421829,
+          "incumbent_seconds_per_candidate": 0.0004809591297695685,
+          "gpu_speedup_over_incumbent": 3.9639468562926843
+        },
+        {
+          "population_size": 1024,
+          "candidate_count": 4096,
+          "gpu_seconds_per_candidate": 0.00012920900796113224,
+          "incumbent_seconds_per_candidate": 0.0004678120259692757,
+          "gpu_speedup_over_incumbent": 3.6205836833760046
+        }
+      ],
+      "one_generation": [
+        {
+          "population_size": 128,
+          "candidate_count_hint": 512,
+          "gpu_seconds_per_run": 0.13107416965067387,
+          "incumbent_seconds_per_run": 0.536728797480464,
+          "gpu_speedup_over_incumbent": 4.0948479697479785,
+          "gpu_gf": 1278.0975851529877,
+          "incumbent_gf": 1256.8907164611558,
+          "gf_delta_incumbent_minus_gpu": -21.206868691831914
+        },
+        {
+          "population_size": 256,
+          "candidate_count_hint": 1024,
+          "gpu_seconds_per_run": 0.2622079197317362,
+          "incumbent_seconds_per_run": 1.0828024819493294,
+          "gpu_speedup_over_incumbent": 4.129556739007502,
+          "gpu_gf": 1328.1481249871545,
+          "incumbent_gf": 1328.148124987153,
+          "gf_delta_incumbent_minus_gpu": -1.3642420526593924e-12
+        },
+        {
+          "population_size": 512,
+          "candidate_count_hint": 2048,
+          "gpu_seconds_per_run": 0.5863367468118668,
+          "incumbent_seconds_per_run": 2.1754480190575123,
+          "gpu_speedup_over_incumbent": 3.7102365336749585,
+          "gpu_gf": 1267.5999133886155,
+          "incumbent_gf": 1267.9066072735168,
+          "gf_delta_incumbent_minus_gpu": 0.3066938849012786
+        }
+      ],
+      "multi_generation": [
+        {
+          "population_size": 256,
+          "candidate_count_hint": 1024,
+          "gpu_seconds_per_run": 0.4013910908252001,
+          "incumbent_seconds_per_run": 1.5765653401613235,
+          "gpu_speedup_over_incumbent": 3.927753695081126,
+          "gpu_gf": 1328.1481249871545,
+          "incumbent_gf": 1302.6313669718552,
+          "gf_delta_incumbent_minus_gpu": -25.516758015299274
+        },
+        {
+          "population_size": 512,
+          "candidate_count_hint": 2048,
+          "gpu_seconds_per_run": 0.9110757373273373,
+          "incumbent_seconds_per_run": 3.2689229398965836,
+          "gpu_speedup_over_incumbent": 3.5879815540758973,
+          "gpu_gf": 1229.3901569304444,
+          "incumbent_gf": 1249.9045832600382,
+          "gf_delta_incumbent_minus_gpu": 20.51442632959379
+        }
+      ]
+    },
+    {
+      "profile": "notebook_layer10_8param",
+      "description": {
+        "profile": "notebook_layer10_8param",
+        "label": "Notebook added-layer trapezoid at 10%",
+        "layers": 2,
+        "trapezoid_count": 3,
+        "parameter_count": 8,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "trap_1_height",
+          "trap_2_width",
+          "DW",
+          "I0",
+          "Bk"
+        ],
+        "default_vector": [
+          400.0,
+          70.0,
+          368.3,
+          665.0,
+          83.0,
+          15.0,
+          1e-06,
+          0.5
+        ]
+      },
+      "candidate_budget": [
+        {
+          "population_size": 32,
+          "candidate_count": 256,
+          "gpu_seconds_per_candidate": 0.00012520357267931104,
+          "incumbent_seconds_per_candidate": 0.000813941725937184,
+          "gpu_speedup_over_incumbent": 6.500946486742561
+        },
+        {
+          "population_size": 64,
+          "candidate_count": 512,
+          "gpu_seconds_per_candidate": 0.00012096241698600352,
+          "incumbent_seconds_per_candidate": 0.0008548049008823,
+          "gpu_speedup_over_incumbent": 7.066698253732884
+        },
+        {
+          "population_size": 128,
+          "candidate_count": 1024,
+          "gpu_seconds_per_candidate": 0.00012118090671719983,
+          "incumbent_seconds_per_candidate": 0.0008019601197399121,
+          "gpu_speedup_over_incumbent": 6.617875220322029
+        },
+        {
+          "population_size": 256,
+          "candidate_count": 2048,
+          "gpu_seconds_per_candidate": 0.00012861369244395368,
+          "incumbent_seconds_per_candidate": 0.000806683576835591,
+          "gpu_speedup_over_incumbent": 6.272143824710744
+        }
+      ],
+      "one_generation": [
+        {
+          "population_size": 32,
+          "candidate_count_hint": 256,
+          "gpu_seconds_per_run": 0.07182665169239044,
+          "incumbent_seconds_per_run": 0.4360983557999134,
+          "gpu_speedup_over_incumbent": 6.071539540330754,
+          "gpu_gf": 4006.7306448272716,
+          "incumbent_gf": 8255.542982048344,
+          "gf_delta_incumbent_minus_gpu": 4248.812337221072
+        },
+        {
+          "population_size": 64,
+          "candidate_count_hint": 512,
+          "gpu_seconds_per_run": 0.1417883150279522,
+          "incumbent_seconds_per_run": 0.8821012638509274,
+          "gpu_speedup_over_incumbent": 6.221255000294133,
+          "gpu_gf": 3964.3537675118814,
+          "incumbent_gf": 6462.113001279873,
+          "gf_delta_incumbent_minus_gpu": 2497.7592337679916
+        },
+        {
+          "population_size": 128,
+          "candidate_count_hint": 1024,
+          "gpu_seconds_per_run": 0.2735480908304453,
+          "incumbent_seconds_per_run": 1.772900752723217,
+          "gpu_speedup_over_incumbent": 6.481130054101248,
+          "gpu_gf": 3938.0683767810106,
+          "incumbent_gf": 6774.673229964096,
+          "gf_delta_incumbent_minus_gpu": 2836.6048531830857
+        }
+      ],
+      "multi_generation": [
+        {
+          "population_size": 64,
+          "candidate_count_hint": 512,
+          "gpu_seconds_per_run": 0.21053658612072468,
+          "incumbent_seconds_per_run": 1.3331181518733501,
+          "gpu_speedup_over_incumbent": 6.332002320532172,
+          "gpu_gf": 3959.460434627193,
+          "incumbent_gf": 6254.131215780889,
+          "gf_delta_incumbent_minus_gpu": 2294.6707811536958
+        },
+        {
+          "population_size": 128,
+          "candidate_count_hint": 1024,
+          "gpu_seconds_per_run": 0.41705494932830334,
+          "incumbent_seconds_per_run": 2.65653108432889,
+          "gpu_speedup_over_incumbent": 6.369738780483057,
+          "gpu_gf": 3919.4578915504544,
+          "incumbent_gf": 6774.673229964096,
+          "gf_delta_incumbent_minus_gpu": 2855.215338413642
+        }
+      ]
+    },
+    {
+      "profile": "notebook_layer90_8param",
+      "description": {
+        "profile": "notebook_layer90_8param",
+        "label": "Notebook added-layer trapezoid at 90%",
+        "layers": 2,
+        "trapezoid_count": 3,
+        "parameter_count": 8,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "trap_1_height",
+          "trap_2_width",
+          "DW",
+          "I0",
+          "Bk"
+        ],
+        "default_vector": [
+          400.0,
+          630.0,
+          114.69999999999999,
+          105.0,
+          83.0,
+          15.0,
+          1e-06,
+          0.5
+        ]
+      },
+      "candidate_budget": [
+        {
+          "population_size": 32,
+          "candidate_count": 256,
+          "gpu_seconds_per_candidate": 0.000124769869823164,
+          "incumbent_seconds_per_candidate": 0.0009043305690283887,
+          "gpu_speedup_over_incumbent": 7.247988399042927
+        },
+        {
+          "population_size": 64,
+          "candidate_count": 512,
+          "gpu_seconds_per_candidate": 0.000120658363205924,
+          "incumbent_seconds_per_candidate": 0.0009227827492092425,
+          "gpu_speedup_over_incumbent": 7.647897126155747
+        },
+        {
+          "population_size": 128,
+          "candidate_count": 1024,
+          "gpu_seconds_per_candidate": 0.00012262785154841063,
+          "incumbent_seconds_per_candidate": 0.0009025033887155587,
+          "gpu_speedup_over_incumbent": 7.359693391996444
+        },
+        {
+          "population_size": 256,
+          "candidate_count": 2048,
+          "gpu_seconds_per_candidate": 0.00012931777443251727,
+          "incumbent_seconds_per_candidate": 0.0009028728030292162,
+          "gpu_speedup_over_incumbent": 6.981815198964534
+        }
+      ],
+      "one_generation": [
+        {
+          "population_size": 32,
+          "candidate_count_hint": 256,
+          "gpu_seconds_per_run": 0.07298251241445541,
+          "incumbent_seconds_per_run": 0.47849782556295395,
+          "gpu_speedup_over_incumbent": 6.5563353429879925,
+          "gpu_gf": 3982.915010792729,
+          "incumbent_gf": 6597.595775547593,
+          "gf_delta_incumbent_minus_gpu": 2614.680764754864
+        },
+        {
+          "population_size": 64,
+          "candidate_count_hint": 512,
+          "gpu_seconds_per_run": 0.14119365997612476,
+          "incumbent_seconds_per_run": 0.9549565222114325,
+          "gpu_speedup_over_incumbent": 6.763451860182047,
+          "gpu_gf": 3948.2741428582617,
+          "incumbent_gf": 7160.580500535075,
+          "gf_delta_incumbent_minus_gpu": 3212.306357676813
+        },
+        {
+          "population_size": 128,
+          "candidate_count_hint": 1024,
+          "gpu_seconds_per_run": 0.27456736750900745,
+          "incumbent_seconds_per_run": 1.9324505627155304,
+          "gpu_speedup_over_incumbent": 7.038165460985215,
+          "gpu_gf": 3954.6860420773455,
+          "incumbent_gf": 9340.74622652714,
+          "gf_delta_incumbent_minus_gpu": 5386.060184449795
+        }
+      ],
+      "multi_generation": [
+        {
+          "population_size": 64,
+          "candidate_count_hint": 512,
+          "gpu_seconds_per_run": 0.20851093158125877,
+          "incumbent_seconds_per_run": 1.451816225424409,
+          "gpu_speedup_over_incumbent": 6.962782307932003,
+          "gpu_gf": 3948.2741428582617,
+          "incumbent_gf": 7160.580500535075,
+          "gf_delta_incumbent_minus_gpu": 3212.306357676813
+        },
+        {
+          "population_size": 128,
+          "candidate_count_hint": 1024,
+          "gpu_seconds_per_run": 0.41724046878516674,
+          "incumbent_seconds_per_run": 2.9510096330195665,
+          "gpu_speedup_over_incumbent": 7.072683149867263,
+          "gpu_gf": 3890.573917363491,
+          "incumbent_gf": 7304.75073744383,
+          "gf_delta_incumbent_minus_gpu": 3414.176820080339
+        }
+      ]
+    },
+    {
+      "profile": "notebook_multilayer_12param",
+      "description": {
+        "profile": "notebook_multilayer_12param",
+        "label": "Notebook multi-added-layer trapezoid",
+        "layers": 4,
+        "trapezoid_count": 5,
+        "parameter_count": 12,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "trap_1_height",
+          "trap_2_width",
+          "trap_2_height",
+          "trap_3_width",
+          "trap_3_height",
+          "trap_4_width",
+          "DW",
+          "I0",
+          "Bk"
+        ],
+        "default_vector": [
+          400.0,
+          77.17500000000001,
+          365.05075,
+          328.9125,
+          233.575,
+          299.25,
+          114.69999999999999,
+          105.0,
+          83.0,
+          15.0,
+          1e-06,
+          0.5
+        ]
+      },
+      "candidate_budget": [
+        {
+          "population_size": 16,
+          "candidate_count": 192,
+          "gpu_seconds_per_candidate": 9.552036256839831e-05,
+          "incumbent_seconds_per_candidate": 0.0016399080923292786,
+          "gpu_speedup_over_incumbent": 17.168151881280874
+        },
+        {
+          "population_size": 32,
+          "candidate_count": 384,
+          "gpu_seconds_per_candidate": 0.00013587839364643313,
+          "incumbent_seconds_per_candidate": 0.0016283417401912932,
+          "gpu_speedup_over_incumbent": 11.983816532511957
+        },
+        {
+          "population_size": 64,
+          "candidate_count": 768,
+          "gpu_seconds_per_candidate": 0.00013446095464233722,
+          "incumbent_seconds_per_candidate": 0.0016441795911911565,
+          "gpu_speedup_over_incumbent": 12.227933347376814
+        },
+        {
+          "population_size": 128,
+          "candidate_count": 1536,
+          "gpu_seconds_per_candidate": 0.00013588212378737,
+          "incumbent_seconds_per_candidate": 0.0016297004129026188,
+          "gpu_speedup_over_incumbent": 11.993486468115512
+        }
+      ],
+      "one_generation": [
+        {
+          "population_size": 16,
+          "candidate_count_hint": 192,
+          "gpu_seconds_per_run": 0.06203601695597172,
+          "incumbent_seconds_per_run": 0.6519567258656025,
+          "gpu_speedup_over_incumbent": 10.509325998932363,
+          "gpu_gf": 4251.954656104826,
+          "incumbent_gf": 6958.6402670928765,
+          "gf_delta_incumbent_minus_gpu": 2706.68561098805
+        },
+        {
+          "population_size": 32,
+          "candidate_count_hint": 384,
+          "gpu_seconds_per_run": 0.11494111269712448,
+          "incumbent_seconds_per_run": 1.3092027679085732,
+          "gpu_speedup_over_incumbent": 11.390204402826578,
+          "gpu_gf": 4170.927942205935,
+          "incumbent_gf": 9675.43744703438,
+          "gf_delta_incumbent_minus_gpu": 5504.509504828444
+        },
+        {
+          "population_size": 64,
+          "candidate_count_hint": 768,
+          "gpu_seconds_per_run": 0.23082205094397068,
+          "incumbent_seconds_per_run": 2.617068136110902,
+          "gpu_speedup_over_incumbent": 11.338033456544254,
+          "gpu_gf": 4140.116317133633,
+          "incumbent_gf": 7947.505440405008,
+          "gf_delta_incumbent_minus_gpu": 3807.389123271375
+        }
+      ],
+      "multi_generation": [
+        {
+          "population_size": 32,
+          "candidate_count_hint": 384,
+          "gpu_seconds_per_run": 0.1799586359411478,
+          "incumbent_seconds_per_run": 1.9617612641304731,
+          "gpu_speedup_over_incumbent": 10.90117878406253,
+          "gpu_gf": 4170.927942205935,
+          "incumbent_gf": 6623.613658192124,
+          "gf_delta_incumbent_minus_gpu": 2452.6857159861884
+        },
+        {
+          "population_size": 64,
+          "candidate_count_hint": 768,
+          "gpu_seconds_per_run": 0.3481184523552656,
+          "incumbent_seconds_per_run": 3.9317013528198004,
+          "gpu_speedup_over_incumbent": 11.294148087293511,
+          "gpu_gf": 4140.116317133633,
+          "incumbent_gf": 7947.505440405008,
+          "gf_delta_incumbent_minus_gpu": 3807.389123271375
+        }
+      ]
+    }
+  ]
+}

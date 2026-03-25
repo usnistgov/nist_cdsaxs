@@ -35,6 +35,8 @@ Environment used so far:
   - `line_profiler`
   - `corner`
   - `cupy-cuda12x`
+- local acceleration package installed into the env:
+  - editable `cdsaxs_cython` from `src/cdsaxs/Fitting`
 - GPU hardware visible in this workspace:
   - `Quadro RTX 8000`
   - `49152 MiB`
@@ -421,3 +423,298 @@ Notes:
 - The fused path is not uniformly faster for every batch size versus the first Dean GPU candidate.
 - It is still worth keeping because it improves the tiny vectorized optimizer run, which is closer to the real fitting workflow than a single synthetic objective call.
 - This fused GPU class is the current leading trapezoid acceleration branch.
+
+### 2026-03-25 / Stage 5 / Cython Installation And Scalar Comparison
+
+- area: trapezoid compiled CPU path
+- candidate: existing `cdsaxs_cython` package and `AcceleratedTrapezoidModel`
+- status: complete
+
+Motivation:
+
+- The repo already contained a Cython extension package, but it was not installed into the working env.
+- Benchmark it in the regime where it is actually valid and compare it against the current vectorized CPU and GPU paths.
+
+Files touched:
+
+- `src/cdsaxs/Fitting/accelerated_models.py`
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+
+Environment actions:
+
+- built local extensions with:
+  - `python setup.py build_ext --inplace`
+- installed editable local package with:
+  - `pip install -e . --no-build-isolation`
+  - from `src/cdsaxs/Fitting`
+
+Benchmark protocol:
+
+- Verify direct import of `cdsaxs_cython` and `CYTHON_AVAILABLE=True`.
+- Run function-level benchmark using the existing `run_comprehensive_benchmark(...)`.
+- Fix the accelerated wrapper bug that used `Intensity or self.Intensity` with NumPy arrays.
+- Re-benchmark scalar-only usage:
+  - scalar objective parity
+  - repeated scalar candidate sweeps for:
+    - incumbent
+    - Cython accelerated model
+    - Dean CPU
+- Compare scalar Cython total time against:
+  - Dean CPU batched objective
+  - Dean fused GPU batched objective
+  at matched candidate counts.
+- Compare tiny fixed-seed DE runs:
+  - incumbent scalar
+  - Cython scalar
+  - Dean CPU scalar
+  - Dean CPU vectorized
+  - Dean fused GPU vectorized
+
+Results:
+
+- Installation:
+  - `cdsaxs_cython` now imports successfully from normal repo-root execution
+  - `CYTHON_AVAILABLE=True`
+- Function-level benchmark on the DeRocher example:
+  - `GF_calc`: about `1.01x`
+  - `SymCoordAssign`: about `1.30x`
+  - `FreeFormTrapezoid`: about `1.00x`
+- Scalar objective parity:
+  - default scalar candidate matched exactly
+  - tested batch of scalar candidates matched exactly
+- Scalar objective throughput:
+  - incumbent scalar per candidate: roughly `0.71 ms` to `1.20 ms`
+  - Cython scalar per candidate: roughly `0.44 ms` to `0.52 ms`
+  - Dean CPU scalar per candidate: roughly `0.60 ms` to `0.85 ms`
+- Scalar Cython versus vectorized Dean paths at matched candidate counts:
+  - versus Dean CPU batched:
+    - batch `16`: about parity
+    - batches `64` to `1024`: scalar Cython remained faster than Dean CPU batched
+  - versus Dean fused GPU batched:
+    - batch `16`: GPU about `3.15x` faster
+    - batch `64`: GPU about `3.23x` faster
+    - batch `256`: GPU about `3.80x` faster
+    - batch `1024`: GPU about `4.00x` faster
+- Tiny DE comparisons:
+  - incumbent scalar: about `0.0490 s`, `GF=1719.1091`
+  - Cython scalar: about `0.0310 s`, `GF=1719.1091`
+  - Dean CPU scalar: about `0.0431 s`, `GF=1719.1091`
+  - Dean CPU vectorized: about `0.0353 s`, `GF=1268.2043`
+  - Dean fused GPU vectorized: about `0.00904 s`, `GF=1268.2043`
+
+Outcome:
+
+- keep, but only as a scalar CPU option
+
+Notes:
+
+- The current Cython path is not a real batched/vectorized optimization path.
+- Existing batched/vectorized Cython attempts fall back because the compiled functions expect lower-dimensional inputs.
+- That makes the current compiled code valuable for scalar CPU work, but not a competitor to the vectorized GPU branch.
+- Dean CPU remains the batched CPU reference path.
+- Dean fused GPU remains the leading vectorized path.
+
+## 2026-03-25: Realistic GPU Harness Build And Notebook-Derived Scaling Baseline
+
+Goal:
+
+- Replace the tiny-only benchmark with a notebook-derived realistic harness that still finishes in seconds, not minutes.
+- Measure the current fused GPU path across a realistic trapezoid profile ladder.
+- Keep repo structure and public semantics parallel to the existing fitting code.
+
+Files touched:
+
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+- `src/cdsaxs/Fitting/__init__.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+
+Implementation notes:
+
+- Added realistic profile builders that derive notebook-parallel `model_params` on the baseline trapezoid model and then re-instantiate the requested fitting variant.
+- Implemented four routine realistic profiles:
+  - `notebook_4param`
+  - `notebook_layer10_8param`
+  - `notebook_layer90_8param`
+  - `notebook_multilayer_12param`
+- Implemented benchmark families:
+  - deterministic candidate-budget objective timing
+  - one-generation vectorized DE timing
+  - short multi-generation vectorized DE timing
+- Defined candidate budget in a principled way:
+  - `candidate_count = population_size * parameter_count`
+- Added a fused-GPU matrix runner and saved one reference result set to:
+  - `.dean_realistic_gpu_scaling.json`
+
+Bug found and fixed:
+
+- Layer-addition helpers left `slds` at length `1` even when the new model had multiple layers.
+- That allowed some objective-only timing paths to run, but broke later end-to-end optimizer simulation with:
+  - `SLD array length (1) must exactly match number of layers`
+- Fixed by expanding the single-material `slds` list to one value per layer in the realistic builder before re-instantiating the target model class.
+
+Benchmark protocol:
+
+- Environment:
+  - `mamba run -n cdsax-dev`
+  - CuPy visible with `3` CUDA devices
+- Candidate-budget timing:
+  - `3` timed repeats
+  - `1` warmup
+  - fused GPU class
+- One-generation DE:
+  - `maxiter=1`
+  - `tol=0.5`
+  - `polish=False`
+  - fixed seed `1234`
+- Short multi-generation DE:
+  - `maxiter=2`
+  - `tol=0.0`
+  - `polish=False`
+  - fixed seed `1234`
+
+Validation:
+
+- `pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
+  - `10 passed`
+- existing Dean optimization regression coverage still passed after the additions
+
+Results:
+
+- Candidate-budget throughput stayed in a fairly tight band across the realistic ladder:
+  - `notebook_4param`: about `7.7k` to `9.1k` candidates/s
+  - `notebook_layer10_8param`: about `7.8k` to `8.3k` candidates/s
+  - `notebook_layer90_8param`: about `7.7k` to `8.3k` candidates/s
+  - `notebook_multilayer_12param`: about `7.4k` to `10.5k` candidates/s
+- Objective cost per candidate was roughly:
+  - `95 us` to `136 us`
+- One-generation DE timing:
+  - `notebook_4param`: about `0.13 s` to `0.59 s`
+  - `notebook_layer10_8param`: about `0.07 s` to `0.27 s`
+  - `notebook_layer90_8param`: about `0.07 s` to `0.27 s`
+  - `notebook_multilayer_12param`: about `0.06 s` to `0.23 s`
+- Short multi-generation DE timing:
+  - `notebook_4param`: about `0.40 s` to `0.91 s`
+  - `notebook_layer10_8param`: about `0.21 s` to `0.42 s`
+  - `notebook_layer90_8param`: about `0.21 s` to `0.42 s`
+  - `notebook_multilayer_12param`: about `0.18 s` to `0.35 s`
+- Best observed `GF` values in the current matrix:
+  - `notebook_4param`
+    - one-generation best: about `1267.60`
+    - multi-generation best: about `1229.39`
+  - `notebook_layer10_8param`
+    - one-generation best: about `3938.07`
+    - multi-generation best: about `3919.46`
+  - `notebook_layer90_8param`
+    - one-generation best: about `3948.27`
+    - multi-generation best: about `3890.57`
+  - `notebook_multilayer_12param`
+    - one-generation best: about `4140.12`
+    - multi-generation best: about `4140.12`
+
+Outcome:
+
+- keep
+
+Why kept:
+
+- The realistic harness now exists in the repo with parallel structure and naming.
+- The current fused GPU path remains fast and stable across a more notebook-like scaling ladder.
+- The harness is now strong enough to serve as the baseline for future GPU optimization attempts.
+
+Open follow-on work:
+
+- Add a larger offline notebook-derived profile after current GPU optimization ideas stop moving the 4/8/12-parameter ladder.
+- Re-introduce scalar Cython comparison later when cross-device reporting matters again.
+- Only add strict structure-similarity gating for future candidates that beat this realistic GPU baseline by a meaningful amount.
+
+## 2026-03-25: Realistic GPU Versus Scalar Cython Incumbent
+
+Goal:
+
+- Benchmark the realistic 4/8/12-parameter trapezoid workloads against the current scalar Cython incumbent.
+- Use the comparison to decide whether future optimization should focus on small-batch overheads or large-batch vectorized throughput.
+
+Artifacts saved:
+
+- `.dean_realistic_incumbent_scaling.json`
+- `.dean_realistic_gpu_vs_incumbent.json`
+
+Benchmark protocol:
+
+- Incumbent model:
+  - `AcceleratedTrapezoidModel`
+- GPU model:
+  - `TrapezoidModelArrayDeanGPUFused`
+- Candidate-budget comparison:
+  - same realistic profile ladder as the GPU baseline
+  - deterministic candidate matrices
+  - scalar incumbent evaluated one candidate at a time
+  - fused GPU evaluated the whole candidate matrix vectorized
+- Optimizer comparison:
+  - same `popsize`, `maxiter`, seed, mutation, recombination, and polish settings
+  - incumbent ran scalar DE
+  - GPU ran vectorized DE
+  - one-generation family used `maxiter=1`, `tol=0.5`
+  - short multi-generation family used `maxiter=2`, `tol=0.0`
+
+Results:
+
+- Candidate-budget objective speedup of fused GPU over scalar Cython:
+  - `notebook_4param`: about `3.6x` to `5.2x`
+  - `notebook_layer10_8param`: about `6.3x` to `7.1x`
+  - `notebook_layer90_8param`: about `7.0x` to `7.6x`
+  - `notebook_multilayer_12param`: about `12.0x` to `17.2x`
+- One-generation DE wall-time speedup:
+  - `notebook_4param`: about `3.7x` to `4.1x`
+  - `notebook_layer10_8param`: about `6.1x` to `6.5x`
+  - `notebook_layer90_8param`: about `6.6x` to `7.0x`
+  - `notebook_multilayer_12param`: about `10.5x` to `11.4x`
+- Short multi-generation DE wall-time speedup:
+  - `notebook_4param`: about `3.6x` to `3.9x`
+  - `notebook_layer10_8param`: about `6.3x` to `6.4x`
+  - `notebook_layer90_8param`: about `7.0x` to `7.1x`
+  - `notebook_multilayer_12param`: about `10.9x` to `11.3x`
+
+Fit-quality observations:
+
+- `notebook_4param`:
+  - scalar Cython and fused GPU were close under the short-DE budgets
+  - neither path dominated completely on `GF`
+- Layered realistic profiles:
+  - fused GPU not only ran much faster, it also reached much lower `GF` under the same short budgets
+  - scalar Cython was materially worse on the tested 8- and 12-parameter ladder
+  - this is likely a combination of:
+    - vectorized path efficiency
+    - higher practical search budget per wall-clock second
+    - optimizer-behavior differences between scalar and vectorized SciPy DE execution
+
+Small-batch crossover observations:
+
+- Very small candidate sets still benefit from the fused GPU path, but only modestly:
+  - `notebook_4param`, `4` candidates: about `1.3x`
+  - `notebook_4param`, `8` candidates: about `2.1x`
+  - `notebook_layer10_8param`, `8` candidates: about `2.3x`
+- Once the batch reaches the tens-of-candidates regime, vectorization becomes clearly dominant:
+  - `notebook_4param`, `16` candidates: about `3.3x`
+  - `notebook_layer10_8param`, `16` candidates: about `4.1x`
+  - `notebook_layer10_8param`, `32` candidates: about `4.3x`
+
+Outcome:
+
+- keep fused GPU as the primary optimization target
+- keep scalar Cython only as the incumbent CPU reference and fallback path
+
+Optimization implication:
+
+- Small-workload tuning priority:
+  - launch overhead
+  - host/device transfer overhead
+  - small-batch CPU fallback threshold
+- Large-workload tuning priority:
+  - fused device-resident math
+  - memory traffic reduction
+  - occupancy and batch-shape tuning
+  - avoiding scalar-path work entirely where possible

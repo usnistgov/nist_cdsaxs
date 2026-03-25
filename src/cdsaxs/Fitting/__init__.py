@@ -59,6 +59,16 @@ from .dean_optimization_trapezoid import (
     run_optimizer_trial,
     run_structure_similarity_trial,
 )
+from .dean_optimization_trapezoid_realistic import (
+    REALISTIC_TRAPEZOID_PROFILE_SPECS,
+    build_realistic_trapezoid_model,
+    describe_realistic_trapezoid_profile,
+    get_realistic_population_sizes,
+    get_realistic_trapezoid_profile_spec,
+    run_realistic_candidate_budget_trial,
+    run_realistic_gpu_scaling_matrix,
+    run_realistic_optimizer_profile,
+)
 
 from .cython_integration import (
     enable_cython,
@@ -143,6 +153,14 @@ __all__ = [
     "run_objective_trial",
     "run_optimizer_trial",
     "run_structure_similarity_trial",
+    "REALISTIC_TRAPEZOID_PROFILE_SPECS",
+    "build_realistic_trapezoid_model",
+    "describe_realistic_trapezoid_profile",
+    "get_realistic_population_sizes",
+    "get_realistic_trapezoid_profile_spec",
+    "run_realistic_candidate_budget_trial",
+    "run_realistic_gpu_scaling_matrix",
+    "run_realistic_optimizer_profile",
     "enable_cython",
     "disable_cython",
     "cython_fallback",

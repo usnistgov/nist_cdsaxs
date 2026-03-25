@@ -1,0 +1,870 @@
+{
+  "model_class": "TrapezoidModelArrayDeanGPUFused",
+  "profiles": [
+    {
+      "description": {
+        "profile": "notebook_4param",
+        "label": "Notebook base trapezoid",
+        "layers": 1,
+        "trapezoid_count": 2,
+        "parameter_count": 4,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "DW"
+        ],
+        "default_vector": [
+          400.0,
+          700.0,
+          83.0,
+          15.0
+        ]
+      },
+      "candidate_budget": {
+        "profile": "notebook_4param",
+        "profile_spec": {
+          "label": "Notebook base trapezoid",
+          "builder": "base",
+          "expected_parameter_count": 4,
+          "candidate_budget_population_sizes": [
+            128,
+            256,
+            512,
+            1024
+          ],
+          "one_generation_population_sizes": [
+            128,
+            256,
+            512
+          ],
+          "multi_generation_population_sizes": [
+            256,
+            512
+          ]
+        },
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 128,
+            "candidate_count": 512,
+            "parameter_count": 4,
+            "repeats": 3,
+            "elapsed_seconds": 0.16921506635844707,
+            "seconds_per_call": 0.05640502211948236,
+            "seconds_per_candidate": 0.00011016605882711399,
+            "candidates_per_second": 9077.205907577414,
+            "mean_objective": 4834.23958468031
+          },
+          {
+            "population_size": 256,
+            "candidate_count": 1024,
+            "parameter_count": 4,
+            "repeats": 3,
+            "elapsed_seconds": 0.3499192949384451,
+            "seconds_per_call": 0.1166397649794817,
+            "seconds_per_candidate": 0.0001139060204877751,
+            "candidates_per_second": 8779.167209228634,
+            "mean_objective": 4834.239809410534
+          },
+          {
+            "population_size": 512,
+            "candidate_count": 2048,
+            "parameter_count": 4,
+            "repeats": 3,
+            "elapsed_seconds": 0.7454723790287971,
+            "seconds_per_call": 0.24849079300959906,
+            "seconds_per_candidate": 0.00012133339502421829,
+            "candidates_per_second": 8241.754051309606,
+            "mean_objective": 4834.239921303926
+          },
+          {
+            "population_size": 1024,
+            "candidate_count": 4096,
+            "parameter_count": 4,
+            "repeats": 3,
+            "elapsed_seconds": 1.5877202898263931,
+            "seconds_per_call": 0.5292400966087977,
+            "seconds_per_candidate": 0.00012920900796113224,
+            "candidates_per_second": 7739.3984814186715,
+            "mean_objective": 4834.239977412585
+          }
+        ]
+      },
+      "one_generation": {
+        "profile": "notebook_4param",
+        "profile_spec": {
+          "label": "Notebook base trapezoid",
+          "builder": "base",
+          "expected_parameter_count": 4,
+          "candidate_budget_population_sizes": [
+            128,
+            256,
+            512,
+            1024
+          ],
+          "one_generation_population_sizes": [
+            128,
+            256,
+            512
+          ],
+          "multi_generation_population_sizes": [
+            256,
+            512
+          ]
+        },
+        "family": "one_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 128,
+            "candidate_count_hint": 512,
+            "parameter_count": 4,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.13107416965067387,
+            "seconds_per_run": 0.13107416965067387,
+            "gf": 1278.0975851529877,
+            "bic": 1306.6917831475537
+          },
+          {
+            "population_size": 256,
+            "candidate_count_hint": 1024,
+            "parameter_count": 4,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.2622079197317362,
+            "seconds_per_run": 0.2622079197317362,
+            "gf": 1328.1481249871545,
+            "bic": 1356.6532254475253
+          },
+          {
+            "population_size": 512,
+            "candidate_count_hint": 2048,
+            "parameter_count": 4,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.5863367468118668,
+            "seconds_per_run": 0.5863367468118668,
+            "gf": 1267.5999133886155,
+            "bic": 1296.2127988273548
+          }
+        ]
+      },
+      "multi_generation": {
+        "profile": "notebook_4param",
+        "profile_spec": {
+          "label": "Notebook base trapezoid",
+          "builder": "base",
+          "expected_parameter_count": 4,
+          "candidate_budget_population_sizes": [
+            128,
+            256,
+            512,
+            1024
+          ],
+          "one_generation_population_sizes": [
+            128,
+            256,
+            512
+          ],
+          "multi_generation_population_sizes": [
+            256,
+            512
+          ]
+        },
+        "family": "multi_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 256,
+            "candidate_count_hint": 1024,
+            "parameter_count": 4,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.4013910908252001,
+            "seconds_per_run": 0.4013910908252001,
+            "gf": 1328.1481249871545,
+            "bic": 1356.6532254475253
+          },
+          {
+            "population_size": 512,
+            "candidate_count_hint": 2048,
+            "parameter_count": 4,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.9110757373273373,
+            "seconds_per_run": 0.9110757373273373,
+            "gf": 1229.3901569304444,
+            "bic": 1258.0710615173068
+          }
+        ]
+      }
+    },
+    {
+      "description": {
+        "profile": "notebook_layer10_8param",
+        "label": "Notebook added-layer trapezoid at 10%",
+        "layers": 2,
+        "trapezoid_count": 3,
+        "parameter_count": 8,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "trap_1_height",
+          "trap_2_width",
+          "DW",
+          "I0",
+          "Bk"
+        ],
+        "default_vector": [
+          400.0,
+          70.0,
+          368.3,
+          665.0,
+          83.0,
+          15.0,
+          1e-06,
+          0.5
+        ]
+      },
+      "candidate_budget": {
+        "profile": "notebook_layer10_8param",
+        "profile_spec": {
+          "label": "Notebook added-layer trapezoid at 10%",
+          "builder": "single_layer",
+          "height_percentage": 10,
+          "expected_parameter_count": 8,
+          "candidate_budget_population_sizes": [
+            32,
+            64,
+            128,
+            256
+          ],
+          "one_generation_population_sizes": [
+            32,
+            64,
+            128
+          ],
+          "multi_generation_population_sizes": [
+            64,
+            128
+          ]
+        },
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 32,
+            "candidate_count": 256,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.09615634381771088,
+            "seconds_per_call": 0.032052114605903625,
+            "seconds_per_candidate": 0.00012520357267931104,
+            "candidates_per_second": 7986.99253224459,
+            "mean_objective": 4898.044516975038
+          },
+          {
+            "population_size": 64,
+            "candidate_count": 512,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.1857982724905014,
+            "seconds_per_call": 0.0619327574968338,
+            "seconds_per_candidate": 0.00012096241698600352,
+            "candidates_per_second": 8267.030577900154,
+            "mean_objective": 4898.044712588566
+          },
+          {
+            "population_size": 128,
+            "candidate_count": 1024,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.3722677454352379,
+            "seconds_per_call": 0.12408924847841263,
+            "seconds_per_candidate": 0.00012118090671719983,
+            "candidates_per_second": 8252.125083811283,
+            "mean_objective": 4898.044810306472
+          },
+          {
+            "population_size": 256,
+            "candidate_count": 2048,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.7902025263756514,
+            "seconds_per_call": 0.26340084212521714,
+            "seconds_per_candidate": 0.00012861369244395368,
+            "candidates_per_second": 7775.221914538941,
+            "mean_objective": 4898.044858879648
+          }
+        ]
+      },
+      "one_generation": {
+        "profile": "notebook_layer10_8param",
+        "profile_spec": {
+          "label": "Notebook added-layer trapezoid at 10%",
+          "builder": "single_layer",
+          "height_percentage": 10,
+          "expected_parameter_count": 8,
+          "candidate_budget_population_sizes": [
+            32,
+            64,
+            128,
+            256
+          ],
+          "one_generation_population_sizes": [
+            32,
+            64,
+            128
+          ],
+          "multi_generation_population_sizes": [
+            64,
+            128
+          ]
+        },
+        "family": "one_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 32,
+            "candidate_count_hint": 256,
+            "parameter_count": 8,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.07182665169239044,
+            "seconds_per_run": 0.07182665169239044,
+            "gf": 4006.7306448272716,
+            "bic": 4042.3358722338753
+          },
+          {
+            "population_size": 64,
+            "candidate_count_hint": 512,
+            "parameter_count": 8,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.1417883150279522,
+            "seconds_per_run": 0.1417883150279522,
+            "gf": 3964.3537675118814,
+            "bic": 4000.0721507991675
+          },
+          {
+            "population_size": 128,
+            "candidate_count_hint": 1024,
+            "parameter_count": 8,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.2735480908304453,
+            "seconds_per_run": 0.2735480908304453,
+            "gf": 3938.0683767810106,
+            "bic": 3973.8569480275246
+          }
+        ]
+      },
+      "multi_generation": {
+        "profile": "notebook_layer10_8param",
+        "profile_spec": {
+          "label": "Notebook added-layer trapezoid at 10%",
+          "builder": "single_layer",
+          "height_percentage": 10,
+          "expected_parameter_count": 8,
+          "candidate_budget_population_sizes": [
+            32,
+            64,
+            128,
+            256
+          ],
+          "one_generation_population_sizes": [
+            32,
+            64,
+            128
+          ],
+          "multi_generation_population_sizes": [
+            64,
+            128
+          ]
+        },
+        "family": "multi_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 64,
+            "candidate_count_hint": 512,
+            "parameter_count": 8,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.21053658612072468,
+            "seconds_per_run": 0.21053658612072468,
+            "gf": 3959.460434627193,
+            "bic": 3995.191884223917
+          },
+          {
+            "population_size": 128,
+            "candidate_count_hint": 1024,
+            "parameter_count": 8,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.41705494932830334,
+            "seconds_per_run": 0.41705494932830334,
+            "gf": 3919.4578915504544,
+            "bic": 3955.2961570165426
+          }
+        ]
+      }
+    },
+    {
+      "description": {
+        "profile": "notebook_layer90_8param",
+        "label": "Notebook added-layer trapezoid at 90%",
+        "layers": 2,
+        "trapezoid_count": 3,
+        "parameter_count": 8,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "trap_1_height",
+          "trap_2_width",
+          "DW",
+          "I0",
+          "Bk"
+        ],
+        "default_vector": [
+          400.0,
+          630.0,
+          114.69999999999999,
+          105.0,
+          83.0,
+          15.0,
+          1e-06,
+          0.5
+        ]
+      },
+      "candidate_budget": {
+        "profile": "notebook_layer90_8param",
+        "profile_spec": {
+          "label": "Notebook added-layer trapezoid at 90%",
+          "builder": "single_layer",
+          "height_percentage": 90,
+          "expected_parameter_count": 8,
+          "candidate_budget_population_sizes": [
+            32,
+            64,
+            128,
+            256
+          ],
+          "one_generation_population_sizes": [
+            32,
+            64,
+            128
+          ],
+          "multi_generation_population_sizes": [
+            64,
+            128
+          ]
+        },
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 32,
+            "candidate_count": 256,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.09582326002418995,
+            "seconds_per_call": 0.03194108667472998,
+            "seconds_per_candidate": 0.000124769869823164,
+            "candidates_per_second": 8014.755496798204,
+            "mean_objective": 4926.9802964588525
+          },
+          {
+            "population_size": 64,
+            "candidate_count": 512,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.18533124588429928,
+            "seconds_per_call": 0.06177708196143309,
+            "seconds_per_candidate": 0.000120658363205924,
+            "candidates_per_second": 8287.863132150484,
+            "mean_objective": 4926.980581180987
+          },
+          {
+            "population_size": 128,
+            "candidate_count": 1024,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.3767127599567175,
+            "seconds_per_call": 0.1255709199855725,
+            "seconds_per_candidate": 0.00012262785154841063,
+            "candidates_per_second": 8154.754302330928,
+            "mean_objective": 4926.980722606539
+          },
+          {
+            "population_size": 256,
+            "candidate_count": 2048,
+            "parameter_count": 8,
+            "repeats": 3,
+            "elapsed_seconds": 0.7945284061133862,
+            "seconds_per_call": 0.26484280203779537,
+            "seconds_per_candidate": 0.00012931777443251727,
+            "candidates_per_second": 7732.889035465395,
+            "mean_objective": 4926.980793373228
+          }
+        ]
+      },
+      "one_generation": {
+        "profile": "notebook_layer90_8param",
+        "profile_spec": {
+          "label": "Notebook added-layer trapezoid at 90%",
+          "builder": "single_layer",
+          "height_percentage": 90,
+          "expected_parameter_count": 8,
+          "candidate_budget_population_sizes": [
+            32,
+            64,
+            128,
+            256
+          ],
+          "one_generation_population_sizes": [
+            32,
+            64,
+            128
+          ],
+          "multi_generation_population_sizes": [
+            64,
+            128
+          ]
+        },
+        "family": "one_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 32,
+            "candidate_count_hint": 256,
+            "parameter_count": 8,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.07298251241445541,
+            "seconds_per_run": 0.07298251241445541,
+            "gf": 3982.915010792729,
+            "bic": 4018.5838313476224
+          },
+          {
+            "population_size": 64,
+            "candidate_count_hint": 512,
+            "parameter_count": 8,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.14119365997612476,
+            "seconds_per_run": 0.14119365997612476,
+            "gf": 3948.2741428582617,
+            "bic": 3984.035462392954
+          },
+          {
+            "population_size": 128,
+            "candidate_count_hint": 1024,
+            "parameter_count": 8,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.27456736750900745,
+            "seconds_per_run": 0.27456736750900745,
+            "gf": 3954.6860420773455,
+            "bic": 3990.4302403858187
+          }
+        ]
+      },
+      "multi_generation": {
+        "profile": "notebook_layer90_8param",
+        "profile_spec": {
+          "label": "Notebook added-layer trapezoid at 90%",
+          "builder": "single_layer",
+          "height_percentage": 90,
+          "expected_parameter_count": 8,
+          "candidate_budget_population_sizes": [
+            32,
+            64,
+            128,
+            256
+          ],
+          "one_generation_population_sizes": [
+            32,
+            64,
+            128
+          ],
+          "multi_generation_population_sizes": [
+            64,
+            128
+          ]
+        },
+        "family": "multi_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 64,
+            "candidate_count_hint": 512,
+            "parameter_count": 8,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.20851093158125877,
+            "seconds_per_run": 0.20851093158125877,
+            "gf": 3948.2741428582617,
+            "bic": 3984.035462392954
+          },
+          {
+            "population_size": 128,
+            "candidate_count_hint": 1024,
+            "parameter_count": 8,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.41724046878516674,
+            "seconds_per_run": 0.41724046878516674,
+            "gf": 3890.573917363491,
+            "bic": 3926.489309596434
+          }
+        ]
+      }
+    },
+    {
+      "description": {
+        "profile": "notebook_multilayer_12param",
+        "label": "Notebook multi-added-layer trapezoid",
+        "layers": 4,
+        "trapezoid_count": 5,
+        "parameter_count": 12,
+        "parameter_names": [
+          "trap_0_width",
+          "trap_0_height",
+          "trap_1_width",
+          "trap_1_height",
+          "trap_2_width",
+          "trap_2_height",
+          "trap_3_width",
+          "trap_3_height",
+          "trap_4_width",
+          "DW",
+          "I0",
+          "Bk"
+        ],
+        "default_vector": [
+          400.0,
+          77.17500000000001,
+          365.05075,
+          328.9125,
+          233.575,
+          299.25,
+          114.69999999999999,
+          105.0,
+          83.0,
+          15.0,
+          1e-06,
+          0.5
+        ]
+      },
+      "candidate_budget": {
+        "profile": "notebook_multilayer_12param",
+        "profile_spec": {
+          "label": "Notebook multi-added-layer trapezoid",
+          "builder": "multi_layer",
+          "height_percentages": [
+            10,
+            50,
+            90
+          ],
+          "expected_parameter_count": 12,
+          "candidate_budget_population_sizes": [
+            16,
+            32,
+            64,
+            128
+          ],
+          "one_generation_population_sizes": [
+            16,
+            32,
+            64
+          ],
+          "multi_generation_population_sizes": [
+            32,
+            64
+          ]
+        },
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 16,
+            "candidate_count": 192,
+            "parameter_count": 12,
+            "repeats": 3,
+            "elapsed_seconds": 0.05501972883939743,
+            "seconds_per_call": 0.018339909613132477,
+            "seconds_per_candidate": 9.552036256839831e-05,
+            "candidates_per_second": 10468.971987872637,
+            "mean_objective": 5010.956587762187
+          },
+          {
+            "population_size": 32,
+            "candidate_count": 384,
+            "parameter_count": 12,
+            "repeats": 3,
+            "elapsed_seconds": 0.15653190948069096,
+            "seconds_per_call": 0.052177303160230316,
+            "seconds_per_candidate": 0.00013587839364643313,
+            "candidates_per_second": 7359.521798602383,
+            "mean_objective": 5010.956813183265
+          },
+          {
+            "population_size": 64,
+            "candidate_count": 768,
+            "parameter_count": 12,
+            "repeats": 3,
+            "elapsed_seconds": 0.309798039495945,
+            "seconds_per_call": 0.10326601316531499,
+            "seconds_per_candidate": 0.00013446095464233722,
+            "candidates_per_second": 7437.103229409422,
+            "mean_objective": 5010.956923395102
+          },
+          {
+            "population_size": 128,
+            "candidate_count": 1536,
+            "parameter_count": 12,
+            "repeats": 3,
+            "elapsed_seconds": 0.6261448264122009,
+            "seconds_per_call": 0.2087149421374003,
+            "seconds_per_candidate": 0.00013588212378737,
+            "candidates_per_second": 7359.3197701620575,
+            "mean_objective": 5010.956978397952
+          }
+        ]
+      },
+      "one_generation": {
+        "profile": "notebook_multilayer_12param",
+        "profile_spec": {
+          "label": "Notebook multi-added-layer trapezoid",
+          "builder": "multi_layer",
+          "height_percentages": [
+            10,
+            50,
+            90
+          ],
+          "expected_parameter_count": 12,
+          "candidate_budget_population_sizes": [
+            16,
+            32,
+            64,
+            128
+          ],
+          "one_generation_population_sizes": [
+            16,
+            32,
+            64
+          ],
+          "multi_generation_population_sizes": [
+            32,
+            64
+          ]
+        },
+        "family": "one_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 16,
+            "candidate_count_hint": 192,
+            "parameter_count": 12,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.06203601695597172,
+            "seconds_per_run": 0.06203601695597172,
+            "gf": 4251.954656104826,
+            "bic": 4310.205362168448
+          },
+          {
+            "population_size": 32,
+            "candidate_count_hint": 384,
+            "parameter_count": 12,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.11494111269712448,
+            "seconds_per_run": 0.11494111269712448,
+            "gf": 4170.927942205935,
+            "bic": 4229.539247797366
+          },
+          {
+            "population_size": 64,
+            "candidate_count_hint": 768,
+            "parameter_count": 12,
+            "maxiter": 1,
+            "repeats": 1,
+            "elapsed_seconds": 0.23082205094397068,
+            "seconds_per_run": 0.23082205094397068,
+            "gf": 4140.116317133633,
+            "bic": 4198.864746112124
+          }
+        ]
+      },
+      "multi_generation": {
+        "profile": "notebook_multilayer_12param",
+        "profile_spec": {
+          "label": "Notebook multi-added-layer trapezoid",
+          "builder": "multi_layer",
+          "height_percentages": [
+            10,
+            50,
+            90
+          ],
+          "expected_parameter_count": 12,
+          "candidate_budget_population_sizes": [
+            16,
+            32,
+            64,
+            128
+          ],
+          "one_generation_population_sizes": [
+            16,
+            32,
+            64
+          ],
+          "multi_generation_population_sizes": [
+            32,
+            64
+          ]
+        },
+        "family": "multi_generation",
+        "model_class": "TrapezoidModelArrayDeanGPUFused",
+        "freeform_use_cupy": true,
+        "results": [
+          {
+            "population_size": 32,
+            "candidate_count_hint": 384,
+            "parameter_count": 12,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.1799586359411478,
+            "seconds_per_run": 0.1799586359411478,
+            "gf": 4170.927942205935,
+            "bic": 4229.539247797366
+          },
+          {
+            "population_size": 64,
+            "candidate_count_hint": 768,
+            "parameter_count": 12,
+            "maxiter": 2,
+            "repeats": 1,
+            "elapsed_seconds": 0.3481184523552656,
+            "seconds_per_run": 0.3481184523552656,
+            "gf": 4140.116317133633,
+            "bic": 4198.864746112124
+          }
+        ]
+      }
+    }
+  ]
+}
