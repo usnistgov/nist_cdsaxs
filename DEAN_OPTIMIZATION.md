@@ -1,861 +1,733 @@
 # DEAN Optimization Action Plan
 
-## Goal
+## Purpose
 
-Improve fitting throughput in `nist_cdsaxs`, starting with trapezoid fitting, while preserving:
+Improve fitting throughput in `nist_cdsaxs` while preserving:
 
-- Nearly identical user-facing APIs.
-- Repo structure that parallels the current fitting package.
-- Scientific comparability, especially structure similarity and fit-quality stability.
+- nearly identical user-facing workflows
+- repo structure parallel to the existing fitting package
+- scientific parity on fit quality and structure interpretation
 
-This plan assumes large-memory GPU systems are a target platform, but it stages work so each phase is measurable on CPU first.
+The current priority order is:
 
-## Current State
+1. trapezoid GPU optimization for realistic vectorized workflows
+2. benchmark coverage for short MCMC workflows that reflect real usage
+3. SiGe fitting support and optimization, now a high-priority geometry for the team
+4. cylinder follow-on work after trapezoid and SiGe are on firmer ground
 
-Artifacts added so far:
+## Current Branch Context
+
+- repo: `/homes/deand/dev/nist_cdsaxs`
+- working branch: `feature/dean_optimization`
+- environment: `cdsax-dev`
+- install mode: editable
+- GPU host used so far:
+  - `3 x Quadro RTX 8000`
+  - `49152 MiB` each
+- GPU package support:
+  - `cupy-cuda12x`
+- dev dependencies needed for the rebased package:
+  - `scikit-image`
+  - `scikit-learn`
+
+## Current Artifacts
+
+Added optimization and harness files:
 
 - `DEAN_OPTIMIZATION.md`
 - `DEAN_OPTIMIZATION_LEDGER.MD`
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
-- `tests/test_fitting/test_dean_optimization_trapezoid.py`
-
-Artifacts now added for the first optimization pass:
-
 - `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
-- `tests/test_fitting/test_dean_optimization_structure_similarity.py`
 - `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
+- `tests/test_fitting/test_dean_optimization_structure_similarity.py`
 
-Working branch and environment:
+Rebase and compatibility updates already applied:
 
-- branch: `feature/dean_optimization`
-- mamba env: `cdsax-dev`
-- install mode: editable
-- GPU package support now added:
-  - `cupy-cuda12x`
+- merged `README.md`
+- merged `src/cdsaxs/__init__.py`
+- merged `src/cdsaxs/Fitting/__init__.py`
+- fixed `src/cdsaxs/Fitting/SiGe_model.py` to use relative import of `CDSAXS_base_model`
+- exposed `create_model` at top-level `cdsaxs` package to support workflow helpers that import it from `cdsaxs`
 
-Guidance incorporated from the current round:
+## Non-Negotiable Principles
 
-- preserve parallelism with the current repo layout and naming conventions
-- grow the timing harness to study larger broadcast-style batches in a principled way
-- add a structure-similarity regression scaffold, but only enforce it after a meaningful speedup candidate appears
-- maintain a detailed experiment ledger separate from the roadmap
-- proceed sequentially, and stop to reassess if an optimization only moves overhead around without improving realistic fitting runs
-
-## Measured Readout So Far
-
-Stage 1 has now been exercised once with the first Dean trapezoid variant in
-`src/cdsaxs/Fitting/Trapezoid_model_dean.py`.
-
-What was added:
-
-- cached `log(Intensity)` for GF evaluation
-- cached `Qx**2 + Qz**2` for Debye-Waller reuse
-- cached parameter-name parsing into a reusable plan
-- reduced temporary array and object churn in scalar and batched trapezoid objective paths
-- benchmark helpers for:
-  - named objective batch profiles
-  - scaling comparisons across increasing batch sizes
-  - lightweight structure-signature extraction
-
-Measured outcome on the DeRocher V3 example:
-
-- tiny DE, scalar objective path: about `1.14x` speedup
-- tiny DE, vectorized objective path: about `1.16x` speedup
-- objective-only batched timing:
-  - peak win around batch size `64`: about `1.42x`
-  - moderate win around batch size `256`: about `1.25x`
-  - small win at batch size `1024` and `4096`: about `1.04x` to `1.08x`
-- fixed-seed tiny structure trial produced identical widths, heights, `DW`, `GF`, and `BIC`
-
-Interpretation:
-
-- the first optimization is worth keeping as a cleaner baseline
-- it is not yet the GPU-oriented breakthrough
-- by batch size `1024+`, the expensive form-factor math dominates and the cached Python-side cleanup no longer moves the needle much
-- this argues for a second-stage optimization that changes the math-kernel cost model or device residency, not just more Python cleanup
-
-Additional environment readout:
-
-- this workspace exposes three `Quadro RTX 8000` GPUs with `49152 MiB` each
-- `cupy` is now installed in `cdsax-dev` via `cupy-cuda12x`
-- the existing CuPy hooks in the code are not yet truly device-resident because the current form-factor path converts results back to NumPy before returning
-
-## Latest Results
-
-Two additional conclusions are now measured:
-
-1. Component profiling of the current Dean CPU path
-   - `FreeFormTrapezoid` accounts for about `85%` to `88%` of vectorized objective time at realistic batch sizes
-   - `GF_calc` is only about `6%` to `8%`
-   - `SymCoordAssign` is negligible in the current example
-
-2. GPU status after trying the next candidates
-   - the legacy-style CuPy hook in the baseline trapezoid model is not a keep candidate
-   - it is not device-resident and, in the tested path, returns `inf` objective values because the old wrapper expects NumPy arrays
-   - a new Dean GPU-resident trapezoid variant does produce a real win:
-     - objective-only speedup at medium and large batch sizes: about `4.9x` to `8.2x`
-     - vectorized tiny DE speedup: about `4.1x`
-     - fixed-seed structure, `GF`, and `BIC` matched exactly in the lightweight regression
-   - a fused refinement of that GPU path is now the leading branch:
-     - objective speed is broadly similar and sometimes better
-     - tiny vectorized DE improved again by about `1.29x` relative to the first GPU variant
-     - fit parity remained exact in the tested regression
-
-Interpretation:
-
-- the GPU path is now justified for batched workflows
-- the scalar path is still not a GPU win, so the accelerated path should remain explicitly batch-oriented
-- the next optimization work should stay focused on vectorized / broadcasted fitting rather than scalar GPU use
-
-3. Cython status after installation and scalar benchmarking
-   - the repo-local `cdsaxs_cython` package was built and installed into `cdsax-dev`
-   - the existing `AcceleratedTrapezoidModel` is a valid scalar CPU acceleration path after fixing an array-truth-value bug in its `GF_calc` wrapper
-   - scalar objective throughput improved materially over the incumbent:
-     - roughly `1.7x` to `2.0x` faster per scalar candidate
-   - scalar tiny DE also improved materially over the incumbent:
-     - about `1.58x` faster in the tested run
-   - however, the current Cython path is not a usable batched/vectorized fitting path:
-     - batched Cython kernels fall back because they expect lower-dimensional inputs
-     - the current compiled implementation therefore does not compete with the leading vectorized GPU workflow
-
-Interpretation:
-
-- keep Cython as a scalar CPU option
-- do not treat it as the mainline optimization direction for trapezoid fitting
-- the mainline path remains Dean-style vectorized fitting, especially the fused GPU branch
-
-## Current Read On The Code
-
-- The main optimization entry point is `CDSAXS_Optimize` in `src/cdsaxs/Fitting/CDSAXS_base_model.py`.
-- Trapezoid fitting already has a batched objective path for `scipy.optimize.differential_evolution(vectorized=True)`.
-- Cylinder fitting is still mostly scalar and loop-heavy.
-- The example trapezoid workflow in `examples/fitting_examples/CDSAXS_DeRocher_V3.ipynb` is the right baseline because it is small, already timed in the notebook, and uses the current public model-building pattern.
-- Recorded notebook timings show that the current "GPU broadcast" path is not yet a win, so the first task is not "turn on GPU", it is "make the batched path principled and measurable".
-
-## Working Principles
-
-1. Preserve the public fitting workflow.
-   New tools should still look like:
+1. Preserve the fitting workflow shape.
+   The optimized path should still look like:
    - construct model
    - import data
    - call `CDSAXS_Optimize(...)`
    - inspect `model.GF`, `model.BIC`, and optimized parameters
 
-2. Keep optimized variants structurally parallel to the existing package.
-   Preferred placement:
-   - optimized trapezoid variants beside `Trapezoid_model.py`
-   - optimized cylinder variants beside `Cylinder_model.py`
-   - shared benchmark helpers inside `src/cdsaxs/Fitting/`
-   - test harnesses inside `tests/`
-
-3. Optimize only against a fixed scientific benchmark.
-   Each stage must check:
-   - wall time
-   - number of objective evaluations when available
-   - final GF / BIC
-   - parameter drift
-   - derived structure similarity
-   - comparison against the current incumbent path
-
-Incumbent policy:
-
-- For future GPU benchmark work, treat the installed scalar Cython path
-  `AcceleratedTrapezoidModel` as the incumbent CPU comparator because it is
-  currently the fastest non-GPU path we have measured for valid scalar fitting.
-- Keep `TrapezoidModelArrayDean` as a secondary batched CPU reference because it
-  better matches the vectorized workflow shape, even though it is not the scalar
-  incumbent.
-
-4. Separate "hot-loop speed" from "optimizer behavior".
-   We need both:
-   - objective-level benchmarks
-   - lightweight end-to-end optimizer benchmarks
-
-5. Gate scientific-proof work appropriately.
-   We will:
-   - validate speedup first
-   - only tighten structure-similarity proof once the candidate is worth keeping
-   - avoid over-investing in stochastic regression machinery for candidates that do not materially improve speed
-
-## Staged Plan
-
-### Stage 0: Baseline And Measurement
-
-Purpose:
-- Establish a reproducible trapezoid benchmark that mirrors the example notebook.
-
-Actions:
-- Use the DeRocher V3 trapezoid example data and model setup.
-- Add a small helper module in `src/cdsaxs/Fitting/` that builds the example model with current APIs.
-- Add a `pytest` harness with:
-  - scalar objective smoke test
-  - batched objective smoke test
-  - tiny end-to-end DE run with reduced `maxiter` / `popsize`
-  - named batch-size profiles that separate smoke, broadcast, and GPU-candidate studies
-
-Deliverables:
-- `DEAN_OPTIMIZATION.md`
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
-- `tests/test_fitting/test_dean_optimization_trapezoid.py`
-
-Acceptance:
-- Baseline run succeeds in the new env.
-- The harness finishes fast enough to run repeatedly during development.
-- Benchmark helpers support both lightweight smoke profiles and larger broadcast-oriented profiles.
-- Larger profiles remain outside routine CI expectations and are used as deliberate benchmark experiments.
-
-### Stage 1: CPU Hot-Loop Cleanup
-
-Purpose:
-- Remove avoidable Python and allocation overhead before introducing new math kernels.
-
-Actions:
-- Precompute immutable dataset terms such as:
-  - `log(Intensity)`
-  - `Qx**2 + Qz**2`
-- Reduce repeated dictionary copying and parameter-name parsing in trapezoid objective code.
-- Reduce temporary array churn in batched trapezoid objective evaluation.
-- Remove debugging prints from optimization hot paths.
-- Keep the first optimization in a parallel Dean-style trapezoid variant rather than directly rewriting the baseline model.
-
-Expected benefit:
-- Better scalar speed.
-- Better batched CPU speed.
-- Cleaner reference implementation before GPU work.
-
-Acceptance:
-- Objective-level benchmark shows a measurable reduction in wall time.
-- End-to-end tiny DE benchmark improves or stays flat with no scientific regressions.
-- If no meaningful speedup is observed, stop and reconsider before continuing with later stages.
-
-Current status:
-
-- complete enough to keep
-- measured win is real but modest
-- not sufficient on its own to justify heavier scientific gating or broader refactors
-
-### Stage 2: Trapezoid Batched CPU Path
-
-Purpose:
-- Make the current vectorized SciPy path a strong CPU baseline.
-
-Actions:
-- Treat candidate matrices as first-class inputs.
-- Reuse work buffers where possible.
-- Keep a single parameter-mapping implementation for scalar and batched paths.
-- Validate shape handling and background handling on both scalar and batched inputs.
-- Profile where the batched path stops scaling:
-  - `SymCoordAssign`
-  - `FreeFormTrapezoid`
-  - Debye-Waller application
-  - GF calculation
-- If needed, split "broadcasting many candidates" from "computing one candidate efficiently" so both are benchmarked explicitly.
-
-Expected benefit:
-- Better scaling with `vectorized=True`.
-- Clearer comparison point for future GPU work.
-
-Acceptance:
-- Batched objective benchmark beats repeated scalar calls at realistic batch sizes.
-- Tiny DE vectorized run is competitive with or better than worker-based CPU runs.
-- Larger batch-size timing profiles reveal whether more aggressive broadcasting is likely to pay off on GPU later.
-
-### Stage 3: Trapezoid GPU-Resident Path
-
-Purpose:
-- Make large-population fitting benefit from large-memory GPUs without changing the public workflow.
-
-Actions:
-- Keep `Intensity`, `Qx`, `Qz`, and reusable buffers on device for the entire optimization.
-- Avoid host-device round trips inside each objective call.
-- Return only the objective vector to SciPy.
-- If needed, add a parallel class or module variant in `src/cdsaxs/Fitting/` rather than creating a separate API family.
-- Use the larger broadcast timing profiles from Stage 0/2 to choose realistic device batch sizes rather than guessing.
-- Benchmark transfer cost separately from math throughput so the GPU path is only judged on device-resident work once setup is amortized.
-
-Expected benefit:
-- GPU path becomes viable for large trial populations instead of being slower than CPU due to transfer overhead.
-
-Acceptance:
-- For large enough populations, device-resident batched evaluation is faster than Stage 2 CPU batched evaluation.
-- Final parameters and GF remain scientifically comparable.
-
-### Stage 4: Trapezoid Compiled Kernels
-
-Purpose:
-- Decide whether Cython / compiled kernels should back the optimized trapezoid path.
-
-Actions:
-- Compare:
-  - cleaned Python/NumPy batched path
-  - current Cython-enabled path
-  - GPU-resident batched path
-- Only adopt compiled code where it changes the measured bottleneck.
-
-Acceptance:
-- Keep the smallest implementation that wins clearly.
-- Do not keep extra compiled complexity if the measured gain is marginal.
-
-### Stage 5: Cylinder And Workflow-Level Expansion
-
-Purpose:
-- Extend the same methodology after trapezoid is under control.
-
-Actions:
-- Add cylinder objective benchmark and tiny optimizer benchmark.
-- Prioritize compiled or batched cylinder kernels because the current path is more loop-heavy.
-- Revisit `parameter_sweep_*` and `batch_initialize_and_fit` so they can reuse the same benchmarked objective machinery.
-
-Acceptance:
-- Cylinder work follows the same benchmark discipline as trapezoid.
-
-## Full Optimization Inventory
-
-### High-Yield Candidates
-
-- CPU hot-loop cleanup for trapezoid objective evaluation.
-- Stronger batched CPU trapezoid path for `vectorized=True`.
-- GPU-resident trapezoid candidate evaluation with reusable device buffers.
-- Compiled trapezoid kernels only if they beat the cleaned batched CPU path.
-- Batched or compiled cylinder objective path.
-
-### Medium-Yield Candidates
-
-- Route accelerated models into real workflows more directly so speedup paths are easier to exercise.
-- Precompute more invariants once per dataset, including log-intensity and repeated Q-space terms.
-- Remove unconditional debug output from optimizer hot paths.
-- Add lightweight profiling helpers that attribute time to:
-  - parameter mapping
-  - coordinate construction
-  - form-factor evaluation
-  - GF calculation
-- Reuse allocated candidate and work buffers across repeated objective calls when the optimizer shape is stable.
-- Fuse simple elementwise operations where practical, especially:
-  - Debye-Waller factor application
-  - magnitude-square-plus-background construction
-  - log-space GF comparison
-- Avoid repeated transposes or layout fixes in vectorized paths by standardizing one internal candidate layout.
-- Audit CuPy and Cython fallbacks so acceleration paths do not silently fall back in a way that hides performance regressions.
-- Add offline benchmark scripts or pytest markers for large-batch runs on real GPU hosts.
-- Use hybrid optimization strategies:
-  - coarse global search
-  - then local refinement
-- Add coarse prescreening for parameter sweeps and batch initialization workflows before full optimization.
-- Reuse optimization machinery across `parameter_sweep_*` and `batch_initialize_and_fit`.
-- Add offline benchmark modes that study scaling versus population size and batch size.
-- Improve optional dependency and environment support for acceleration-oriented paths.
-
-## Priority Order To Try
-
-This is the current execution order, combining the earlier roadmap with the deeper read on the bottlenecks and the available `48 GB` GPUs.
-
-1. True device-resident trapezoid objective
-   - keep `Intensity`, `Qx`, `Qz`, cached invariants, and large work arrays on GPU
-   - return only the final objective vector to the CPU-side optimizer
-   - use a Dean-style parallel variant beside the current trapezoid model
-
-2. GPU-native batched `FreeFormTrapezoid`
-   - redesign the batched trapezoid kernel around device arrays instead of wrapping the NumPy-oriented broadcast path
-   - remove forced `.get()` behavior from the internal hot path
-
-3. Persistent GPU workspaces
-   - preallocate and reuse candidate, coordinate, Debye-Waller, simulated-intensity, and GF scratch arrays
-   - target the large-batch flattening seen in the first benchmark pass
-
-4. Fused post-form-factor batched path
-   - fuse Debye-Waller application, magnitude-square, background addition, and log-space GF accumulation where practical
-   - reduce temporary-array traffic on both CPU and GPU
-
-5. Stronger batched CPU path
-   - profile and optimize `SymCoordAssign`, `FreeFormTrapezoid`, and GF separately
-   - standardize candidate layout and avoid repeated transpose / layout repair
-   - keep this as the CPU baseline even if GPU work wins
-
-6. Optimizer strategy aligned with large batches
-   - keep the public API nearly identical
-   - continue using the current SciPy-facing flow where possible
-   - if needed later, introduce an internal ask/tell style or staged global-plus-local strategy that naturally emits large candidate batches
-
-7. Compiled trapezoid kernels
-   - compare only after the GPU-native and stronger batched CPU paths are measured
-   - keep compiled complexity only if it wins clearly
-
-8. Workflow-level propagation
-   - route winning trapezoid paths into `parameter_sweep_*` and `batch_initialize_and_fit`
-   - extend the same method to cylinder once trapezoid is stable
-
-9. Structure-similarity gating and broader regression hardening
-   - tighten only for candidates that materially improve speed
-   - keep early-stage scientific checks lightweight but real
-
-## Concrete Next Steps
-
-The immediate next sequence should be:
-
-1. Install and verify the repo's existing Cython extension package.
-   - build `cdsaxs_cython` from `src/cdsaxs/Fitting/setup.py`
-   - confirm imports succeed without the current fallback spam
-   - benchmark the existing accelerated model path before changing it
-
-2. Compare four trapezoid baselines on the same DeRocher example:
-   - incumbent `TrapezoidModelArray`
-   - Cython-backed `AcceleratedTrapezoidModel`
-   - Dean CPU `TrapezoidModelArrayDean`
-   - leading GPU path `TrapezoidModelArrayDeanGPUFused`
-
-3. Keep the benchmark split explicit:
-   - function-level comparison for:
-     - `GF_calc`
-     - `SymCoordAssign`
-     - `FreeFormTrapezoid`
-   - objective-level comparison across named batch profiles
-   - tiny end-to-end vectorized DE comparison
-
-4. Use the Cython result to decide the next branch point:
-   - if Cython beats Dean CPU materially, use it as the CPU-side reference path
-   - if it does not, keep Dean CPU as the reference and avoid further Cython investment for trapezoid
-   - if Cython ideas are strong at the kernel level, consider combining them with the Dean mapping approach later
-
-Current decision:
-
-- keep the Cython path as a scalar fallback / reference option
-- keep Dean CPU as the batched CPU reference
-- keep Dean fused GPU as the leading vectorized optimization branch
-
-5. After the Cython comparison, prioritize one of:
-   - persistent GPU workspaces
-   - larger-batch optimizer strategy
-   - CPU compiled-kernel integration into the Dean path
-   based on measured gains rather than preference
-
-## Harness Upgrade Proposal
-
-The current tiny workflow is still useful as a smoke benchmark, but it is too
-small to serve as the main decision-maker for further GPU work. The next harness
-upgrade should mimic the notebook workflows more directly while keeping runtime
-below the multi-minute regime.
-
-### Principles
-
-- Keep the DeRocher notebooks as the source of "realistic" workflow shape.
-- Separate:
-  - objective-throughput scaling
-  - one-generation optimizer behavior
-  - short multi-generation optimizer behavior
-- Compare every GPU candidate against:
-  - scalar Cython incumbent
-  - Dean batched CPU reference
-- Report both:
-  - absolute wall time
-  - throughput in candidates per second or objective calls per second
-
-### Notebook-Derived Profiles
-
-1. Four-parameter trapezoid profile
-   - source: `CDSAXS_DeRocher_V3.ipynb`
-   - same model/data already used in the current harness
-   - use popsize ladders that echo the notebook trend but remain affordable:
-     - `128`
-     - `256`
-     - `512`
-     - `1024`
-   - use:
-     - objective-only candidate sweeps
-     - `maxiter=1`
-     - `maxiter=2`
-
-2. Higher-parameter trapezoid profile
-   - source: later DeRocher V3 notebook cells that optimize `27` parameters
-   - build a notebook-parallel helper for that configuration
-   - use smaller popsize ladders because dimension is higher:
-     - `32`
-     - `64`
-     - `128`
-     - `256`
-   - this profile is important because the optimization geometry is more realistic
-     than the current four-parameter toy path
-
-3. Sweep-style workflow profile
-   - source: notebook `parameter_sweep_1d(...)` usage
-   - benchmark a short sweep with:
-     - small `n_points`
-     - reduced optimizer budget per point
-   - compare total wall time across:
-     - scalar Cython
-     - Dean batched CPU where applicable
-     - Dean fused GPU
-
-### Benchmark Families To Add
-
-1. Candidate-budget benchmark
-   - Evaluate exactly `N` candidates from a deterministic matrix.
-   - Run:
-     - scalar Cython loop
-     - Dean CPU batched objective
-     - Dean fused GPU objective
-   - This is the cleanest scaling comparison because it removes optimizer noise.
-
-2. One-generation DE benchmark
-   - Use the real optimizer entry point.
-   - Configure `maxiter=1`.
-   - This gives a "real workflow" benchmark that is still bounded.
-   - It is the best next step for understanding scaling without committing to long runs.
-
-3. Short multi-generation DE benchmark
-   - Use `maxiter=2` or `3`.
-   - Run only selected mid-size profiles, not the whole matrix.
-   - This captures some optimizer adaptation behavior without drifting into minute-scale runs.
-
-4. Periodic offline scale benchmark
-   - Not part of routine pytest.
-   - Run a larger popsize ladder occasionally, especially on the GPU host.
-   - Use notebook-like settings but cap runtime by:
-     - limiting generations
-     - limiting the number of population sizes tested
-
-### Target Runtime Envelope
-
-- default pytest-like smoke: a few seconds
-- realistic benchmark scripts: tens of seconds
-- offline scaling study: roughly under one minute per model profile
-
-### Proposed File/Layout Additions
-
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
-  - notebook-parallel model builders for:
-    - `notebook_4param`
-    - `notebook_layer10_8param`
-    - `notebook_layer90_8param`
-    - `notebook_multilayer_12param`
-  - fixed candidate-budget runners
-  - one-generation and short-DE benchmark helpers
-
-- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
-  - smoke coverage for the realistic builders and benchmark helpers
-
-- optional offline script or marked test
-  - for the larger notebook-like scaling matrix
-
-### Implemented Harness Status
-
-- The realistic harness is now implemented beside the existing trapezoid helper as:
-  - `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
-- The new helpers keep the public calling style parallel to the current repo:
-  - build a model variant
-  - run a deterministic batched objective benchmark
-  - run a short vectorized DE benchmark
-- Candidate-budget sizing is now defined in a principled way:
-  - `candidate_count = population_size * parameter_count`
-  - this mirrors the way the DE workflow scales with dimensionality
-- The routine realistic profile ladder now uses:
-  - `notebook_4param`
-  - `notebook_layer10_8param`
-  - `notebook_layer90_8param`
-  - `notebook_multilayer_12param`
-- The layered builders required one real workflow fix:
-  - after layer insertion, `slds` must be expanded to one value per layer for the single-material model
-  - without that fix, objective-only timing worked, but end-to-end optimizer runs failed during later structure simulation
-- Current active benchmark focus is GPU-only by request:
-  - fused GPU path is the baseline under active optimization
-  - scalar Cython remains the incumbent CPU reference for future cross-device comparisons, but it is not in the routine matrix right now
-- The short-DE families now use:
-  - one-generation: `maxiter=1`, `tol=0.5`
-  - multi-generation: `maxiter=2`, `tol=0.0`
-  - the stricter multi-generation tolerance avoids accidental early exit after the initial population
-- The notebook cell that reaches a much larger parameter count is still a follow-on target:
-  - keep that as an offline scale study after the 4/8/12-parameter ladder is exhausted
-
-### Current Realistic GPU Scaling Snapshot
-
-- Candidate-budget throughput on the current fused GPU path is broadly stable across the realistic ladder:
-  - `notebook_4param`: about `7.7k` to `9.1k` candidates/s
-  - `notebook_layer10_8param`: about `7.8k` to `8.3k` candidates/s
-  - `notebook_layer90_8param`: about `7.7k` to `8.3k` candidates/s
-  - `notebook_multilayer_12param`: about `7.4k` to `10.5k` candidates/s, with the smallest batch benefiting most from fixed-overhead amortization
-- Objective cost per candidate stays in a narrow band:
-  - roughly `95 us` to `136 us` per candidate over the tested realistic matrix
-- End-to-end one-generation DE timing also scales cleanly:
-  - `4` parameters: about `0.13 s` to `0.59 s`
-  - `8` parameters: about `0.07 s` to `0.27 s`
-  - `12` parameters: about `0.06 s` to `0.23 s`
-- Short multi-generation DE is now distinct from the one-generation family:
-  - `4` parameters: about `0.40 s` to `0.91 s`
-  - `8` parameters: about `0.21 s` to `0.42 s`
-  - `12` parameters: about `0.18 s` to `0.35 s`
-- Fit quality still improves modestly in the stricter short-DE family on some profiles:
-  - `notebook_4param`: best `GF` improved from about `1267.6` to `1229.4`
-  - `notebook_layer10_8param`: best `GF` improved from about `3938.1` to `3919.5`
-  - `notebook_layer90_8param`: best `GF` improved from about `3954.7` to `3890.6`
-  - `notebook_multilayer_12param`: no material improvement yet under the short budget
-
-### Realistic GPU Versus Incumbent Snapshot
-
-The realistic fused-GPU baseline has now been benchmarked directly against the
-current scalar Cython incumbent.
-
-- Candidate-budget objective speedup versus scalar Cython:
-  - `notebook_4param`: about `3.6x` to `5.2x`
-  - `notebook_layer10_8param`: about `6.3x` to `7.1x`
-  - `notebook_layer90_8param`: about `7.0x` to `7.6x`
-  - `notebook_multilayer_12param`: about `12.0x` to `17.2x`
-- One-generation DE wall-time speedup versus scalar Cython:
-  - `notebook_4param`: about `3.7x` to `4.1x`
-  - `notebook_layer10_8param`: about `6.1x` to `6.5x`
-  - `notebook_layer90_8param`: about `6.6x` to `7.0x`
-  - `notebook_multilayer_12param`: about `10.5x` to `11.4x`
-- Short multi-generation DE wall-time speedup versus scalar Cython:
-  - `notebook_4param`: about `3.6x` to `3.9x`
-  - `notebook_layer10_8param`: about `6.3x` to `6.4x`
-  - `notebook_layer90_8param`: about `7.0x` to `7.1x`
-  - `notebook_multilayer_12param`: about `10.9x` to `11.3x`
-
-### Tuning Implications From The Realistic Comparison
-
-- Small workloads:
-  - vectorization still helps, but the gains are limited by fixed overhead
-  - around very small candidate counts, the main levers are:
-    - CPU fallback threshold
-    - launch overhead
-    - host/device transfer overhead
-    - avoiding unnecessary batching setup
-- Measured small-workload crossover examples:
-  - `notebook_4param`, `4` candidates:
-    - fused GPU only about `1.3x` faster than scalar Cython
-  - `notebook_4param`, `8` candidates:
-    - fused GPU about `2.1x` faster
-  - `notebook_layer10_8param`, `8` candidates:
-    - fused GPU about `2.3x` faster
-- Medium workloads:
-  - vectorized tuning matters a lot
-  - once the batch reaches a few tens of candidates, the GPU path already opens a clear lead
-  - measured examples:
-    - `notebook_4param`, `16` candidates: about `3.3x`
-    - `notebook_layer10_8param`, `16` candidates: about `4.1x`
-    - `notebook_layer10_8param`, `32` candidates: about `4.3x`
-- Large realistic workloads:
-  - the key factor is bulk vectorized throughput, not scalar micro-optimization
-  - future wins should come from:
-    - reducing per-candidate GPU math cost
-    - reducing memory traffic
-    - increasing device-resident fusion
-    - tuning large-batch occupancy and batching shape
-  - at this scale, scalar incumbent improvements are unlikely to close the gap materially
-
-Practical prioritization:
-
-- For tiny or interactive workloads:
-  - preserve and tune the small-batch CPU fallback
-  - optimize transition thresholds carefully
-- For anything notebook-like or optimization-heavy:
-  - prioritize vectorized GPU-path improvements over scalar-path cleanup
-- For future GPU work, use the realistic incumbent comparison files as the decision baseline:
-  - `.dean_realistic_gpu_scaling.json`
-  - `.dean_realistic_incumbent_scaling.json`
-  - `.dean_realistic_gpu_vs_incumbent.json`
-
-### GPU Optimization Handoff
-
-This section is meant to make the current state portable to a fresh context.
-
-Environment assumptions:
-
-- branch: `feature/dean_optimization`
-- env: `cdsax-dev`
-- GPU library: `cupy-cuda12x`
-- incumbent CPU comparator:
-  - `AcceleratedTrapezoidModel`
-- active GPU baseline:
-  - `TrapezoidModelArrayDeanGPUFused`
-
-Primary source files for the current trapezoid GPU path:
-
-- `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py`
-  - fused/vectorized GPU implementation
-  - contains the current small-batch CPU fallback behavior
-- `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
-  - CPU-side parameter mapping and batched candidate plumbing
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
-  - original tiny benchmark and helper layer
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
-  - realistic notebook-derived harness
-- `tests/test_fitting/test_dean_optimization_trapezoid.py`
-  - tiny-path regression coverage
-- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
-  - realistic-harness regression coverage
-- `tests/test_fitting/test_dean_optimization_structure_similarity.py`
-  - structure-similarity scaffold
-
-Current realistic benchmark artifacts:
-
-- `.dean_realistic_gpu_scaling.json`
-  - fused GPU realistic matrix
-- `.dean_realistic_incumbent_scaling.json`
-  - scalar Cython incumbent realistic matrix
-- `.dean_realistic_gpu_vs_incumbent.json`
-  - precomputed speedup comparison
-
-How to rerun the realistic GPU matrix:
-
-- run:
-  - `mamba run -n cdsax-dev python - <<'PY'`
-  - `from cdsaxs.Fitting.dean_optimization_trapezoid_realistic import run_realistic_gpu_scaling_matrix`
-  - `print(run_realistic_gpu_scaling_matrix(candidate_repeats=3, candidate_warmups=1, optimizer_tol=0.5, multi_generation_tol=0.0, optimizer_polish=False, optimizer_seed=1234))`
-  - `PY`
-
-How to rerun the realistic harness smoke tests:
-
-- `mamba run -n cdsax-dev pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
-- `mamba run -n cdsax-dev pytest tests/test_fitting/test_dean_optimization_trapezoid.py tests/test_fitting/test_dean_optimization_structure_similarity.py -q`
-
-Expected extension points for future GPU work:
+2. Preserve structural parallelism with the repo.
+   Optimized variants should live beside the current geometry modules.
+   Benchmark helpers should live inside `src/cdsaxs/Fitting/`.
+   Tests should live inside `tests/test_fitting/`.
 
+3. Keep user-facing naming parallel to current conventions.
+   Use geometry-first names.
+   Prefer the repo's public aliases like `TrapezoidModel` and `SiGeModel` in user-facing examples.
+   Reserve `*Array` and `*Dean*` names for implementation and explicit benchmark selection.
+
+4. Separate algorithm families.
+   Objective microbenchmarks, DE timing, batch initialization, and MCMC should not be mixed into one number.
+
+5. Separate incumbents by workload shape.
+   There is not one universal incumbent anymore.
+
+6. Keep scientific gating proportional to value.
+   Validate speedup first.
+   Tighten structure-similarity and stochastic regression only for candidates worth keeping.
+
+## Rebased Repo Read
+
+The rebased repo changed the fitting landscape in ways that matter for the harness.
+
+### Public And Workflow Surface
+
+The key public and workflow entry points now include:
+
+- `src/cdsaxs/Fitting/CDSAXS_base_model.py`
+  - `CDSAXS_Optimize`
+  - `CDSAXS_MCMC`
+  - `add_layer_at_percentage`
+  - `add_multiple_layers`
+  - `batch_initialize_and_fit`
+  - `show_best_fit_results`
+- `src/cdsaxs/Fitting/Trapezoid_model.py`
+  - current base trapezoid implementation
+  - current vectorized batched objective path
+- `src/cdsaxs/Fitting/SiGe_model.py`
+  - new geometry with typed design layers and constraints
+- `src/cdsaxs/Fitting/optimization_logger.py`
+  - multi-layer optimization workflow helper
+
+### Real-World Workflow Representations Now Present
+
+The repo now represents realistic workflows in two places:
+
+1. notebooks
+   - `examples/fitting_examples/CDSAXS_DeRocher_V2.ipynb`
+   - `examples/fitting_examples/CDSAXS_DeRocher_V3.ipynb`
+
+2. API methods in `CDSAXS_base_model.py`
+   - layer growth
+   - automatic optimization-bound generation
+   - repeated initialization workflows
+   - MCMC
+   - uncertainty-envelope plotting
+   - best-fit replay from sweeps
+
+This means the harness should now benchmark workflow semantics directly, not just raw parameter dictionaries.
+
+## Current Incumbent Policy
+
+### Tiny Trapezoid Workloads
+
+For scalar or tiny-workload trapezoid fitting, the current incumbent remains:
+
+- `AcceleratedTrapezoidModel`
+
+Measured status on the rebased branch:
+
+- scalar objective: about `1.5x` faster than base `TrapezoidModelArray`
+- tiny scalar DE: still fastest among valid CPU paths tested
+- tiny base `workers=8` DE: much slower than local scalar or vectorized tiny runs
+
+### Realistic CPU Broadcast Workloads
+
+For realistic vectorized CPU workflows, the meaningful incumbent is:
+
+- `TrapezoidModelArray`
+
+Reason:
+
+- the current vectorized batched objective is implemented in the base trapezoid model
+- the Cython wrapper does not provide a distinct winning batched path for realistic vectorized fitting
+- the current accelerated model still routes batched objective work effectively through the base broadcast implementation
+
+### Current GPU Baseline
+
+The leading GPU path remains:
+
+- `TrapezoidModelArrayDeanGPUFused`
+
+### Invalid Incumbent To Avoid
+
+Do not treat the current baseline `freeform_use_cupy=True` path in `Trapezoid_model.py` as a valid incumbent.
+
+Observed behavior:
+
+- candidate-budget timing can look unrealistically fast
+- objective values can become `inf`
+- fit parity is not reliable
+
+## Validated Findings So Far
+
+### Early Dean CPU Cleanup
+
+Kept:
+
+- cached `log(Intensity)`
+- cached `Qx**2 + Qz**2`
+- cached parameter parsing
+- reduced Python-side temporary churn
+
+Measured effect:
+
+- modest but real speedup
+- worth keeping as a cleaner baseline
+- not sufficient by itself as the main breakthrough
+
+### Bottleneck Attribution
+
+For realistic vectorized trapezoid runs:
+
+- `FreeFormTrapezoid` dominates objective time
+- `GF_calc` is secondary
+- `SymCoordAssign` is minor in the measured 4 to 12 parameter profiles
+
+### Cython Status
+
+The repo-local `cdsaxs_cython` path is useful as a scalar CPU reference.
+
+Measured effect:
+
+- scalar objective win over base CPU
+- tiny scalar DE win over base CPU
+- no clear winning batched/vectorized path
+- batched Cython calls still fall back because kernels expect lower-dimensional inputs
+
+Conclusion:
+
+- keep as scalar CPU incumbent
+- do not center future GPU work on Cython
+
+### Rebased Realistic GPU Result
+
+After rebase, the fused Dean GPU path still clearly wins for realistic workloads.
+
+Representative measured results:
+
+- `notebook_4param`
+  - candidate-budget speedup vs realistic base CPU: about `5.7x` to `6.2x`
+  - one-generation DE speedup vs realistic base CPU: about `5.2x`
+- `notebook_multilayer_12param`
+  - candidate-budget speedup vs realistic base CPU: about `15.9x` to `21.2x`
+  - one-generation DE speedup vs realistic base CPU: about `13.9x`
+
+It also continues to beat the scalar Cython incumbent on those realistic broadcast-shaped runs.
+
+Conclusion:
+
+- no restart is needed after rebase
+- the GPU direction is still justified
+- the comparison set changed more than the conclusion changed
+
+## Real-World Workflows To Mirror In The Harness
+
+These are the workflow shapes the harness should explicitly reflect.
+
+### Trapezoid DE Base Workflow
+
+Source:
+
+- `CDSAXS_DeRocher_V3.ipynb`
+
+Shape:
+
+- one-layer trapezoid
+- `CDSAXS_Optimize`
+- `differential_evolution`
+- compare:
+  - scalar CPU
+  - `workers`
+  - `vectorized=True`
+  - GPU-vectorized path
+
+### Trapezoid Layer-Growth Workflow
+
+Source:
+
+- V3 notebook cells using:
+  - `add_layer_at_percentage(10)`
+  - `add_layer_at_percentage(90)`
+  - sequential growth from an already grown model
+
+API support:
+
+- `CDSAXS_base_model.add_layer_at_percentage`
+- `CDSAXS_base_model.add_multiple_layers`
+
+### Trapezoid Alternative Optimizer Workflow
+
+Source:
+
+- V3 notebook cells using `dual_annealing`
+
+Why it matters:
+
+- not all real use follows DE
+- alternative optimizer support should not silently break or bypass acceleration choices
+
+### Batch Initialization Workflow
+
+Source:
+
+- notebook usage of `batch_initialize_and_fit`
+
+API support:
+
+- `CDSAXS_base_model.batch_initialize_and_fit`
+
+Why it matters:
+
+- this is a real workflow-level multiplier on objective cost
+- GPU wins on the objective can compound here
+
+### MCMC Workflow
+
+Source:
+
+- notebook usage of `CDSAXS_MCMC`
+- uncertainty-envelope plotting after MCMC
+
+API support:
+
+- `CDSAXS_base_model.CDSAXS_MCMC`
+- `plot_mcmc_uncertainty_envelope`
+- related percentile envelope functions
+
+Why it matters:
+
+- real users do not stop at point estimates
+- we need a short trial MCMC benchmark to understand whether objective acceleration survives this usage mode
+
+### Sweep And Best-Fit Replay Workflow
+
+API support:
+
+- `show_best_fit_results`
+
+Why it matters:
+
+- future optimization propagation should reuse winning trapezoid objective machinery inside sweep-centered workflows
+
+## Benchmark Matrix
+
+The benchmark matrix should now be organized by both geometry and workflow family.
+
+### Geometry Priority
+
+1. trapezoid
+2. SiGe
+3. cylinder
+
+### Workflow Families
+
+1. scalar objective
+2. batched objective
+3. tiny DE
+4. realistic candidate-budget
+5. realistic one-generation DE
+6. realistic short multi-generation DE
+7. batch initialization smoke
+8. MCMC smoke
+9. MCMC trial benchmark
+
+### Trapezoid Profiles
+
+Keep the current notebook-parallel profiles:
+
+- `notebook_4param`
+- `notebook_layer10_8param`
+- `notebook_layer90_8param`
+- `notebook_multilayer_12param`
+
+Add the next profile family:
+
+- `notebook_v3_largeparam_de`
+
+Intent:
+
+- mirror the much larger V3 optimization cells
+- keep it offline or opt-in
+- use reduced optimizer budgets to avoid multi-minute runs
+
+### MCMC Profiles
+
+Add two trapezoid MCMC families:
+
+1. `mcmc_smoke`
+   - base 4-parameter model
+   - short chain
+   - enough to validate plumbing and rough throughput
+
+2. `mcmc_trial`
+   - one or more notebook-derived layered models
+   - reduced but still realistic walker and step counts
+   - enough to reveal scaling trends without turning into a full scientific production run
+
+Recommended initial MCMC trial settings:
+
+- `n_walkers`: just above the minimum valid threshold for the chosen dimension
+- `n_steps`: low hundreds, not thousands
+- `burn_in`: short but explicit
+- `thin`: explicit and logged
+- plots disabled during timing runs
+
+### SiGe Profiles
+
+Add an initial high-priority SiGe profile set:
+
+1. `sige_flat_twidth`
+   - typed trapezoids with `twidth`
+   - no elliptical indentation yet
+
+2. `sige_ellipse_single`
+   - one `Layer_Type: 'Ellipse'`
+   - includes `depth`
+
+3. `sige_constraints`
+   - typed layers with explicit `constraints`
+
+These should start as objective and tiny-DE profiles first.
+
+## Runtime Envelope
+
+Keep the runtime classes explicit:
+
+- smoke tests:
+  - a few seconds
+- realistic routine benchmarks:
+  - tens of seconds
+- offline scale studies:
+  - under roughly one minute per selected profile
+
+MCMC should be split the same way:
+
+- smoke:
+  - very short, test-oriented
+- trial:
+  - enough to reveal scaling
+- scientific production:
+  - explicitly out of scope for routine benchmarking
+
+## Trapezoid Roadmap
+
+### Stage T0: Preserve And Stabilize Existing Wins
+
+Keep:
+
+- `Trapezoid_model_dean.py`
 - `Trapezoid_model_dean_gpu.py`
-  - more device-resident fusion
-  - lower host/device traffic
-  - better large-batch memory layout
-  - threshold tuning for small-batch fallback
-- `dean_optimization_trapezoid_realistic.py`
-  - add larger offline notebook-derived profiles
-  - add optional sweep-style workflow benchmarks
-  - add future GPU candidates to the same matrix for A/B comparison
+- current realistic trapezoid harness
 
-What should not be used as the main decision-maker anymore:
+Immediate cleanup items:
 
-- the tiny DE smoke benchmark by itself
-- scalar-only microbenchmarks without realistic candidate budgets
+- remove unconditional optimizer debug prints from `CDSAXS_base_model._run_scipy_optimizer`
+- keep benchmark output deterministic and machine-readable
+- keep scalar and batched incumbents explicit in results
 
-Current decision standard for GPU changes:
+### Stage T1: Refactor The Harness Around Current Repo Semantics
 
-- beat the fused GPU realistic baseline on the saved 4/8/12-parameter ladder
-- preserve or improve fit quality on the short-DE profiles
-- only after that, tighten structure-similarity gating
+Refactor the current trapezoid harness so it interacts more elegantly with the updated repo.
 
-### Next Steps
+Required changes:
 
-- Treat the saved realistic GPU matrix as the new optimization baseline for trapezoid GPU work.
-- Run future GPU candidates against the same 4/8/12-parameter ladder before promoting them.
-- Add structure-similarity regression only for candidates that beat this realistic GPU baseline by a meaningful margin.
-- Add an offline larger notebook-derived profile after the current GPU path stops yielding wins on the 4/8/12-parameter ladder.
+- build realistic profiles by calling current model APIs such as:
+  - `add_layer_at_percentage`
+  - `add_multiple_layers`
+- expose benchmark families in the same language the repo uses:
+  - DE
+  - dual annealing
+  - batch initialization
+  - MCMC
+- log the exact workflow knobs:
+  - `optimizer`
+  - `vectorized`
+  - `workers`
+  - `freeform_use_cupy`
+  - `height_percentage`
+  - `height_percentages`
+  - `sequential`
+  - `n_walkers`
+  - `n_steps`
+  - `burn_in`
+  - `thin`
 
-### Decision Rule For Future GPU Work
+### Stage T2: Keep The Current GPU Lead Valid
 
-For future GPU optimization attempts, a candidate should be considered strong if:
+Continue treating `TrapezoidModelArrayDeanGPUFused` as the lead GPU candidate.
 
-- it beats the scalar Cython incumbent on realistic candidate-budget comparisons
-- it also beats the Dean batched CPU reference on batched objective throughput
-- it preserves fit parity on at least one short real-optimizer notebook-derived profile
+Next GPU implementation targets:
 
-### Lower-Priority Or Dependent Work
+1. persistent GPU workspaces
+2. even tighter device residency for reused buffers
+3. further fusion of:
+   - Debye-Waller application
+   - magnitude-square
+   - background addition
+   - residual accumulation
 
-- Device-specific tuning once a working GPU-resident path exists.
-- Strong structure-similarity gating after a speedup candidate is identified.
-- Broader workflow refactors that are not on the critical path to faster trapezoid fitting.
+Decision rule:
 
-## What To Measure At Every Stage
+- keep complexity only if it improves realistic notebook-derived workloads, not just microbenchmarks
 
-### Performance
+### Stage T3: Small-Workload Policy
 
-- Objective wall time:
-  - scalar candidate
-  - batched candidate list
-- Objective throughput:
-  - seconds per call
-  - seconds per candidate
-- objective scaling across batch profiles:
-  - smoke
-  - broadcast
-  - GPU-candidate
-- End-to-end optimizer wall time:
-  - tiny DE run
-  - optionally larger comparison run outside the default test suite
-- Optional memory counters for large-batch experiments
-
-### Scientific Stability
-
-- Final GF
-- Final BIC
-- Final optimized parameter vector
-- Derived geometry comparison
-- Structure similarity summary
-
-For structure similarity, we should not rely only on GF. We should compare the optimized geometry explicitly, especially widths and heights per layer, because a faster optimizer is not useful if it arrives at materially different structures under the same setup.
+Do not force GPU on tiny workloads.
 
 Policy:
 
-- Before speedup exists:
-  - keep structure-similarity scaffolding available
-  - do not block progress on stochastic equivalence proof
-- After speedup exists:
-  - compare optimized structures with fixed seeds where possible
-  - add tolerances for widths, heights, DW, and background summaries
+- scalar or very small batches:
+  - prefer scalar CPU incumbent
+- realistic broadcast-sized batches:
+  - prefer vectorized GPU candidate if parity is maintained
 
-## Proposed File Layout
+This policy should eventually become an explicit threshold or fallback rule.
 
-### Added Now
+### Stage T4: Workflow Propagation
 
-- `DEAN_OPTIMIZATION.md`
-- `DEAN_OPTIMIZATION_LEDGER.MD`
-- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
-- `tests/test_fitting/test_dean_optimization_trapezoid.py`
+Once trapezoid objective wins are stable, propagate them to:
+
+- `batch_initialize_and_fit`
+- sweep-based workflows
+- short MCMC workflows
+
+### Stage T5: Trapezoid MCMC Benchmarking
+
+This is now required work, not optional follow-on.
+
+Goals:
+
+- measure whether faster objective evaluation produces real end-to-end benefit in MCMC
+- determine whether the accelerated path should be used directly inside MCMC likelihood calls
+
+Required benchmark families:
+
+1. `trapezoid_mcmc_smoke_4param`
+2. `trapezoid_mcmc_trial_layer10`
+3. `trapezoid_mcmc_trial_multilayer`
+
+Required outputs:
+
+- wall time
+- effective samples generated
+- mean acceptance fraction
+- best-fit GF and BIC after applying best sampled parameters
+- whether objective parity issues appear under repeated stochastic calls
+
+## SiGe Roadmap
+
+SiGe is now a high-priority geometry.
+
+### Why It Matters
+
+The rebased repo added a genuinely richer fitting model:
+
+- geometry name: `sige`
+- typed layers
+- `twidth`
+- `depth`
+- elliptical indentation via `Layer_Type: 'Ellipse'`
+- explicit constraints
+
+This is not just a copy of trapezoid with renamed fields.
+
+### Immediate SiGe Plan
+
+1. make the harness aware of `SiGeModel`
+2. add one helper module for reproducible SiGe benchmark models
+3. add objective and tiny-DE tests before any GPU attempt
+4. profile where SiGe time goes:
+   - typed-layer expansion
+   - constraint application
+   - coordinate construction
+   - form-factor evaluation
+   - GF
+
+### Initial SiGe Benchmark Families
+
+1. objective scalar
+2. objective batched if the implementation supports it cleanly
+3. tiny DE
+4. short one-generation DE
+5. MCMC smoke after DE is stable
+
+### Initial SiGe Incumbent Policy
+
+Until measured otherwise:
+
+- scalar CPU incumbent:
+  - `SiGeModel`
+- no GPU incumbent yet
+- no assumption that trapezoid GPU machinery will transfer cleanly
+
+### SiGe Optimization Direction
+
+Priority order:
+
+1. establish stable realistic SiGe profiles
+2. remove obvious Python overhead in typed-layer expansion and constraints
+3. determine whether SiGe can reuse trapezoid batched mapping machinery
+4. only then evaluate a SiGe-specific GPU path
+
+## Cylinder Roadmap
+
+Cylinder remains the third geometry priority.
+
+Current status:
+
+- still relevant
+- now lower priority than trapezoid and SiGe
+
+Plan:
+
+- keep cylinder on the roadmap
+- do not start new cylinder optimization until:
+  - trapezoid workflow harness refactor is done
+  - SiGe baseline harness exists
+
+## Repo Layout And Naming Alignment
+
+### Keep
+
+- optimized geometry variants beside existing geometry modules
+- tests under `tests/test_fitting`
+- workflow helpers under `src/cdsaxs/Fitting`
+
+### Update In Spirit
+
+The harness should align more closely with current repo naming and structure.
+
+Recommended direction:
+
+- geometry-first helper names
+- workflow-family naming that mirrors current APIs
+- user-facing examples that use:
+  - `cdsaxs.Fitting`
+  - `TrapezoidModel`
+  - `SiGeModel`
+  - `CylinderModel`
+
+### Current Added Files That Still Fit Well
+
 - `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
-- `tests/test_fitting/test_dean_optimization_structure_similarity.py`
+- `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
 
-### Likely Next Files
+### Next Files To Add
 
-- `src/cdsaxs/Fitting/Cylinder_model_dean.py`
-- `tests/test_fitting/test_dean_optimization_cylinder.py`
-- `tests/test_fitting/test_dean_optimization_broadcast_scaling.py`
+Trapezoid:
 
-## Proposal For The Principled Benchmark Matrix
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_mcmc.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid_mcmc.py`
 
-For the high-level options, I propose a fixed benchmark matrix:
+SiGe:
 
-1. Objective-only trapezoid benchmark
-   - scalar current path
-   - batched CPU current path
-   - future Dean CPU path
-   - future Dean GPU path
-   - evaluate across named batch profiles, not just one population size
+- `src/cdsaxs/Fitting/dean_optimization_sige.py`
+- `tests/test_fitting/test_dean_optimization_sige.py`
 
-2. Tiny end-to-end trapezoid optimizer benchmark
-   - same data
-   - same initial parameters
-   - reduced `maxiter`, `popsize`, `polish=False`
-   - compare runtime, GF, parameter drift
+Optional later refactor if naming pressure grows:
 
-3. Medium offline trapezoid benchmark
-   - not part of default `pytest`
-   - closer to notebook settings
-   - compare scaling versus population size
-   - explicitly include sizes where the first Dean candidate flattened out, so later work must beat the current plateau rather than just the smoke profile
+- move reusable benchmark-profile helpers into a shared `dean_optimization_workflows.py`
+- keep geometry-specific entry modules thin and parallel
 
-4. Structure-similarity regression benchmark
-   - compare optimized structures between baseline and candidate implementation
-   - define acceptable tolerance per parameter and total GF drift
-   - keep this scaffolded but non-gating until a significant speedup candidate exists
+## Necessary Harness Changes For Better Repo Compatibility
 
-### Named Batch Profiles
+These are required, not optional.
 
-- `smoke`: `1, 4, 16`
-  - quick correctness and timing sanity checks
-- `broadcast`: `1, 4, 16, 64, 256, 1024`
-  - default offline CPU scaling profile
-- `gpu_candidate`: `1, 16, 64, 256, 1024, 4096`
-  - larger profile for testing whether a candidate plausibly benefits from massive broadcasting
+1. Stop treating raw parameter cloning as the main realistic builder mechanism.
+   Prefer the current model APIs for workflow-derived model construction.
 
-### Current Next-Step Proposal
+2. Split incumbent reporting by workload class.
+   Every result should state whether the comparator is:
+   - scalar CPU incumbent
+   - realistic CPU vectorized incumbent
+   - lead GPU candidate
 
-The next principled option should not be "more of the same caching." The first candidate already captured most of the easy Python overhead.
+3. Add workflow-native benchmark families.
+   Specifically:
+   - `batch_initialize_and_fit_smoke`
+   - `mcmc_smoke`
+   - `mcmc_trial`
 
-The best next target is:
+4. Make benchmark metadata match repo semantics.
+   Include:
+   - geometry
+   - optimizer family
+   - layer-growth path
+   - constraint presence
+   - typed-layer presence
 
-1. Keep the Dean GPU-resident batched path as the active acceleration branch for trapezoid fitting.
-   - current leading implementation: fused GPU post-form-factor variant
-2. Improve that branch only where measurements still say it matters:
-   - fused post-form-factor work
-   - persistent GPU workspaces
-   - larger-batch optimizer workflows
-3. Avoid investing in scalar GPU routing unless a future workflow truly needs it.
-4. Use structure-similarity regression as a real gate for subsequent GPU-path changes, because there is now a significant speedup worth protecting.
+5. Keep the existing component-level Cython benchmark separate.
+   It is useful support tooling, but it is not a workflow benchmark.
 
-This should let us reject changes that are fast but scientifically sloppy, and also reject changes that are scientifically fine but only move time from compute into Python overhead.
+6. Record invalid paths explicitly.
+   Example:
+   - baseline CuPy path that returns `inf` objective values should be marked invalid, not merely slow or fast
+
+## Decision Rules
+
+### Keep A Candidate If
+
+- it provides significant speedup on realistic benchmark families
+- it preserves fit parity on deterministic checks
+- it does not make workflow integration materially uglier
+
+### Reject A Candidate If
+
+- it wins only on microbenchmarks
+- it silently falls back in real workflows
+- it breaks MCMC, layer growth, or batch initialization semantics
+- it requires a user-facing API fork that is too different from the current repo
+
+## Known Caveats And Follow-Up Items
+
+- the current repo still has some internal rough edges in package exposure and optimizer logging
+- the realistic benchmark harness is stronger than before, but it still centers DE more than batch initialization and MCMC
+- `optimization_logger.py` should be treated as a workflow to integrate with, not yet as the main benchmark scaffold
+- current mainline CuPy hooks in the base trapezoid model should not be trusted as the GPU baseline
+
+## Continuation Checklist
+
+If continuing from a fresh context, do this first:
+
+1. confirm branch and environment
+   - repo at `/homes/deand/dev/nist_cdsaxs`
+   - branch `feature/dean_optimization`
+   - env `cdsax-dev`
+
+2. verify imports
+   - `import cdsaxs`
+   - `from cdsaxs.Fitting import TrapezoidModel, SiGeModel, AcceleratedTrapezoidModel`
+
+3. verify current lead GPU class
+   - `TrapezoidModelArrayDeanGPUFused`
+
+4. re-run a short realistic trapezoid comparison
+   - scalar incumbent
+   - realistic vectorized CPU incumbent
+   - Dean fused GPU path
+
+5. implement the next harness expansion in this order
+   - trapezoid MCMC smoke
+   - trapezoid MCMC trial
+   - SiGe helper module
+   - SiGe objective and tiny-DE tests
+
+6. record every attempt in `DEAN_OPTIMIZATION_LEDGER.MD`
+
+## Summary Of What Comes Next
+
+Immediate next work should be:
+
+1. stabilize the rebased branch surface and keep it pushable
+2. refactor the harness around current repo workflows, not just old notebook assumptions
+3. add trapezoid MCMC benchmark coverage
+4. start a dedicated SiGe benchmark and optimization track
+5. continue GPU optimization only on realistic vectorized workflows and only against valid incumbents
