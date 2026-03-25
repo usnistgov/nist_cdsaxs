@@ -804,19 +804,19 @@ class CDSAXS_Model:
     def GF_calc(self, SimInt, Intensity=None):
         """
         Calculates the goodness of fit (GF) metric between experimental and simulated intensities.
-        Uses log intensity.
+        Uses log intensity. Works with both NumPy and CuPy arrays.
         
         Parameters:
         -----------
-        SimInt : numpy.ndarray
+        SimInt : numpy.ndarray or cupy.ndarray
             Simulated intensity array 
-        Intensity : numpy.ndarray, optional
+        Intensity : numpy.ndarray or cupy.ndarray, optional
             Experimental intensity array
             If None, uses self.Intensity
             
         Returns:
         --------
-        float
+        float or cupy.ndarray
             The goodness of fit value; lower values indicate better fit
         """
         try:
@@ -830,20 +830,38 @@ class CDSAXS_Model:
             # Check if input is valid
             if SimInt is None:
                 raise ValueError("SimInt must not be None")
+            
+            # Ensure C-contiguous for optimal performance
+
                 
-            # Check if shapes are compatible
-            if Intensity.shape != SimInt.shape:
-                raise ValueError(f"Shape mismatch: Intensity shape {Intensity.shape} different from SimInt shape {SimInt.shape}")
-            
-            # Compute the goodness of fit
-            GF_M = abs(np.log(Intensity) - np.log(SimInt))
-            
-            # Replace NaN values with zeros
-            GF_M[np.isnan(GF_M)] = 0
-            
-            # Sum to get the overall goodness of fit
-            GF = np.sum(GF_M)
-            
+            # Allow optional leading batch dimension(s) to broadcast
+            if SimInt.shape != Intensity.shape:
+                # Try to broadcast by adding leading axes to Intensity
+                try:
+                    # Align Intensity to SimInt's trailing 2D (N,M), broadcast over leading dims
+                    target_shape = SimInt.shape
+                    base = Intensity
+                    while base.ndim < SimInt.ndim:
+                        base = base[np.newaxis, ...]
+                    Intensity_b = np.broadcast_to(base, target_shape)
+                    # Ensure C-contiguous for optimal performance
+                    if not Intensity_b.flags.c_contiguous:
+                        Intensity_b = np.ascontiguousarray(Intensity_b)
+                except Exception:
+                    raise ValueError(f"Shape mismatch: Intensity shape {Intensity.shape} not broadcastable to SimInt shape {SimInt.shape}")
+            else:
+                Intensity_b = Intensity
+
+            GF_M = abs(np.log(Intensity_b) - np.log(SimInt))
+            GF_M = np.nan_to_num(GF_M, copy=False)
+            # Ensure C-contiguous for optimal performance
+            if not GF_M.flags.c_contiguous:
+                GF_M = np.ascontiguousarray(GF_M)
+            # Sum over the last two axes (qz grid), keep batch dims
+            if GF_M.ndim >= 2:
+                GF = np.sum(GF_M, axis=tuple(range(-2, 0)))
+            else:
+                GF = np.sum(GF_M)
             return GF
             
         except Exception as e:
@@ -3739,20 +3757,14 @@ class CDSAXS_Model:
                 'default': self.I0
             }
             
-            # Handle background parameters
-            if isinstance(self.Bk, np.ndarray):
-                for i, bk_val in enumerate(self.Bk):
-                    param_limits[f'Bk_{i}'] = {
-                        'min': bk_val * (1 - optimization_margin),
-                        'max': bk_val * (1 + optimization_margin),
-                        'default': bk_val
-                    }
-            else:
-                param_limits['Bk'] = {
-                    'min': self.Bk * (1 - optimization_margin),
-                    'max': self.Bk * (1 + optimization_margin),
-                    'default': self.Bk
-                }
+            # Handle background parameters - use single scalar Bk parameter
+            # Subclasses can override this behavior if they need per-column Bk_i parameters
+            bk_scalar = float(self.Bk[0]) if isinstance(self.Bk, np.ndarray) else float(self.Bk)
+            param_limits['Bk'] = {
+                'min': bk_scalar * (1 - optimization_margin),
+                'max': bk_scalar * (1 + optimization_margin),
+                'default': bk_scalar
+            }
         
         # Store optimization parameters
         self.model_params['optimization'] = param_limits
@@ -4151,20 +4163,14 @@ class CDSAXS_Model:
             'default': self.I0
         }
         
-        # Handle background parameters
-        if isinstance(self.Bk, np.ndarray):
-            for i, bk_val in enumerate(self.Bk):
-                opt_params[f'Bk_{i}'] = {
-                    'min': bk_val * (1 - margin),
-                    'max': bk_val * (1 + margin),
-                    'default': bk_val
-                }
-        else:
-            opt_params['Bk'] = {
-                'min': self.Bk * (1 - margin),
-                'max': self.Bk * (1 + margin),
-                'default': self.Bk
-            }
+        # Handle background parameters - use single scalar Bk parameter
+        # Subclasses can override this behavior if they need per-column Bk_i parameters
+        bk_scalar = float(self.Bk[0]) if isinstance(self.Bk, np.ndarray) else float(self.Bk)
+        opt_params['Bk'] = {
+            'min': bk_scalar * (1 - margin),
+            'max': bk_scalar * (1 + margin),
+            'default': bk_scalar
+        }
         
         return opt_params
 
@@ -4923,7 +4929,7 @@ class CDSAXS_Model:
     def CDSAXS_Optimize(self, params_to_optimize=None, optimizer='differential_evolution', 
                        plot_results=True, plot_structure=True, plot_grid=True, 
                        plot_combined=False, verbose=False, use_callbacks=False, 
-                       callback_frequency=10, **kwargs):
+                       callback_frequency=10, vectorized=False, freeform_use_cupy=False, **kwargs):
         """
         Flexible optimization method for CDSAXS model fitting with optional callback monitoring.
         
@@ -4956,6 +4962,8 @@ class CDSAXS_Model:
             Optimized model parameters or None if failed
         """
         try:
+            # Store the FreeFormTrapezoid CuPy flag for downstream calls
+            self._freeform_use_cupy = bool(freeform_use_cupy)
             # Check if required attributes exist
             if not hasattr(self, 'Intensity'):
                 raise AttributeError("Missing required attribute: Intensity")
@@ -5074,7 +5082,7 @@ class CDSAXS_Model:
                 print(f"Starting optimization with {optimizer} using {len(param_names)} parameters...")
             
             result = self._run_scipy_optimizer(
-                optimizer, wrapper_func, bounds, initial_values, verbose, **kwargs
+                optimizer, wrapper_func, bounds, initial_values, verbose, vectorized=vectorized, **kwargs
             )
             
             # Store the optimization result
@@ -5154,10 +5162,15 @@ class CDSAXS_Model:
                 'polish': True,
                 'x0': np.array(initial_values),
                 'maxiter': 100,
-                'popsize': 15
+                'popsize': 15,
+                'vectorized': kwargs.pop('vectorized', False)
             }
+            # Strip any unsupported keys before passing to SciPy
+            kwargs.pop('use_cupy', None)
             default_params.update(kwargs)
-            
+            print(f'default_params: {default_params}')
+            print(f'bounds: {bounds}')
+            print(objective_func)
             result = differential_evolution(
                 objective_func, bounds, **default_params
             )

@@ -276,19 +276,31 @@ class TrapezoidModelArray(CDSAXS_Model):
                 'default': self.I0
             }
             
-            # Add background parameters (one per column if array)
-            if isinstance(self.Bk, np.ndarray):
+            # Add background parameters
+            # Default: treat background as a single scalar parameter for optimization,
+            # even if self.Bk is stored as an array for per-column simulation.
+            # Only expand to per-column Bk_i if the caller explicitly passed such keys
+            # via param_limits. We do NOT infer Bk_* from existing model_params to avoid
+            # unintended parameter proliferation when vectorizing.
+            explicit_keys = set(param_limits.keys()) if param_limits is not None else set()
+            has_explicit_bk_columns = any(k.startswith('Bk_') for k in explicit_keys)
+
+            if has_explicit_bk_columns and isinstance(self.Bk, np.ndarray):
                 for i, bk_val in enumerate(self.Bk):
-                    param_limits[f'Bk_{i}'] = {
-                        'min': bk_val * 0.9,
-                        'max': bk_val * 1.1,
-                        'default': bk_val
-                    }
+                    key = f'Bk_{i}'
+                    if key in explicit_keys:
+                        param_limits[key] = {
+                            'min': bk_val * 0.9,
+                            'max': bk_val * 1.1,
+                            'default': bk_val
+                        }
             else:
+                # Single scalar Bk parameter
+                bk_scalar = float(self.Bk[0]) if isinstance(self.Bk, np.ndarray) else float(self.Bk)
                 param_limits['Bk'] = {
-                    'min': self.Bk * 0.9,
-                    'max': self.Bk * 1.1,
-                    'default': self.Bk
+                    'min': bk_scalar * 0.9,
+                    'max': bk_scalar * 1.1,
+                    'default': bk_scalar
                 }
         else:
             # Ensure default values are set for all provided parameters
@@ -498,54 +510,80 @@ class TrapezoidModelArray(CDSAXS_Model):
             else:
                 sld_array = np.ones(layers, dtype=float)
             
-            # STRICT VALIDATION
-            if len(sld_array) != layers:
-                raise ValueError(
-                    f"SLD array length ({len(sld_array)}) must exactly match number of layers ({layers}). "
-                    f"Each layer requires its own SLD value."
-                )
+            # STRICT VALIDATION (supports batched sld_array)
+            if sld_array.ndim == 1:
+                if len(sld_array) != layers:
+                    raise ValueError(
+                        f"SLD array length ({len(sld_array)}) must exactly match number of layers ({layers}). "
+                        f"Each layer requires its own SLD value."
+                    )
+            elif sld_array.ndim == 2:
+                if sld_array.shape[1] != layers:
+                    raise ValueError(
+                        f"SLD array shape {sld_array.shape} must have second dim == layers ({layers})."
+                    )
+            else:
+                raise ValueError(f"SLD array must be 1D or 2D, got shape {sld_array.shape}")
             
             # Validate PAR
-            if not isinstance(PAR, np.ndarray) or len(PAR) < layers + 1 or PAR.shape[1] < 2:
+            if not isinstance(PAR, np.ndarray) or PAR.shape[-2] < layers + 1 or PAR.shape[-1] < 2:
                 raise ValueError("Invalid PAR array dimensions")
-            
-            # Initialize coordinate array
-            Coord = np.zeros([layers + 1, 5, 1])
-            
-            # Assign coordinates and SLD values
-            for layer_idx in range(layers):
-                # Each layer_idx corresponds to coordinate index layer_idx
-                T = layer_idx
-                
-                if T == 0:
-                    # Bottom layer
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
-                    Coord[T, 3, 0] = 0
-                else:
-                    # Upper layers
-                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-                    Coord[T, 2, 0] = PAR[T, 1]
-                    Coord[T, 3, 0] = 0
-                
-                # CLEAR SLD ASSIGNMENT: layer_idx gets sld_array[layer_idx]
-                Coord[T, 4, 0] = sld_array[layer_idx]
-            
-            # Handle the top vertex (T = layers)
-            T = layers
-            Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-            Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-            Coord[T, 2, 0] = PAR[T, 1]
-            Coord[T, 3, 0] = 0
-            Coord[T, 4, 0] = 0.0  # Top vertex - no layer associated
-            
-            if using_self:
-                self.Coord = Coord
-                return True
-                
-            return Coord
+
+            # Vectorized batch support: PAR can be (layers+1,2) or (S,layers+1,2)
+            if PAR.ndim == 2:
+                # Single instance
+                Coord = np.zeros([layers + 1, 5, 1])
+                for layer_idx in range(layers):
+                    T = layer_idx
+                    if T == 0:
+                        Coord[T, 0, 0] = 0
+                        Coord[T, 1, 0] = PAR[0, 0]
+                        Coord[T, 2, 0] = PAR[0, 1]
+                        Coord[T, 3, 0] = 0
+                    else:
+                        Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+                        Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
+                        Coord[T, 2, 0] = PAR[T, 1]
+                        Coord[T, 3, 0] = 0
+                    Coord[T, 4, 0] = sld_array[layer_idx]
+                T = layers
+                Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+                Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
+                Coord[T, 2, 0] = PAR[T, 1]
+                Coord[T, 3, 0] = 0
+                Coord[T, 4, 0] = 0.0
+                if using_self:
+                    self.Coord = Coord
+                    return True
+                return Coord
+            else:
+                # Batched PAR: shape (S, layers+1, 2)
+                S = PAR.shape[0]
+                Coord = np.zeros([S, layers + 1, 5, 1])
+                # Bottom layer T=0
+                Coord[:, 0, 0, 0] = 0
+                Coord[:, 0, 1, 0] = PAR[:, 0, 0]
+                Coord[:, 0, 2, 0] = PAR[:, 0, 1]
+                Coord[:, 0, 3, 0] = 0
+                Coord[:, 0, 4, 0] = sld_array[:, 0]
+                # Upper layers
+                for T in range(1, layers):
+                    Coord[:, T, 0, 0] = Coord[:, T-1, 0, 0] + 0.5 * (PAR[:, T-1, 0] - PAR[:, T, 0])
+                    Coord[:, T, 1, 0] = Coord[:, T, 0, 0] + PAR[:, T, 0]
+                    Coord[:, T, 2, 0] = PAR[:, T, 1]
+                    Coord[:, T, 3, 0] = 0
+                    Coord[:, T, 4, 0] = sld_array[:, T]
+                # Top vertex T=layers
+                T = layers
+                Coord[:, T, 0, 0] = Coord[:, T-1, 0, 0] + 0.5 * (PAR[:, T-1, 0] - PAR[:, T, 0])
+                Coord[:, T, 1, 0] = Coord[:, T, 0, 0] + PAR[:, T, 0]
+                Coord[:, T, 2, 0] = PAR[:, T, 1]
+                Coord[:, T, 3, 0] = 0
+                Coord[:, T, 4, 0] = 0.0
+                if using_self:
+                    self.Coord = Coord
+                    return True
+                return Coord
             
         except Exception as e:
             print(f"Error in SymCoordAssign_Alternative: {str(e)}")
@@ -688,28 +726,31 @@ class TrapezoidModelArray(CDSAXS_Model):
     def FreeFormTrapezoid(self, Coord=None, layers=None, Qx=None, Qz=None):
         """
         Calculates the form factor for a free-form trapezoid structure.
+        Works with both NumPy and CuPy arrays.
         
         Parameters:
         -----------
-        Coord : numpy.ndarray, optional
+        Coord : numpy.ndarray or cupy.ndarray, optional
             Coordinate array with trapezoid coordinates and parameters
             If None, uses self.Coord
         layers : int, optional
             Number of layers in the trapezoid structure
             If None, uses self.layers
-        Qx : numpy.ndarray, optional
+        Qx : numpy.ndarray or cupy.ndarray, optional
             X-component of scattering vector, 2D array
             If None, uses self.Qx
-        Qz : numpy.ndarray, optional
+        Qz : numpy.ndarray or cupy.ndarray, optional
             Z-component of scattering vector, 2D array
             If None, uses self.Qz
         
         Returns:
         --------
-        numpy.ndarray
+        numpy.ndarray or cupy.ndarray
             The calculated form factor
             If called with self attributes, also sets self.form
         """
+        use_cupy = getattr(self, '_freeform_use_cupy', False)
+
         try:
             # Determine whether to use passed parameters or class attributes
             using_self = False
@@ -740,41 +781,89 @@ class TrapezoidModelArray(CDSAXS_Model):
             if len(Qx.shape) != 2:
                 raise ValueError(f"Qx must be a 2D array, got shape {Qx.shape}")
                 
-            # Validate Coord shape for indexing
-            if int(layers) + 1 > len(Coord):
-                raise IndexError(f"Not enough rows in Coord ({len(Coord)}) for {int(layers)} layers")
+            # Validate Coord shape for indexing (aware of batched Coord)
+            if Coord.ndim == 4:
+                # Coord shape: (S, layers+1, 5, 1)
+                if Coord.shape[1] < int(layers) + 1:
+                    raise IndexError(f"Not enough rows in Coord ({Coord.shape[1]}) for {int(layers)} layers")
+            else:
+                if int(layers) + 1 > len(Coord):
+                    raise IndexError(f"Not enough rows in Coord ({len(Coord)}) for {int(layers)} layers")
             
-            # Initialize height values and form factor array
-            H1 = Coord[0, 3, 0]
-            H2 = H1
-            form = np.zeros([len(Qx[:,1]), len(Qx[1,:])])
+            # Optional CuPy acceleration (tight scope)
+            xp = np
+            if self._freeform_use_cupy:
+                try:
+                    import cupy as cp  # local import
+                    xp = cp
+                    # Convert inputs to CuPy
+                    Coord = xp.asarray(Coord)
+                    Qx = xp.asarray(Qx)
+                    Qz = xp.asarray(Qz)
+                except Exception:
+                    xp = np
+                    use_cupy = False
+
+            # Vectorized over batch if Coord has an extra leading dimension
+            if Coord.ndim == 4:
+                # shapes: Coord -> (S, layers+1, 5, 1); Qx,Qz -> (N,M)
+                S = Coord.shape[0]
+                N = Qx.shape[0]
+                Mq = Qx.shape[1]
+                form = xp.zeros((S, N, Mq), dtype=xp.complex128 if xp is not np else complex)
+                H1 = Coord[:, 0, 3, 0]  # (S,)
+                H2 = H1.copy()
+                for i in range(int(layers)):
+                    H2 = H2 + Coord[:, i, 2, 0]
+                    H1 = xp.where(xp.asarray(i > 0), H1 + Coord[:, i-1, 2, 0], H1)
+                    x1 = Coord[:, i, 0, 0]
+                    x4 = Coord[:, i, 1, 0]
+                    x2 = Coord[:, i+1, 0, 0]
+                    x3 = Coord[:, i+1, 1, 0]
+                    # Avoid division by zero
+                    x2 = xp.where(xp.isclose(x2, x1), x1 - 1e-6, x2)
+                    x4 = xp.where(xp.isclose(x4, x3), x3 - 1e-6, x4)
+                    SL = Coord[:, i, 2, 0] / (x2 - x1)
+                    SR = -Coord[:, i, 2, 0] / (x4 - x3)
+                    # Broadcast to (S,N,M)
+                    Qx_b = Qx[None, :, :]
+                    Qz_b = Qz[None, :, :]
+                    H1b = H1[:, None, None]
+                    H2b = H2[:, None, None]
+                    SLb = SL[:, None, None]
+                    SRb = SR[:, None, None]
+                    x1b = x1[:, None, None]
+                    x4b = x4[:, None, None]
+                    A1 = (xp.exp(1j*Qx_b*((H1b-SRb*x4b)/SRb))/(Qx_b/SRb+Qz_b))*(xp.exp(-1j*H2b*(Qx_b/SRb+Qz_b))-xp.exp(-1j*H1b*(Qx_b/SRb+Qz_b)))
+                    A2 = (xp.exp(1j*Qx_b*((H1b-SLb*x1b)/SLb))/(Qx_b/SLb+Qz_b))*(xp.exp(-1j*H2b*(Qx_b/SLb+Qz_b))-xp.exp(-1j*H1b*(Qx_b/SLb+Qz_b)))
+                    form = form + (1j/Qx_b)*(A1-A2)*Coord[:, i, 4, 0][:, None, None]
+            else:
+                # Original single-instance path
+                H1 = Coord[0, 3, 0]
+                H2 = H1
+                form = xp.zeros((Qx.shape[0], Qx.shape[1]), dtype=xp.complex128 if xp is not np else complex)
+                for i in range(int(layers)):
+                    H2 = H2 + Coord[i, 2, 0]
+                    if i > 0:
+                        H1 = H1 + Coord[i-1, 2, 0]
+                    x1 = Coord[i, 0, 0]
+                    x4 = Coord[i, 1, 0]
+                    x2 = Coord[i+1, 0, 0]
+                    x3 = Coord[i+1, 1, 0]
+                    x2 = x1 - 1e-6 if xp.isclose(x2, x1) else x2
+                    x4 = x3 - 1e-6 if xp.isclose(x4, x3) else x4
+                    SL = Coord[i, 2, 0] / (x2 - x1)
+                    SR = -Coord[i, 2, 0] / (x4 - x3)
+                    A1 = (xp.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(xp.exp(-1j*H2*(Qx/SR+Qz))-xp.exp(-1j*H1*(Qx/SR+Qz)))
+                    A2 = (xp.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(xp.exp(-1j*H2*(Qx/SL+Qz))-xp.exp(-1j*H1*(Qx/SL+Qz)))
+                    form = form + (1j/Qx)*(A1-A2)*Coord[i, 4, 0]
             
-            # Calculate form factor
-            for i in range(int(layers)):
-                H2 = H2 + Coord[i, 2, 0]
-                if i > 0:
-                    H1 = H1 + Coord[i-1, 2, 0]
-                    
-                x1 = Coord[i, 0, 0]
-                x4 = Coord[i, 1, 0]
-                x2 = Coord[i+1, 0, 0]
-                x3 = Coord[i+1, 1, 0]
-                
-                # Avoid division by zero
-                x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
-                x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
-                
-                SL = Coord[i, 2, 0] / (x2 - x1)
-                SR = -Coord[i, 2, 0] / (x4 - x3)
-                
-                A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
-                A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
-                form = form + (1j/Qx)*(A1-A2)*Coord[i, 4, 0]
-            
+            if self._freeform_use_cupy:
+                form = form.get()
             # If using self attributes, update self.form
             if using_self:
                 self.form = form
-                
+                return self.form
             return form
             
         except Exception as e:
@@ -881,7 +970,7 @@ class TrapezoidModelArray(CDSAXS_Model):
                 self.SimInt = None
             return None
     
-    def SimTrap_GF(self, optimization_values, param_names=None, Intensity=None, Qx=None, Qz=None):
+    def SimTrap_GF(self, optimization_values, param_names=None, Intensity=None, Qx=None, Qz=None, use_cupy=False):
         """
         Enhanced goodness of fit calculation with SLD support.
         """
@@ -911,111 +1000,180 @@ class TrapezoidModelArray(CDSAXS_Model):
                     raise AttributeError("Missing required attribute: Qz")
                 Qz = self.Qz
                 
-            # Check if we have enough values for parameters
-            if len(optimization_values) != len(param_names):
-                raise ValueError(f"Number of optimization values ({len(optimization_values)}) must match number of parameter names ({len(param_names)})")
-            
-            # Create a copy of the current model parameters
-            params = self.model_params.copy()
-            
-            # Initialize background array
-            if isinstance(self.Bk, np.ndarray):
-                temp_Bk = self.Bk.copy()
+            # Support both 1D and 2D parameter inputs
+            if self._freeform_use_cupy:
+                vals = cp.asarray(optimization_values, dtype=float)
             else:
-                temp_Bk = self.Bk
-            
-            # Initialize SLD array
-            if hasattr(self, 'sld_values'):
-                temp_sld_values = self.sld_values.copy()
-            else:
-                temp_sld_values = np.ones(self.layers + 1)
-            
-            # Update parameters with optimization values
-            for i, param_name in enumerate(param_names):
-                if param_name.startswith('trap_'):
-                    # Parse trapezoid parameter
-                    parts = param_name.split('_')
-                    trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width' or 'height'
-                    
-                    # Make sure we have a deep copy of trapezoids to avoid modifying the original
-                    if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
-                        params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
-                    
-                    params['trapezoids'][trap_idx][param_type] = optimization_values[i]
-                    
-                elif param_name.startswith('sld_'):
-                    # SLD parameter - treat just like any other parameter
-                    sld_idx = int(param_name.split('_')[1])
-                    temp_sld_values[sld_idx] = optimization_values[i]
-                    
-                elif param_name.startswith('Bk_'):
-                    # Background parameter for specific column
-                    bk_idx = int(param_name.split('_')[1])
-                    if isinstance(temp_Bk, np.ndarray):
-                        temp_Bk[bk_idx] = optimization_values[i]
+                vals = np.asarray(optimization_values, dtype=float)
+
+
+
+            # Helper to compute chi2 for a single parameter vector
+            def _chi2_for_vec(vec):
+                if vec.shape[0] != len(param_names):
+                    raise ValueError(f"Number of optimization values ({vec.shape[0]}) must match number of parameter names ({len(param_names)})")
+
+                # Copy base params and arrays, convert to CuPy if needed
+                params = self.model_params.copy()
+                temp_Bk = self.Bk.copy() if isinstance(self.Bk, np.ndarray) else self.Bk
+                temp_sld_values = self.sld_values.copy() if hasattr(self, 'sld_values') else np.ones(self.layers + 1)
+
+                # Map vector into params
+                for i, param_name in enumerate(param_names):
+                    if param_name.startswith('trap_'):
+                        parts = param_name.split('_')
+                        trap_idx = int(parts[1])
+                        param_type = parts[2]
+                        if 'trapezoids' not in params or params['trapezoids'] is self.model_params['trapezoids']:
+                            params['trapezoids'] = [trap.copy() for trap in self.model_params['trapezoids']]
+                        params['trapezoids'][trap_idx][param_type] = vec[i]
+                    elif param_name.startswith('sld_'):
+                        sld_idx = int(param_name.split('_')[1])
+                        temp_sld_values[sld_idx] = vec[i]
+                    elif param_name.startswith('Bk_'):
+                        bk_idx = int(param_name.split('_')[1])
+                        if isinstance(temp_Bk, np.ndarray):
+                            temp_Bk[bk_idx] = vec[i]
+                        else:
+                            n_columns = Intensity.shape[1]
+                            temp_Bk = np.full(n_columns, temp_Bk)
+                            temp_Bk[bk_idx] = vec[i]
+                    elif param_name == 'Bk':
+                        temp_Bk = vec[i]
                     else:
-                        # Convert scalar to array if needed
-                        n_columns = Intensity.shape[1]
-                        temp_Bk = np.full(n_columns, temp_Bk)
-                        temp_Bk[bk_idx] = optimization_values[i]
-                elif param_name == 'Bk':
-                    # Scalar background parameter
-                    temp_Bk = optimization_values[i]
+                        params[param_name] = vec[i]
+
+                # Build PAR
+                temp_PAR = np.zeros((self.layers + 1, 2))
+                for j, trap in enumerate(params['trapezoids']):
+                    if j <= self.layers:
+                        temp_PAR[j, 0] = trap['width']
+                        temp_PAR[j, 1] = trap['height']
+
+                temp_DW = params['DW']
+                temp_I0 = params['I0']
+
+                Coord = self.SymCoordAssign(temp_PAR, self.layers, sld_values=temp_sld_values)
+                if Coord is None:
+                    return float('inf')
+                form = self.FreeFormTrapezoid(Coord, self.layers, Qx, Qz)
+                if form is None:
+                    return float('inf')
+                M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(temp_DW, 2)), 0.5)
+                Formfactor = abs(form * M)
+                intensity_base = np.power(Formfactor, 2) * temp_I0
+                SimInt = intensity_base + (temp_Bk[np.newaxis, :] if isinstance(temp_Bk, np.ndarray) else temp_Bk)
+                return self.GF_calc(SimInt, Intensity)
+
+            # 1D vector
+            if vals.ndim == 1:
+                # print('1D vector')
+                return _chi2_for_vec(vals)
+
+            # 2D matrix (S, D) or (D, S) -> build batched PAR, DW, I0, Bk and compute in one pass
+            if vals.ndim == 2:
+                # print('2D matrix')
+                D = len(param_names)
+                if vals.shape[1] == D:
+                    candidates = vals
+                elif vals.shape[0] == D:
+                    candidates = np.ascontiguousarray(vals.T)
                 else:
-                    # Global parameter (DW, I0)
-                    params[param_name] = optimization_values[i]
-            
-            # Create temporary PAR array for compatibility
-            temp_PAR = np.zeros((self.layers + 1, 2))
-            for i, trap in enumerate(params['trapezoids']):
-                if i <= self.layers:
-                    temp_PAR[i, 0] = trap['width']
-                    temp_PAR[i, 1] = trap['height']
-            
-            # Extract global parameters
-            temp_DW = params['DW']
-            temp_I0 = params['I0']
-            
-            # Use SymCoordAssign with current SLD values
-            Coord = self.SymCoordAssign(temp_PAR, self.layers, sld_values=temp_sld_values)
-            if Coord is None:
-                raise RuntimeError("Failed to assign coordinates with SLD values")
-            
-            # Calculate form factor
-            form = self.FreeFormTrapezoid(Coord, self.layers, Qx, Qz)
-            if form is None:
-                raise RuntimeError("Failed to calculate form factor")
-            
-            # Calculate Debye-Waller factor
-            M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(temp_DW, 2)), 0.5)
-            
-            # Apply Debye-Waller factor to form factor
-            Formfactor = form * M
-            Formfactor = abs(Formfactor)
-            
-            # Calculate intensity with array background support
-            intensity_base = np.power(Formfactor, 2) * temp_I0
-            
-            if isinstance(temp_Bk, np.ndarray):
-                # Array background - broadcast across columns
-                if len(temp_Bk) != intensity_base.shape[1]:
-                    raise ValueError(f"Background array length ({len(temp_Bk)}) must match number of columns ({intensity_base.shape[1]})")
-                
-                # Add background to each column
-                SimInt = intensity_base + temp_Bk[np.newaxis, :]
-            else:
-                # Scalar background
-                SimInt = intensity_base + temp_Bk
-            
-            # Calculate goodness of fit
-            Chi2 = self.GF_calc(SimInt, Intensity)
-            
-            return Chi2
+                    raise ValueError(f"Parameter count mismatch: got {vals.shape}, expected (*,{D}) or ({D},*)")
+                S = candidates.shape[0]
+
+                # Initialize per-candidate containers
+                traps = [trap.copy() for trap in self.model_params['trapezoids']]
+                base_DW = self.model_params['DW']
+                base_I0 = self.model_params['I0']
+                base_Bk = self.Bk.copy() if isinstance(self.Bk, np.ndarray) else self.Bk
+                base_slds = self.sld_values.copy() if hasattr(self, 'sld_values') else np.ones(self.layers + 1)
+
+                # Prepare arrays to fill - ensure C-contiguous for optimal performance
+                batched_traps = np.zeros((S, self.layers + 1, 2), dtype=float)
+                batched_slds = np.tile(base_slds, (S, 1))
+
+                DW_arr = np.full(S, base_DW, dtype=float)
+                I0_arr = np.full(S, base_I0, dtype=float)
+                if isinstance(base_Bk, np.ndarray):
+                    Bk_arr = np.tile(base_Bk, (S, 1))
+                else:
+                    Bk_arr = np.full((S, 1), base_Bk, dtype=float)
+
+
+                # Start with defaults from current params
+                for j, trap in enumerate(traps):
+                    if j <= self.layers:
+                        batched_traps[:, j, 0] = trap['width']
+                        batched_traps[:, j, 1] = trap['height']
+
+                # Apply candidate-specific overrides
+                for i, pname in enumerate(param_names):
+                    vals_i = candidates[:, i]
+                    if pname.startswith('trap_'):
+                        parts = pname.split('_')
+                        trap_idx = int(parts[1])
+                        ptype = parts[2]
+                        if ptype == 'width':
+                            batched_traps[:, trap_idx, 0] = vals_i
+                        else:
+                            batched_traps[:, trap_idx, 1] = vals_i
+                    elif pname.startswith('sld_'):
+                        sld_idx = int(pname.split('_')[1])
+                        batched_slds[:, sld_idx] = vals_i
+                    elif pname.startswith('Bk_'):
+                        bk_idx = int(pname.split('_')[1])
+                        if Bk_arr.shape[1] == 1:
+                            Bk_arr = np.tile(Bk_arr, (1, self.Intensity.shape[1]))
+                        Bk_arr[:, bk_idx] = vals_i
+                    elif pname == 'Bk':
+                        if Bk_arr.shape[1] == 1:
+                            Bk_arr[:, 0] = vals_i
+                        else:
+                            Bk_arr[:] = vals_i[:, None]
+                    elif pname == 'DW':
+                        DW_arr = vals_i
+                    elif pname == 'I0':
+                        I0_arr = vals_i
+                    else:
+                        pass
+
+                # Build batched Coord via vectorized SymCoordAssign
+                Coord_b = self.SymCoordAssign(batched_traps, self.layers, sld_values=batched_slds)
+                # Ensure C-contiguous for optimal performance
+
+                # Form factor for all candidates
+                form_b = self.FreeFormTrapezoid(Coord_b, self.layers, Qx, Qz)
+
+                # Debye-Waller per candidate
+                Qsum = (np.power(Qx, 2) + np.power(Qz, 2))[None, :, :]
+                M_b = np.power(np.exp(-1 * Qsum * (DW_arr[:, None, None] ** 2)), 0.5)
+                Form_b = np.abs(form_b * M_b)
+                intensity_base_b = (Form_b ** 2) * I0_arr[:, None, None]
+                # Ensure C-contiguous for optimal performance
+
+                # Background broadcast
+                if Bk_arr.shape[1] == intensity_base_b.shape[2]:
+                    SimInt_b = intensity_base_b + Bk_arr[:, None, :]
+                elif Bk_arr.shape[1] == 1:
+                    SimInt_b = intensity_base_b + Bk_arr[:, 0][:, None, None]
+                else:
+                    raise ValueError("Background array length mismatch in batched path")
+                # Ensure C-contiguous for optimal performance
+
+                # Batched GF over last two dims → (S,)
+                GF_b = self.GF_calc(SimInt_b, Intensity)
+                # Ensure C-contiguous for optimal performance
+
+                return GF_b
+
+            raise ValueError("optimization_values must be a 1D or 2D array")
             
         except Exception as e:
             print(f"Error in SimTrap_GF: {str(e)}")
-            return float('inf')  # Return infinity as worst-case fit
+            if optimization_values.ndim == 2:
+                return np.full(optimization_values.shape[0], float('inf'))
+            return float('inf')
         
         
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
@@ -1086,10 +1244,33 @@ class TrapezoidModelArray(CDSAXS_Model):
             if verbose:  # Only print if verbose=True
                 print(f"Starting optimization with {len(param_names)} parameters...")
             
+            print(f'bounds: {bounds}')
+            print(f'optimization_params: {optimization_params}')
+            import types, pickle
+
+            # 1) Find module objects stored on self
+            mod_attrs = [name for name, val in self.__dict__.items() if isinstance(val, types.ModuleType)]
+            print("Module attributes on self:", mod_attrs)
+
+            # 2) Find non-pickleable attrs on self (will show the offending ones and their types)
+            for name, val in self.__dict__.items():
+                try:
+                    pickle.dumps(val)
+                except Exception as e:
+                    print(f"Non-pickleable attr: {name} ({type(val)}): {e}")
+
+            # 3) Check the objective args tuple you pass to DE
+            obj_args = (param_names, self.Intensity, self.Qx, self.Qz, getattr(self, '_freeform_use_cupy', False))
+            for idx, val in enumerate(obj_args):
+                try:
+                    pickle.dumps(val)
+                except Exception as e:
+                    print(f"Non-pickleable arg[{idx}]: {type(val)}: {e}")
+
             result = differential_evolution(
                 self.SimTrap_GF,
                 bounds, 
-                args=(param_names, self.Intensity, self.Qx, self.Qz),
+                args=(param_names, self.Intensity, self.Qx, self.Qz, getattr(self, '_freeform_use_cupy', False)),
                 **optimization_params
             )
             
@@ -1117,12 +1298,12 @@ class TrapezoidModelArray(CDSAXS_Model):
                     
                     optimized_params['trapezoids'][trap_idx][param_type] = result.x[i]
                 elif param_name.startswith('Bk_'):
-                    # Background parameter for specific column
+                    # Background parameter for specific column (only if explicitly optimized)
                     bk_idx = int(param_name.split('_')[1])
                     if isinstance(optimized_bk, np.ndarray):
                         optimized_bk[bk_idx] = result.x[i]
                     else:
-                        # Convert scalar to array if needed
+                        # Expand once to match number of columns and apply update
                         n_columns = self.Intensity.shape[1]
                         optimized_bk = np.full(n_columns, optimized_bk)
                         optimized_bk[bk_idx] = result.x[i]
@@ -2119,9 +2300,9 @@ class TrapezoidModelArray(CDSAXS_Model):
             """
             try:
                 # CRITICAL FIX: Always convert to numpy array first
-                if not isinstance(optimization_values, np.ndarray):
-                    optimization_values = np.array(optimization_values, dtype=float)
-                
+                values = optimization_values if isinstance(optimization_values, np.ndarray) else np.array(optimization_values, dtype=float)
+                # Ensure C-contiguous for optimal performance
+
                 # Get parameter names from available sources
                 if hasattr(self, 'param_names'):
                     param_names = self.param_names
@@ -2130,15 +2311,39 @@ class TrapezoidModelArray(CDSAXS_Model):
                 else:
                     # Generate parameter names from optimization parameters
                     param_names = list(self.model_params.get('optimization', {}).keys())
-                
-                if len(optimization_values) != len(param_names):
-                    raise ValueError(f"Parameter count mismatch: got {len(optimization_values)}, expected {len(param_names)}")
-                
-                # Call SimTrap_GF with numpy array
-                return self.SimTrap_GF(optimization_values, param_names, self.Intensity, self.Qx, self.Qz)
+
+                # Single vector path (existing behavior)
+                if values.ndim == 1:
+                    if len(values) != len(param_names):
+                        raise ValueError(f"Parameter count mismatch: got {len(values)}, expected {len(param_names)}")
+                    return self.SimTrap_GF(values, param_names, self.Intensity, self.Qx, self.Qz)
+
+                # Batched path for scipy differential_evolution(vectorized=True)
+                if values.ndim == 2:
+                    n_params = len(param_names)
+                    batch = values
+                    # Support both shapes: (S, D) or (D, S)
+                    if batch.shape[1] == n_params:
+                        candidates = batch
+                    elif batch.shape[0] == n_params:
+                        candidates = batch.T
+                    else:
+                        raise ValueError(f"Parameter count mismatch: got {batch.shape}, expected (*,{n_params}) or ({n_params},*)")
+                    # Call vectorized SimTrap_GF once for the entire candidate set
+
+                    if self._freeform_use_cupy:
+                        import cupy as cp
+                        return self.SimTrap_GF(cp.asarray(candidates), param_names, cp.asarray(self.Intensity), cp.asarray(self.Qx), cp.asarray(self.Qz))
+                    else:
+                        return self.SimTrap_GF(candidates, param_names, self.Intensity, self.Qx, self.Qz)
+                    return self.SimTrap_GF(candidates, param_names, self.Intensity, self.Qx, self.Qz)
+
+                raise ValueError("optimization_values must be a 1D or 2D numpy array")
                 
             except Exception as e:
                 print(f"Error in trapezoid wrapper: {e}")
+                if isinstance(optimization_values, np.ndarray) and optimization_values.ndim == 2:
+                    return np.full(optimization_values.shape[0], float('inf'))
                 return float('inf')
 
         
