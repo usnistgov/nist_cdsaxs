@@ -134,3 +134,36 @@ def test_dean_gpu_candidate_matches_baseline_objective_values(gpu_cls):
     baseline_batch = evaluate_batched_objective(baseline, candidates=candidates)
     gpu_batch = evaluate_batched_objective(gpu, candidates=candidates)
     assert np.allclose(baseline_batch, gpu_batch, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.skipif(not _gpu_available(), reason="Requires CuPy with a visible CUDA GPU.")
+@pytest.mark.parametrize(
+    ("gpu_cls", "expected_path"),
+    [
+        (TrapezoidModelArrayDeanGPU, "gpu_resident"),
+        (TrapezoidModelArrayDeanGPUFused, "gpu_resident_fused"),
+    ],
+)
+def test_dean_gpu_batched_objective_reports_resident_execution_path(gpu_cls, expected_path):
+    gpu = build_example_trapezoid_model(model_cls=gpu_cls, freeform_use_cupy=True)
+
+    candidates = build_candidate_matrix(gpu, batch_size=16)
+    values = evaluate_batched_objective(gpu, candidates=candidates)
+
+    assert values.shape == (16,)
+    assert np.all(np.isfinite(values))
+    assert gpu._dean_last_execution_path == expected_path
+    assert gpu._dean_last_gpu_exception is None
+
+
+@pytest.mark.skipif(not _gpu_available(), reason="Requires CuPy with a visible CUDA GPU.")
+def test_dean_gpu_small_batch_reports_cpu_fallback_path():
+    gpu = build_example_trapezoid_model(model_cls=TrapezoidModelArrayDeanGPUFused, freeform_use_cupy=True)
+
+    candidates = build_candidate_matrix(gpu, batch_size=4)
+    values = evaluate_batched_objective(gpu, candidates=candidates)
+
+    assert values.shape == (4,)
+    assert np.all(np.isfinite(values))
+    assert gpu._dean_last_execution_path == "gpu_small_batch_cpu_fallback"
+    assert gpu._dean_last_gpu_exception is None

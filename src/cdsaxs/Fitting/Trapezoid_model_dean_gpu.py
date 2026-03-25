@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import numpy as np
 
 from .Trapezoid_model_dean import TrapezoidModelArrayDean
@@ -9,11 +10,57 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     cp = None
 
+_CUPY_ERRSTATE_SUPPORTED = False
+if cp is not None:  # pragma: no branch - one-time capability probe
+    _cupy_errstate = getattr(cp, "errstate", None)
+    if _cupy_errstate is not None:
+        try:
+            with _cupy_errstate(divide="ignore", invalid="ignore"):
+                pass
+        except Exception:
+            _CUPY_ERRSTATE_SUPPORTED = False
+        else:
+            _CUPY_ERRSTATE_SUPPORTED = True
+
+
+@contextlib.contextmanager
+def _gpu_errstate():
+    """
+    CuPy 14 no longer exposes a working ``cp.errstate`` in this environment.
+
+    The resident Dean GPU path is already guarded with explicit NaN cleanup, so
+    if a usable CuPy errstate context is unavailable we continue without it
+    rather than silently forcing a CPU fallback.
+    """
+    if cp is None or not _CUPY_ERRSTATE_SUPPORTED:
+        yield
+        return
+
+    with cp.errstate(divide="ignore", invalid="ignore"):
+        yield
+
+
 if cp is not None:  # pragma: no branch - defined only when CuPy is available
     @cp.fuse()
     def _fused_batched_log_residual(form_abs_sq, qsq_b, dw_sq, i0_b, bk_b, log_intensity_b):
         sim_int = form_abs_sq * cp.exp(-qsq_b * dw_sq) * i0_b + bk_b
         return cp.abs(log_intensity_b - cp.log(sim_int))
+
+    @cp.fuse()
+    def _fused_trapezoid_layer_contribution(qx_b, qz_b, h1b, h2b, slb, srb, x1b, x4b, sld):
+        a1 = (
+            cp.exp(1j * qx_b * ((h1b - srb * x4b) / srb)) / (qx_b / srb + qz_b)
+        ) * (
+            cp.exp(-1j * h2b * (qx_b / srb + qz_b))
+            - cp.exp(-1j * h1b * (qx_b / srb + qz_b))
+        )
+        a2 = (
+            cp.exp(1j * qx_b * ((h1b - slb * x1b) / slb)) / (qx_b / slb + qz_b)
+        ) * (
+            cp.exp(-1j * h2b * (qx_b / slb + qz_b))
+            - cp.exp(-1j * h1b * (qx_b / slb + qz_b))
+        )
+        return (1j / qx_b) * (a1 - a2) * sld
 
 
 class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
@@ -30,6 +77,12 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
         super().__init__(*args, **kwargs)
         self._dean_gpu_cache = {}
         self._dean_gpu_min_batch = 8
+        self._dean_last_execution_path = None
+        self._dean_last_gpu_exception = None
+
+    def _mark_execution_path(self, path, exc=None):
+        self._dean_last_execution_path = str(path)
+        self._dean_last_gpu_exception = None if exc is None else f"{type(exc).__name__}: {exc}"
 
     def process_imported_data(self):
         super().process_imported_data()
@@ -77,7 +130,7 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
         qx_gpu = cache["qx_gpu"]
         qz_gpu = cache["qz_gpu"]
 
-        with cp.errstate(divide="ignore", invalid="ignore"):
+        with _gpu_errstate():
             if coord_gpu.ndim == 4:
                 qx_b = cache["qx_b_gpu"]
                 qz_b = cache["qz_b_gpu"]
@@ -111,20 +164,17 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
                     x4b = x4[:, None, None]
                     sld = coord_gpu[:, i, 4, 0][:, None, None]
 
-                    a1 = (
-                        cp.exp(1j * qx_b * ((h1b - srb * x4b) / srb)) / (qx_b / srb + qz_b)
-                    ) * (
-                        cp.exp(-1j * h2b * (qx_b / srb + qz_b))
-                        - cp.exp(-1j * h1b * (qx_b / srb + qz_b))
+                    form = form + _fused_trapezoid_layer_contribution(
+                        qx_b,
+                        qz_b,
+                        h1b,
+                        h2b,
+                        slb,
+                        srb,
+                        x1b,
+                        x4b,
+                        sld,
                     )
-                    a2 = (
-                        cp.exp(1j * qx_b * ((h1b - slb * x1b) / slb)) / (qx_b / slb + qz_b)
-                    ) * (
-                        cp.exp(-1j * h2b * (qx_b / slb + qz_b))
-                        - cp.exp(-1j * h1b * (qx_b / slb + qz_b))
-                    )
-
-                    form = form + (1j / qx_b) * (a1 - a2) * sld
 
                 return cp.nan_to_num(form, copy=False)
 
@@ -149,16 +199,17 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
                 sl = height / (x2 - x1)
                 sr = -height / (x4 - x3)
 
-                a1 = (cp.exp(1j * qx_gpu * ((h1 - sr * x4) / sr)) / (qx_gpu / sr + qz_gpu)) * (
-                    cp.exp(-1j * h2 * (qx_gpu / sr + qz_gpu))
-                    - cp.exp(-1j * h1 * (qx_gpu / sr + qz_gpu))
+                form = form + _fused_trapezoid_layer_contribution(
+                    qx_gpu,
+                    qz_gpu,
+                    h1,
+                    h2,
+                    sl,
+                    sr,
+                    x1,
+                    x4,
+                    coord_gpu[i, 4, 0],
                 )
-                a2 = (cp.exp(1j * qx_gpu * ((h1 - sl * x1) / sl)) / (qx_gpu / sl + qz_gpu)) * (
-                    cp.exp(-1j * h2 * (qx_gpu / sl + qz_gpu))
-                    - cp.exp(-1j * h1 * (qx_gpu / sl + qz_gpu))
-                )
-
-                form = form + (1j / qx_gpu) * (a1 - a2) * coord_gpu[i, 4, 0]
 
             return cp.nan_to_num(form, copy=False)
 
@@ -167,7 +218,7 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
         if cache is None:
             raise RuntimeError("GPU dataset cache unavailable")
 
-        with cp.errstate(divide="ignore", invalid="ignore"):
+        with _gpu_errstate():
             log_sim_gpu = cp.log(sim_int_gpu)
         log_sim_gpu = cp.nan_to_num(log_sim_gpu, copy=False)
 
@@ -181,7 +232,9 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
 
     def SimTrap_GF(self, optimization_values, param_names=None, Intensity=None, Qx=None, Qz=None, use_cupy=False):
         if not self._dean_gpu_enabled():
-            return super().SimTrap_GF(optimization_values, param_names, Intensity, Qx, Qz, use_cupy=use_cupy)
+            result = super().SimTrap_GF(optimization_values, param_names, Intensity, Qx, Qz, use_cupy=use_cupy)
+            self._mark_execution_path("gpu_disabled_cpu_fallback")
+            return result
 
         try:
             cache = self._get_dean_gpu_dataset_cache()
@@ -204,12 +257,23 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
             plan = self._get_dean_param_plan(param_names)
 
             if values.ndim == 1:
-                return super().SimTrap_GF(values, param_names, self.Intensity, self.Qx, self.Qz, use_cupy=False)
+                result = super().SimTrap_GF(values, param_names, self.Intensity, self.Qx, self.Qz, use_cupy=False)
+                self._mark_execution_path("gpu_scalar_cpu_fallback")
+                return result
 
             if values.ndim == 2:
                 candidates = self._normalize_candidate_matrix(values, len(param_names))
                 if candidates.shape[0] < int(self._dean_gpu_min_batch):
-                    return super().SimTrap_GF(candidates, param_names, self.Intensity, self.Qx, self.Qz, use_cupy=False)
+                    result = super().SimTrap_GF(
+                        candidates,
+                        param_names,
+                        self.Intensity,
+                        self.Qx,
+                        self.Qz,
+                        use_cupy=False,
+                    )
+                    self._mark_execution_path("gpu_small_batch_cpu_fallback")
+                    return result
                 batched_par, batched_slds, dw_arr, i0_arr, bk_arr = self._map_batched_candidates(
                     candidates,
                     plan,
@@ -237,12 +301,16 @@ class TrapezoidModelArrayDeanGPU(TrapezoidModelArrayDean):
                 else:
                     raise ValueError("Background array length mismatch in Dean GPU path")
 
-                return cp.asnumpy(self._gf_calc_gpu(sim_int_b_gpu))
+                result = cp.asnumpy(self._gf_calc_gpu(sim_int_b_gpu))
+                self._mark_execution_path("gpu_resident")
+                return result
 
             raise ValueError("optimization_values must be a 1D or 2D array")
 
-        except Exception:
-            return super().SimTrap_GF(optimization_values, param_names, Intensity, Qx, Qz, use_cupy=use_cupy)
+        except Exception as exc:
+            result = super().SimTrap_GF(optimization_values, param_names, Intensity, Qx, Qz, use_cupy=use_cupy)
+            self._mark_execution_path("gpu_exception_cpu_fallback", exc)
+            return result
 
 
 TrapezoidModelDeanGPU = TrapezoidModelArrayDeanGPU
@@ -314,10 +382,14 @@ class TrapezoidModelArrayDeanGPUFused(TrapezoidModelArrayDeanGPU):
                 cache["log_intensity_b_gpu"],
             )
             residual_gpu = cp.nan_to_num(residual_gpu, copy=False)
-            return cp.asnumpy(cp.sum(residual_gpu, axis=tuple(range(-2, 0))))
+            result = cp.asnumpy(cp.sum(residual_gpu, axis=tuple(range(-2, 0))))
+            self._mark_execution_path("gpu_resident_fused")
+            return result
 
-        except Exception:
-            return super().SimTrap_GF(optimization_values, param_names, Intensity, Qx, Qz, use_cupy=use_cupy)
+        except Exception as exc:
+            result = super().SimTrap_GF(optimization_values, param_names, Intensity, Qx, Qz, use_cupy=use_cupy)
+            self._mark_execution_path("gpu_exception_cpu_fallback_fused", exc)
+            return result
 
 
 TrapezoidModelDeanGPUFused = TrapezoidModelArrayDeanGPUFused

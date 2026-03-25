@@ -68,15 +68,15 @@ Completed:
   - benchmark and harness smoke coverage in the existing Dean optimization test modules
 - current local validation baseline:
   - `mamba run -n cdsax-dev python -m pytest tests/test_fitting -q`
-  - `27 passed`
+  - `35 passed`
 
-Immediate follow-on work before further GPU optimization resumes:
+Completed follow-on work after this checkpoint:
 
-- add a speculative vectorized MCMC harness that is explicitly separate from the native notebook MCMC harness
-- compare vectorized CPU and vectorized GPU MCMC-style evaluation at similar gross model-evaluation budgets
-- keep native MCMC smoke and trial runs as the workflow-validation baseline
-- strengthen regression coverage only for workflow-native paths that prove benchmark value
-- extend opt-in native MCMC benchmarking beyond smoke/trial level only where it remains informative
+- added the speculative vectorized MCMC harness as a benchmark family separate from native notebook MCMC
+- compared vectorized CPU and vectorized GPU MCMC-style evaluation at matched gross model-evaluation budgets
+- kept native MCMC smoke and trial runs as the workflow-validation baseline
+- added regression coverage for the resident GPU execution path and the vectorized MCMC evaluation-budget harness
+- resumed Dean GPU optimization against the realistic DE and vectorized MCMC families
 
 ## Current Harness Tuning Surface
 
@@ -962,3 +962,184 @@ Immediate next work should be:
 3. add stronger regression coverage for the new trapezoid workflow-native harness families
 4. continue GPU optimization only on realistic vectorized workflows and only against valid incumbents after the separate vectorized-MCMC comparison exists
 5. start a dedicated SiGe benchmark and optimization track
+
+## 2026-03-25 GPU Readiness Update
+
+Additional analysis in the current `cdsax-dev` environment changed the immediate GPU priority order.
+
+What was verified:
+
+- current env:
+  - `cupy==14.0.1`
+  - `cupy.errstate` is absent
+  - `cupyx.errstate` exists but currently raises `NotImplementedError`
+- because `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py` enters `cp.errstate(...)` inside `_free_form_trapezoid_gpu(...)`, the intended GPU-resident Dean path does not execute in this env as written
+- the current Dean GPU classes therefore benchmark almost exactly like the Dean CPU wrapper with `freeform_use_cupy=True`, which is a hybrid CuPy path rather than the intended resident path
+
+Working inference from the analysis-only forcing run:
+
+- when the resident Dean GPU path is allowed to run, it is still the correct direction
+- analysis-only runs that replaced `cp.errstate(...)` with a no-op context showed large wins over the current Dean CPU-plus-CuPy hybrid path on realistic objective batches:
+  - `notebook_4param`, population `128`: about `12.8x`
+  - `notebook_4param`, population `1024`: about `17.0x`
+  - `notebook_layer10_8param`, population `128`: about `8.9x`
+  - `notebook_multilayer_12param`, population `64`: about `5.0x`
+
+The time breakdown also changed the optimization priority:
+
+- once the resident GPU path actually runs, `_free_form_trapezoid_gpu(...)` dominates GPU wall time
+- representative attribution from the analysis-only forcing run:
+  - `notebook_4param`, population `128`:
+    - form-factor GPU kernel path: about `81.8%`
+    - post-form-factor residual/reduction: about `13.3%`
+    - CPU mapping, `SymCoordAssign`, and host-device transfers combined: about `6.8%`
+  - `notebook_4param`, population `1024`:
+    - form-factor GPU kernel path: about `83.5%`
+    - post-form-factor residual/reduction: about `13.2%`
+    - CPU mapping, `SymCoordAssign`, and host-device transfers combined: about `3.2%`
+  - `notebook_multilayer_12param`, population `64`:
+    - form-factor GPU kernel path: about `94.5%`
+    - post-form-factor residual/reduction: about `3.6%`
+    - CPU mapping, `SymCoordAssign`, and host-device transfers combined: about `2.8%`
+
+This means the next Dean GPU work should not start with transfer cleanup or parameter-mapping micro-optimizations. The first blocker is compatibility. After that, the form-factor math kernel is the main target.
+
+## Prioritized GPU Optimization Ideas
+
+### Priority 0: restore the intended GPU-resident path in the real environment
+
+- replace the current `cp.errstate(...)` dependency in `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py` with a CuPy-14-safe approach
+- avoid any solution that depends on `cupyx.errstate`, because it currently raises in this env
+- add a regression that proves the resident path actually executes rather than silently falling back
+
+Why first:
+
+- this is currently gating the real Dean GPU implementation
+- the analysis-only forcing run showed that fixing this blocker is likely to unlock the largest immediate wall-time win
+
+### Priority 1: optimize `_free_form_trapezoid_gpu(...)`
+
+- focus all serious post-compatibility tuning on `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py`
+- likely directions:
+  - reduce temporary array creation inside the per-layer GPU math
+  - reduce the number of elementwise kernel launches inside each layer iteration
+  - test a lower-level `ElementwiseKernel` or `RawKernel` implementation only if a simpler CuPy rewrite does not move the needle
+
+Why second:
+
+- the real resident path spends about `82%` to `95%` of time here on realistic workloads
+
+### Priority 2: specialize the common single-layer notebook case
+
+- add a fast path for `layers == 1` if it can be kept readable
+- keep the general multilayer path intact for layered and SiGe-adjacent follow-on work
+
+Why third:
+
+- the base `notebook_4param` realistic workflow is common and still spends more than `80%` of time in the form-factor path
+- a single-layer specialization is lower risk than a full raw-kernel rewrite of the general case
+
+### Priority 3: only then evaluate post-form-factor fusion and reduction cleanup
+
+- revisit the residual, `abs/log`, and reduction path only after the form-factor kernel changes are measured
+- the existing fused residual path is already materially smaller than the form-factor cost on realistic runs
+
+Why fourth:
+
+- current attribution puts this area around `13%` on the one-layer realistic cases and lower on multilayer cases
+
+### Priority 4: treat host-side mapping and transfer cleanup as low-yield follow-on work
+
+- examples:
+  - scratch-buffer reuse by batch shape
+  - avoiding repeated small parameter transfers
+  - GPU-native coordinate construction
+
+Why low priority:
+
+- once the resident path is active, these costs are low single digits on realistic workloads
+- they may still matter later, but they are not the best next bet for GPU wall time
+
+### Priority 5: keep batch-threshold tuning and tiny-workflow behavior explicitly secondary
+
+- use small vectorized workloads only as a screening tool
+- keep real decision gates on realistic harnesses
+
+Why last:
+
+- the analysis-only forcing run already showed useful crossover by about batch `16`
+- realistic workflow wins are much larger than any likely threshold-only gain
+
+## Validation Order For The Next GPU Round
+
+Use this order for future Dean GPU optimization attempts:
+
+1. quick screen on smaller vectorized objective batches
+   - use to reject clearly bad ideas early
+2. realistic candidate-budget validation
+   - `run_realistic_candidate_budget_trial(...)`
+   - check `notebook_4param`, one layered `8`-parameter profile, and the `12`-parameter multilayer profile
+3. realistic optimizer validation
+   - `run_realistic_optimizer_profile(...)`
+   - at least `one_generation`, then `multi_generation` where informative
+4. speculative vectorized MCMC throughput check
+   - `run_realistic_vectorized_mcmc_eval_budget_profile(...)`
+   - use only to judge throughput potential, not notebook-native MCMC timing
+5. only after a GPU-time win is established, compare back to the CPU incumbent on realistic workflows
+
+Concrete rule:
+
+- smaller workflows can be used to judge potential
+- no Dean GPU optimization should be accepted until it also improves the more realistic workflow families
+
+## 2026-03-25 Implemented GPU Optimization Outcome
+
+The optimization round described above has now been executed and measured against the realistic harnesses. The detailed experiment history lives in `DEAN_OPTIMIZATION_LEDGER.MD`; this section records the current outcome.
+
+### Kept Changes
+
+1. Stage 6: restore the Dean GPU resident path in the active CuPy environment
+   - `src/cdsaxs/Fitting/Trapezoid_model_dean_gpu.py` now uses a CuPy-14-safe errstate capability check instead of assuming `cp.errstate(...)` works
+   - the Dean GPU classes now expose execution-path diagnostics so resident execution, small-batch CPU fallback, and exception-triggered fallback are observable
+   - `tests/test_fitting/test_dean_optimization_trapezoid.py` now proves that realistic batched objectives use the resident GPU path while tiny batches still use the intended CPU fallback
+
+2. Stage 7: fuse per-layer GPU contribution assembly inside `_free_form_trapezoid_gpu(...)`
+   - the trapezoid GPU path now computes each layer contribution directly instead of assembling the same intermediates through a more allocation-heavy sequence
+   - this reduced resident-GPU wall time on the realistic DE and vectorized MCMC throughput workloads and is the current kept kernel shape
+
+### Rejected Change
+
+1. Stage 8: single-layer GPU fast path
+   - a dedicated `layers == 1` specialization was tested
+   - it preserved parity but did not produce a consistent steady-state win over the kept Stage 7 path
+   - it was reverted and is not part of the current implementation
+
+### Current Realistic Workflow Appraisal
+
+All timings below compare the incumbent CPU `TrapezoidModelArrayDean` against the current optimized GPU `TrapezoidModelArrayDeanGPUFused` after warming representative GPU shapes to avoid first-use JIT distortion.
+
+- realistic DE:
+  - `notebook_4param`, one generation, population `128`: about `32.8x` faster on GPU
+  - `notebook_4param`, multi generation, population `256`: about `39.4x` faster on GPU
+  - `notebook_multilayer_12param`, one generation, population `64`: about `55.0x` faster on GPU
+  - `notebook_multilayer_12param`, multi generation, population `64`: about `54.4x` faster on GPU
+- realistic native notebook MCMC smoke:
+  - `notebook_4param`: GPU-backed model is about `0.76x` of CPU speed, so still slower end to end
+  - `notebook_multilayer_12param`: GPU-backed model is about `0.78x` of CPU speed, so still slower end to end
+- realistic vectorized MCMC evaluation-budget throughput:
+  - `notebook_4param`, walker batch `16`: about `8.17x` faster on GPU
+  - `notebook_4param`, walker batch `32`: about `13.9x` faster on GPU
+  - `notebook_multilayer_12param`, walker batch `24`: about `27.3x` faster on GPU
+  - `notebook_multilayer_12param`, walker batch `48`: about `35.8x` faster on GPU
+
+Parity status:
+
+- realistic DE outputs matched on `GF` and `BIC`, with the 12-parameter runs differing only at floating-point noise scale
+- native notebook MCMC matched on effective samples, mean acceptance, `GF`, and `BIC`
+- vectorized MCMC evaluation-budget runs matched on best objective, `GF`, and `BIC`
+
+### Current Recommendation
+
+- use the optimized GPU path for realistic DE workflows
+- use the optimized GPU path for vectorized MCMC evaluation-heavy workflows
+- treat native notebook MCMC as a parity-verified workflow path, not as a current GPU-time win
