@@ -72,6 +72,7 @@ from .dean_optimization_trapezoid_realistic import (
     run_realistic_mcmc_profile,
     run_realistic_optimizer_profile,
     run_realistic_sweep_replay_smoke,
+    run_realistic_vectorized_mcmc_eval_budget_profile,
 )
 
 from .cython_integration import (
@@ -169,6 +170,7 @@ __all__ = [
     "run_realistic_mcmc_profile",
     "run_realistic_optimizer_profile",
     "run_realistic_sweep_replay_smoke",
+    "run_realistic_vectorized_mcmc_eval_budget_profile",
     "enable_cython",
     "disable_cython",
     "cython_fallback",

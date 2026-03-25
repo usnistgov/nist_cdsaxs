@@ -6,6 +6,8 @@ dependencies:
   - pip=25.0
   - pip:
       - flake8==7.1.2
+      - corner==2.2.3
+      - emcee==3.1.6
       - ipympl==0.9.7
       - jupyterlab==4.3.6
       - matplotlib==3.10.1

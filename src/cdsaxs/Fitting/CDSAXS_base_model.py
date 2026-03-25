@@ -5429,11 +5429,12 @@ class CDSAXS_Model:
     from tqdm import tqdm
     import warnings
 
-    def CDSAXS_MCMC(self, params_to_sample=None, n_walkers=50, n_steps=1000, 
+    def CDSAXS_MCMC(self, params_to_sample=None, n_walkers=50, n_steps=1000,
                     burn_in=200, thin=1, progress=True, plot_results=True,
                     plot_chains=True, plot_corner=True, plot_structure=False,
                     save_chains=False, chain_filename=None, verbose=True,
-                    prior_type='uniform', sigma_multiplier=10.0, **emcee_kwargs):
+                    prior_type='uniform', sigma_multiplier=10.0,
+                    seed=None, **emcee_kwargs):
         """
         Perform MCMC sampling using emcee to estimate parameters and uncertainties.
         
@@ -5470,6 +5471,8 @@ class CDSAXS_Model:
             Type of prior: 'uniform', 'gaussian'. Default: 'uniform'
         sigma_multiplier : float, optional
             For Gaussian priors: std = (max-min)/sigma_multiplier. Default: 10.0
+        seed : int, optional
+            Seed for deterministic walker initialization and sampler proposals.
         **emcee_kwargs : dict
             Additional arguments passed to emcee.EnsembleSampler
             
@@ -5538,9 +5541,11 @@ class CDSAXS_Model:
             self.mcmc_param_names = param_names
             self.mcmc_param_info = params_to_sample
             
+            rng = np.random.RandomState(seed) if seed is not None else None
+
             # Setup priors and initial positions
             bounds, initial_positions, log_prior_func = self._setup_mcmc_priors(
-                params_to_sample, n_walkers, prior_type, sigma_multiplier
+                params_to_sample, n_walkers, prior_type, sigma_multiplier, rng=rng
             )
             
             # Create log probability function
@@ -5562,13 +5567,13 @@ class CDSAXS_Model:
             if 'thin' in emcee_kwargs_clean:
                 # Function parameter thin takes precedence
                 del emcee_kwargs_clean['thin']
-            # Use function parameter thin (defaults to 1)
-            thin_to_use = thin
             
             # Initialize sampler
             sampler = emcee.EnsembleSampler(
-                n_walkers, n_params, log_probability, **emcee_kwargs
+                n_walkers, n_params, log_probability, **emcee_kwargs_clean
             )
+            if rng is not None:
+                sampler.random_state = rng.get_state()
             
             if verbose:
                 print(f"Running MCMC: {n_steps} steps with {n_walkers} walkers")
@@ -5637,6 +5642,7 @@ class CDSAXS_Model:
                 'n_steps': n_steps,
                 'burn_in': burn_in,
                 'thin': thin,
+                'seed': seed,
                 'acceptance_fraction': sampler.acceptance_fraction,
                 'mean_acceptance': np.mean(sampler.acceptance_fraction),
                 'autocorr_time': None,  # Will calculate if possible
@@ -5679,7 +5685,7 @@ class CDSAXS_Model:
             traceback.print_exc()
             return None
 
-    def _setup_mcmc_priors(self, params_to_sample, n_walkers, prior_type, sigma_multiplier):
+    def _setup_mcmc_priors(self, params_to_sample, n_walkers, prior_type, sigma_multiplier, rng=None):
         """
         Setup priors and initial walker positions for MCMC.
         
@@ -5693,6 +5699,8 @@ class CDSAXS_Model:
             Type of prior ('uniform' or 'gaussian')
         sigma_multiplier : float
             For Gaussian priors
+        rng : numpy.random.RandomState, optional
+            Random generator used for deterministic initialization.
             
         Returns:
         --------
@@ -5712,6 +5720,13 @@ class CDSAXS_Model:
         
         bounds = np.array(bounds)
         defaults = np.array(defaults)
+
+        if rng is None:
+            uniform_draw = np.random.random
+            normal_draw = np.random.normal
+        else:
+            uniform_draw = rng.random_sample
+            normal_draw = rng.normal
         
         # Generate initial positions
         if prior_type == 'uniform':
@@ -5720,7 +5735,7 @@ class CDSAXS_Model:
             initial_positions = []
             
             for _ in range(n_walkers):
-                pos = defaults + 0.1 * widths * (np.random.random(n_params) - 0.5)
+                pos = defaults + 0.1 * widths * (uniform_draw(n_params) - 0.5)
                 # Ensure within bounds
                 pos = np.clip(pos, bounds[:, 0], bounds[:, 1])
                 initial_positions.append(pos)
@@ -5743,7 +5758,7 @@ class CDSAXS_Model:
             # Generate initial positions from Gaussian around defaults
             initial_positions = []
             for _ in range(n_walkers):
-                pos = np.random.normal(defaults, sigmas * 0.5)
+                pos = normal_draw(defaults, sigmas * 0.5)
                 # Ensure within bounds
                 pos = np.clip(pos, bounds[:, 0], bounds[:, 1])
                 initial_positions.append(pos)

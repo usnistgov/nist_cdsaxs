@@ -223,3 +223,34 @@ def test_realistic_candidate_budget_trial_runs_on_fused_gpu_path():
     assert row["candidate_count"] == 16
     assert row["elapsed_seconds"] > 0
     assert np.isfinite(row["mean_objective"])
+
+
+@pytest.mark.skipif(not _gpu_available(), reason="Requires CuPy with a visible CUDA GPU.")
+def test_realistic_one_generation_gpu_profile_matches_incumbent():
+    baseline = run_realistic_optimizer_profile(
+        profile="notebook_4param",
+        family="one_generation",
+        model_cls=TrapezoidModelArray,
+        population_sizes=(2,),
+        repeats=1,
+        tol=0.5,
+        polish=False,
+        seed=1234,
+    )
+    candidate = run_realistic_optimizer_profile(
+        profile="notebook_4param",
+        family="one_generation",
+        model_cls=TrapezoidModelArrayDeanGPUFused,
+        population_sizes=(2,),
+        repeats=1,
+        tol=0.5,
+        polish=False,
+        seed=1234,
+        freeform_use_cupy=True,
+    )
+
+    base_row = baseline["results"][0]
+    candidate_row = candidate["results"][0]
+    assert candidate_row["candidate_count_hint"] == base_row["candidate_count_hint"]
+    assert candidate_row["gf"] == pytest.approx(base_row["gf"])
+    assert candidate_row["bic"] == pytest.approx(base_row["bic"])

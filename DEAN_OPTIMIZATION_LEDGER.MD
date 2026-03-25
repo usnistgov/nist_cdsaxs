@@ -879,3 +879,96 @@ Notes:
 
 - the harness and test prerequisite for resuming trapezoid GPU optimization is now complete
 - stale documentation that still described the realistic builder as cloned-parameter re-instantiation or the test split as future work was updated in this step
+
+## 2026-03-25: Prioritize Separate Speculative Vectorized MCMC Harness In Documentation
+
+Goal:
+
+- document a separate speculative vectorized MCMC harness before further trapezoid GPU optimization
+- keep native notebook MCMC timing and validation distinct from optimization-only vectorized MCMC comparisons
+- define the comparison rule for the planned harness in terms of similar gross model-evaluation budgets
+
+Files touched:
+
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+
+Implementation notes:
+
+- the action plan priority order now places a separate speculative vectorized trapezoid MCMC harness ahead of further trapezoid GPU tuning
+- the main optimization document now distinguishes:
+  - native notebook-parallel `CDSAXS_MCMC(...)` smoke and trial coverage
+  - a planned speculative vectorized-MCMC evaluation-budget harness
+- the planned comparison rule is now explicit:
+  - choose a native MCMC budget target
+  - approximate gross model evaluations as `n_walkers * n_steps`
+  - execute a similar number of model evaluations through vectorized walker-matrix batches on CPU and GPU
+  - log target budget, chunk size, and realized total evaluations
+- stage-planning and immediate-next-work sections now say this harness should land before more trapezoid GPU optimization resumes
+
+Validation:
+
+- not run
+  - documentation-only update
+
+Outcome:
+
+- keep
+
+Notes:
+
+- this update is intentionally planning-only; it does not yet implement the speculative vectorized MCMC harness
+- stale wording that treated generic MCMC expansion as a lower-priority follow-on was updated here
+
+## 2026-03-25: Implement Vectorized MCMC Evaluation-Budget Harness And Tests
+
+Goal:
+
+- implement the separate speculative vectorized MCMC harness that the optimization document had planned
+- add regression coverage that keeps the harness purpose explicit and protects incumbent-versus-GPU parity
+- document the new test and clarify that it is optimization-only, not a replacement for native notebook MCMC timing
+
+Files touched:
+
+- `DEAN_OPTIMIZATION.md`
+- `environment_dev.yml`
+- `pyproject.toml`
+- `src/cdsaxs/Fitting/CDSAXS_base_model.py`
+- `src/cdsaxs/Fitting/__init__.py`
+- `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
+- `tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py`
+- `tests/test_fitting/test_dean_optimization_trapezoid_realistic.py`
+
+Implementation notes:
+
+- `CDSAXS_MCMC(...)` now accepts an optional `seed` so short realistic MCMC runs can be compared deterministically across incumbent and GPU-backed model classes
+- the realistic trapezoid harness now includes `run_realistic_vectorized_mcmc_eval_budget_profile(...)`
+  - it matches the speculative comparison rule from the planning document
+  - it derives a gross evaluation budget from a native MCMC baseline
+  - it builds one deterministic candidate stream for that budget
+  - it replays that stream in vectorized walker-batch chunks on CPU and GPU
+- a dedicated regression file now covers the new harness purpose directly:
+  - vectorized evaluation-budget smoke/schema coverage
+  - chunk-size invariance for the same candidate stream
+  - seeded incumbent-versus-GPU native MCMC parity on a short realistic profile
+  - incumbent-versus-GPU parity for the vectorized evaluation-budget path
+- realistic DE coverage now also includes a short incumbent-versus-GPU one-generation parity check in the realistic trapezoid test file
+- the optimization document now treats the vectorized-MCMC family as implemented and documents its use boundary:
+  - use it to answer vectorized throughput and parity questions
+  - do not use it to claim notebook-native MCMC timing or optimizer-level convergence superiority
+
+Validation:
+
+- run in `/home/deand/mambaforge/envs/cdsax-dev/bin/python`
+- `python -m pytest -q tests/test_fitting --maxfail=1`
+  - `32 passed`
+- additional realistic incumbent-versus-GPU DE/native-MCMC/vectorized-MCMC comparison runs completed in the same environment
+
+Outcome:
+
+- keep
+
+Notes:
+
+- the similarly named `cdsaxs_dev` environment on this machine was missing required scientific-test dependencies, so validation used `cdsax-dev`
+- the new vectorized-MCMC test is intentionally a harness guardrail for future optimization work, not a claim that native `CDSAXS_MCMC(...)` is already walker-vectorized

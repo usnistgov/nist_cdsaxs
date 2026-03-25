@@ -643,27 +643,23 @@ def run_realistic_mcmc_profile(
     thin: int | None = None,
     data_path: str | Path | None = None,
     freeform_use_cupy: bool = False,
+    seed: int | None = None,
 ) -> dict:
     """Run a short MCMC workflow on a notebook-parallel model."""
-    if family not in {"mcmc_smoke", "mcmc_trial"}:
-        raise ValueError(f"Unknown realistic MCMC family: {family}")
-
     model = build_realistic_trapezoid_model(
         profile=profile,
         data_path=data_path,
         model_cls=model_cls,
         freeform_use_cupy=freeform_use_cupy,
     )
-    param_count = int(len(get_parameter_names_and_defaults(model)[0]))
-    default_walkers = max(2 * param_count + 2, 10 if family == "mcmc_smoke" else 18)
-    default_steps = 20 if family == "mcmc_smoke" else 60
-    default_burn_in = 5 if family == "mcmc_smoke" else 10
-    default_thin = 2 if family == "mcmc_smoke" else 5
-
-    walkers = int(n_walkers if n_walkers is not None else default_walkers)
-    steps = int(n_steps if n_steps is not None else default_steps)
-    burn = int(burn_in if burn_in is not None else default_burn_in)
-    thin_value = int(thin if thin is not None else default_thin)
+    settings = _resolve_realistic_mcmc_settings(
+        model,
+        family=family,
+        n_walkers=n_walkers,
+        n_steps=n_steps,
+        burn_in=burn_in,
+        thin=thin,
+    )
 
     workflow = _build_realistic_workflow_metadata(
         model,
@@ -673,22 +669,24 @@ def run_realistic_mcmc_profile(
         optimizer="mcmc",
         vectorized=False,
         workers=None,
-        n_walkers=walkers,
-        n_steps=steps,
-        burn_in=burn,
-        thin=thin_value,
+        n_walkers=settings["n_walkers"],
+        n_steps=settings["n_steps"],
+        burn_in=settings["burn_in"],
+        thin=settings["thin"],
+        seed=seed,
     )
 
     with _suppress_workflow_output():
         start = time.perf_counter()
         mcmc_results = model.CDSAXS_MCMC(
-            n_walkers=walkers,
-            n_steps=steps,
-            burn_in=burn,
-            thin=thin_value,
+            n_walkers=settings["n_walkers"],
+            n_steps=settings["n_steps"],
+            burn_in=settings["burn_in"],
+            thin=settings["thin"],
             progress=False,
             plot_results=False,
             verbose=False,
+            seed=seed,
         )
         elapsed = time.perf_counter() - start
 
@@ -718,6 +716,244 @@ def run_realistic_mcmc_profile(
         "workflow": workflow,
         "results": [row],
         "mcmc_results": mcmc_results,
+    }
+
+
+def _resolve_realistic_mcmc_settings(
+    model,
+    *,
+    family: str = "mcmc_smoke",
+    n_walkers: int | None = None,
+    n_steps: int | None = None,
+    burn_in: int | None = None,
+    thin: int | None = None,
+) -> dict:
+    """Resolve a consistent native-MCMC budget for realistic profiles."""
+    if family not in {"mcmc_smoke", "mcmc_trial"}:
+        raise ValueError(f"Unknown realistic MCMC family: {family}")
+
+    param_count = int(len(get_parameter_names_and_defaults(model)[0]))
+    default_walkers = max(2 * param_count + 2, 10 if family == "mcmc_smoke" else 18)
+    default_steps = 20 if family == "mcmc_smoke" else 60
+    default_burn_in = 5 if family == "mcmc_smoke" else 10
+    default_thin = 2 if family == "mcmc_smoke" else 5
+
+    return {
+        "family": family,
+        "parameter_count": param_count,
+        "n_walkers": int(n_walkers if n_walkers is not None else default_walkers),
+        "n_steps": int(n_steps if n_steps is not None else default_steps),
+        "burn_in": int(burn_in if burn_in is not None else default_burn_in),
+        "thin": int(thin if thin is not None else default_thin),
+    }
+
+
+def _default_vectorized_mcmc_chunk_sizes(param_count: int) -> tuple[int, ...]:
+    """Return a small batch-size ladder for speculative vectorized MCMC timing."""
+    base = max(8, int(param_count))
+    return (base, base * 2, base * 4)
+
+
+def _build_vectorized_mcmc_candidate_stream(
+    model,
+    *,
+    total_evaluations: int,
+    amplitude: float = 0.02,
+    seed: int = 1234,
+) -> np.ndarray:
+    """Build one deterministic candidate stream so chunk-size tests share inputs."""
+    if int(total_evaluations) < 1:
+        raise ValueError("total_evaluations must be at least 1")
+
+    param_names, defaults = get_parameter_names_and_defaults(model)
+    bounds = model.model_params["optimization"]
+    lower = np.asarray([float(bounds[name]["min"]) for name in param_names], dtype=float)
+    upper = np.asarray([float(bounds[name]["max"]) for name in param_names], dtype=float)
+    span = upper - lower
+    scale = amplitude * (np.arange(len(param_names), dtype=float) + 1.0) / max(1, len(param_names))
+
+    rng = np.random.RandomState(seed)
+    offsets = rng.uniform(-1.0, 1.0, size=(int(total_evaluations), len(param_names)))
+    candidates = defaults[None, :] + offsets * span[None, :] * scale[None, :]
+    return np.clip(candidates, lower[None, :], upper[None, :])
+
+
+def _run_vectorized_mcmc_eval_budget_trial(
+    model,
+    *,
+    candidate_stream: np.ndarray,
+    walker_batch_size: int,
+    repeats: int = 1,
+    warmups: int = 0,
+) -> dict:
+    """Consume one deterministic candidate stream in fixed-size vectorized batches."""
+    param_names, _ = get_parameter_names_and_defaults(model)
+    total_evaluations = int(candidate_stream.shape[0])
+    batch_size = max(1, int(walker_batch_size))
+
+    def _consume_stream(track_best: bool) -> dict:
+        best_value = float("inf")
+        best_candidate = None
+        objective_sum = 0.0
+        last_batch_size = 0
+        batches = 0
+
+        for start_idx in range(0, total_evaluations, batch_size):
+            batch = np.asarray(candidate_stream[start_idx:start_idx + batch_size], dtype=float)
+            values = np.asarray(evaluate_batched_objective(model, candidates=batch), dtype=float)
+
+            batches += 1
+            last_batch_size = int(batch.shape[0])
+            objective_sum += float(np.sum(values))
+
+            if track_best:
+                local_best_idx = int(np.argmin(values))
+                local_best = float(values[local_best_idx])
+                if local_best < best_value:
+                    best_value = local_best
+                    best_candidate = np.asarray(batch[local_best_idx], dtype=float).copy()
+
+        return {
+            "best_candidate": best_candidate,
+            "best_value": best_value,
+            "batches": batches,
+            "last_batch_size": last_batch_size,
+            "objective_sum": objective_sum,
+        }
+
+    for _ in range(max(0, warmups)):
+        _consume_stream(track_best=False)
+
+    run_summary = None
+    start = time.perf_counter()
+    for _ in range(max(1, repeats)):
+        run_summary = _consume_stream(track_best=True)
+    elapsed = time.perf_counter() - start
+
+    if run_summary is None or run_summary["best_candidate"] is None:  # pragma: no cover - defensive branch
+        raise RuntimeError("Vectorized MCMC evaluation budget trial did not produce a best candidate")
+
+    model._apply_mcmc_parameters(run_summary["best_candidate"], param_names)
+    total_budget = max(1, repeats * total_evaluations)
+
+    return {
+        "walker_batch_size": batch_size,
+        "repeats": int(repeats),
+        "target_gross_evaluations": total_evaluations,
+        "realized_gross_evaluations": total_evaluations,
+        "batches_per_run": int(run_summary["batches"]),
+        "last_batch_size": int(run_summary["last_batch_size"]),
+        "elapsed_seconds": elapsed,
+        "seconds_per_run": elapsed / max(1, repeats),
+        "seconds_per_evaluation": elapsed / total_budget,
+        "evaluations_per_second": total_budget / elapsed if elapsed else float("inf"),
+        "best_objective": float(run_summary["best_value"]),
+        "mean_objective": float(run_summary["objective_sum"] / total_evaluations),
+        "best_gf": float(getattr(model, "GF", np.inf)),
+        "best_bic": float(getattr(model, "BIC", np.inf)),
+        "best_params": np.asarray(run_summary["best_candidate"], dtype=float),
+    }
+
+
+def run_realistic_vectorized_mcmc_eval_budget_profile(
+    *,
+    profile: str = "notebook_4param",
+    native_family: str = "mcmc_smoke",
+    model_cls=TrapezoidModelArray,
+    walker_batch_sizes: tuple[int, ...] | None = None,
+    n_walkers: int | None = None,
+    n_steps: int | None = None,
+    burn_in: int | None = None,
+    thin: int | None = None,
+    target_gross_evaluations: int | None = None,
+    amplitude: float = 0.02,
+    candidate_seed: int = 1234,
+    repeats: int = 1,
+    warmups: int = 0,
+    data_path: str | Path | None = None,
+    freeform_use_cupy: bool = False,
+) -> dict:
+    """
+    Run a speculative vectorized MCMC-style evaluation budget on one realistic profile.
+    """
+    model = build_realistic_trapezoid_model(
+        profile=profile,
+        data_path=data_path,
+        model_cls=model_cls,
+        freeform_use_cupy=freeform_use_cupy,
+    )
+    settings = _resolve_realistic_mcmc_settings(
+        model,
+        family=native_family,
+        n_walkers=n_walkers,
+        n_steps=n_steps,
+        burn_in=burn_in,
+        thin=thin,
+    )
+
+    target_budget = int(
+        target_gross_evaluations
+        if target_gross_evaluations is not None
+        else settings["n_walkers"] * settings["n_steps"]
+    )
+    if target_budget < 1:
+        raise ValueError("target_gross_evaluations must be at least 1")
+
+    batch_sizes = tuple(int(size) for size in (
+        walker_batch_sizes
+        or _default_vectorized_mcmc_chunk_sizes(settings["parameter_count"])
+    ))
+    candidate_stream = _build_vectorized_mcmc_candidate_stream(
+        model,
+        total_evaluations=target_budget,
+        amplitude=amplitude,
+        seed=int(candidate_seed),
+    )
+
+    workflow = _build_realistic_workflow_metadata(
+        model,
+        profile=profile,
+        freeform_use_cupy=freeform_use_cupy,
+        workflow_api="vectorized_mcmc_eval_budget",
+        optimizer="mcmc_vectorized_eval_budget",
+        vectorized=True,
+        workers=None,
+        native_family=native_family,
+        n_walkers=settings["n_walkers"],
+        n_steps=settings["n_steps"],
+        burn_in=settings["burn_in"],
+        thin=settings["thin"],
+        target_gross_evaluations=target_budget,
+        candidate_seed=int(candidate_seed),
+        amplitude=float(amplitude),
+    )
+
+    results = []
+    for walker_batch_size in batch_sizes:
+        trial_model = build_realistic_trapezoid_model(
+            profile=profile,
+            data_path=data_path,
+            model_cls=model_cls,
+            freeform_use_cupy=freeform_use_cupy,
+        )
+        results.append(
+            _run_vectorized_mcmc_eval_budget_trial(
+                trial_model,
+                candidate_stream=candidate_stream,
+                walker_batch_size=int(walker_batch_size),
+                repeats=repeats,
+                warmups=warmups,
+            )
+        )
+
+    return {
+        "profile": profile,
+        "profile_spec": get_realistic_trapezoid_profile_spec(profile),
+        "family": "mcmc_vectorized_eval_budget",
+        "model_class": model_cls.__name__,
+        "freeform_use_cupy": bool(freeform_use_cupy),
+        "workflow": workflow,
+        "results": results,
     }
 
 

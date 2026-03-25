@@ -10,10 +10,11 @@ Improve fitting throughput in `nist_cdsaxs` while preserving:
 
 The current priority order is:
 
-1. trapezoid GPU optimization for realistic vectorized workflows
-2. benchmark coverage for short MCMC workflows that reflect real usage
-3. SiGe fitting support and optimization, now a high-priority geometry for the team
-4. cylinder follow-on work after trapezoid and SiGe are on firmer ground
+1. add a speculative vectorized trapezoid MCMC harness, separate from the native notebook MCMC workflow, with comparisons matched on similar model-evaluation budgets
+2. continue trapezoid GPU optimization for realistic vectorized workflows after that harness exists
+3. keep the native short MCMC workflow harness as the baseline for real-usage validation
+4. SiGe fitting support and optimization, now a high-priority geometry for the team
+5. cylinder follow-on work after trapezoid and SiGe are on firmer ground
 
 ## Current Branch Context
 
@@ -69,10 +70,13 @@ Completed:
   - `mamba run -n cdsax-dev python -m pytest tests/test_fitting -q`
   - `27 passed`
 
-Remaining follow-on work after GPU optimization resumes:
+Immediate follow-on work before further GPU optimization resumes:
 
+- add a speculative vectorized MCMC harness that is explicitly separate from the native notebook MCMC harness
+- compare vectorized CPU and vectorized GPU MCMC-style evaluation at similar gross model-evaluation budgets
+- keep native MCMC smoke and trial runs as the workflow-validation baseline
 - strengthen regression coverage only for workflow-native paths that prove benchmark value
-- extend opt-in MCMC benchmarking beyond smoke/trial level where it remains informative
+- extend opt-in native MCMC benchmarking beyond smoke/trial level only where it remains informative
 
 ## Current Harness Tuning Surface
 
@@ -128,13 +132,45 @@ Current DE limitation:
   - `n_steps`
   - `burn_in`
   - `thin`
-- the core `CDSAXS_MCMC(...)` API still accepts additional `emcee` kwargs, but the realistic harness wrapper does not yet surface them directly
+  - `seed`
+- the core `CDSAXS_MCMC(...)` API still accepts additional `emcee` kwargs, but the realistic harness wrapper only surfaces the fixed benchmarking knobs directly
 
 Current MCMC limitation:
 
 - the current MCMC path is not walker-vectorized in the same sense that DE generations are vectorized
 - changing `n_walkers` changes total sampler work, but does not currently create a clean DE-like GPU batch-chunk control
 - this means current MCMC runs are useful for workflow validation and coarse throughput trends, but not yet as a strong GPU chunk-shape tuning harness
+
+### Experimental Vectorized MCMC Harness
+
+- the speculative vectorized harness now exists as `run_realistic_vectorized_mcmc_eval_budget_profile(...)`
+- it is intentionally a separate, opt-in benchmark family rather than a mutation of `run_realistic_mcmc_profile(...)`
+- it is documented as speculative and optimization-specific, not as a notebook-native workflow timing result
+- its comparison rule is:
+  - choose a native MCMC budget target
+  - derive a similar gross model-evaluation budget, approximately `n_walkers * n_steps`
+  - build one deterministic candidate stream for that budget
+  - consume that stream through vectorized walker-matrix batches on CPU and GPU
+- it logs explicitly:
+  - target gross evaluation budget
+  - vectorized walker-batch chunk size
+  - realized total evaluations after the last partial batch
+- it compares:
+  - vectorized CPU `TrapezoidModelArray`
+  - vectorized GPU `TrapezoidModelArrayDeanGPUFused`
+- use this harness when the question is:
+  - whether batched walker evaluation creates a GPU-suitable MCMC workload
+  - how throughput changes with vectorized walker chunk size
+  - whether the incumbent and GPU paths stay numerically aligned under the same candidate stream
+- regression coverage for this harness now lives in `tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py`
+  - smoke/schema coverage for the new family
+  - chunk-size invariance over the same candidate stream
+  - short seeded incumbent-versus-GPU native MCMC parity
+  - incumbent-versus-GPU parity for the vectorized evaluation-budget path
+- do not use this harness to claim:
+  - notebook-native `CDSAXS_MCMC(...)` timing
+  - full emcee behavioral parity
+  - time-to-convergence superiority
 
 ### Current Validation State
 
@@ -150,6 +186,10 @@ What is already valid:
   - fixed-seed structure-similarity regression
 - MCMC validation exists through:
   - smoke and trial runners
+  - short seeded incumbent-versus-GPU native MCMC parity
+  - vectorized evaluation-budget smoke coverage
+  - vectorized evaluation-budget chunk-size invariance
+  - vectorized incumbent-versus-GPU parity under a shared candidate stream
   - positive acceptance and effective-sample checks
   - finite `GF` and `BIC`
   - stateful sweep-to-MCMC workflow-consistency coverage
@@ -160,7 +200,7 @@ What is still missing:
 - a time-to-threshold comparison such as:
   - first finite fit below a target `GF`
   - best `GF` reached after equal wall-clock budget
-- a stronger CPU-versus-GPU MCMC parity regression comparable to the current DE structure-similarity check
+- broader native MCMC parity coverage beyond the current short seeded profiles
 
 ### Current Interpretation Rule
 
@@ -168,6 +208,7 @@ What is still missing:
   - which path evaluates more candidates per second
   - which path is faster under the same short DE or MCMC budget
   - whether core workflow semantics still hold
+  - what MCMC throughput would look like if walker evaluations were batched into the vectorized CPU and GPU objective paths
 - the current harness cannot yet answer:
   - which path gets to fit convergence first in a robust optimizer-level sense
 
@@ -436,7 +477,9 @@ API support:
 Why it matters:
 
 - real users do not stop at point estimates
-- we need a short trial MCMC benchmark to understand whether objective acceleration survives this usage mode
+- we need both:
+  - a native short-trial MCMC benchmark for real workflow validation
+  - a separate speculative vectorized-MCMC harness to test whether walker batching could make GPU acceleration meaningful in this workflow family
 
 ### Sweep And Best-Fit Replay Workflow
 
@@ -467,8 +510,9 @@ The benchmark matrix should now be organized by both geometry and workflow famil
 5. realistic one-generation DE
 6. realistic short multi-generation DE
 7. batch initialization smoke
-8. MCMC smoke
-9. MCMC trial benchmark
+8. native MCMC smoke
+9. native MCMC trial benchmark
+10. speculative vectorized MCMC evaluation-budget benchmark
 
 ### Trapezoid Profiles
 
@@ -491,7 +535,7 @@ Intent:
 
 ### MCMC Profiles
 
-Add two trapezoid MCMC families:
+Keep two native trapezoid MCMC families:
 
 1. `mcmc_smoke`
    - base 4-parameter model
@@ -510,6 +554,30 @@ Recommended initial MCMC trial settings:
 - `burn_in`: short but explicit
 - `thin`: explicit and logged
 - plots disabled during timing runs
+
+Keep one separate speculative vectorized MCMC family:
+
+1. `mcmc_vectorized_eval_budget`
+  - not a replacement for notebook-native `CDSAXS_MCMC(...)`
+  - uses similar gross model-evaluation budgets to a chosen native MCMC baseline
+  - executes those evaluations in vectorized walker-matrix batches
+  - compares vectorized CPU and vectorized GPU objective paths directly
+  - exists to answer optimization questions, not notebook-workflow timing questions
+
+Recommended initial vectorized-MCMC settings:
+
+- choose one native baseline budget and report it explicitly:
+  - approximate gross evaluations as `n_walkers * n_steps`
+- sweep vectorized walker-batch chunk sizes separately from the native harness
+- keep CPU and GPU runs on the same candidate matrices and the same gross evaluation budget
+- report:
+  - elapsed time
+  - evaluations per second
+  - best `GF` and `BIC` reached within the matched evaluation budget
+  - any parity drift across repeated stochastic trials
+- keep `tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py` aligned with this harness so:
+  - CPU/GPU candidate-stream parity remains covered
+  - chunk-size changes cannot silently change the winning candidate
 
 ### SiGe Profiles
 
@@ -650,22 +718,27 @@ Once trapezoid objective wins are stable, propagate them to:
 
 ### Stage T5: Trapezoid MCMC Benchmarking
 
-This is now required work, not optional follow-on.
+This harness stage is now implemented and should remain the basis for deciding whether future vectorized MCMC work is worth deeper optimization.
 
 Goals:
 
-- measure whether faster objective evaluation produces real end-to-end benefit in MCMC
-- determine whether the accelerated path should be used directly inside MCMC likelihood calls
+- keep native short MCMC smoke and trial runs as the workflow-valid baseline
+- keep a separate speculative vectorized-MCMC harness matched on similar gross model-evaluation counts
+- measure whether batched walker evaluation would create real end-to-end GPU benefit in the MCMC workload family
+- determine whether the accelerated path should eventually be used inside a future vectorized MCMC likelihood implementation
 
 Required benchmark families:
 
-1. `trapezoid_mcmc_smoke_4param`
-2. `trapezoid_mcmc_trial_layer10`
-3. `trapezoid_mcmc_trial_multilayer`
+1. `trapezoid_mcmc_native_smoke_4param`
+2. `trapezoid_mcmc_native_trial_multilayer`
+3. `trapezoid_mcmc_vectorized_eval_budget_4param`
+4. `trapezoid_mcmc_vectorized_eval_budget_multilayer`
 
 Required outputs:
 
 - wall time
+- target and realized gross model-evaluation counts
+- vectorized walker-batch chunk size for the speculative harness
 - effective samples generated
 - mean acceptance fraction
 - best-fit GF and BIC after applying best sampled parameters
@@ -872,8 +945,9 @@ If continuing from a fresh context, do this first:
    - Dean fused GPU path
 
 5. implement the next harness expansion in this order
+   - add the speculative vectorized trapezoid MCMC harness with matched model-evaluation budgets
    - strengthen regression coverage for the workflow-native trapezoid runners that are worth keeping
-   - add trapezoid MCMC benchmark coverage beyond smoke/trial if it still reveals useful scaling
+   - extend native trapezoid MCMC benchmarking beyond smoke/trial only if it still reveals useful scaling
    - SiGe helper module
    - SiGe objective and tiny-DE tests
 
@@ -883,7 +957,8 @@ If continuing from a fresh context, do this first:
 
 Immediate next work should be:
 
-1. add stronger regression coverage for the new trapezoid workflow-native harness families
-2. add trapezoid MCMC benchmark coverage beyond smoke level where it remains informative
-3. start a dedicated SiGe benchmark and optimization track
-4. continue GPU optimization only on realistic vectorized workflows and only against valid incumbents
+1. add the speculative vectorized trapezoid MCMC harness as a separate benchmark family, matched on similar gross model-evaluation budgets
+2. keep the native MCMC smoke and trial harness as the real-workflow validation baseline
+3. add stronger regression coverage for the new trapezoid workflow-native harness families
+4. continue GPU optimization only on realistic vectorized workflows and only against valid incumbents after the separate vectorized-MCMC comparison exists
+5. start a dedicated SiGe benchmark and optimization track

@@ -52,7 +52,11 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "flake8>=7.0.0",
-    "jupyterlab>=4.0.0"
+    "jupyterlab>=4.0.0",
+    "scikit-image>=0.25.0",
+    "scikit-learn>=1.7.0",
+    "emcee>=3.1.0",
+    "corner>=2.2.0"
 ]
 legacy = [
     "future>=0.18.0",
