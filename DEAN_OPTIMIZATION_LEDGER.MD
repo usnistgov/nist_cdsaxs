@@ -11,12 +11,22 @@ This ledger captures each optimization experiment in enough detail to answer:
 
 The ledger is intentionally more detailed than `DEAN_OPTIMIZATION.md`. The plan defines the roadmap. The ledger captures actual trials.
 
+Current planning docs now live at:
+
+- `DEAN_OPTIMIZATION.md`
+- `docs/optimization/README.md`
+- `docs/optimization/trapezoid.md`
+- `docs/optimization/sige.md`
+
 ## Current Artifacts
 
 Added so far:
 
 - `DEAN_OPTIMIZATION.md`
 - `DEAN_OPTIMIZATION_LEDGER.MD`
+- `docs/optimization/README.md`
+- `docs/optimization/trapezoid.md`
+- `docs/optimization/sige.md`
 - `src/cdsaxs/Fitting/dean_optimization_trapezoid.py`
 - `src/cdsaxs/Fitting/dean_optimization_trapezoid_realistic.py`
 - `src/cdsaxs/Fitting/Trapezoid_model_dean.py`
@@ -29,7 +39,7 @@ Added so far:
 Environment used so far:
 
 - branch: `feature/dean_optimization`
-- mamba env: `cdsax-dev`
+- mamba env: `cdsaxs-dev`
 - editable install: `pip install -e .[dev]`
 - extras installed for fitting/benchmark support:
   - `pytest-benchmark`
@@ -98,6 +108,51 @@ Once a candidate shows meaningful speedup:
 
 ## Experiment Entries
 
+### 2026-03-26 / Planning Refactor / Geometry Docs And SiGe Roadmap
+
+- area: planning and documentation checkpoint
+- candidate: geometry-specific planning docs plus resumable SiGe roadmap
+- status: complete
+
+Motivation:
+
+- the root planning docs had become trapezoid-heavy and difficult to resume from
+- SiGe needed a dedicated roadmap with enough detail to continue from a fresh context
+- the documented env name was stale and needed to match the renamed `cdsaxs-dev` environment
+
+Files touched:
+
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+- `docs/optimization/README.md`
+- `docs/optimization/trapezoid.md`
+- `docs/optimization/sige.md`
+
+Benchmark protocol:
+
+- none
+- this checkpoint records planning structure, not a timing run
+
+Results:
+
+- converted `DEAN_OPTIMIZATION.md` into a landing page for active optimization work
+- established `docs/optimization/` as the location for active geometry-specific plans
+- recorded the current trapezoid reusable patterns and kept implementation status
+- recorded the SiGe reuse appraisal
+- recorded the detailed CPU-vectorized SiGe plan
+- recorded the basic follow-on GPU SiGe plan
+- corrected the documented env name to `cdsaxs-dev`
+
+Outcome:
+
+- keep
+
+Notes:
+
+- current active SiGe conclusion remains CPU vectorization first, GPU second
+- existing `Dean` names remain historical for current trapezoid code, but new work should use neutral `_vectorized`, `_vectorized_GPU`, and `_GPU` naming
+- the only non-doc repo code change already on branch at this checkpoint is the `SRM_model.py` import fix
+
 ### 2026-03-25 / Stage 0 / Baseline Harness
 
 - area: trapezoid benchmark scaffolding
@@ -120,7 +175,7 @@ Benchmark protocol:
 
 Results:
 
-- Harness imported and executed successfully in `cdsax-dev`.
+- Harness imported and executed successfully in `cdsaxs-dev`.
 - `pytest tests/test_fitting/test_dean_optimization_trapezoid.py -q` passed.
 
 Outcome:
@@ -265,7 +320,7 @@ Files touched:
 
 Benchmark protocol:
 
-- Install `cupy-cuda12x` in `cdsax-dev`.
+- Install `cupy-cuda12x` in `cdsaxs-dev`.
 - Run the existing baseline trapezoid objective wrapper with:
   - `freeform_use_cupy=True`
   - batched candidates
@@ -563,7 +618,7 @@ Bug found and fixed:
 Benchmark protocol:
 
 - Environment:
-  - `mamba run -n cdsax-dev`
+  - `mamba run -n cdsaxs-dev`
   - CuPy visible with `3` CUDA devices
 - Candidate-budget timing:
   - `3` timed repeats
@@ -754,7 +809,7 @@ Implementation notes:
 
 Validation:
 
-- runtime smoke checks in `cdsax-dev` confirmed:
+- runtime smoke checks in `cdsaxs-dev` confirmed:
   - `TrapezoidModelArrayDeanGPUFused.add_layer_at_percentage(10)` returns `TrapezoidModelArrayDeanGPUFused`
   - the grown model now has `len(model.model_params['slds']) == model.layers`
   - `parameter_sweep_2d(...)` executes successfully on a tiny 2x2 smoke case
@@ -807,7 +862,7 @@ Implementation notes:
 
 Validation:
 
-- smoke execution in `cdsax-dev` confirmed:
+- smoke execution in `cdsaxs-dev` confirmed:
   - realistic layer-growth now preserves the requested class on the direct builder path
   - realistic DE coverage still runs
   - dual annealing returns finite `GF`
@@ -862,13 +917,13 @@ Implementation notes:
 
 Validation:
 
-- `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
+- `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
   - `10 passed`
-- `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_workflow_semantics.py -q`
+- `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_workflow_semantics.py -q`
   - `7 passed`
-- `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_structure_similarity.py -q`
+- `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_optimization_structure_similarity.py -q`
   - `1 passed`
-- `mamba run -n cdsax-dev python -m pytest tests/test_fitting -q`
+- `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting -q`
   - `27 passed`
 
 Outcome:
@@ -959,7 +1014,7 @@ Implementation notes:
 
 Validation:
 
-- run in `/home/deand/mambaforge/envs/cdsax-dev/bin/python`
+- run in `/home/deand/mambaforge/envs/cdsaxs-dev/bin/python`
 - `python -m pytest -q tests/test_fitting --maxfail=1`
   - `32 passed`
 - additional realistic incumbent-versus-GPU DE/native-MCMC/vectorized-MCMC comparison runs completed in the same environment
@@ -970,14 +1025,14 @@ Outcome:
 
 Notes:
 
-- the similarly named `cdsaxs_dev` environment on this machine was missing required scientific-test dependencies, so validation used `cdsax-dev`
+- before environment cleanup, the similarly named `cdsaxs_dev` environment on this machine was missing required scientific-test dependencies; the surviving project environment is now `cdsaxs-dev`
 - the new vectorized-MCMC test is intentionally a harness guardrail for future optimization work, not a claim that native `CDSAXS_MCMC(...)` is already walker-vectorized
 
 ## 2026-03-25: Verify Dean GPU Path Execution Under Current CuPy And Reprioritize Optimization Work
 
 Goal:
 
-- verify that the current Dean GPU classes actually execute their intended GPU-resident path in the active `cdsax-dev` environment
+- verify that the current Dean GPU classes actually execute their intended GPU-resident path in the active `cdsaxs-dev` environment
 - separate environment-compatibility issues from true performance issues
 - use one more round of measurement to produce a prioritized GPU-only optimization plan
 
@@ -989,7 +1044,7 @@ Files touched:
 Benchmark protocol:
 
 - environment verification:
-  - confirm `cdsax-dev` is the usable env
+  - confirm `cdsaxs-dev` is the usable env
   - confirm visible CUDA devices
   - inspect CuPy error-state support
 - current-path verification:
@@ -1026,7 +1081,7 @@ Benchmark protocol:
 Results:
 
 - environment:
-  - `cdsax-dev` was the correct env for this repo
+  - `cdsaxs-dev` was the correct env for this repo
   - `cupy==14.0.1`
   - `cupy.errstate` was absent
   - `cupyx.errstate` existed but raised `NotImplementedError`
@@ -1100,7 +1155,7 @@ Notes:
 
 Motivation:
 
-- the intended Dean GPU-resident path was not executing in the active `cdsax-dev` environment because `cupy==14.0.1` does not provide a working `cp.errstate(...)`
+- the intended Dean GPU-resident path was not executing in the active `cdsaxs-dev` environment because `cupy==14.0.1` does not provide a working `cp.errstate(...)`
 - before any additional GPU kernel tuning, the resident path had to be restored and made observable so silent CPU fallback could not masquerade as GPU timing
 
 Files touched:
@@ -1125,9 +1180,9 @@ Implementation notes:
 Benchmark protocol:
 
 - focused validation:
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid.py -q`
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid.py -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py -q`
 - realistic DE timing comparisons against the Dean CPU incumbent:
   - `notebook_4param`, `one_generation`, population `128`, repeated runs
   - `notebook_multilayer_12param`, `one_generation`, population `64`, repeated runs
@@ -1229,10 +1284,10 @@ Implementation notes:
 Benchmark protocol:
 
 - validation:
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid.py -q`
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py -q`
-  - `mamba run -n cdsax-dev python -m pytest tests/test_fitting -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid.py -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_optimization_trapezoid_realistic.py -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting/test_dean_mcmc_vectorized_eval_budget.py -q`
+  - `mamba run -n cdsaxs-dev python -m pytest tests/test_fitting -q`
 - performance:
   - use the same realistic DE and MCMC timing families as Stage 6
   - first observation:
@@ -1393,7 +1448,7 @@ Notes:
 - area: final realistic benchmark appraisal for the kept Stage 7 GPU path
 - baseline: incumbent CPU `TrapezoidModelArrayDean`
 - candidate: current optimized GPU `TrapezoidModelArrayDeanGPUFused`
-- environment: `cdsax-dev`
+- environment: `cdsaxs-dev`
 - status: recorded
 
 Benchmark protocol:
