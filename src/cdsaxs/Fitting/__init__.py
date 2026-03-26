@@ -1,5 +1,6 @@
 # cdsaxs/__init__.py
 from .Trapezoid_model import TrapezoidModel
+from .SRM_model import TrapezoidModelArray as SRMModel
 from .SiGe_model import SiGeModel
 from .Cylinder_model import CylinderModel
 
@@ -37,6 +38,8 @@ def create_model(geometry, model, layers, PAR=None, SLD=None, DW=None, I0=None, 
     """
     if geometry == 'trapezoid':
         return TrapezoidModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
+    elif geometry == 'srm':
+        return SRMModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
     elif geometry == 'sige':
         return SiGeModel(model, layers, PAR, SLD, DW, I0, Bk, Pitch, model_params)
     elif geometry == 'cylinder':
@@ -45,4 +48,4 @@ def create_model(geometry, model, layers, PAR=None, SLD=None, DW=None, I0=None, 
         raise ValueError(f"Unsupported geometry: {geometry}")
 
 # Make create_model available at the package level
-__all__ = ['TrapezoidModel', 'SiGeModel', 'CylinderModel', 'create_model']
+__all__ = ['TrapezoidModel', 'SiGeModel', 'CylinderModel', 'SRMModel', 'create_model']

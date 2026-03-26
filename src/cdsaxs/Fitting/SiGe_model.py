@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.patches import Polygon, Patch
 import copy
+from types import SimpleNamespace
 from scipy.optimize import differential_evolution
 
 from .CDSAXS_base_model import CDSAXS_Model
@@ -137,6 +138,8 @@ class SiGeModelArray(CDSAXS_Model):
             'height_bounds': 'height',
             'twidth_bounds': 'twidth',
             'depth_bounds': 'depth',
+            'side_length_bounds': 'side_length',
+            'tip_deflection_bounds': 'tip_deflection',
         }
 
         opt = {}
@@ -278,7 +281,7 @@ class SiGeModelArray(CDSAXS_Model):
             if len(parts) < 3:
                 raise ValueError(f"Invalid trap parameter name: {name}")
             idx = int(parts[1])
-            field = parts[2]
+            field = '_'.join(parts[2:])
             traps = params_dict.get('design_trapezoids', None)
             if not isinstance(traps, list):
                 traps = params_dict.get('trapezoids', None)
@@ -331,7 +334,7 @@ class SiGeModelArray(CDSAXS_Model):
             if len(parts) < 3:
                 raise ValueError(f"Invalid trap parameter name: {name}")
             idx = int(parts[1])
-            field = parts[2]
+            field = '_'.join(parts[2:])
             traps_key = 'design_trapezoids' if isinstance(params_dict.get('design_trapezoids', None), list) else 'trapezoids'
             traps = params_dict.get(traps_key, None)
             if not isinstance(traps, list) or idx >= len(traps):
@@ -489,7 +492,9 @@ class SiGeModelArray(CDSAXS_Model):
     def _has_typed_layers(self, trapezoids):
         """
         Return True if any trapezoid dict indicates a non-standard (typed) layer.
-        Currently supports `Layer_Type: 'Ellipse'` (case-insensitive).
+        Currently supports typed layers via `Layer_Type` (case-insensitive), including:
+        - 'ellipse'
+        - 'curved_sides' (center trapezoid + curved sidewalls; expanded at simulation-time)
         """
         if trapezoids is None:
             return False
@@ -569,6 +574,7 @@ class SiGeModelArray(CDSAXS_Model):
         - expanded_trapezoids: list[dict] length = expanded_layers + 1
         - expanded_slds: list[float] length = expanded_layers + 1
         - expanded_layers: int (the `layers` parameter used everywhere else)
+        - expanded_design_index: list[int] mapping each expanded segment to its design entry index
         """
         if model_params is None:
             raise ValueError("model_params cannot be None")
@@ -604,6 +610,7 @@ class SiGeModelArray(CDSAXS_Model):
 
         expanded_traps = []
         expanded_slds = []
+        expanded_design_index = []
 
         for idx, trap in enumerate(design_traps):
             if not isinstance(trap, dict):
@@ -624,6 +631,7 @@ class SiGeModelArray(CDSAXS_Model):
                 for seg in ellipse_segments:
                     expanded_traps.append(seg)
                     expanded_slds.append(sld_val)
+                    expanded_design_index.append(int(idx))
             else:
                 if trap_width is None:
                     raise ValueError(f"Trapezoid {idx} missing 'width'")
@@ -631,6 +639,7 @@ class SiGeModelArray(CDSAXS_Model):
                     raise ValueError(f"Trapezoid {idx} missing 'height'")
                 expanded_traps.append({'width': trap_width, 'height': trap_height, 'twidth': trap_twidth})
                 expanded_slds.append(sld_val)
+                expanded_design_index.append(int(idx))
 
         # Ensure the last segment has an explicit top width to avoid PAR[T+1] out-of-range in legacy logic
         if expanded_traps:
@@ -639,7 +648,7 @@ class SiGeModelArray(CDSAXS_Model):
 
         expanded_layers = max(0, len(expanded_traps) - 1)
 
-        return expanded_traps, expanded_slds, expanded_layers, design_layers, design_traps, design_slds_list
+        return expanded_traps, expanded_slds, expanded_layers, design_layers, design_traps, design_slds_list, expanded_design_index
 
     def _ensure_expanded_model_params(self):
         """
@@ -681,6 +690,7 @@ class SiGeModelArray(CDSAXS_Model):
                     _,
                     _,
                     _,
+                    _,
                 ) = self._expand_typed_layers(tmp_model_params)
                 
                 # Update expanded structure
@@ -715,6 +725,7 @@ class SiGeModelArray(CDSAXS_Model):
             design_layers,
             design_traps,
             design_slds_list,
+            _,
         ) = self._expand_typed_layers(self.model_params)
 
         # Preserve original (design) structure
@@ -862,6 +873,30 @@ class SiGeModelArray(CDSAXS_Model):
                         'max': trap['twidth'] * 1.1,
                         'default': trap['twidth']
                     }
+
+                # Curved-sidewall typed-layer optimizable params (user-facing & optimizable)
+                # Non-optimizable slice controls are intentionally NOT added here.
+                layer_type = trap.get('Layer_Type', None)
+                if layer_type is not None and str(layer_type).strip().lower() == 'curved_sides':
+                    if 'side_length' in trap:
+                        v = float(trap.get('side_length', 0.0))
+                        if v <= 0:
+                            lo, hi = 0.0, max(1.0, abs(v) * 2.0)
+                        else:
+                            lo, hi = v * 0.9, v * 1.1
+                        param_limits[f'trap_{i}_side_length'] = {
+                            'min': float(lo),
+                            'max': float(hi),
+                            'default': float(v)
+                        }
+                    if 'tip_deflection' in trap:
+                        v = float(trap.get('tip_deflection', 0.0))
+                        dv = max(abs(v) * 0.1, 1e-6)
+                        param_limits[f'trap_{i}_tip_deflection'] = {
+                            'min': float(v - dv),
+                            'max': float(v + dv),
+                            'default': float(v)
+                        }
             
             # Add global parameters
             param_limits['DW'] = {
@@ -1168,6 +1203,397 @@ class SiGeModelArray(CDSAXS_Model):
                 return False
             return None
 
+    # ----------------------------
+    # Curved sidewall typed layer
+    # ----------------------------
+    @staticmethod
+    def _curved_sides_incompressible_diving_board_local(length, thickness, tip_deflection, n_points=500):
+        """
+        Local cantilever with constant thickness (top/bottom from centerline + normal offset).
+        Ported from the final notebook implementation.
+        """
+        length = float(length)
+        thickness = float(thickness)
+        tip_deflection = float(tip_deflection)
+        n_points = int(n_points)
+        if n_points < 3:
+            n_points = 3
+        if length <= 0:
+            s = np.zeros(n_points, dtype=float)
+            y = np.linspace(0.5 * thickness, -0.5 * thickness, n_points)
+            return s, y, s, y
+
+        s = np.linspace(0.0, length, n_points)
+        y_center = -(tip_deflection / length**3) * s**2 * (3.0 * length - s)
+        dy_ds = -(tip_deflection / length**3) * s * (6.0 * length - 3.0 * s)
+
+        theta = np.arctan(dy_ds)
+        normal_x = -np.sin(theta)
+        normal_y = np.cos(theta)
+
+        x_top = s + 0.5 * thickness * normal_x
+        y_top = y_center + 0.5 * thickness * normal_y
+        x_bottom = s - 0.5 * thickness * normal_x
+        y_bottom = y_center - 0.5 * thickness * normal_y
+        return x_top, y_top, x_bottom, y_bottom
+
+    @staticmethod
+    def _curved_sides_build_layer_center_trapezoid_incompressible_sides(
+        center_x,
+        center_y_bottom,
+        center_height,
+        center_bottom_width,
+        center_top_width,
+        side_length,
+        side_tip_deflection,
+        n_side_pts=500,
+    ):
+        """
+        Build a closed polygon for the full layer boundary (center trapezoid + left/right incompressible sides),
+        plus metadata used by the smart side-only slicing.
+        """
+        yb = float(center_y_bottom)
+        yt = float(center_y_bottom + center_height)
+
+        xbL = float(center_x - 0.5 * center_bottom_width)
+        xbR = float(center_x + 0.5 * center_bottom_width)
+        xtL = float(center_x - 0.5 * center_top_width)
+        xtR = float(center_x + 0.5 * center_top_width)
+
+        # Side cross-section thickness at attachment is length of center side edge
+        t_left = float(np.hypot(xtL - xbL, yt - yb))
+        t_right = float(np.hypot(xtR - xbR, yt - yb))
+
+        cxL, cyL = 0.5 * (xtL + xbL), 0.5 * (yt + yb)
+        cxR, cyR = 0.5 * (xtR + xbR), 0.5 * (yt + yb)
+
+        xl_t, yl_t, xl_b, yl_b = SiGeModel._curved_sides_incompressible_diving_board_local(
+            side_length, t_left, side_tip_deflection, n_points=n_side_pts
+        )
+        xr_t, yr_t, xr_b, yr_b = SiGeModel._curved_sides_incompressible_diving_board_local(
+            side_length, t_right, side_tip_deflection, n_points=n_side_pts
+        )
+
+        # Map local to global
+        x_left_top = cxL - xl_t
+        y_left_top = cyL + yl_t
+        x_left_bottom = cxL - xl_b
+        y_left_bottom = cyL + yl_b
+
+        x_right_top = cxR + xr_t
+        y_right_top = cyR + yr_t
+        x_right_bottom = cxR + xr_b
+        y_right_bottom = cyR + yr_b
+
+        # Clockwise polygon
+        px, py = [], []
+        px.extend(x_left_bottom[::-1])
+        py.extend(y_left_bottom[::-1])
+        px.extend([xbL, xbR])
+        py.extend([yb, yb])
+        px.extend(x_right_bottom)
+        py.extend(y_right_bottom)
+        px.extend([x_right_bottom[-1], x_right_top[-1]])
+        py.extend([y_right_bottom[-1], y_right_top[-1]])
+        px.extend(x_right_top[::-1])
+        py.extend(y_right_top[::-1])
+        px.extend([xtR, xtL])
+        py.extend([yt, yt])
+        px.extend(x_left_top)
+        py.extend(y_left_top)
+        px.extend([x_left_top[-1], x_left_bottom[-1]])
+        py.extend([y_left_top[-1], y_left_bottom[-1]])
+
+        return {
+            "poly_x": np.array(px, dtype=float),
+            "poly_y": np.array(py, dtype=float),
+            "center": {"xbL": xbL, "xbR": xbR, "xtL": xtL, "xtR": xtR, "yb": yb, "yt": yt},
+            "top_side_min": float(min(np.min(y_left_top), np.min(y_right_top))),
+            "bottom_side_min": float(min(np.min(y_left_bottom), np.min(y_right_bottom))),
+        }
+
+    @staticmethod
+    def _curved_sides_polygon_x_hits(poly_x, poly_y, y_target):
+        xs = []
+        for i in range(len(poly_x) - 1):
+            x1, y1 = poly_x[i], poly_y[i]
+            x2, y2 = poly_x[i + 1], poly_y[i + 1]
+            if (y1 <= y_target <= y2) or (y2 <= y_target <= y1):
+                if abs(y2 - y1) < 1e-12:
+                    continue
+                t = (y_target - y1) / (y2 - y1)
+                xs.append(x1 + t * (x2 - x1))
+        return xs
+
+    @staticmethod
+    def _curved_sides_x_on_segment_at_y(x1, y1, x2, y2, y):
+        if (y < min(y1, y2)) or (y > max(y1, y2)) or abs(y2 - y1) < 1e-12:
+            return None
+        t = (y - y1) / (y2 - y1)
+        return x1 + t * (x2 - x1)
+
+    @staticmethod
+    def _curved_sides_center_edge_x_at_y(center, y, side="left"):
+        if side == "left":
+            return SiGeModel._curved_sides_x_on_segment_at_y(center["xbL"], center["yb"], center["xtL"], center["yt"], y)
+        return SiGeModel._curved_sides_x_on_segment_at_y(center["xbR"], center["yb"], center["xtR"], center["yt"], y)
+
+    @staticmethod
+    def _curved_sides_side_outer_and_inner_x_at_y(layer, y, side="left"):
+        xs = sorted(SiGeModel._curved_sides_polygon_x_hits(layer["poly_x"], layer["poly_y"], y))
+        if len(xs) < 2:
+            return None
+        c = layer["center"]
+        x_center = 0.5 * (c["xbL"] + c["xbR"])
+        if side == "left":
+            x_outer = xs[0]
+            x_center_edge = SiGeModel._curved_sides_center_edge_x_at_y(c, y, side="left")
+            left_candidates = [x for x in xs if x <= x_center + 1e-9 and x > x_outer + 1e-9]
+            x_inner = x_center_edge if x_center_edge is not None else (max(left_candidates) if left_candidates else None)
+            if x_inner is None or not (x_outer < x_inner - 1e-9):
+                return None
+            return x_outer, x_inner  # outer, inner
+        x_outer = xs[-1]
+        x_center_edge = SiGeModel._curved_sides_center_edge_x_at_y(c, y, side="right")
+        right_candidates = [x for x in xs if x >= x_center - 1e-9 and x < x_outer - 1e-9]
+        x_inner = x_center_edge if x_center_edge is not None else (min(right_candidates) if right_candidates else None)
+        if x_inner is None or not (x_inner < x_outer - 1e-9):
+            return None
+        return x_inner, x_outer  # inner, outer
+
+    @staticmethod
+    def _curved_sides_nonuniform_levels(y0, y1, n, power=1.6):
+        if n <= 0 or y1 <= y0:
+            return np.array([])
+        u = np.linspace(0.0, 1.0, n + 1)
+        u2 = 0.5 * (u**power + (1.0 - (1.0 - u) ** power))
+        return y0 + (y1 - y0) * u2
+
+    @staticmethod
+    def _curved_sides_slice_band(layer, y_levels, side="left"):
+        traps = []
+        for i in range(len(y_levels) - 1):
+            y0 = float(y_levels[i])
+            y1 = float(y_levels[i + 1])
+            s0 = SiGeModel._curved_sides_side_outer_and_inner_x_at_y(layer, y0, side=side)
+            s1 = SiGeModel._curved_sides_side_outer_and_inner_x_at_y(layer, y1, side=side)
+            if s0 is None or s1 is None:
+                continue
+            if side == "left":
+                xL0, xR0 = s0  # outer, inner
+                xL1, xR1 = s1
+            else:
+                xL0, xR0 = s0  # inner, outer
+                xL1, xR1 = s1
+            traps.append(
+                {
+                    "y_bottom": y0,
+                    "y_top": y1,
+                    "x_left_bottom": float(xL0),
+                    "x_right_bottom": float(xR0),
+                    "x_left_top": float(xL1),
+                    "x_right_top": float(xR1),
+                    "height": float(y1 - y0),
+                }
+            )
+        return traps
+
+    @staticmethod
+    def _curved_sides_smart_slice_sides_by_regions(layer, target_total_per_side=8, middle_fixed=1, nonuniform=True, eps=1e-6):
+        c = layer["center"]
+        yb = float(c["yb"])
+        yt = float(c["yt"])
+
+        y_top_min = float(layer.get("top_side_min", yt))
+        y_bot_min = float(layer.get("bottom_side_min", np.min(layer["poly_y"])))
+
+        top_lo, top_hi = min(y_top_min, yt), max(y_top_min, yt)
+        mid_lo, mid_hi = yb, min(yt, y_top_min)
+        bot_lo, bot_hi = y_bot_min, yb
+
+        top_exists = (top_hi - top_lo) > eps
+        mid_exists = (mid_hi - mid_lo) > eps
+        bot_exists = (bot_hi - bot_lo) > eps
+
+        n_mid = int(middle_fixed) if mid_exists else 0
+        curved_budget = max(int(target_total_per_side) - n_mid, 1)
+
+        top_span = (top_hi - top_lo) if top_exists else 0.0
+        bot_span = (bot_hi - bot_lo) if bot_exists else 0.0
+
+        if (not top_exists) and bot_exists:
+            n_top, n_bot = 0, curved_budget
+        elif top_exists and (not bot_exists):
+            n_top, n_bot = curved_budget, 0
+        elif top_exists and bot_exists:
+            frac_top = top_span / max(top_span + bot_span, eps)
+            n_top = int(round(curved_budget * frac_top))
+            if curved_budget > 1:
+                n_top = max(1, min(curved_budget - 1, n_top))
+            else:
+                n_top = 1
+            n_bot = curved_budget - n_top
+        else:
+            n_top, n_bot = 0, 0
+
+        def levels(y0, y1, n):
+            if n <= 0 or y1 <= y0 + eps:
+                return np.array([])
+            return SiGeModel._curved_sides_nonuniform_levels(y0, y1, n) if nonuniform else np.linspace(y0, y1, n + 1)
+
+        lv_top = levels(top_lo, top_hi, n_top)
+        lv_mid = levels(mid_lo, mid_hi, n_mid)
+        lv_bot = levels(bot_lo, bot_hi, n_bot)
+
+        return {
+            "anchors": {"top_lo": top_lo, "top_hi": top_hi, "mid_lo": mid_lo, "mid_hi": mid_hi, "bot_lo": bot_lo, "bot_hi": bot_hi},
+            "alloc": {"n_top": n_top, "n_middle": n_mid, "n_bottom": n_bot},
+            "left": {
+                "top": SiGeModel._curved_sides_slice_band(layer, lv_top, side="left") if len(lv_top) else [],
+                "middle": SiGeModel._curved_sides_slice_band(layer, lv_mid, side="left") if len(lv_mid) else [],
+                "bottom": SiGeModel._curved_sides_slice_band(layer, lv_bot, side="left") if len(lv_bot) else [],
+            },
+            "right": {
+                "top": SiGeModel._curved_sides_slice_band(layer, lv_top, side="right") if len(lv_top) else [],
+                "middle": SiGeModel._curved_sides_slice_band(layer, lv_mid, side="right") if len(lv_mid) else [],
+                "bottom": SiGeModel._curved_sides_slice_band(layer, lv_bot, side="right") if len(lv_bot) else [],
+            },
+        }
+
+    @staticmethod
+    def _curved_sides_flatten_smart_trapezoids(smart_dict):
+        rows = []
+        for side in ("left", "right"):
+            for region in ("top", "middle", "bottom"):
+                for i, t in enumerate(smart_dict.get(side, {}).get(region, [])):
+                    row = {"side": side, "region": region, "slice_idx": int(i)}
+                    row.update({k: float(t[k]) for k in ("y_bottom", "y_top", "x_left_bottom", "x_right_bottom", "x_left_top", "x_right_top", "height")})
+                    rows.append(row)
+        return rows
+
+    @staticmethod
+    def _curved_sides_traps_to_coord(traps, z_offset, sld):
+        if not traps:
+            return None
+        n = len(traps)
+        Coord = np.zeros([n, 7, 1], dtype=float)
+        for i, t in enumerate(traps):
+            Coord[i, 0, 0] = float(t["x_left_bottom"])
+            Coord[i, 1, 0] = float(t["x_right_bottom"])
+            Coord[i, 2, 0] = float(t["height"])
+            Coord[i, 3, 0] = 0.0
+            Coord[i, 4, 0] = float(sld)
+            Coord[i, 5, 0] = float(t["x_left_top"])
+            Coord[i, 6, 0] = float(t["x_right_top"])
+        Coord[0, 3, 0] = float(z_offset)
+        return Coord
+
+    def _curved_sides_compute_for_expanded_stack(self, design_traps, expanded_design_index, PAR, layers, expanded_slds=None):
+        coord_by_design = {"left": {}, "right": {}}
+        traps_by_design = {"left": {}, "right": {}}
+        flat_rows = []
+        if not design_traps or not expanded_design_index or PAR is None:
+            return coord_by_design, traps_by_design, flat_rows
+
+        center_x = 0.5 * float(PAR[0, 0])
+        heights = PAR[: int(layers) + 1, 1].astype(float)
+        cum_heights = np.concatenate(([0.0], np.cumsum(heights)))
+
+        design_to_expanded = {}
+        for exp_idx, d_idx in enumerate(expanded_design_index):
+            design_to_expanded.setdefault(int(d_idx), []).append(int(exp_idx))
+
+        for design_idx, d in enumerate(design_traps):
+            layer_type = d.get("Layer_Type", None)
+            if layer_type is None or str(layer_type).strip().lower() != "curved_sides":
+                continue
+
+            side_length = float(d.get("side_length", 0.0))
+            tip_deflection = float(d.get("tip_deflection", 0.0))
+            slice_budget = int(d.get("slice_budget", 8))
+            middle_fixed = int(d.get("middle_fixed", 1))
+            nonuniform = bool(d.get("nonuniform", True))
+            n_side_pts = int(d.get("n_side_pts", 500))
+
+            exp_indices = design_to_expanded.get(int(design_idx), [])
+            if not exp_indices:
+                continue
+
+            traps_left_all = []
+            traps_right_all = []
+
+            for exp_idx in exp_indices:
+                if exp_idx > layers:
+                    continue
+                yb = float(cum_heights[exp_idx])
+                h = float(PAR[exp_idx, 1])
+                if h <= 0:
+                    continue
+
+                w0 = float(PAR[exp_idx, 0])
+                if not np.isnan(PAR[exp_idx, 2]):
+                    w1 = float(PAR[exp_idx, 2])
+                else:
+                    w1 = float(PAR[exp_idx + 1, 0]) if exp_idx < layers else w0
+
+                layer = self._curved_sides_build_layer_center_trapezoid_incompressible_sides(
+                    center_x=center_x,
+                    center_y_bottom=yb,
+                    center_height=h,
+                    center_bottom_width=w0,
+                    center_top_width=w1,
+                    side_length=side_length,
+                    side_tip_deflection=tip_deflection,
+                    n_side_pts=n_side_pts,
+                )
+                smart = self._curved_sides_smart_slice_sides_by_regions(
+                    layer,
+                    target_total_per_side=slice_budget,
+                    middle_fixed=middle_fixed,
+                    nonuniform=nonuniform,
+                )
+
+                rows = self._curved_sides_flatten_smart_trapezoids(smart)
+                for r in rows:
+                    r2 = dict(r)
+                    r2["design_idx"] = int(design_idx)
+                    r2["expanded_idx"] = int(exp_idx)
+                    flat_rows.append(r2)
+
+                for region in ("top", "middle", "bottom"):
+                    traps_left_all.extend(smart["left"][region])
+                    traps_right_all.extend(smart["right"][region])
+
+            # SLD: same as the corresponding center layer
+            sld_val = None
+            if expanded_slds is not None:
+                try:
+                    sld_val = float(expanded_slds[exp_indices[0]])
+                except Exception:
+                    sld_val = None
+            if sld_val is None:
+                sld_val = float(d.get("sld", 1.0))
+
+            z0 = min([t["y_bottom"] for t in traps_left_all], default=None)
+            if z0 is None:
+                z0 = min([t["y_bottom"] for t in traps_right_all], default=0.0)
+
+            Coord_left = self._curved_sides_traps_to_coord(traps_left_all, z_offset=z0, sld=sld_val)
+            Coord_right = self._curved_sides_traps_to_coord(traps_right_all, z_offset=z0, sld=sld_val)
+
+            coord_by_design["left"][int(design_idx)] = Coord_left
+            coord_by_design["right"][int(design_idx)] = Coord_right
+            traps_by_design["left"][int(design_idx)] = traps_left_all
+            traps_by_design["right"][int(design_idx)] = traps_right_all
+
+            if abs(tip_deflection) > 0 and (Coord_left is None or Coord_right is None):
+                print(
+                    f"WARNING: curved_sides design entry {design_idx} produced no sidewall slices "
+                    f"(side_length={side_length}, tip_deflection={tip_deflection})."
+                )
+
+        return coord_by_design, traps_by_design, flat_rows
+
     
     def _get_current_parameter_value(self, param_name):
         """
@@ -1184,7 +1610,7 @@ class SiGeModelArray(CDSAXS_Model):
             # Trapezoid (design-layer) parameter: width, height, twidth, depth, etc.
             parts = param_name.split('_')
             trap_idx = int(parts[1])
-            param_type = parts[2]
+            param_type = '_'.join(parts[2:])
 
             if not hasattr(self, 'model_params'):
                 raise AttributeError("Missing required attribute: model_params")
@@ -1243,7 +1669,7 @@ class SiGeModelArray(CDSAXS_Model):
             # Trapezoid (design-layer) parameter
             parts = param_name.split('_')
             trap_idx = int(parts[1])
-            param_type = parts[2]
+            param_type = '_'.join(parts[2:])
 
             if not hasattr(self, 'model_params'):
                 raise AttributeError("Missing required attribute: model_params")
@@ -1510,7 +1936,7 @@ class SiGeModelArray(CDSAXS_Model):
                     'layers': tmp_design['layers'],
                     'slds': tmp_design.get('design_slds', None),
                 }
-                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _, expanded_design_index = self._expand_typed_layers(tmp_model_params)
                 # Override PAR/layers for this simulation call
                 temp_PAR = np.zeros((expanded_layers + 1, 3))
                 for ii, trap in enumerate(expanded_traps):
@@ -1536,7 +1962,7 @@ class SiGeModelArray(CDSAXS_Model):
                     'slds': copy.deepcopy(self.model_params.get('slds', None)),
                 }
                 self._apply_constraints(tmp_model_params, constraints)
-                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _, expanded_design_index = self._expand_typed_layers(tmp_model_params)
                 # Override PAR/layers for this simulation call
                 temp_PAR = np.zeros((expanded_layers + 1, 3))
                 for ii, trap in enumerate(expanded_traps):
@@ -1564,16 +1990,47 @@ class SiGeModelArray(CDSAXS_Model):
                     raise AttributeError("Missing required attribute: Coord")
                 Coord = self.Coord
             
-            # Calculate form factor using the enhanced coordinates with SLD
-            form = self.FreeFormTrapezoid(Coord, layers, Qx, Qz)
-            if form is None:
+            # Calculate form factor for the center stack
+            form_center = self.FreeFormTrapezoid(Coord, layers, Qx, Qz)
+            if form_center is None:
                 raise RuntimeError("Failed to calculate form factor in FreeFormTrapezoid")
+
+            # Curved sidewalls (typed design layer): coherent complex sum
+            form_total = form_center
+            self.Coord_curved = {"left": {}, "right": {}}
+            self.curved_sidewall_trapezoids = {"left": {}, "right": {}}
+            self.curved_sidewall_trapezoid_rows = []
+
+            try:
+                if use_design:
+                    # tmp_design['design_trapezoids'] reflects constrained design values
+                    coord_by_design, traps_by_design, flat_rows = self._curved_sides_compute_for_expanded_stack(
+                        design_traps=tmp_design["design_trapezoids"],
+                        expanded_design_index=expanded_design_index,
+                        PAR=PAR,
+                        layers=layers,
+                        expanded_slds=expanded_slds,
+                    )
+                    self.Coord_curved = coord_by_design
+                    self.curved_sidewall_trapezoids = traps_by_design
+                    self.curved_sidewall_trapezoid_rows = flat_rows
+
+                    for d_idx, Cleft in coord_by_design.get("left", {}).items():
+                        if Cleft is None:
+                            continue
+                        form_total = form_total + self.FreeFormTrapezoid(Cleft, len(Cleft) - 1, Qx, Qz)
+                    for d_idx, Cright in coord_by_design.get("right", {}).items():
+                        if Cright is None:
+                            continue
+                        form_total = form_total + self.FreeFormTrapezoid(Cright, len(Cright) - 1, Qx, Qz)
+            except Exception as e:
+                print(f"WARNING: curved sidewall contribution failed: {str(e)}")
             
             # Calculate Debye-Waller factor
             M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(DW, 2)), 0.5)
             
-            # Apply Debye-Waller factor to form factor
-            Formfactor = form * M
+            # Apply Debye-Waller factor to coherent form factor
+            Formfactor = form_total * M
             Formfactor = abs(Formfactor)
             
             # Calculate intensity with array background support
@@ -1654,7 +2111,7 @@ class SiGeModelArray(CDSAXS_Model):
                     # Parse trapezoid (design-layer) parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]
+                    param_type = '_'.join(parts[2:])
 
                     # We do not mutate self.model_params here; changes are applied to
                     # a local design-level trapezoid list constructed below.
@@ -1731,7 +2188,7 @@ class SiGeModelArray(CDSAXS_Model):
             if constraints:
                 self._apply_constraints(tmp_model_params, constraints)
 
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, expanded_design_index = self._expand_typed_layers(tmp_model_params)
 
             # Create temporary PAR array and effective SLD array for compatibility
             temp_PAR = np.zeros((expanded_layers + 1, 3))
@@ -1753,16 +2210,42 @@ class SiGeModelArray(CDSAXS_Model):
             if Coord is None:
                 raise RuntimeError("Failed to assign coordinates with SLD values")
             
-            # Calculate form factor
-            form = self.FreeFormTrapezoid(Coord, expanded_layers, Qx, Qz)
-            if form is None:
+            # Calculate form factor (center stack)
+            form_center = self.FreeFormTrapezoid(Coord, expanded_layers, Qx, Qz)
+            if form_center is None:
                 raise RuntimeError("Failed to calculate form factor")
+
+            # Curved sidewalls (typed design layer): coherent complex sum
+            form_total = form_center
+            try:
+                coord_by_design, traps_by_design, flat_rows = self._curved_sides_compute_for_expanded_stack(
+                    design_traps=tmp_model_params.get('trapezoids', []),
+                    expanded_design_index=expanded_design_index,
+                    PAR=temp_PAR,
+                    layers=expanded_layers,
+                    expanded_slds=expanded_slds,
+                )
+                # Store for optional downstream inspection (even during optimization)
+                self.Coord_curved = coord_by_design
+                self.curved_sidewall_trapezoids = traps_by_design
+                self.curved_sidewall_trapezoid_rows = flat_rows
+
+                for _, Cleft in coord_by_design.get("left", {}).items():
+                    if Cleft is None:
+                        continue
+                    form_total = form_total + self.FreeFormTrapezoid(Cleft, len(Cleft) - 1, Qx, Qz)
+                for _, Cright in coord_by_design.get("right", {}).items():
+                    if Cright is None:
+                        continue
+                    form_total = form_total + self.FreeFormTrapezoid(Cright, len(Cright) - 1, Qx, Qz)
+            except Exception as e:
+                print(f"WARNING: curved sidewall contribution failed (GF): {str(e)}")
             
             # Calculate Debye-Waller factor
             M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(temp_DW, 2)), 0.5)
             
             # Apply Debye-Waller factor to form factor
-            Formfactor = form * M
+            Formfactor = form_total * M
             Formfactor = abs(Formfactor)
             
             # Calculate intensity with array background support
@@ -1791,12 +2274,16 @@ class SiGeModelArray(CDSAXS_Model):
         
     def CDSAXS_DiffEvolution(self, params_to_optimize=None, plot_results=True, 
                     plot_structure=True, plot_grid=True, plot_combined=True,
-                    verbose=False,**kwargs):
+                    verbose=False, structure_curved_show_slices=False, **kwargs):
         """
         Performs differential evolution optimization for CDSAXS trapezoid model fitting
         with array background support and shows before/after comparison plots.
         
         Fixed to respect verbose parameter properly.
+
+        structure_curved_show_slices : bool, optional
+            If True, structure comparison includes individual curved-sidewall slice outlines;
+            default False shows envelope only (cleaner overlay with initial vs optimized).
         """
         try:
             # Check if required attributes exist
@@ -1836,6 +2323,10 @@ class SiGeModelArray(CDSAXS_Model):
                 'x0': np.array(initial_values)
             }
             
+            # Allow structure_curved_show_slices via **kwargs for backward compatibility
+            structure_curved_show_slices = kwargs.pop(
+                'structure_curved_show_slices', structure_curved_show_slices
+            )
             # Update default parameters with any provided kwargs
             optimization_params = {**default_params, **kwargs}
             
@@ -1849,9 +2340,16 @@ class SiGeModelArray(CDSAXS_Model):
             # Store initial simulation results
             initial_simInt = copy.deepcopy(self.SimInt)
             
-            # Calculate initial goodness of fit if not already done
-            if not hasattr(self, 'GF_Initial') or self.GF_Initial is None:
-                self.GF_Initial = self.GF_calc(self.SimInt)
+            # Baseline χ² for this run: same objective and seed vector as differential_evolution
+            # (`SimTrap_GF`), not `GF_calc(SimInt)` — those differ if `x0` / optimization defaults
+            # disagree with the geometry used to build the current `SimInt`.
+            x0_seed = np.asarray(optimization_params.get('x0', np.array(initial_values, dtype=float)), dtype=float).ravel()
+            if x0_seed.shape[0] == len(param_names):
+                _gf0 = self.SimTrap_GF(x0_seed, param_names, self.Intensity, self.Qx, self.Qz)
+                self.GF_Initial = float(_gf0) if np.isfinite(_gf0) else float(self.GF_calc(self.SimInt))
+            else:
+                self.GF_Initial = float(self.GF_calc(self.SimInt))
+            self.BIC_Initial = self.BIC_calc(self.GF_Initial)
             
             # Run differential evolution optimization
             if verbose:  # Only print if verbose=True
@@ -1882,7 +2380,7 @@ class SiGeModelArray(CDSAXS_Model):
                     # Parse trapezoid (design-layer) parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]
+                    param_type = '_'.join(parts[2:])
 
                     if 'design_trapezoids' in optimized_params:
                         # Store best-fit values on the design geometry
@@ -1927,7 +2425,7 @@ class SiGeModelArray(CDSAXS_Model):
                     optimized_params['design_trapezoids'] = [t.copy() for t in tmp_model_params['trapezoids']]
                 
                 # Expand typed layers (ellipse -> many segments)
-                expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+                expanded_traps, expanded_slds, expanded_layers, _, _, _, _ = self._expand_typed_layers(tmp_model_params)
                 
                 # Update optimized_params with expanded structure
                 optimized_params['trapezoids'] = expanded_traps
@@ -1957,8 +2455,14 @@ class SiGeModelArray(CDSAXS_Model):
             
             # Generate before/after comparison plots if requested
             if plot_results:
-                self._plot_optimization_results(initial_model_params, initial_simInt,
-                                            plot_structure, plot_grid, plot_combined)
+                self._plot_optimization_results(
+                    initial_model_params,
+                    initial_simInt,
+                    plot_structure,
+                    plot_grid,
+                    plot_combined,
+                    structure_curved_show_slices=structure_curved_show_slices,
+                )
             
             # Print parameter changes only if verbose
             if verbose:
@@ -1975,7 +2479,8 @@ class SiGeModelArray(CDSAXS_Model):
 
     
     def _plot_optimization_results(self, initial_model_params, initial_simInt, 
-                                  plot_structure=True, plot_grid=True, plot_combined=True):
+                                  plot_structure=True, plot_grid=True, plot_combined=True,
+                                  structure_curved_show_slices=False):
         """
         Generate before/after comparison plots for optimization results.
         
@@ -1991,6 +2496,8 @@ class SiGeModelArray(CDSAXS_Model):
             Whether to plot the grid of individual Qz cuts
         plot_combined : bool
             Whether to plot the combined view with all cuts
+        structure_curved_show_slices : bool
+            Passed to curved overlay in structure plot (default False: envelope only).
         """
         import matplotlib.pyplot as plt
         
@@ -2021,7 +2528,7 @@ class SiGeModelArray(CDSAXS_Model):
                             if len(parts) >= 3:
                                 try:
                                     trap_idx = int(parts[1])
-                                    param_type = parts[2]
+                                    param_type = '_'.join(parts[2:])
                                     if trap_idx < len(design_traps):
                                         design_traps[trap_idx][param_type] = result_x[i]
                                 except (ValueError, IndexError):
@@ -2046,24 +2553,37 @@ class SiGeModelArray(CDSAXS_Model):
         # Use reconstructed optimized params if available, otherwise fall back to self.model_params
         optimized_params_to_plot = optimized_model_params_for_plot if optimized_model_params_for_plot is not None else self.model_params
         
-        # Plot trapezoid structure comparison on the same plot
+        # Plot trapezoid structure comparison on the same plot (center stack + curved overlay)
         if plot_structure:
-            plt.figure(figsize=(10, 6))
-            
-            # Plot initial trapezoid structure with dashed lines and transparency
-            self._plot_trapezoid_structure(initial_model_params, 
-                                        linestyle='--', 
-                                        color='blue', 
-                                        alpha=0.7,
-                                        label='Initial')
-            
-            # Plot optimized trapezoid structure with solid lines (using reconstructed params)
-            self._plot_trapezoid_structure(optimized_params_to_plot, 
-                                        linestyle='-', 
-                                        color='red', 
-                                        alpha=1.0,
-                                        label='Optimized')
-            
+            _, ax = plt.subplots(figsize=(10, 6))
+
+            def _draw_structure_series(model_params_for_series, linestyle, color, alpha, legend_label, env_linestyle):
+                plt.sca(ax)
+                plot_prepared, overlay_b = self._prepare_structure_plot_params(model_params_for_series)
+                self._plot_trapezoid_structure(
+                    plot_prepared,
+                    linestyle=linestyle,
+                    color=color,
+                    alpha=alpha,
+                    label=legend_label,
+                )
+                if overlay_b is not None and self._design_has_curved_sides(overlay_b['design_traps']):
+                    env_alpha = 0.12 if color == 'blue' else 0.17
+                    self._plot_curved_sidewalls_overlay(
+                        ax,
+                        overlay_b,
+                        show_slices=structure_curved_show_slices,
+                        poly_alpha=env_alpha,
+                        envelope_edgecolor=color,
+                        envelope_linestyle=env_linestyle,
+                        envelope_linewidth=1.35,
+                        left_slice_color=color,
+                        right_slice_color=color,
+                    )
+
+            _draw_structure_series(initial_model_params, '--', 'blue', 0.7, 'Initial', '--')
+            _draw_structure_series(optimized_params_to_plot, '-', 'red', 1.0, 'Optimized', '-')
+
             plt.title('Trapezoid Structure Comparison')
             plt.legend()
             plt.tight_layout()
@@ -2178,21 +2698,21 @@ class SiGeModelArray(CDSAXS_Model):
                 'layers': tmp_design['layers'],
                 'slds': tmp_design.get('design_slds', None),
             }
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, _ = self._expand_typed_layers(tmp_model_params)
             plot_params['trapezoids'] = expanded_traps
             plot_params['layers'] = expanded_layers
             plot_params['slds'] = expanded_slds
         elif constraints:
             # No design_trapezoids; apply constraints directly and expand if typed layers exist
             self._apply_constraints(plot_params, constraints)
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, _ = self._expand_typed_layers(plot_params)
             if expanded_traps:  # Only update if expansion occurred
                 plot_params['trapezoids'] = expanded_traps
                 plot_params['layers'] = expanded_layers
                 plot_params['slds'] = expanded_slds
         else:
             # No design_trapezoids and no constraints; just expand if typed layers exist
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, _ = self._expand_typed_layers(plot_params)
             if expanded_traps:  # Only update if expansion occurred
                 plot_params['trapezoids'] = expanded_traps
                 plot_params['layers'] = expanded_layers
@@ -2462,6 +2982,209 @@ class SiGeModelArray(CDSAXS_Model):
         plt.show()
     
     
+    @staticmethod
+    def _design_has_curved_sides(design_traps):
+        if not design_traps:
+            return False
+        for t in design_traps:
+            if isinstance(t, dict) and str(t.get('Layer_Type', '')).strip().lower() == 'curved_sides':
+                return True
+        return False
+
+    def _plot_curved_sidewalls_overlay(
+        self,
+        ax,
+        overlay_bundle,
+        show_slices=True,
+        poly_alpha=0.15,
+        left_slice_color='#1f77b4',
+        right_slice_color='#ff7f0e',
+        envelope_edgecolor='#8b0000',
+        envelope_linewidth=1.2,
+        envelope_linestyle='-',
+        slice_linewidth=0.7,
+        slice_line_alpha=0.85,
+    ):
+        """
+        Draw full curved-sidewall polygon envelope(s) and optional side-slice outlines on an existing structure axes.
+        """
+        design_traps = overlay_bundle['design_traps']
+        expanded_traps = overlay_bundle['expanded_traps']
+        expanded_slds = overlay_bundle['expanded_slds']
+        expanded_design_index = overlay_bundle['expanded_design_index']
+        expanded_layers = int(overlay_bundle['expanded_layers'])
+
+        temp_PAR = np.zeros((expanded_layers + 1, 3), dtype=float)
+        for ii, trap in enumerate(expanded_traps):
+            if ii <= expanded_layers:
+                temp_PAR[ii, 0] = trap.get('width')
+                temp_PAR[ii, 1] = trap.get('height')
+                tw = trap.get('twidth', None)
+                temp_PAR[ii, 2] = np.nan if tw is None else tw
+
+        _, traps_by_design, _ = self._curved_sides_compute_for_expanded_stack(
+            design_traps=design_traps,
+            expanded_design_index=expanded_design_index,
+            PAR=temp_PAR,
+            layers=expanded_layers,
+            expanded_slds=expanded_slds,
+        )
+
+        center_x = 0.5 * float(temp_PAR[0, 0])
+        heights = temp_PAR[: expanded_layers + 1, 1].astype(float)
+        cum_heights = np.concatenate(([0.0], np.cumsum(heights)))
+        design_to_expanded = {}
+        for exp_idx, d_idx in enumerate(expanded_design_index):
+            design_to_expanded.setdefault(int(d_idx), []).append(int(exp_idx))
+
+        for design_idx, d in enumerate(design_traps):
+            if not isinstance(d, dict) or str(d.get('Layer_Type', '')).strip().lower() != 'curved_sides':
+                continue
+            side_length = float(d.get('side_length', 0.0))
+            tip_deflection = float(d.get('tip_deflection', 0.0))
+            n_side_pts = int(d.get('n_side_pts', 400))
+            for exp_idx in design_to_expanded.get(int(design_idx), []):
+                if exp_idx > expanded_layers:
+                    continue
+                yb = float(cum_heights[exp_idx])
+                h = float(temp_PAR[exp_idx, 1])
+                if h <= 0:
+                    continue
+                w0 = float(temp_PAR[exp_idx, 0])
+                if not np.isnan(temp_PAR[exp_idx, 2]):
+                    w1 = float(temp_PAR[exp_idx, 2])
+                else:
+                    w1 = float(temp_PAR[exp_idx + 1, 0]) if exp_idx < expanded_layers else w0
+                layer = self._curved_sides_build_layer_center_trapezoid_incompressible_sides(
+                    center_x=center_x,
+                    center_y_bottom=yb,
+                    center_height=h,
+                    center_bottom_width=w0,
+                    center_top_width=w1,
+                    side_length=side_length,
+                    side_tip_deflection=tip_deflection,
+                    n_side_pts=n_side_pts,
+                )
+                ax.fill(
+                    layer['poly_x'],
+                    layer['poly_y'],
+                    facecolor=envelope_edgecolor,
+                    edgecolor=envelope_edgecolor,
+                    linewidth=float(envelope_linewidth),
+                    linestyle=envelope_linestyle,
+                    alpha=poly_alpha,
+                    zorder=2,
+                )
+
+        if show_slices:
+            for side, col in (('left', left_slice_color), ('right', right_slice_color)):
+                for _, tlist in traps_by_design.get(side, {}).items():
+                    if not tlist:
+                        continue
+                    for t in tlist:
+                        xs = [
+                            t['x_left_bottom'],
+                            t['x_right_bottom'],
+                            t['x_right_top'],
+                            t['x_left_top'],
+                            t['x_left_bottom'],
+                        ]
+                        ys = [
+                            t['y_bottom'],
+                            t['y_bottom'],
+                            t['y_top'],
+                            t['y_top'],
+                            t['y_bottom'],
+                        ]
+                        ax.plot(
+                            xs, ys, color=col, linewidth=float(slice_linewidth),
+                            alpha=float(slice_line_alpha), zorder=3,
+                        )
+
+    def _prepare_structure_plot_params(self, model_params):
+        """
+        Expand design/typed layers for structure plotting and build overlay_bundle for curved_sides.
+
+        Mirrors the layout logic in plot_structure so optimization comparison plots stay consistent.
+
+        Returns
+        -------
+        plot_params : dict
+            Copy of model_params with trapezoids/layers/slds replaced by expanded simulation stack.
+        overlay_bundle : dict or None
+            Keys: design_traps, expanded_traps, expanded_slds, expanded_design_index, expanded_layers;
+            None if no typed-layer overlay is needed.
+        """
+        plot_params = copy.deepcopy(model_params)
+        constraints = plot_params.get('constraints', None)
+        overlay_bundle = None
+
+        if 'design_trapezoids' in plot_params and 'design_slds' in plot_params:
+            tmp_design = {
+                'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
+                'design_slds': copy.deepcopy(plot_params.get('design_slds', [])),
+                'DW': plot_params.get('DW', self.DW),
+                'I0': plot_params.get('I0', self.I0),
+                'Bk': plot_params.get('Bk', self.Bk),
+                'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
+            }
+            if constraints:
+                self._apply_constraints(tmp_design, constraints)
+            tmp_model_params = {
+                'trapezoids': tmp_design['design_trapezoids'],
+                'layers': tmp_design['layers'],
+                'slds': tmp_design.get('design_slds', None),
+            }
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, expanded_design_index = self._expand_typed_layers(
+                tmp_model_params
+            )
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+            overlay_bundle = {
+                'design_traps': list(tmp_design['design_trapezoids']),
+                'expanded_traps': expanded_traps,
+                'expanded_slds': expanded_slds,
+                'expanded_design_index': expanded_design_index,
+                'expanded_layers': expanded_layers,
+            }
+        elif constraints:
+            self._apply_constraints(plot_params, constraints)
+            design_traps_for_overlay = copy.deepcopy(plot_params['trapezoids'])
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, expanded_design_index = self._expand_typed_layers(
+                plot_params
+            )
+            plot_params['trapezoids'] = expanded_traps
+            plot_params['layers'] = expanded_layers
+            plot_params['slds'] = expanded_slds
+            if self._has_typed_layers(design_traps_for_overlay):
+                overlay_bundle = {
+                    'design_traps': design_traps_for_overlay,
+                    'expanded_traps': expanded_traps,
+                    'expanded_slds': expanded_slds,
+                    'expanded_design_index': expanded_design_index,
+                    'expanded_layers': expanded_layers,
+                }
+        else:
+            design_traps_for_overlay = copy.deepcopy(plot_params['trapezoids'])
+            expanded_traps, expanded_slds, expanded_layers, _, _, _, expanded_design_index = self._expand_typed_layers(
+                plot_params
+            )
+            if expanded_traps:
+                plot_params['trapezoids'] = expanded_traps
+                plot_params['layers'] = expanded_layers
+                plot_params['slds'] = expanded_slds
+            if self._has_typed_layers(design_traps_for_overlay):
+                overlay_bundle = {
+                    'design_traps': design_traps_for_overlay,
+                    'expanded_traps': expanded_traps,
+                    'expanded_slds': expanded_slds,
+                    'expanded_design_index': expanded_design_index,
+                    'expanded_layers': expanded_layers,
+                }
+
+        return plot_params, overlay_bundle
+
     
     def plot_structure(
         self,
@@ -2479,6 +3202,9 @@ class SiGeModelArray(CDSAXS_Model):
         sld_label_map=None,
         show_sld_legend=True,
         sld_legend_precision=3,
+        show_curved_sidewalls=None,
+        curved_sidewall_show_slices=True,
+        curved_sidewall_poly_alpha=0.15,
         **kwargs
     ):
         """
@@ -2517,6 +3243,14 @@ class SiGeModelArray(CDSAXS_Model):
             If True and `shade_by_sld=True`, adds a legend entry for each unique SLD. Default: True.
         sld_legend_precision : int, optional
             Decimal rounding used for grouping and mapping float SLD values in the legend. Default: 3.
+        show_curved_sidewalls : bool or None, optional
+            If True, overlays the full curved-sidewall envelope (`Layer_Type: curved_sides`) and optional
+            side-slice outlines on top of the center trapezoid stack. If None (default), overlay runs only when
+            the design contains a `curved_sides` entry.
+        curved_sidewall_show_slices : bool, optional
+            When True, draws individual side-slice trapezoids (left/right) used in the coherent form factor.
+        curved_sidewall_poly_alpha : float, optional
+            Fill alpha for the sidewall envelope polygon(s). Default: 0.15.
         **kwargs : dict
             Additional keyword arguments passed to matplotlib plot functions
             
@@ -2535,46 +3269,7 @@ class SiGeModelArray(CDSAXS_Model):
         grey_dark = float(np.clip(grey_dark, 0.0, 1.0))
         shading_alpha = float(np.clip(float(shading_alpha), 0.0, 1.0))
 
-        # Apply constraints for plotting on a copy of model_params, then expand typed layers
-        plot_params = copy.deepcopy(self.model_params)
-        constraints = plot_params.get('constraints', None)
-        
-        # Always prefer design_trapezoids if it exists (regardless of constraints)
-        if 'design_trapezoids' in plot_params and 'design_slds' in plot_params:
-            tmp_design = {
-                'design_trapezoids': [t.copy() for t in plot_params['design_trapezoids']],
-                'design_slds': copy.deepcopy(plot_params.get('design_slds', [])),
-                'DW': plot_params.get('DW', self.DW),
-                'I0': plot_params.get('I0', self.I0),
-                'Bk': plot_params.get('Bk', self.Bk),
-                'layers': plot_params.get('design_layers', len(plot_params['design_trapezoids']) - 1),
-            }
-            # Apply constraints if they exist
-            if constraints:
-                self._apply_constraints(tmp_design, constraints)
-            tmp_model_params = {
-                'trapezoids': tmp_design['design_trapezoids'],
-                'layers': tmp_design['layers'],
-                'slds': tmp_design.get('design_slds', None),
-            }
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(tmp_model_params)
-            plot_params['trapezoids'] = expanded_traps
-            plot_params['layers'] = expanded_layers
-            plot_params['slds'] = expanded_slds
-        elif constraints:
-            # No design_trapezoids; apply constraints directly and expand if typed layers exist
-            self._apply_constraints(plot_params, constraints)
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
-            plot_params['trapezoids'] = expanded_traps
-            plot_params['layers'] = expanded_layers
-            plot_params['slds'] = expanded_slds
-        else:
-            # No design_trapezoids and no constraints; just expand if typed layers exist
-            expanded_traps, expanded_slds, expanded_layers, _, _, _ = self._expand_typed_layers(plot_params)
-            if expanded_traps:  # Only update if expansion occurred
-                plot_params['trapezoids'] = expanded_traps
-                plot_params['layers'] = expanded_layers
-                plot_params['slds'] = expanded_slds
+        plot_params, overlay_bundle = self._prepare_structure_plot_params(self.model_params)
 
         ax = self._plot_trapezoid_structure(
             plot_params,
@@ -2589,6 +3284,20 @@ class SiGeModelArray(CDSAXS_Model):
             shading_alpha=shading_alpha,
             **kwargs
         )
+
+        do_curved = show_curved_sidewalls
+        if do_curved is None:
+            do_curved = overlay_bundle is not None and self._design_has_curved_sides(overlay_bundle['design_traps'])
+        if do_curved and overlay_bundle is not None and self._design_has_curved_sides(overlay_bundle['design_traps']):
+            try:
+                self._plot_curved_sidewalls_overlay(
+                    ax,
+                    overlay_bundle,
+                    show_slices=curved_sidewall_show_slices,
+                    poly_alpha=float(curved_sidewall_poly_alpha),
+                )
+            except Exception as e:
+                print(f"WARNING: curved sidewall structure overlay failed: {str(e)}")
         
         # Set axis limits if provided (after plotting to override equal aspect if needed)
         if xlim is not None:
@@ -2886,12 +3595,93 @@ class SiGeModelArray(CDSAXS_Model):
         """
         return self.SimTrap_SM(*args, **kwargs)
 
+    def _update_model_with_optimization_result(self, result, param_names, initial_model_params):
+        """
+        Apply optimizer result to ``model_params``.
 
-         
-            
-            
-            
-            
+        Base CDSAXS_Model only updates expanded ``trapezoids``; SiGe ``trap_{i}_*`` names refer to
+        **design** indices when ``design_trapezoids`` is present. Writing to expanded segments
+        leaves design geometry unchanged so ``simulate_structure()`` and ``print_parameter_changes``
+        GF/BIC can disagree with the objective seen during optimization.
+        """
+        if 'design_trapezoids' not in initial_model_params:
+            return super()._update_model_with_optimization_result(
+                result, param_names, initial_model_params
+            )
+
+        if hasattr(result, 'x'):
+            optimal_values = result.x
+        elif hasattr(result, 'best_x'):
+            optimal_values = result.best_x
+        else:
+            raise ValueError("Could not extract optimal values from optimization result")
+
+        optimized_params = copy.deepcopy(initial_model_params)
+
+        if isinstance(self.Bk, np.ndarray):
+            optimized_bk = self.Bk.copy()
+        else:
+            optimized_bk = self.Bk
+
+        for i, param_name in enumerate(param_names):
+            if param_name.startswith('trap_'):
+                parts = param_name.split('_')
+                trap_idx = int(parts[1])
+                param_type = '_'.join(parts[2:])
+                if trap_idx < len(optimized_params['design_trapezoids']):
+                    optimized_params['design_trapezoids'][trap_idx][param_type] = optimal_values[i]
+            elif param_name.startswith('Bk_'):
+                bk_idx = int(param_name.split('_')[1])
+                if isinstance(optimized_bk, np.ndarray):
+                    optimized_bk[bk_idx] = optimal_values[i]
+                else:
+                    n_columns = self.Intensity.shape[1]
+                    optimized_bk = np.full(n_columns, optimized_bk)
+                    optimized_bk[bk_idx] = optimal_values[i]
+            elif param_name == 'Bk':
+                optimized_bk = optimal_values[i]
+            else:
+                optimized_params[param_name] = optimal_values[i]
+
+        optimized_params['Bk'] = optimized_bk.tolist() if isinstance(optimized_bk, np.ndarray) else optimized_bk
+
+        tmp_model_params = {
+            'trapezoids': [t.copy() for t in optimized_params['design_trapezoids']],
+            'layers': optimized_params.get('design_layers', len(optimized_params['design_trapezoids']) - 1),
+            'slds': optimized_params.get('design_slds', optimized_params.get('slds', None)),
+        }
+        constraints = optimized_params.get('constraints', None)
+        if constraints:
+            self._apply_constraints(tmp_model_params, constraints)
+            optimized_params['design_trapezoids'] = [t.copy() for t in tmp_model_params['trapezoids']]
+
+        expanded_traps, expanded_slds, expanded_layers, _, _, _, _ = self._expand_typed_layers(tmp_model_params)
+        optimized_params['trapezoids'] = expanded_traps
+        optimized_params['layers'] = int(expanded_layers)
+        optimized_params['slds'] = expanded_slds
+
+        return optimized_params
+
+    def _apply_mcmc_parameters(self, params, param_names):
+        """
+        Apply MCMC sample (or MAP/best) to the model.
+
+        Base implementation writes ``trap_*`` into expanded ``trapezoids`` only, which breaks
+        typed design stacks (ellipse, ``curved_sides``, etc.). Reuse design-level apply + expand
+        so post-MCMC ``SimInt``/structure plots match the likelihood path.
+        """
+        if 'design_trapezoids' not in self.model_params:
+            return super()._apply_mcmc_parameters(params, param_names)
+
+        res = SimpleNamespace(x=np.asarray(params, dtype=float))
+        self.model_params = self._update_model_with_optimization_result(
+            res, param_names, copy.deepcopy(self.model_params)
+        )
+        self.update_traditional_from_model_params()
+        self.SimInt = self.simulate_structure()
+        self.GF = self.GF_calc(self.SimInt)
+        self.BIC = self.BIC_calc(self.GF)
+
     def _trapezoid_optimization_wrapper(self, optimization_values):
             """
             Enhanced wrapper function for trapezoid optimization with SLD support.
