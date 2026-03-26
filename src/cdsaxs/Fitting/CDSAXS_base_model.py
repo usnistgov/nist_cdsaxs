@@ -845,14 +845,14 @@ class CDSAXS_Model:
                         parts = pname.split('_')
                         if len(parts) >= 3 and parts[1].isdigit():
                             idx = int(parts[1])
-                            field = parts[2]
+                            field = '_'.join(parts[2:])
                             trap_opt_fields.setdefault(idx, set()).add(field)
                     elif pname.startswith('trap2_'):
                         # Second-stack trapezoid fields for SRM models
                         parts = pname.split('_')
                         if len(parts) >= 3 and parts[1].isdigit():
                             idx = int(parts[1])
-                            field = parts[2]
+                            field = '_'.join(parts[2:])
                             trap2_opt_fields.setdefault(idx, set()).add(field)
 
                 # If no trap_* parameters are optimizable, skip detailed trapezoid printing
@@ -874,6 +874,8 @@ class CDSAXS_Model:
                         'height': 'Height',
                         'twidth': 'TWidth',
                         'depth': 'Depth',
+                        'side_length': 'Side len.',
+                        'tip_deflection': 'Tip defl.',
                     }
 
                     for i in sorted(trap_opt_fields.keys()):
@@ -1949,13 +1951,13 @@ class CDSAXS_Model:
             # Trapezoid parameter
             parts = param_name.split('_')
             trap_idx = int(parts[1])
-            param_type = parts[2]
+            param_type = '_'.join(parts[2:])
             self.model_params['trapezoids'][trap_idx][param_type] = value
         elif param_name.startswith('cyl_'):
             # Cylinder parameter
             parts = param_name.split('_')
             cyl_idx = int(parts[1])
-            param_type = parts[2]
+            param_type = '_'.join(parts[2:])
             self.model_params['cylinders'][cyl_idx][param_type] = value
         elif param_name.startswith('Bk_'):
             # Background parameter for specific column
@@ -4808,9 +4810,28 @@ class CDSAXS_Model:
             initial_simInt = copy.deepcopy(self.SimInt)
             self._initial_model_params = initial_model_params
             
-            # Calculate initial goodness of fit if not already done
-            if not hasattr(self, 'GF_Initial') or self.GF_Initial is None:
-                self.GF_Initial = self.GF_calc(self.SimInt)
+            # Baseline χ²: objective(wrapper) at the same seed vector scipy uses, not GF_calc(SimInt),
+            # so printed "Original GF" matches the DE/DA objective trajectory (when x0 matches optimizer).
+            if optimizer in ('differential_evolution', 'dual_annealing'):
+                if optimizer == 'differential_evolution':
+                    _opt_kw = {'polish': True, 'x0': np.array(initial_values, dtype=float), 'maxiter': 100, 'popsize': 15}
+                else:
+                    _opt_kw = {'x0': np.array(initial_values, dtype=float), 'maxiter': 1000}
+                _opt_kw.update(kwargs)
+                x0_seed = np.asarray(_opt_kw['x0'], dtype=float).ravel()
+                if x0_seed.shape[0] == len(param_names):
+                    if self.geometry == 'cylinder':
+                        _gf0 = self._cylinder_optimization_wrapper(x0_seed)
+                    elif self.geometry in ('trapezoid', 'sige'):
+                        _gf0 = self._trapezoid_optimization_wrapper(x0_seed)
+                    else:
+                        _gf0 = self.GF_calc(self.SimInt)
+                    self.GF_Initial = float(_gf0) if np.isfinite(_gf0) else float(self.GF_calc(self.SimInt))
+                else:
+                    self.GF_Initial = float(self.GF_calc(self.SimInt))
+            else:
+                self.GF_Initial = float(self.GF_calc(self.SimInt))
+            self.BIC_Initial = self.BIC_calc(self.GF_Initial)
             
             # Choose wrapper function based on geometry
             if self.geometry == 'cylinder':
@@ -5027,7 +5048,7 @@ class CDSAXS_Model:
                     # Parse trapezoid parameter
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]  # 'width', 'height', or 'twidth'
+                    param_type = '_'.join(parts[2:])
                     
                     optimized_params['trapezoids'][trap_idx][param_type] = optimal_values[i]
                 elif param_name.startswith('Bk_'):
@@ -5059,7 +5080,7 @@ class CDSAXS_Model:
                     # Parse cylinder parameter
                     parts = param_name.split('_')
                     cyl_idx = int(parts[1])
-                    param_type = parts[2]  # 'radius' or 'height'
+                    param_type = '_'.join(parts[2:])
                     
                     optimized_params['cylinders'][cyl_idx][param_type] = optimal_values[i]
                 else:
@@ -5485,7 +5506,7 @@ class CDSAXS_Model:
                 if param_name.startswith('trap_'):
                     parts = param_name.split('_')
                     trap_idx = int(parts[1])
-                    param_type = parts[2]
+                    param_type = '_'.join(parts[2:])
                     updated_params['trapezoids'][trap_idx][param_type] = params[i]
                 elif param_name.startswith('Bk_'):
                     bk_idx = int(param_name.split('_')[1])
@@ -5511,7 +5532,7 @@ class CDSAXS_Model:
                 if param_name.startswith('cyl_'):
                     parts = param_name.split('_')
                     cyl_idx = int(parts[1])
-                    param_type = parts[2]
+                    param_type = '_'.join(parts[2:])
                     updated_params['cylinders'][cyl_idx][param_type] = params[i]
                 else:
                     updated_params[param_name] = params[i]
@@ -5585,7 +5606,7 @@ class CDSAXS_Model:
         if results['autocorr_time'] is not None:
             print(f"Mean autocorrelation time: {results['mean_autocorr_time']:.1f}")
             
-            # Check convergence
+            # Check convergence via autocorrelation-based independent samples
             n_effective = results['n_steps'] - results['burn_in']
             if results['mean_autocorr_time'] > 0:
                 n_independent = n_effective / results['mean_autocorr_time']
@@ -5595,6 +5616,62 @@ class CDSAXS_Model:
                     print("⚠️  Warning: Low number of independent samples. Consider longer chains.")
                 elif n_independent > 100:
                     print("✓ Good number of independent samples")
+
+        # ------------------------------------------------------------------
+        # Optional: R-hat (Gelman–Rubin) convergence diagnostic via ArviZ
+        # ------------------------------------------------------------------
+        try:
+            import arviz as az  # type: ignore[import]
+
+            # Simple ANSI colors (match print_parameter_changes convention)
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            RED = '\033[91m'
+            RESET = '\033[0m'
+
+            chains = results.get("chains_final")
+            param_names = results.get("param_names")
+            if chains is not None and param_names is not None:
+                # emcee shape: (n_draws, n_walkers, n_params)
+                # ArviZ expects: (n_chains, n_draws, n_params)
+                chains_T = np.swapaxes(chains, 0, 1)
+                posterior = {
+                    name: chains_T[:, :, i] for i, name in enumerate(param_names)
+                }
+                # Use generic from_dict API; works across ArviZ versions
+                idata = az.from_dict({"posterior": posterior})
+
+                rhat_ds = az.rhat(idata, var_names=list(param_names))
+
+                print("\nR-hat convergence diagnostics:")
+                print(f"{'Parameter':<20} {'R-hat':<8}")
+
+                rhat_values = []
+                for name in param_names:
+                    if name in rhat_ds:
+                        val = float(rhat_ds[name])
+                        rhat_values.append(val)
+                        if val <= 1.01:
+                            color = GREEN
+                        elif val <= 1.05:
+                            color = YELLOW
+                        else:
+                            color = RED
+                        print(f"{name:<20} {color}{val:<8.3f}{RESET}")
+
+                if rhat_values:
+                    max_rhat = max(rhat_values)
+                    if max_rhat > 1.05:
+                        print(f"{RED}⚠️  Warning: Some parameters have R-hat > 1.05 (poor mixing).{RESET}")
+                    elif max_rhat > 1.01:
+                        print(f"{YELLOW}⚠️  Note: Some parameters have R-hat between 1.01 and 1.05.{RESET}")
+                    else:
+                        print(f"{GREEN}✓ All reported R-hat values are ≤ 1.01 (well mixed).{RESET}")
+        except ImportError:
+            # ArviZ not available; silently skip R-hat
+            pass
+        except Exception as e:
+            print(f"\nWarning: R-hat calculation failed: {e}")
         
         print(f"\nBest-fit log probability: {results['best_log_prob']:.3f}")
         print(f"Best-fit GF: {self.GF:.6f}")
@@ -5616,7 +5693,14 @@ class CDSAXS_Model:
         
         print(f"{'='*80}")
 
-    def _plot_mcmc_results(self, results, plot_chains=True, plot_corner=True, plot_structure=True):
+    def _plot_mcmc_results(
+        self,
+        results,
+        plot_chains=True,
+        plot_corner=True,
+        plot_structure=True,
+        plot_intensity_envelope=True,
+    ):
         """
         Generate plots for MCMC results.
         
@@ -5640,6 +5724,10 @@ class CDSAXS_Model:
         
         if plot_structure:
             self._plot_mcmc_structure_uncertainty(results)
+
+        # Posterior predictive envelope for simulated intensities
+        if plot_intensity_envelope and hasattr(self, "Intensity"):
+            self._plot_mcmc_intensity_uncertainty(results)
 
     def _plot_mcmc_chains(self, results):
         """
@@ -5899,6 +5987,186 @@ class CDSAXS_Model:
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         
         plt.tight_layout()
+        plt.show()
+    
+    def _plot_mcmc_intensity_uncertainty(
+        self,
+        results,
+        n_samples=200,
+        percentiles=(2.5, 16.0, 50.0, 84.0, 97.5),
+    ):
+        """
+        Plot posterior predictive envelopes for simulated intensities from MCMC.
+
+        For a subset of posterior samples, re-simulate the intensity and show,
+        for each Qx cut, shaded bands corresponding to the posterior
+        distribution of the simulated intensity, together with the median model
+        and the experimental data.
+        """
+        if not hasattr(self, "Intensity") or not hasattr(self, "Qz") or not hasattr(self, "Qx"):
+            print("Intensity/Qx/Qz not available; cannot plot MCMC intensity uncertainty.")
+            return
+
+        flat_chains = results.get("flat_chains")
+        param_names = results.get("param_names")
+        if flat_chains is None or param_names is None:
+            print("MCMC results missing flat_chains or param_names; skipping intensity envelope plot.")
+            return
+
+        # Limit number of samples for performance
+        n_total = flat_chains.shape[0]
+        n_use = min(n_samples, n_total)
+        indices = np.random.choice(n_total, n_use, replace=False)
+
+        # Preserve current model state
+        original_model_params = copy.deepcopy(self.model_params)
+
+        sims = []
+        for idx in indices:
+            theta = flat_chains[idx]
+            # Apply sampled parameters
+            self._apply_mcmc_parameters(theta, param_names)
+            # Re-simulate intensity with current model; subclasses implement simulate_structure
+            sim = None
+            try:
+                sim = self.simulate_structure()
+            except Exception:
+                sim = getattr(self, "SimInt", None)
+            if sim is None:
+                continue
+            sims.append(np.array(sim, copy=True))
+
+        if not sims:
+            print("No simulated intensities generated; skipping intensity envelope plot.")
+            # Restore model state
+            self.model_params = original_model_params
+            self.update_traditional_from_model_params()
+            return
+
+        sims = np.stack(sims, axis=0)  # (n_use, n_qz, n_qx)
+
+        # Restore original/best-fit parameters for plotting reference curve
+        self.model_params = original_model_params
+        self.update_traditional_from_model_params()
+        sim_best = None
+        try:
+            best_params = results.get("best_params")
+            if best_params is not None:
+                self._apply_mcmc_parameters(best_params, param_names)
+            try:
+                sim_best = self.simulate_structure()
+            except Exception:
+                sim_best = getattr(self, "SimInt", None)
+        except Exception:
+            sim_best = getattr(self, "SimInt", None)
+
+        # Compute posterior percentiles along the sample axis
+        perc_vals = np.percentile(sims, percentiles, axis=0)
+        # Unpack assuming the default percentiles order
+        if len(percentiles) >= 5:
+            p2_5, p16, p50, p84, p97_5 = perc_vals[:5]
+        else:
+            # Fallback: just use median
+            p50 = perc_vals[0]
+            p16 = p84 = p2_5 = p97_5 = p50
+
+        n_cuts = self.Intensity.shape[1]
+
+        # Choose grid layout similar to other Qz-cut plots
+        if n_cuts <= 3:
+            n_rows, n_cols = 1, n_cuts
+        else:
+            n_rows = int(np.ceil(np.sqrt(n_cuts)))
+            n_cols = int(np.ceil(n_cuts / n_rows))
+
+        fig, axes = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(5 * n_cols, 4 * n_rows),
+            squeeze=False,
+            sharex=False,
+        )
+        axes = axes.flatten()
+
+        for i in range(n_cuts):
+            ax = axes[i]
+
+            qz_values = self.Qz[:, i]
+            qx_value = self.Qx[0, i]
+
+            # Experimental data
+            ax.semilogy(
+                qz_values,
+                self.Intensity[:, i],
+                "o",
+                color="grey",
+                alpha=0.7,
+                markersize=4,
+                label="Measured" if i == 0 else None,
+            )
+
+            # 95% posterior band
+            ax.fill_between(
+                qz_values,
+                p2_5[:, i],
+                p97_5[:, i],
+                color="tab:blue",
+                alpha=0.15,
+                label="95% posterior" if i == 0 else None,
+            )
+
+            # 68% posterior band
+            ax.fill_between(
+                qz_values,
+                p16[:, i],
+                p84[:, i],
+                color="tab:blue",
+                alpha=0.3,
+                label="68% posterior" if i == 0 else None,
+            )
+
+            # Posterior median
+            ax.semilogy(
+                qz_values,
+                p50[:, i],
+                color="tab:blue",
+                linewidth=1.5,
+                label="Posterior median" if i == 0 else None,
+            )
+
+            # Best-fit curve (MAP / highest log prob) if available
+            if sim_best is not None:
+                ax.semilogy(
+                    qz_values,
+                    sim_best[:, i],
+                    color="tab:red",
+                    linewidth=1.5,
+                    alpha=0.9,
+                    label="Best fit" if i == 0 else None,
+                )
+
+            ax.set_title(f"Cut at Qx = {qx_value:.4f}")
+            ax.set_xlabel("Qz (Å$^{-1}$)")
+            ax.set_ylabel("Intensity (a.u.)")
+            ax.grid(True, linestyle="--", alpha=0.4)
+
+        # Hide any unused subplots
+        for j in range(n_cuts, len(axes)):
+            axes[j].set_visible(False)
+
+        # Single legend
+        handles, labels = axes[0].get_legend_handles_labels()
+        if handles:
+            fig.legend(
+                handles,
+                labels,
+                loc="upper center",
+                ncol=len(labels),
+                bbox_to_anchor=(0.5, 1.02),
+            )
+
+        fig.suptitle("Intensity Comparison: Posterior Envelope vs. Measured", y=0.98)
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
         plt.show()
 
     def _save_mcmc_chains(self, results, filename=None):
