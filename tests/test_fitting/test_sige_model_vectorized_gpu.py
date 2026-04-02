@@ -42,7 +42,7 @@ def test_sige_gpu_vectorized_matches_cpu_vectorized_batches():
 
     assert np.all(np.isfinite(gpu_values))
     assert np.allclose(gpu_values, baseline_values, rtol=0.0, atol=1e-8)
-    assert gpu._vectorized_last_execution_path == "gpu_resident"
+    assert gpu._vectorized_last_execution_path == "gpu_resident_4d"
     assert gpu._vectorized_last_gpu_exception is None
 
 
@@ -59,6 +59,25 @@ def test_sige_gpu_vectorized_small_batch_falls_back_to_cpu():
     assert values.shape == (4,)
     assert np.all(np.isfinite(values))
     assert gpu._vectorized_last_execution_path == "gpu_small_batch_cpu_fallback"
+    assert gpu._vectorized_last_gpu_exception is None
+
+
+@pytest.mark.skipif(not _gpu_available(), reason="Requires CuPy with a visible CUDA GPU.")
+def test_sige_gpu_vectorized_loop_path_remains_opt_in():
+    baseline = build_realistic_sige_model(model_cls=SiGeModelArray_vectorized)
+    gpu = build_realistic_sige_model(
+        model_cls=SiGeModelArray_vectorized_GPU,
+        freeform_use_cupy=True,
+    )
+    gpu._vectorized_gpu_layer_algorithm = "loop"
+    batch = build_realistic_sige_candidate_matrix(baseline, batch_size=16)
+
+    baseline_values = np.asarray(baseline._trapezoid_optimization_wrapper(batch), dtype=float)
+    gpu_values = np.asarray(gpu._trapezoid_optimization_wrapper(batch), dtype=float)
+
+    assert np.all(np.isfinite(gpu_values))
+    assert np.allclose(gpu_values, baseline_values, rtol=0.0, atol=1e-8)
+    assert gpu._vectorized_last_execution_path == "gpu_resident"
     assert gpu._vectorized_last_gpu_exception is None
 
 

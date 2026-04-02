@@ -50,11 +50,13 @@ See `docs/optimization/trapezoid.md`.
 Current status:
 
 - realistic SiGe workflows now have a package-native `vectorized=True` ellipse-stack path in the repo
-- the current SiGe batched objective path is functionally correct but still about parity-to-slower than the scalar CPU path
+- the current SiGe CPU batched objective path is functionally correct but still about parity-to-slower than the scalar CPU path
 - a naive full layer-axis NumPy broadcast rewrite of `SiGeModel_vectorized._batched_form_factor(...)` was tried and rejected
-- remaining CPU speedup options are now documented, but the next active milestone is GPU vectorization of the realistic SiGe batched path
-- the full `(candidate, layer, qz, qx)` layer reduction should be revisited on GPU rather than on CPU
-- GPU work is now the active next milestone for SiGe because the current CPU vectorized path is correct, profiled, and no longer a promising place for a naive 4D NumPy reduction
+- the kept SiGe GPU path now lives in `src/cdsaxs/Fitting/SiGe_model_vectorized_GPU.py` and defaults to the `4d` raw-kernel reduction
+- the per-layer GPU loop path remains available as an opt-in fallback and comparison path
+- the naive full-broadcast 4D GPU reduction is now a rejected historical experiment, not the kept implementation
+- the kept 4D raw-kernel GPU path is materially faster than both scalar CPU and the opt-in GPU loop path on realistic DE-shaped candidate batches
+- the next active SiGe priority is now convergence-equivalence validation between scalar and vectorized/GPU optimization behavior, rather than more raw candidate-evaluation microbenchmarking
 
 Current role in the roadmap:
 
@@ -62,7 +64,9 @@ Current role in the roadmap:
 - refactor scalar SiGe objective logic into resumable helpers
 - keep the documented CPU speedup options available for later follow-up if needed
 - move the next active implementation pass to a GPU-vectorized SiGe objective
-- then move the dominant batched form-factor and GF work onto GPU
+- keep the raw-kernel 4D GPU path as the default realistic GPU evaluator while preserving the loop path as an opt-in comparison mode
+- use the current timing harness to benchmark realistic DE-shaped candidate batches and batch-scaling behavior
+- shift the next scientific validation milestone to convergence equivalence rather than more isolated candidate-throughput gains
 
 See `docs/optimization/sige.md`.
 

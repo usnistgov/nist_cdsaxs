@@ -27,7 +27,8 @@ Current important facts:
 - realistic `vectorized=True` SiGe is now functionally correct on the ellipse-stack workflow
 - the incumbent scalar implementation in `src/cdsaxs/Fitting/SiGe_model.py` remains the physics oracle and fallback
 - `curved_sides` is still intentionally out of scope for this first realistic vectorized pass
-- CPU speedup is not yet in place, so the next priority is still CPU-kernel work rather than GPU work
+- CPU speedup is not yet in place on the CPU-vectorized path, but the active kept GPU path now exists and outperforms both scalar CPU and the older GPU loop path
+- the next SiGe priority is now convergence-equivalence testing on realistic optimization runs rather than more raw candidate-evaluation microbenchmarking
 
 ## Resume Context
 
@@ -96,11 +97,39 @@ Implementation status update as of 2026-04-02:
   - the realistic batched path is already end-to-end vectorized at the workflow level
   - the remaining performance issue is that `_batched_form_factor(...)` still spends almost all wall time in elementwise complex math over large CPU arrays
   - candidate batching on CPU increases array size and temporary traffic more than it reduces useful overhead
+- `src/cdsaxs/Fitting/SiGe_model_vectorized_GPU.py` now contains multiple realistic GPU layer-reduction variants:
+  - `loop`
+  - `4d_naive`
+  - `4d_tiled_layers`
+  - `4d_tiled_layers_candidates`
+  - `4d` / `4d_rawkernel`
+- the kept realistic GPU default is now the `4d` raw-kernel path
+- the GPU loop path remains available as an opt-in comparison path by setting `_vectorized_gpu_layer_algorithm = "loop"`
+- the naive full-broadcast 4D GPU path is now retained only as a rejected experimental reference
+- blocked broadcast 4D GPU variants were tested in this session and improved over the naive 4D broadcast path
+- the custom raw-kernel 4D GPU reducer was then tested and became the kept result
+- realistic DE-shaped candidate-evaluation throughput now strongly favors GPU:
+  - practical DE batch `104` (`popsize=4`, `26` parameters):
+    - scalar CPU: about `28.37` candidates/s
+    - opt-in GPU loop path: about `3328.71` candidates/s
+    - kept GPU 4D path: about `3976.56` candidates/s
+  - the kept GPU 4D path is about `1.19x` faster than the GPU loop path at the practical DE batch
+  - on the scanned DE-shaped ladder up to batch `1040`, the kept GPU 4D path continued improving and reached about `4279.72` candidates/s at the largest tested batch
+- fixed-generation realistic DE timing now strongly favors the kept GPU 4D path:
+  - scalar CPU: about `9.41 s`
+  - opt-in GPU loop path: about `0.179 s`
+  - kept GPU 4D path: about `0.149 s`
+- parity remains within floating-point noise on the kept GPU path:
+  - GPU loop versus scalar CPU objective checks: about `6e-12` to `1e-11`
+  - kept GPU 4D versus scalar CPU objective checks: about `6e-12` to `1e-11`
+  - kept GPU 4D versus GPU loop objective checks: about `0.0` to `1.82e-12`
 
 Validation completed in `cdsaxs-dev`:
 
 - `pytest -q tests/test_fitting/test_sige_model_vectorized.py tests/test_fitting/test_optimization_sige_realistic.py`
 - result: `9 passed`
+- `pytest -q tests/test_fitting/test_sige_model_vectorized_gpu.py`
+- result: `6 passed`
 
 Current measured realistic timing snapshot:
 
@@ -119,21 +148,16 @@ Most important interpretation:
 
 - correctness is now in place
 - meaningful CPU speedup is not yet in place
-- the next priority is to re-examine the CPU-vectorized workflow and verify that the hot numerical path is truly end-to-end vectorized in the sense we want:
-  - NumPy broadcasting across candidates
-  - no hidden scalar fallback in the realistic path
-  - no material Python-loop bottleneck left in the dominant numerical kernel
-- the concrete next implementation step is now defined:
-  - treat the rejected full-4D NumPy reduction as a completed experiment, not the active next step
-  - record the remaining CPU speedup candidates, but do not treat them as the active milestone:
-    - a compiled CPU kernel for the layer accumulation
-    - a more memory-aware blocked CPU reduction that preserves the scalar accumulation order more closely
-    - internal candidate tiling inside the vectorized objective to improve cache locality on large DE-shaped batches
-    - reduced temporary allocation and more buffer reuse inside the form-factor kernel
-    - thread-level CPU parallelism in a compiled kernel
-  - keep `complex128` / `float64` parity targets unchanged while testing the next kernel candidate
-  - the active next milestone is now GPU vectorization of the realistic SiGe path
-  - the rejected CPU-side full `(candidate, layer, qz, qx)` reduction should be revisited on GPU, where the larger fused tensor expression is more likely to pay off
+- the kept realistic GPU path is now in place and should be treated as the default GPU evaluator for realistic SiGe work
+- the opt-in GPU loop path remains useful as:
+  - a fallback implementation
+  - a parity comparison path
+  - a lower-risk debugging path when the raw-kernel implementation needs isolation
+- additional raw candidate-throughput work is no longer the most valuable next SiGe milestone
+- the next priority is now a convergence-equivalence test:
+  - verify that scalar CPU, CPU-vectorized, GPU loop, and kept GPU 4D realistic optimization runs converge to equivalent results under matched seeds and optimizer settings
+  - emphasize optimizer trajectory and final-fit equivalence, not only isolated candidate-evaluation parity
+  - keep the existing candidate-evaluation timing harness as support tooling rather than the main scientific gate
 
 Key code anchors for resumption:
 
@@ -599,6 +623,79 @@ Possible later targets:
 - GPU-resident coordinate construction
 
 Do not start here.
+
+### GPU V1.5: 4D Layer Reduction Results
+
+The SiGe GPU file now contains several 4D experiments in
+`src/cdsaxs/Fitting/SiGe_model_vectorized_GPU.py`:
+
+- `4d_naive`
+  - historical full-broadcast CuPy reference
+- `4d_tiled_layers`
+  - blocked layer-axis CuPy broadcast reduction
+- `4d_tiled_layers_candidates`
+  - blocked layer-axis plus candidate-axis CuPy broadcast reduction
+- `4d` / `4d_rawkernel`
+  - custom raw-kernel layer reducer
+
+Kept result from this session:
+
+- the kept realistic GPU default is now `4d`
+- the kept `4d` implementation is the raw-kernel reducer
+- the GPU loop path remains available as an explicit opt-in by setting `_vectorized_gpu_layer_algorithm = "loop"`
+- the naive full-broadcast 4D CuPy path is now a rejected experimental reference only
+
+Measured stepwise acceptance sequence on the realistic harness:
+
+1. blocked layer tiling beat the naive 4D broadcast baseline by about `1.15x` at the best tested tile while preserving parity
+2. blocked candidate-plus-layer tiling then beat the accepted blocked-layer baseline by about `1.18x` while preserving parity
+3. the custom raw-kernel reducer then beat the accepted blocked candidate-plus-layer baseline by about `1.82x` on objective throughput and about `1.29x` on fixed-generation DE timing while preserving parity
+
+Current realistic interpretation:
+
+- the original naive 4D GPU loss was a temporary-allocation and memory-traffic problem, not a proof that 4D reduction was the wrong direction
+- shrinking broadcast tiles helped, which supports the temporary-pressure interpretation
+- eliminating the broadcasted `a1` and `a2` temporaries entirely with a custom reducer helped much more, which is why the raw-kernel path is now the kept result
+
+Measured realistic DE-shaped candidate-evaluation scaling, opt-in GPU loop versus kept GPU 4D:
+
+- practical DE batch `104` (`popsize=4`, `26` parameters):
+  - GPU loop: about `3328.71` candidates/s
+  - kept GPU 4D: about `3976.56` candidates/s
+  - 4D relative speed: about `1.19x`
+- larger DE-shaped batches continued to favor kept GPU 4D:
+  - batch `260` (`popsize=10`): about `1.19x`
+  - batch `416` (`popsize=16`): about `1.22x`
+  - batch `624` (`popsize=24`): about `1.25x`
+  - batch `1040` (`popsize=40`): about `1.25x`
+
+Current best observed throughput in the tested realistic DE-shaped ladder:
+
+- opt-in GPU loop peak: about `3505.53` candidates/s at batch `260` (`popsize=10`)
+- kept GPU 4D peak so far: about `4279.72` candidates/s at batch `1040` (`popsize=40`)
+- the kept GPU 4D path was still slowly improving at the top of the scanned ladder, so a hard throughput optimum has not yet been established
+
+Fixed-generation realistic DE timing with `seed=1234`, `maxiter=2`, `popsize=4`, `tol=0.0`, `polish=False`, `updating='deferred'`:
+
+- scalar CPU: about `9.41 s`
+- opt-in GPU loop path: about `0.179 s`
+- kept GPU 4D path: about `0.149 s`
+
+Parity status for the kept GPU 4D line:
+
+- kept GPU 4D versus scalar CPU objective checks stayed at about `6e-12` to `1e-11`
+- kept GPU 4D versus opt-in GPU loop objective checks stayed at about `0.0` to `1.82e-12`
+- realistic seeded DE final `GF` matched exactly across the compared paths
+
+Next step for SiGe after the current GPU keep decision:
+
+- stop prioritizing more raw candidate-throughput work as the main milestone
+- develop a realistic convergence-equivalence test for SiGe:
+  - scalar CPU versus CPU-vectorized
+  - scalar CPU versus opt-in GPU loop
+  - scalar CPU versus kept GPU 4D
+  - matched seeds and optimizer settings
+  - compare convergence behavior and final-fit equivalence, not only per-candidate objective parity
 
 ## Recommended Test Matrix For The GPU Phase
 
