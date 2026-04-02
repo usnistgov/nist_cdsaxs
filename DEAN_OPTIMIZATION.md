@@ -49,16 +49,19 @@ See `docs/optimization/trapezoid.md`.
 
 Current status:
 
-- realistic SiGe workflows exist outside the repo in the imec notebook and reduced CSV
-- the current SiGe batched objective path is not working as a true vectorized path
-- the next milestone is CPU vectorization of `SiGeModel.SimTrap_GF`
-- GPU work should follow only after the CPU vectorized objective has parity and a realistic harness
+- realistic SiGe workflows now have a package-native `vectorized=True` ellipse-stack path in the repo
+- the current SiGe batched objective path is functionally correct but still about parity-to-slower than the scalar CPU path
+- a naive full layer-axis NumPy broadcast rewrite of `SiGeModel_vectorized._batched_form_factor(...)` was tried and rejected
+- remaining CPU speedup options are now documented, but the next active milestone is GPU vectorization of the realistic SiGe batched path
+- the full `(candidate, layer, qz, qx)` layer reduction should be revisited on GPU rather than on CPU
+- GPU work is now the active next milestone for SiGe because the current CPU vectorized path is correct, profiled, and no longer a promising place for a naive 4D NumPy reduction
 
 Current role in the roadmap:
 
 - establish a realistic package-native SiGe harness
 - refactor scalar SiGe objective logic into resumable helpers
-- land a correct vectorized CPU objective path first
+- keep the documented CPU speedup options available for later follow-up if needed
+- move the next active implementation pass to a GPU-vectorized SiGe objective
 - then move the dominant batched form-factor and GF work onto GPU
 
 See `docs/optimization/sige.md`.

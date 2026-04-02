@@ -108,6 +108,164 @@ Once a candidate shows meaningful speedup:
 
 ## Experiment Entries
 
+### 2026-04-02 / SiGe / Rejected Full-4D NumPy Layer Reduction
+
+- area: SiGe realistic CPU kernel
+- candidate: full `(candidate, layer, qz, qx)` NumPy broadcast reduction in `SiGe_model_vectorized._batched_form_factor(...)`
+- status: rejected
+
+Motivation:
+
+- the realistic vectorized SiGe path had already proven that preprocessing and GF reduction were not the bottleneck
+- profiling isolated the remaining cost to the Python layer loop inside `_batched_form_factor(...)`
+- the most direct experiment was to remove that loop completely and evaluate the whole layer stack in one NumPy reduction
+
+Files touched:
+
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+- `docs/optimization/sige.md`
+- `src/cdsaxs/Fitting/SiGe_model_vectorized.py`
+
+Benchmark protocol:
+
+- env: `cdsaxs-dev`
+- realistic dataset: `SMI_imec_nsh_d24b_D260126_T104543_reduced_results.csv`
+- parity check:
+  - `pytest -q tests/test_fitting/test_sige_model_vectorized.py tests/test_fitting/test_optimization_sige_realistic.py`
+- objective timing:
+  - compare scalar candidate-by-candidate evaluation versus one batched call for batch sizes `1, 4, 8, 16, 32`
+- optimizer timing:
+  - compare `vectorized=False` scalar DE versus `vectorized=True` realistic DE
+  - fixed DE config:
+    - `seed=1234`
+    - `maxiter=1`
+    - `popsize=2`
+    - `tol=0.5`
+    - `polish=False`
+
+Results:
+
+- correctness:
+  - DE final `GF` parity remained exact in the short seeded comparison
+  - objective parity weakened from the current kept `~1e-12` level to about `5.46e-12`
+  - the existing objective parity tests failed at the current `abs=1e-12` threshold
+- objective throughput speedup, scalar versus full-4D candidate:
+  - batch `1`: about `0.902x`
+  - batch `4`: about `0.912x`
+  - batch `8`: about `0.897x`
+  - batch `16`: about `0.813x`
+  - batch `32`: about `0.825x`
+- short realistic DE timing:
+  - scalar CPU: about `3.14 s`
+  - full-4D candidate: about `3.83 s`
+  - speedup: about `0.820x`
+
+Outcome:
+
+- reject
+- revert to the prior kept batched kernel
+
+Notes:
+
+- removing the Python layer loop alone was not enough because the naive full broadcast increased temporary allocation and memory traffic too much
+- the failed experiment still clarifies the next step:
+  - keep the CPU follow-up options documented:
+    - compiled CPU kernel
+    - blocked CPU reduction with closer scalar accumulation order
+    - internal candidate tiling for large DE-shaped batches
+    - lower temporary allocation pressure and more buffer reuse
+    - thread-level CPU parallelism in a compiled kernel
+  - but move the active next implementation step to GPU vectorization
+  - revisit the rejected full `(candidate, layer, qz, qx)` reduction on GPU rather than on CPU
+
+### 2026-04-02 / SiGe / Realistic CPU Vectorized Ellipse-Stack Path
+
+- area: SiGe realistic optimization path
+- candidate: `SiGeModelArray_vectorized` plus realistic imec harness
+- status: complete
+
+Motivation:
+
+- the realistic SiGe workflow needed a package-native `vectorized=True` path that matched the incumbent scalar physics
+- the first deliverable was correctness on the realistic ellipse-stack workflow, with explicit performance measurement before any GPU work
+- the immediate follow-on priority is to confirm whether the CPU batched path is truly efficient end-to-end, not only correct at the optimizer interface
+
+Files touched:
+
+- `docs/optimization/sige.md`
+- `src/cdsaxs/Fitting/__init__.py`
+- `src/cdsaxs/Fitting/SiGe_model_vectorized.py`
+- `src/cdsaxs/Fitting/optimization_sige_realistic.py`
+- `tests/test_fitting/test_sige_model_vectorized.py`
+- `tests/test_fitting/test_optimization_sige_realistic.py`
+
+Benchmark protocol:
+
+- env: `cdsaxs-dev`
+- realistic dataset: `SMI_imec_nsh_d24b_D260126_T104543_reduced_results.csv`
+- realistic workload shape:
+  - imported intensity shape: `(121, 49)`
+  - design entries: `11`
+  - expanded simulation trapezoids: `26`
+  - active optimization parameters: `26`
+- targeted validation:
+  - `pytest -q tests/test_fitting/test_sige_model_vectorized.py tests/test_fitting/test_optimization_sige_realistic.py`
+- objective throughput timing:
+  - compare incumbent scalar candidate-by-candidate evaluation versus one batched call in `compare_realistic_sige_objective_throughput(...)`
+  - batch ladder: `1, 4, 8, 16, 32`
+- optimizer timing:
+  - compare `vectorized=False` scalar baseline versus `vectorized=True` realistic candidate in `compare_realistic_sige_de_timing(...)`
+  - fixed DE config:
+    - `seed=1234`
+    - `maxiter=2`
+    - `popsize=4`
+    - `tol=0.0`
+    - `polish=False`
+    - `updating='deferred'`
+
+Results:
+
+- functional status:
+  - realistic `vectorized=True` SiGe is now correct on the ellipse-stack workflow
+  - 1D, `(S, D)`, and `(D, S)` objective calls match scalar behavior
+  - the realistic path does not require the scalar oracle for the supported ellipse-stack workflow
+- parity:
+  - batched objective max absolute `GF` difference versus scalar oracle: about `9.09e-13` to `1.82e-12`
+  - fixed-generation DE final `GF` difference versus scalar oracle: `0.0`
+- tests:
+  - `9 passed`
+- objective throughput speedup, scalar versus current CPU-vectorized path:
+  - batch `1`: about `1.018x`
+  - batch `4`: about `0.981x`
+  - batch `8`: about `0.972x`
+  - batch `16`: about `0.971x`
+  - batch `32`: about `0.962x`
+- fixed-generation realistic DE timing:
+  - scalar CPU: about `9.12 s`
+  - current CPU-vectorized path: about `9.74 s`
+  - speedup: about `0.937x`
+  - final `GF` matched exactly
+
+Outcome:
+
+- keep for correctness and realistic optimizer support
+- defer any claim of CPU acceleration
+
+Notes:
+
+- this pass establishes a correct realistic baseline for further CPU work, not a finished performance win
+- `curved_sides` remains intentionally out of scope for this first realistic vectorized implementation
+- the next priority is to re-examine the CPU-vectorized workflow and verify that the hot numerical kernel is truly end-to-end vectorized in the performance sense:
+  - minimize remaining Python control flow in form-factor accumulation
+  - reduce temporary allocation pressure
+  - confirm reuse of cached dataset invariants
+  - decide from profiling whether the next step should be more NumPy restructuring or a compiled CPU kernel
+- profiling now identifies the immediate next code change more precisely:
+  - replace the per-layer Python loop in `SiGe_model_vectorized._batched_form_factor(...)`
+  - evaluate the whole realistic stack as one `(candidate, layer, qz, qx)` broadcasted reduction
+  - tolerate high temporary-memory use during this CPU experiment because the available RAM budget is not constraining this branch of work
+
 ### 2026-03-26 / Planning Refactor / Geometry Docs And SiGe Roadmap
 
 - area: planning and documentation checkpoint

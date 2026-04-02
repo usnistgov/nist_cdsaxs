@@ -11,24 +11,23 @@ It captures:
 - the detailed resumable plan for a CPU-vectorized `SimTrap_GF` path
 - the basic follow-on GPU plan
 
-## Current Status As Of 2026-03-26
+## Current Status As Of 2026-04-02
 
-The next meaningful SiGe milestone is not "make `SiGe_model.py` use CuPy".
+The realistic imec ellipse-stack workflow now has a package-native CPU-vectorized path.
 
-The next milestone is:
+Completed in the current pass:
 
-- establish a realistic package-native SiGe harness
-- refactor the scalar SiGe objective into explicit helpers
-- land a correct vectorized CPU objective path
-- then evaluate how much of that path should move to GPU
+- `src/cdsaxs/Fitting/optimization_sige_realistic.py` provides the realistic harness, objective helpers, and timing helpers
+- `src/cdsaxs/Fitting/SiGe_model_vectorized.py` provides the new realistic batched SiGe implementation
+- `src/cdsaxs/Fitting/__init__.py` exports the new SiGe vectorized entry points
+- targeted tests landed for realistic shape handling, parity, and seeded DE behavior
 
-Current important fact:
+Current important facts:
 
-- the present SiGe batched objective path is not working as a true vectorized path
-
-The existing `SimTrap_GF(...)` and `_trapezoid_optimization_wrapper(...)` are still scalar by structure:
-
-- `src/cdsaxs/Fitting/SiGe_model.py`
+- realistic `vectorized=True` SiGe is now functionally correct on the ellipse-stack workflow
+- the incumbent scalar implementation in `src/cdsaxs/Fitting/SiGe_model.py` remains the physics oracle and fallback
+- `curved_sides` is still intentionally out of scope for this first realistic vectorized pass
+- CPU speedup is not yet in place, so the next priority is still CPU-kernel work rather than GPU work
 
 ## Resume Context
 
@@ -49,8 +48,92 @@ Important observations from that workflow and the current code:
 - the realistic notebook uses `importCDSAXS_GUI(...)`
 - the realistic notebook uses scalar DE with `workers`, not `vectorized=True`
 - the realistic design stack includes typed layers, especially `Layer_Type: 'Ellipse'`
+- the realistic notebook does not require `curved_sides` for the first vectorization milestone
 - on realistic notebook-style load, SiGe expands from a design stack to a larger simulation stack
-- the current 2D candidate path does not yet return a proper GF vector for SiGe
+- the realistic production target for the current pass is the ellipse-stack workflow, not the optional `curved_sides` path
+
+Validated runtime findings from the realistic imec workload:
+
+- realistic imported data shape is `(121, 49)`
+- the realistic design stack has `11` design entries and expands to `26` simulation trapezoids
+- the realistic optimization surface currently resolves to `26` active parameters
+- scalar default objective evaluation is finite on the realistic harness
+- the realistic vectorized objective path now returns correct finite values for:
+  - 1D input
+  - singleton 2D batches
+  - true multi-candidate `(S, D)` and `(D, S)` batches
+- short seeded `differential_evolution(vectorized=True)` now completes with exact final `GF` parity versus the scalar realistic run for the fixed timing configuration
+
+Implementation status update as of 2026-04-02:
+
+- `src/cdsaxs/Fitting/SiGe_model_vectorized.py` now exists
+- `src/cdsaxs/Fitting/optimization_sige_realistic.py` now exists
+- realistic `vectorized=True` SiGe is now functionally correct on the imec ellipse-stack workflow
+- the realistic batched path is end-to-end array-based across candidates for:
+  - active-parameter application
+  - constraints
+  - typed ellipse expansion
+  - form-factor accumulation
+  - GF reduction
+- parity against incumbent scalar CPU mode is established for:
+  - 1D objective evaluation
+  - `(S, D)` and `(D, S)` batched objective evaluation
+  - short seeded realistic DE runs
+- measured parity quality on the realistic objective path is at floating-point noise level:
+  - max absolute `GF` difference in batched objective checks: about `9.09e-13` to `1.82e-12`
+  - realistic DE final `GF` matched exactly in the fixed-generation timing comparison
+- current speed result:
+  - objective throughput is about parity to slightly slower than scalar CPU
+  - fixed-generation realistic DE timing is currently slower than scalar CPU by about `0.937x`
+- current dominant hotspot:
+  - `_batched_form_factor(...)` in `src/cdsaxs/Fitting/SiGe_model_vectorized.py`
+  - profiling shows the remaining cost is concentrated in the Python layer-accumulation loop, not in batched parameter application, constraints, ellipse expansion, or GF reduction
+- full layer-axis NumPy broadcast reduction has now been tried once and is not a kept result:
+  - the all-at-once `(candidate, layer, qz, qx)` reduction increased temporary pressure enough to slow the realistic CPU path further
+  - reduction-order changes also loosened objective parity from about `1e-12` to about `5.46e-12`
+  - conclusion: a naive full-4D NumPy rewrite is not the right kept CPU solution for this kernel
+- current CPU interpretation after fresh profiling:
+  - the realistic batched path is already end-to-end vectorized at the workflow level
+  - the remaining performance issue is that `_batched_form_factor(...)` still spends almost all wall time in elementwise complex math over large CPU arrays
+  - candidate batching on CPU increases array size and temporary traffic more than it reduces useful overhead
+
+Validation completed in `cdsaxs-dev`:
+
+- `pytest -q tests/test_fitting/test_sige_model_vectorized.py tests/test_fitting/test_optimization_sige_realistic.py`
+- result: `9 passed`
+
+Current measured realistic timing snapshot:
+
+- objective throughput speedup, scalar versus current CPU-vectorized path:
+  - batch `1`: about `1.018x`
+  - batch `4`: about `0.981x`
+  - batch `8`: about `0.972x`
+  - batch `16`: about `0.971x`
+  - batch `32`: about `0.962x`
+- fixed-generation realistic DE timing with `seed=1234`, `maxiter=2`, `popsize=4`, `tol=0.0`, `polish=False`, `updating='deferred'`:
+  - scalar CPU: about `9.12 s`
+  - current CPU-vectorized path: about `9.74 s`
+  - speedup: about `0.937x`
+
+Most important interpretation:
+
+- correctness is now in place
+- meaningful CPU speedup is not yet in place
+- the next priority is to re-examine the CPU-vectorized workflow and verify that the hot numerical path is truly end-to-end vectorized in the sense we want:
+  - NumPy broadcasting across candidates
+  - no hidden scalar fallback in the realistic path
+  - no material Python-loop bottleneck left in the dominant numerical kernel
+- the concrete next implementation step is now defined:
+  - treat the rejected full-4D NumPy reduction as a completed experiment, not the active next step
+  - record the remaining CPU speedup candidates, but do not treat them as the active milestone:
+    - a compiled CPU kernel for the layer accumulation
+    - a more memory-aware blocked CPU reduction that preserves the scalar accumulation order more closely
+    - internal candidate tiling inside the vectorized objective to improve cache locality on large DE-shaped batches
+    - reduced temporary allocation and more buffer reuse inside the form-factor kernel
+    - thread-level CPU parallelism in a compiled kernel
+  - keep `complex128` / `float64` parity targets unchanged while testing the next kernel candidate
+  - the active next milestone is now GPU vectorization of the realistic SiGe path
+  - the rejected CPU-side full `(candidate, layer, qz, qx)` reduction should be revisited on GPU, where the larger fused tensor expression is more likely to pay off
 
 Key code anchors for resumption:
 
@@ -143,6 +226,12 @@ The first vectorized implementation should assume these are fixed within one opt
 
 These assumptions match the realistic notebook-style optimization surface and make batched preprocessing tractable.
 
+Additional first-milestone scope restriction:
+
+- target the realistic ellipse-layer workflow first
+- keep `curved_sides` on the incumbent scalar path until the ellipse-driven CPU vectorized path is correct and benchmarked
+- only generalize the first vectorized implementation to `curved_sides` if a real workload requires it
+
 ### Stage 0: Build A Realistic SiGe Harness First
 
 Create a package-native harness before changing internals.
@@ -207,6 +296,7 @@ Exit criteria:
 
 - `vectorized=True` no longer fails due to shape handling
 - batched output shape is correct and finite for a realistic smoke workload
+- short seeded realistic DE with `vectorized=True` must change the objective away from the initial default value rather than immediately degenerating to all-`inf` behavior
 
 ### Stage 3: Compile A SiGe Parameter Plan
 
@@ -292,6 +382,25 @@ Implementation guidance:
 - if the existing SiGe numerical helpers are hard to batch safely, add batched helpers in the vectorized module
 - keep the scalar implementation available as a fallback until parity is established
 
+Current status of Stage 6:
+
+- a first realistic batched numerical-tail implementation is now present in `SiGe_model_vectorized.py`
+- it delivers parity, but not a CPU speedup on the realistic imec workflow
+- therefore Stage 6 should not be considered complete yet
+
+Next Stage 6 priority:
+
+- re-audit the realistic CPU batched path for any remaining structure that is vectorized only at the API level but not yet efficient in the numerical kernel
+- explicitly inspect:
+  - per-layer Python control flow in the form-factor accumulation
+  - temporary array creation volume
+  - reuse of cached dataset invariants
+  - whether the current batched kernel is memory-bandwidth bound rather than Python-overhead bound
+- only after that audit should the team decide whether the next CPU step is:
+  - further NumPy kernel restructuring
+  - a compiled CPU kernel
+  - or shifting priority to the GPU numerical tail
+
 ### Stage 7: Integrate With Realistic DE And Public Exports
 
 Once batched SiGe evaluation is numerically stable:
@@ -328,6 +437,8 @@ Correct testing stance:
 - use incumbent scalar SiGe as the oracle
 - use trapezoid vectorized logic as the pattern
 - validate SiGe batching against realistic SiGe workflows, not only synthetic arrays
+- treat the realistic ellipse-layer workflow as the primary CPU-vectorization benchmark surface
+- treat `curved_sides` as an explicit fallback case until there is a dedicated vectorized implementation
 
 ## Recommended Test Matrix For The CPU Vectorized Phase
 
@@ -356,6 +467,84 @@ Add tests in at least these groups:
    - objective evaluation does not mutate persistent model state
    - realistic imported-data workflow stays package-native
 
+6. performance benchmarks
+   - keep these in the realistic harness, not in unit-test-only synthetic fixtures
+   - measure both objective throughput and optimizer wall time
+   - use seeded DE so scalar and vectorized runs consume comparable candidate streams
+
+Recommended CPU-vectorized benchmark pair:
+
+1. objective throughput benchmark
+   - file: `src/cdsaxs/Fitting/optimization_sige_realistic.py`
+   - build a deterministic candidate matrix near the realistic default vector
+   - run scalar incumbent candidate-by-candidate
+   - run vectorized candidate batches with the same candidate matrix
+   - report:
+     - batch size
+     - total candidates
+     - wall time
+     - candidates per second
+     - max absolute GF difference versus scalar oracle
+   - suggested batch ladder for CPU bring-up:
+     - `1, 4, 8, 16, 32`
+
+2. fixed-generation differential evolution timing
+   - file: `src/cdsaxs/Fitting/optimization_sige_realistic.py`
+   - compare:
+     - incumbent scalar path: `vectorized=False`
+     - candidate CPU-vectorized path: `vectorized=True`
+   - keep the workload fixed with:
+     - realistic imec SiGe harness
+     - `seed=1234`
+     - `maxiter=2`
+     - `popsize=4`
+     - `polish=False`
+     - `tol=0.0`
+     - `updating='deferred'`
+   - report:
+     - elapsed seconds
+     - final `GF`
+     - number of parameters
+     - implied population size
+     - estimated objective evaluations
+   - the fixed-generation DE benchmark should be marked slow and used as a benchmark gate, not a default smoke test
+
+Current measured realistic results from the implemented CPU-vectorized path:
+
+- objective throughput, scalar versus CPU-vectorized candidate model:
+  - batch `1`: about `1.01x`
+  - batch `4`: about `0.97x`
+  - batch `8`: about `0.97x`
+  - batch `16`: about `0.98x`
+  - batch `32`: about `0.97x`
+- fixed-generation realistic DE timing with:
+  - `seed=1234`
+  - `maxiter=2`
+  - `popsize=4`
+  - `polish=False`
+  - `tol=0.0`
+  - `updating='deferred'`
+  - result:
+    - scalar CPU: about `9.21 s`
+    - current CPU-vectorized path: about `9.88 s`
+    - speedup: about `0.93x`
+    - final `GF` matched exactly
+
+Decision rule for keeping the CPU-vectorized SiGe path:
+
+- first gate: correctness
+  - vectorized DE must produce finite `GF`
+  - vectorized objective batches must match scalar oracle within agreed tolerance
+- second gate: speed
+  - the vectorized path should beat the scalar incumbent on the realistic harness at batch sizes that actually occur in DE
+  - if the DE timing does not improve materially after interface correctness is fixed, move next to profiling before writing GPU code
+- current status against the speed gate:
+  - not yet passed
+  - current realistic DE timing is still slower than scalar CPU
+- practical initial success criterion:
+  - at least parity on fixed-generation DE wall time after PR1
+  - clear speedup in objective throughput after batched preprocessing lands
+
 ## Suggested First Implementation Slice
 
 If resuming from a new context, the first code slice should be:
@@ -363,7 +552,8 @@ If resuming from a new context, the first code slice should be:
 1. add `optimization_sige_realistic.py`
 2. add `SiGe_model_vectorized.py` as a new class that initially wraps scalar logic cleanly
 3. make 2D input return a real GF vector, even if implemented by looping internally
-4. add parity and shape tests
+4. add parity, shape, and realistic performance benchmarks
+5. keep the first implementation explicitly scoped to the realistic ellipse-layer workflow and leave `curved_sides` on scalar fallback
 
 This is the smallest change set that unlocks real vectorized optimizer integration without committing too early to a complex kernel design.
 

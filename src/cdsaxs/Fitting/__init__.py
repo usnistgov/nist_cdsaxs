@@ -11,6 +11,8 @@ from .Trapezoid_model_dean_gpu import (
     TrapezoidModelDeanGPUFused,
 )
 from .SiGe_model import SiGeModel, SiGeModelArray
+from .SiGe_model_vectorized import SiGeModel_vectorized, SiGeModelArray_vectorized
+from .SiGe_model_vectorized_GPU import SiGeModel_vectorized_GPU, SiGeModelArray_vectorized_GPU
 from .Cylinder_model import CylinderModel
 
 from .accelerated_models import (
@@ -74,6 +76,21 @@ from .dean_optimization_trapezoid_realistic import (
     run_realistic_sweep_replay_smoke,
     run_realistic_vectorized_mcmc_eval_budget_profile,
 )
+from .optimization_sige_realistic import (
+    build_realistic_sige_candidate_matrix,
+    build_realistic_sige_model,
+    compare_realistic_sige_de_timing,
+    compare_realistic_sige_gpu_de_timing,
+    compare_realistic_sige_gpu_objective_throughput,
+    compare_realistic_sige_objective_throughput,
+    describe_realistic_sige_profile,
+    evaluate_realistic_sige_batched_objective,
+    evaluate_realistic_sige_scalar_objective,
+    get_realistic_sige_data_path,
+    get_realistic_sige_model_params,
+    get_sige_parameter_names_and_defaults,
+    run_realistic_sige_de_timing,
+)
 
 from .cython_integration import (
     enable_cython,
@@ -122,6 +139,10 @@ __all__ = [
     "TrapezoidModelDeanGPUFused",
     "SiGeModel",
     "SiGeModelArray",
+    "SiGeModel_vectorized",
+    "SiGeModelArray_vectorized",
+    "SiGeModel_vectorized_GPU",
+    "SiGeModelArray_vectorized_GPU",
     "CylinderModel",
     "AcceleratedTrapezoidModel",
     "AcceleratedCylinderModel",
@@ -171,6 +192,19 @@ __all__ = [
     "run_realistic_optimizer_profile",
     "run_realistic_sweep_replay_smoke",
     "run_realistic_vectorized_mcmc_eval_budget_profile",
+    "build_realistic_sige_candidate_matrix",
+    "build_realistic_sige_model",
+    "compare_realistic_sige_de_timing",
+    "compare_realistic_sige_gpu_de_timing",
+    "compare_realistic_sige_gpu_objective_throughput",
+    "compare_realistic_sige_objective_throughput",
+    "describe_realistic_sige_profile",
+    "evaluate_realistic_sige_batched_objective",
+    "evaluate_realistic_sige_scalar_objective",
+    "get_realistic_sige_data_path",
+    "get_realistic_sige_model_params",
+    "get_sige_parameter_names_and_defaults",
+    "run_realistic_sige_de_timing",
     "enable_cython",
     "disable_cython",
     "cython_fallback",
