@@ -148,7 +148,7 @@ class CDSAXS_Model:
         """
         raise NotImplementedError("Subclasses must implement this method")
     
-    def importCDSAXS_GUI(self, Datafile):
+    def importCDSAXS_GUI(self, Datafile, Qx_max=None):
         """
         Imports CDSAXS data from a GUI-created file with input validation
         
@@ -156,10 +156,19 @@ class CDSAXS_Model:
         -----------
         Datafile : str
             Path to the data file (CSV format)
+        Qx_max : float, optional
+            Upper limit for Qx cut selection. Cuts with Qx > Qx_max are excluded.
+            If None (default), all Qx cuts are imported.
         """
         # Check if input variable exists and is valid
         if Datafile is None or not isinstance(Datafile, str):
             raise ValueError("Datafile must be a valid file path")
+        
+        if Qx_max is not None:
+            try:
+                Qx_max = float(Qx_max)
+            except (TypeError, ValueError):
+                raise ValueError("Qx_max must be a numeric value or None")
         
         # Check if file exists
         if not os.path.isfile(Datafile):
@@ -178,7 +187,6 @@ class CDSAXS_Model:
             if num_columns < 2:
                 raise ValueError("Data must have at least 2 columns")
                 
-            numbercuts = num_columns // 2
             headers = Data.columns.tolist()
             
             # Extract qx values from headers
@@ -196,6 +204,17 @@ class CDSAXS_Model:
             # Check if we found any qx values
             if not qxlist:
                 raise ValueError("No qx values found in headers")
+            
+            # Filter qx cuts using optional upper limit
+            if Qx_max is not None:
+                selected_cut_indices = [i for i, qx in enumerate(qxlist) if qx <= Qx_max]
+                if not selected_cut_indices:
+                    raise ValueError(f"No qx cuts found with qx <= {Qx_max}")
+                qxlist = [qxlist[i] for i in selected_cut_indices]
+            else:
+                selected_cut_indices = list(range(len(qxlist)))
+            
+            numbercuts = len(selected_cut_indices)
                 
             # Convert to numpy array
             Data1 = Data.to_numpy()
@@ -205,11 +224,13 @@ class CDSAXS_Model:
             self.Intensity = np.zeros([data_rows, numbercuts])
             self.Qz = np.zeros([data_rows, numbercuts])
             
-            # Fill arrays with data
-            for i in range(0, numbercuts):
-                if (i*2+1) < num_columns:  # Check if column exists
-                    self.Intensity[:,i] = Data1[:,(i*2+1)]
-                    self.Qz[:,i] = Data1[:,(i*2)]
+            # Fill arrays with selected data cuts
+            for out_idx, src_idx in enumerate(selected_cut_indices):
+                qz_col = src_idx * 2
+                intensity_col = src_idx * 2 + 1
+                if intensity_col < num_columns:  # Check if column exists
+                    self.Intensity[:, out_idx] = Data1[:, intensity_col]
+                    self.Qz[:, out_idx] = Data1[:, qz_col]
             
             # Create Qx array
             self.Qx = self.Qz.copy()
