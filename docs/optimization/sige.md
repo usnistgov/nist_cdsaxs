@@ -159,6 +159,84 @@ Most important interpretation:
   - emphasize optimizer trajectory and final-fit equivalence, not only isolated candidate-evaluation parity
   - keep the existing candidate-evaluation timing harness as support tooling rather than the main scientific gate
 
+## Current Convergence Plan
+
+The active scientific gate is now a practical workflow convergence report, not a raw throughput microbenchmark.
+
+Scope for the current pass:
+
+- compare only:
+  - scalar CPU: `SiGeModelArray`
+  - current GPU vectorized default: `SiGeModelArray_vectorized_GPU`
+- keep the realistic imec ellipse-stack workflow and the current DE settings shape
+- use matched seeds and matched optimizer settings
+- judge success primarily by fit quality, with speed as the secondary outcome
+
+Concrete deliverables:
+
+- a package-native manual harness in `src/cdsaxs/Fitting/optimization_sige_realistic.py`
+- one ignored-space report bundle under `dev_workspace/sige_convergence/`
+- machine-readable output:
+  - per-run CSV
+  - JSON summary
+- human-readable plots:
+  - convergence summary across DE budgets
+  - representative best-so-far objective trajectory
+  - representative fit overlay showing experimental data, scalar CPU fit, and GPU vectorized fit
+
+Required measurements:
+
+- final `GF`
+- final `BIC`
+- wall time
+- GPU execution path and any fallback/exception status
+- matched-seed absolute `GF` difference between scalar CPU and GPU vectorized
+
+Required report structure:
+
+- sweep a practical DE budget ladder by varying `maxiter` while keeping `popsize=4`
+- repeat each budget over multiple seeds
+- summarize:
+  - median final `GF`
+  - best final `GF`
+  - median wall time
+  - median GPU speedup
+- choose a representative matched-seed run from the largest DE budget and save the actual fit comparison plot
+
+Acceptance criteria:
+
+- every GPU run must stay finite
+- the GPU path must remain on the kept resident path, not a silent CPU fallback
+- final GPU fit quality must match scalar CPU within floating-point noise for matched seeds and settings
+- the saved fit plot must show a scientifically acceptable fit, not only a timing result
+
+GPU tuning policy for this pass:
+
+- tune only the current kept GPU default path
+- prioritize practical DE wall time over isolated kernel microbenchmarks
+- treat thread-block tuning as the main adjustable default on the kept raw-kernel path
+- do not spend effort on memory-constrained compromises; the target hardware has large GPU headroom
+
+Current kept tuning result:
+
+- keep `SiGeModelArray_vectorized_GPU` on the raw-kernel `4d` path
+- keep the loop path only as an opt-in fallback/reference
+- current tuned raw-kernel launch default: `32` threads
+
+## Documented Next Step
+
+The next user-facing deliverable should be a new SiGe fitting notebook that follows the style and structure of:
+
+- `examples/fitting_examples/CDSAXS_DeRocher_V4.ipynb`
+
+Requirements for that notebook:
+
+- use the realistic package-native SiGe workflow rather than private ad hoc helpers
+- demonstrate easy model construction, data import, and `CDSAXS_Optimize(...)` use
+- show the tuned GPU vectorized path alongside the scalar CPU incumbent
+- include the measured speedup and final-fit comparison in the notebook itself
+- keep the practical workflow shape recognizable to an end user
+
 Key code anchors for resumption:
 
 - `src/cdsaxs/Fitting/CDSAXS_base_model.py`

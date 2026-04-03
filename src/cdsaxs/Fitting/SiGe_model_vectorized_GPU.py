@@ -139,7 +139,7 @@ class SiGeModelArray_vectorized_GPU(SiGeModelArray_vectorized):
         self._vectorized_gpu_layer_algorithm = "4d"
         self._vectorized_gpu_4d_layer_tile = 13
         self._vectorized_gpu_4d_candidate_tile = 32
-        self._vectorized_gpu_rawkernel_threads = 128
+        self._vectorized_gpu_rawkernel_threads = 32
         self._vectorized_last_execution_path = None
         self._vectorized_last_gpu_exception = None
 

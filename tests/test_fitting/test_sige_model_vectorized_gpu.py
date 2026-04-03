@@ -1,5 +1,6 @@
 import copy
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -11,6 +12,7 @@ from cdsaxs.Fitting.optimization_sige_realistic import (
     build_realistic_sige_model,
     compare_realistic_sige_gpu_de_timing,
     compare_realistic_sige_gpu_objective_throughput,
+    run_realistic_sige_convergence_suite,
 )
 
 try:
@@ -135,3 +137,24 @@ def test_sige_gpu_de_smoke_matches_cpu_vectorized_physics():
     assert math.isfinite(comparison["baseline"]["gf"])
     assert math.isfinite(comparison["candidate"]["gf"])
     assert comparison["absolute_gf_difference"] < 1e-6
+
+
+@pytest.mark.skipif(not _gpu_available(), reason="Requires CuPy with a visible CUDA GPU.")
+def test_sige_cpu_vs_gpu_convergence_suite_writes_report(tmp_path):
+    report = run_realistic_sige_convergence_suite(
+        seeds=(1234,),
+        maxiters=(1,),
+        popsize=2,
+        tol=0.5,
+        polish=False,
+        output_dir=tmp_path,
+        report_name="smoke",
+    )
+
+    assert len(report["results"]) == 1
+    assert len(report["budget_summaries"]) == 1
+    assert report["budget_summaries"][0]["median_speedup"] > 0
+    assert Path(report["summary_json_path"]).is_file()
+    assert Path(report["results_csv_path"]).is_file()
+    assert Path(report["representative"]["fit_plot_path"]).is_file()
+    assert Path(report["representative"]["summary_plot_path"]).is_file()

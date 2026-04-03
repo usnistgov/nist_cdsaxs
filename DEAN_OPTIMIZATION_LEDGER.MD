@@ -108,6 +108,142 @@ Once a candidate shows meaningful speedup:
 
 ## Experiment Entries
 
+### 2026-04-03 / SiGe / Convergence Harness And GPU-Only Tuning Canvas
+
+- area: SiGe realistic optimizer validation and tuning
+- candidate: package-native convergence/report harness plus GPU tuning sweep in `optimization_sige_realistic.py`
+- status: kept
+
+Motivation:
+
+- the active SiGe question had moved from raw kernel throughput to practical fitting utility
+- the comparison needed to emphasize fit quality and optimizer behavior on the realistic workflow
+- the user explicitly wanted:
+  - a good actual fit with a saved plot in ignored space
+  - CPU scalar versus current GPU vectorized comparison
+  - GPU tuning without spending more time rerunning the scalar reference
+
+Files touched:
+
+- `DEAN_OPTIMIZATION.md`
+- `DEAN_OPTIMIZATION_LEDGER.MD`
+- `docs/optimization/sige.md`
+- `src/cdsaxs/Fitting/SiGe_model_vectorized_GPU.py`
+- `src/cdsaxs/Fitting/__init__.py`
+- `src/cdsaxs/Fitting/optimization_sige_realistic.py`
+- `tests/test_fitting/test_sige_model_vectorized_gpu.py`
+
+Benchmark protocol:
+
+- env: `cdsaxs-dev`
+- realistic dataset: `SMI_imec_nsh_d24b_D260126_T104543_reduced_results.csv`
+- practical workflow notebook inspected:
+  - `/resdata/DeLongchamp/scratchdisk/nist_cdsaxs_sige/CDSAXS_imec_d24_DFS1_ModelV2.ipynb`
+  - practical DE call found there:
+    - `optimizer='differential_evolution'`
+    - `workers=workers`
+    - `maxiter=2000`
+    - `tol=0.001`
+    - `popsize=100`
+- fixed scalar reference reused instead of rerunning scalar during tuning:
+  - source artifact:
+    - `dev_workspace/sige_convergence_proposal/realistic_fit_compare_seed1234_iter3_pop4.json`
+  - frozen scalar reference:
+    - elapsed: about `12.227 s`
+    - `GF`: `3890.4134977212957`
+    - `BIC`: `4300.6201664868095`
+- GPU-only tuning canvas:
+  - report dir:
+    - `dev_workspace/sige_convergence/gpu_tuning_fixed_scalar_canvas/`
+  - kept algorithm family:
+    - raw-kernel `4d`
+  - loop path retained as opt-in comparison
+  - thread sweep:
+    - `32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256, 384, 512`
+  - practical DE-shaped objective batch:
+    - `104` candidates from `popsize=4` and `26` active parameters
+  - DE timing config used for GPU tuning:
+    - `seed=1234`
+    - `maxiter=3`
+    - `popsize=4`
+    - `tol=0.0`
+    - `polish=False`
+    - `updating='deferred'`
+- targeted verification:
+  - `pytest -q tests/test_fitting/test_sige_model_vectorized.py tests/test_fitting/test_optimization_sige_realistic.py tests/test_fitting/test_sige_model_vectorized_gpu.py`
+
+Results:
+
+- new package-native harness capabilities landed:
+  - report-directory creation in ignored space
+  - JSON and CSV result export
+  - representative fit overlay plotting
+  - convergence-summary plotting
+  - optional callback capture for representative trajectory plots
+  - GPU config helpers and fixed-scalar GPU tuning canvas
+- actual saved fit artifact from the realistic workflow:
+  - `dev_workspace/sige_convergence_proposal/realistic_fit_compare_seed1234_iter3_pop4.png`
+- first matched-seed practical-harness CPU versus GPU check:
+  - scalar CPU:
+    - about `12.23 s`
+    - `GF`: `3890.4135`
+  - GPU vectorized:
+    - about `0.244 s`
+    - `GF`: `3890.4135`
+    - execution path: `gpu_resident_4d`
+  - absolute `GF` difference: `0.0`
+  - speedup: about `50.19x`
+- initial GPU tuning sweep with scalar rerun still in the loop:
+  - report dir:
+    - `dev_workspace/sige_convergence/gpu_tuning_predefault/`
+  - best candidate there:
+    - `4d_threads_64`
+    - GPU DE wall time: about `0.1862 s`
+    - objective throughput: about `3149.83` candidates/s
+- final GPU-only tuning canvas with fixed scalar reference:
+  - report dir:
+    - `dev_workspace/sige_convergence/gpu_tuning_fixed_scalar_canvas/`
+  - best candidate:
+    - `4d_threads_32`
+    - objective throughput: about `4318.11` candidates/s
+    - GPU DE wall time: about `0.15810 s`
+    - speedup versus frozen scalar reference: about `77.34x`
+    - execution path: `gpu_resident_4d`
+    - absolute `GF` difference versus frozen scalar reference: `0.0`
+  - close followers:
+    - `4d_threads_96`
+      - about `4275.45` candidates/s
+      - about `0.15860 s`
+      - about `77.09x`
+    - `4d_threads_64`
+      - about `4089.99` candidates/s
+      - about `0.16032 s`
+      - about `76.27x`
+  - opt-in loop reference:
+    - about `2557.35` candidates/s
+    - about `0.19090 s`
+    - about `64.05x`
+- code default updated:
+  - `_vectorized_gpu_rawkernel_threads` moved from `128` to `32`
+- tests:
+  - `16 passed`
+
+Outcome:
+
+- keep
+- treat `4d` raw-kernel plus `32` threads as the current realistic SiGe GPU default
+
+Notes:
+
+- the long multi-seed scalar-versus-GPU convergence ladder was started once and intentionally aborted after the user clarified that scalar should not be rerun
+- the final kept tuning canvas therefore respects the clarified measurement policy:
+  - scalar reference frozen
+  - GPU-only tuning completed
+- next documented user-facing step:
+  - build a new SiGe fitting notebook in the style of `examples/fitting_examples/CDSAXS_DeRocher_V4.ipynb`
+  - demonstrate package-native ease of use plus the measured GPU speedup
+  - this notebook was explicitly deferred in this session and recorded only as the next step
+
 ### 2026-04-02 / SiGe / Rejected Full-4D NumPy Layer Reduction
 
 - area: SiGe realistic CPU kernel

@@ -77,6 +77,7 @@ from .dean_optimization_trapezoid_realistic import (
     run_realistic_vectorized_mcmc_eval_budget_profile,
 )
 from .optimization_sige_realistic import (
+    apply_realistic_sige_gpu_config,
     build_realistic_sige_candidate_matrix,
     build_realistic_sige_model,
     compare_realistic_sige_de_timing,
@@ -87,9 +88,12 @@ from .optimization_sige_realistic import (
     evaluate_realistic_sige_batched_objective,
     evaluate_realistic_sige_scalar_objective,
     get_realistic_sige_data_path,
+    get_realistic_sige_gpu_config,
     get_realistic_sige_model_params,
     get_sige_parameter_names_and_defaults,
+    run_realistic_sige_convergence_suite,
     run_realistic_sige_de_timing,
+    run_realistic_sige_gpu_tuning_sweep,
 )
 
 from .cython_integration import (
@@ -192,6 +196,7 @@ __all__ = [
     "run_realistic_optimizer_profile",
     "run_realistic_sweep_replay_smoke",
     "run_realistic_vectorized_mcmc_eval_budget_profile",
+    "apply_realistic_sige_gpu_config",
     "build_realistic_sige_candidate_matrix",
     "build_realistic_sige_model",
     "compare_realistic_sige_de_timing",
@@ -202,9 +207,12 @@ __all__ = [
     "evaluate_realistic_sige_batched_objective",
     "evaluate_realistic_sige_scalar_objective",
     "get_realistic_sige_data_path",
+    "get_realistic_sige_gpu_config",
     "get_realistic_sige_model_params",
     "get_sige_parameter_names_and_defaults",
+    "run_realistic_sige_convergence_suite",
     "run_realistic_sige_de_timing",
+    "run_realistic_sige_gpu_tuning_sweep",
     "enable_cython",
     "disable_cython",
     "cython_fallback",
