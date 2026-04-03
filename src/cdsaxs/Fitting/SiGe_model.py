@@ -834,7 +834,10 @@ class SiGeModelArray(CDSAXS_Model):
     
     def initialize_optimization_params(self, param_limits=None):
         """
-        Initialize optimization parameters with bounds including SLD support.
+        Initialize optimization parameters with bounds.
+
+        Background (Bk / Bk_i) and layer SLDs (sld_i) are fixed unless added
+        explicitly to the optimization dictionary with min/max bounds.
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
@@ -846,9 +849,7 @@ class SiGeModelArray(CDSAXS_Model):
         param_limits = self._merge_inline_bounds_into_optimization(param_limits)
             
         # Create default limits if not provided
-        auto_generated = False
         if not param_limits:
-            auto_generated = True
             param_limits = {}
             
             # Add trapezoid parameters (design-level when available; otherwise current trapezoids)
@@ -910,21 +911,6 @@ class SiGeModelArray(CDSAXS_Model):
                 'max': self.I0 * 1.1,
                 'default': self.I0
             }
-            
-            # Add background parameters (one per column if array)
-            if isinstance(self.Bk, np.ndarray):
-                for i, bk_val in enumerate(self.Bk):
-                    param_limits[f'Bk_{i}'] = {
-                        'min': bk_val * 0.9,
-                        'max': bk_val * 1.1,
-                        'default': bk_val
-                    }
-            else:
-                param_limits['Bk'] = {
-                    'min': self.Bk * 0.9,
-                    'max': self.Bk * 1.1,
-                    'default': self.Bk
-                }
         else:
             # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
@@ -941,19 +927,6 @@ class SiGeModelArray(CDSAXS_Model):
                             print(f"WARNING: Could not get current value for {param}, using range midpoint: {default_value}")
                         else:
                             raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
-        
-        # Add SLD parameters only when auto-generating a full default optimization set.
-        # If the user provided explicit bounds (either via param_limits or inline *_bounds),
-        # we do NOT implicitly add extra optimizable parameters.
-        if auto_generated and hasattr(self, 'sld_values'):
-            for i, sld_val in enumerate(self.sld_values):
-                param_name = f'sld_{i}'
-                if param_name not in param_limits:
-                    param_limits[param_name] = {
-                        'min': max(0.1, sld_val * 0.5),
-                        'max': sld_val * 2.0,
-                        'default': sld_val
-                    }
         
         # Update stored optimization parameters
         self.model_params['optimization'] = param_limits

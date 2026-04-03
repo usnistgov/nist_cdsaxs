@@ -240,7 +240,12 @@ class TrapezoidModelArray(CDSAXS_Model):
     
     def initialize_optimization_params(self, param_limits=None):
         """
-        Initialize optimization parameters with bounds including SLD support.
+        Initialize optimization parameters with bounds.
+
+        By default, trapezoid widths/heights plus DW and I0 are optimizable.
+        Background (Bk or Bk_i) and layer SLDs (sld_i) are fixed unless you
+        add them to ``param_limits`` or ``model_params['optimization']`` with
+        explicit min/max bounds.
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
@@ -275,21 +280,6 @@ class TrapezoidModelArray(CDSAXS_Model):
                 'max': self.I0 * 1.1,
                 'default': self.I0
             }
-            
-            # Add background parameters (one per column if array)
-            if isinstance(self.Bk, np.ndarray):
-                for i, bk_val in enumerate(self.Bk):
-                    param_limits[f'Bk_{i}'] = {
-                        'min': bk_val * 0.9,
-                        'max': bk_val * 1.1,
-                        'default': bk_val
-                    }
-            else:
-                param_limits['Bk'] = {
-                    'min': self.Bk * 0.9,
-                    'max': self.Bk * 1.1,
-                    'default': self.Bk
-                }
         else:
             # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
@@ -306,20 +296,6 @@ class TrapezoidModelArray(CDSAXS_Model):
                             print(f"WARNING: Could not get current value for {param}, using range midpoint: {default_value}")
                         else:
                             raise ValueError(f"Cannot determine default value for parameter {param}: {str(e)}")
-        
-        # Add SLD parameters - they're treated just like other parameters
-        if hasattr(self, 'sld_values'):
-            for i, sld_val in enumerate(self.sld_values):
-                param_name = f'sld_{i}'
-                
-                # Only add to optimization if not already specified
-                if param_name not in param_limits:
-                    # Set reasonable default bounds for SLD values
-                    param_limits[param_name] = {
-                        'min': max(0.1, sld_val * 0.5),  # Positive SLD with 50% range
-                        'max': sld_val * 2.0,
-                        'default': sld_val
-                    }
         
         # Update stored optimization parameters
         self.model_params['optimization'] = param_limits

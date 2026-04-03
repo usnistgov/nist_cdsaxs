@@ -464,12 +464,6 @@ class CDSAXS_Model:
                 'max': self.I0 * 1.1,
                 'default': self.I0
             }
-            
-            param_limits['Bk'] = {
-                'min': self.Bk * 0.9,
-                'max': self.Bk * 1.1,
-                'default': self.Bk
-            }
         else:
             # Ensure default values are set if not provided
             for param, limits in param_limits.items():
