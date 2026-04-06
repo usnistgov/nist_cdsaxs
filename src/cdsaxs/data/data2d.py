@@ -856,6 +856,35 @@ class Data2D(DataImage):
             overwrite=True)
         self.scale_by_metadata("sample_size_factor")
 
+    def apply_lorentz_correction(self, polarization):
+        """
+        Apply a Lorenz correction to the measured data. This will
+        divide the intensity by the Lorentz factor.
+
+        Parameters
+        ----------
+        polarization : str
+            Specify whether the system is p-polarized or s-polarized.
+            Accepted strings are "p" and "s".
+        """
+        # check that we know q so that we know scattering angle
+        if self.qb is None:
+            raise ValueError(
+                "This correction requires the scattering angle. "
+                "Currently, there is insufficient metadata to calculate "
+                "the Lorentz factor. Make sure that the scattering vector "
+                "qb is calculated and not None."
+            )
+
+        wavelength_nm = self.metadata["wavelength_nm"]
+        theta_deg = diffraction.calculate_theta(self.qb, wavelength_nm)
+        lorentz = calculators.lorentz_factor(theta_deg, polarization)
+
+        self.update_metadata({
+            "lorentz_factor": float(lorentz)},
+            overwrite=True)
+        self.normalize_by_metadata("lorentz_factor")
+
     def apply_substrate_absorption_correction(self):
         """
         Applies a correction due to substrate absorption as a scaling

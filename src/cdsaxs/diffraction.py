@@ -475,6 +475,31 @@ def detector_px_to_qbyxz(
     return qb, qby, qbx, qbz, center_px_beam, center_px_detector
 
 
+def calculate_theta(q, wavelength_nm):
+    """
+    Calculate the scattering angle, theta, from the scattering vector, q,
+    and the wavelength.
+
+    Parameters
+    ----------
+    q : float | NDArray
+        Scattering vector in inverse Angstroms.
+    wavelength_nm : float
+        Source wavelength in nanometers.
+
+    Returns
+    -------
+    float
+        Scattering angle in degrees. Will only return angles
+        between -90 degrees and +90 degrees.
+    """
+
+    theta_rad = 2*np.arcsin(q*(wavelength_nm*10)/(4*np.pi))
+    theta_deg = np.rad2deg(theta_rad)
+
+    return theta_deg
+
+
 def calculate_q(theta_deg, wavelength_nm):
     """
     Calculate the scattering vector q given a full scattering angle
