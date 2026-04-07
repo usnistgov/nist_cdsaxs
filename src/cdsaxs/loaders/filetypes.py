@@ -130,6 +130,10 @@ def read_als_11_0_1_2(filepath):
     Load an image and metadata from data collected at beamline 11.0.1.2
     at ALS.
 
+    CAUTION: This loader assumes data collected in 2025 or earlier
+    uses a detector with a 27 um pixel size. Any data collected in
+    2026 or later is assumed to have a pixel size of 9 um.
+
     Parameters
     ----------
     filepath : str, path
@@ -163,7 +167,11 @@ def read_als_11_0_1_2(filepath):
     metadata['CCD Y'] = header['CCD Y']
     metadata['epu_polarization'] = header['EPU Polarization']
     metadata['beam_stop_position'] = header['Beam Stop']
-    metadata['pixel_size_um'] = 27
+    date = header['DATE']
+    if float(date[:4]) <= 2025:
+        metadata['pixel_size_um'] = 27
+    else:
+        metadata['pixel_size_um'] = 9
 
     return image, filepath, metadata
 
