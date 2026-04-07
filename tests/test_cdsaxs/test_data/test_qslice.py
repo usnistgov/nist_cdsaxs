@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from cdsaxs.data.reduced_data1d import QSlice
+from cdsaxs.data.reduced_data1d import ReducedData1D
 
 
 class TestIntegratedQSlice(unittest.TestCase):
@@ -31,7 +31,7 @@ class TestIntegratedQSlice(unittest.TestCase):
         self.image_mask = np.isnan(self.image_roi)
         self.background = 1
 
-        self.qslice = QSlice(
+        self.qslice = ReducedData1D(
             q=self.q,
             Iq=self.Iq,
             q_axis=self.q_axis,
@@ -71,7 +71,7 @@ class TestIntegratedQSlice(unittest.TestCase):
     def test_init_bad_inputs(self):
 
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=[1],
                 q_axis=self.q_axis,
@@ -87,7 +87,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis='no',
@@ -103,7 +103,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -119,7 +119,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -135,7 +135,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -151,7 +151,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -167,7 +167,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -183,7 +183,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -199,7 +199,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,
@@ -215,7 +215,7 @@ class TestIntegratedQSlice(unittest.TestCase):
                 dIq=self.dIq
             )
         with self.assertRaises(ValueError):
-            QSlice(
+            ReducedData1D(
                 q=self.q,
                 Iq=self.Iq,
                 q_axis=self.q_axis,

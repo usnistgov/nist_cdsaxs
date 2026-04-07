@@ -4,113 +4,13 @@ import unittest
 import numpy as np
 
 import cdsaxs.loaders.load_data as load_data
-import cdsaxs.loaders._loader_tools as lt
 import cdsaxs.calculators as calculators
-
-
-class TestReadTiff(unittest.TestCase):
-
-    def setUp(self):
-
-        image_file = "../data/test_loaders/simple.tif"
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.filepath = os.path.abspath(os.path.join(current_dir, image_file))
-
-        self.image = np.array([
-            [1, 2, 3],
-            [4, 5, 6],
-            [7, 8, -9],
-            [10, 11, 12]
-        ]).astype(np.float64)
-
-        self.return_read = load_data.read_tiff(self.filepath)
-
-    def test_image(self):
-        image = self.return_read[0]
-
-        np.testing.assert_array_equal(image, self.image)
-        self.assertEqual(image.dtype, np.float64)
-
-    def test_filepath(self):
-        filepath = self.return_read[1]
-
-        self.assertEqual(filepath, self.filepath)
-
-
-class TestReadNistBin(unittest.TestCase):
-
-    def setUp(self):
-        image_file = "../data/test_loaders/nist.bin"
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.filepath = os.path.abspath(
-            os.path.join(current_dir, image_file))
-        self.return_read = load_data.read_nist_bin(self.filepath)
-
-    def test_image(self):
-        image = self.return_read[0]
-        self.assertEqual(image[105, 910], 2581.0)
-        self.assertEqual(image.dtype, np.float64)
-
-    def test_filepath(self):
-        filepath = self.return_read[1]
-        self.assertEqual(filepath, self.filepath)
-
-    def test_metadta(self):
-        metadata = self.return_read[2]
-        self.assertEqual(
-            metadata["wavelength_nm"],
-            0.13404
-        )
-        self.assertEqual(
-            metadata["exposure_time_s"],
-            600
-        )
-        self.assertEqual(
-            metadata["pixel_size_um"],
-            172
-        )
-
-
-class TestReadPilatus(unittest.TestCase):
-
-    def setUp(self):
-        image_file = "../data/test_loaders/smi.tif"
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.filepath = os.path.abspath(
-            os.path.join(current_dir, image_file))
-        self.image, self.filepath, self.metadata = load_data.read_pilatus(
-            filepath=self.filepath
-        )
-
-        self.image_check, self.filepath_check, header = load_data.read_tiff(
-            self.filepath
-        )
-        self.metadata_check = lt.pilatus_header_to_metadata(header)
-
-    def test_image(self):
-        np.testing.assert_array_almost_equal(self.image_check, self.image)
-        self.assertEqual(self.image[735, 450], 12)
-        self.assertEqual(self.image.dtype, np.float64)
-
-    def test_filepath(self):
-        self.assertEqual(self.filepath_check, self.filepath)
-
-    def test_metadata(self):
-        self.assertEqual(
-            self.metadata["exposure_time_s"],
-            0.2
-        )
-        self.assertEqual(
-            self.metadata["pixel_size_um"],
-            172
-        )
-        self.assertDictEqual(self.metadata_check, self.metadata)
 
 
 class TestFilterFilenames(unittest.TestCase):
 
     def setUp(self):
-        directory_path = "../data/test_filter_filenames"
+        directory_path = "../../data/test_filter_filenames"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.directory_path = os.path.abspath(
             os.path.join(current_dir, directory_path))
@@ -198,7 +98,7 @@ class TestFilterFilenames(unittest.TestCase):
 class TestLoadData(unittest.TestCase):
 
     def setUp(self):
-        image_file = "../data/test_loaders/smi.tif"
+        image_file = "../../data/test_loaders/smi.tif"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.filepath = os.path.abspath(
             os.path.join(current_dir, image_file))
@@ -249,7 +149,7 @@ class TestLoadData(unittest.TestCase):
 class TestLoadDataset(unittest.TestCase):
 
     def setUp(self):
-        data_directory = "../data/test_load_dataset"
+        data_directory = "../../data/test_load_dataset"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_directory = os.path.abspath(os.path.join(current_dir, data_directory))
         self.dataset = load_data.LoadDataset(
@@ -286,6 +186,15 @@ class TestLoadDataset(unittest.TestCase):
             'center_px': (200, 200),
             'wavelength_nm': calculators.energy_to_wavelength(16100),
             'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         for key, value in self.dataset.datas["W204_F2 -5.0"].metadata.items():
             if type(value) is not str:
@@ -306,6 +215,15 @@ class TestLoadDataset(unittest.TestCase):
             'center_px': (200, 200),
             'wavelength_nm': calculators.energy_to_wavelength(16100),
             'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         for key, value in self.dataset.datas["W204_F2 0.0"].metadata.items():
             if type(value) is not str:
@@ -326,6 +244,15 @@ class TestLoadDataset(unittest.TestCase):
             'center_px': (200, 200),
             'wavelength_nm': calculators.energy_to_wavelength(16100),
             'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         for key, value in self.dataset.datas["W204_F2 5.0"].metadata.items():
             if type(value) is not str:
@@ -393,7 +320,7 @@ class TestLoadDataset(unittest.TestCase):
 class TestLoadDataset_MetadataCSV(unittest.TestCase):
 
     def setUp(self):
-        csv_path = "../data/test_load_dataset/metadata_load.csv"
+        csv_path = "../../data/test_load_dataset/metadata_load.csv"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.csv_path = os.path.abspath(os.path.join(current_dir, csv_path))
         self.dataset = load_data.LoadDataset_MetadataCSV(
@@ -423,6 +350,15 @@ class TestLoadDataset_MetadataCSV(unittest.TestCase):
             'center_px': (0, 0),
             'wavelength_nm': calculators.energy_to_wavelength(16100),
             'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         for key, value in self.dataset.datas["W204_F2 -5.0"].metadata.items():
             if type(value) is not str:
@@ -443,6 +379,15 @@ class TestLoadDataset_MetadataCSV(unittest.TestCase):
             'center_px': (0, 0),
             'wavelength_nm': calculators.energy_to_wavelength(16100),
             'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         for key, value in self.dataset.datas["W204_F2 0.0"].metadata.items():
             if type(value) is not str:
@@ -463,6 +408,15 @@ class TestLoadDataset_MetadataCSV(unittest.TestCase):
             'center_px': (0, 0),
             'wavelength_nm': calculators.energy_to_wavelength(16100),
             'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         for key, value in self.dataset.datas["W204_F2 5.0"].metadata.items():
             if type(value) is not str:

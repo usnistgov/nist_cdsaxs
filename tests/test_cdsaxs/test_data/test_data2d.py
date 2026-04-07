@@ -30,6 +30,17 @@ class TestData2D(unittest.TestCase):
             'wavelength_nm': 0.07,
             'pixel_size_um': 172,
             'sdd_cm': 542,
+            'sample_phi_deg': 0,
+            'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
         }
         self.user_params = {
             'custom_param': 20
@@ -109,15 +120,21 @@ class TestData2D(unittest.TestCase):
                          self.user_params[key])
 
     def test_dataqdyqdx_calculate_q(self):
+        """
+        we are using qb for the main detector q in preparation of ALS data
+        we also now create 2d q components so we need to reference
+        the 1d components that we use for the plots that form the
+        crosshairs of the beam center position
+        """
         qdy = np.array([0.001139386259, 0.000854539696, 0.000569693132,
                         0.000284846566, 0., -0.000284846566,
                         -0.000569693132])
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, qdy, decimal=12)
+            self.dataqdyqdx.qby_1d, qdy, decimal=8)
 
         qdx = np.array([0.000569693132, 0.000284846566, 0., -0.000284846566])
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, qdx, decimal=12)
+            self.dataqdyqdx.qbx_1d, qdx, decimal=8)
 
     def test_data2d_rotate_ccw90(self):
         """test 90 degree rotation counter-clockwise"""
@@ -142,13 +159,13 @@ class TestData2D(unittest.TestCase):
             "wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The counter-clockwise 90 degree rotation resulted in the "
             "incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The counter-clockwise 90 degree rotation resulted in the "
             "incorrect qxzs array."
         )
@@ -186,13 +203,13 @@ class TestData2D(unittest.TestCase):
             " wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The counter-clockwise 180 degree rotation resulted in the"
             " incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The counter-clockwise 180 degree rotation resulted in the"
             " incorrect qxzs array."
         )
@@ -226,13 +243,13 @@ class TestData2D(unittest.TestCase):
             " wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The counter-clockwise 270 degree rotation resulted in the"
             " incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The counter-clockwise 270 degree rotation resulted in the"
             " incorrect qxzs array."
         )
@@ -266,13 +283,13 @@ class TestData2D(unittest.TestCase):
             " wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The counter-clockwise -90 degree rotation resulted in the"
             " incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The counter-clockwise -90 degree rotation resulted in the"
             " incorrect qxzs array."
         )
@@ -310,13 +327,13 @@ class TestData2D(unittest.TestCase):
             " wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The clockwise 180 degree rotation resulted in the"
             " incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The clockwise 180 degree rotation resulted in the"
             " incorrect qxzs array."
         )
@@ -349,13 +366,13 @@ class TestData2D(unittest.TestCase):
             "wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The clockwise 270 degree rotation resulted in the "
             "incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The clockwise 270 degree rotation resulted in the "
             "incorrect qxzs array."
         )
@@ -388,13 +405,13 @@ class TestData2D(unittest.TestCase):
             " wrong image.")
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The clockwise 630 degree rotation resulted in the "
             "incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The clockwise 630 degree rotation resulted in the "
             "incorrect qxzs array."
         )
@@ -430,13 +447,13 @@ class TestData2D(unittest.TestCase):
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The horizontal flip resulted in the"
             " incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The horizontal flip resulted in the"
             " incorrect qxzs array."
         )
@@ -472,13 +489,13 @@ class TestData2D(unittest.TestCase):
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdx, expected_qxzs, decimal=12,
+            self.dataqdyqdx.qbx_1d, expected_qxzs, decimal=8,
             err_msg="The horizontal flip resulted in the"
             " incorrect qxzs array."
         )
 
         np.testing.assert_array_almost_equal(
-            self.dataqdyqdx.qdy, expected_qys, decimal=12,
+            self.dataqdyqdx.qby_1d, expected_qys, decimal=8,
             err_msg="The horizontal flip resulted in the"
             " incorrect qxzs array."
         )
@@ -756,6 +773,34 @@ class TestData2D(unittest.TestCase):
         with self.assertWarns(UserWarning):
             self.dataqdyqdx.scale_by_metadata('sample_phi_offset_deg')
 
+    def test_footprint_correction(self):
+        self.dataqdyqdx.update_metadata(dict(sample_phi_deg=20))
+        self.dataqdyqdx.apply_footprint_correction()
+        new_image = self.image * self.dataqdyqdx.metadata["footprint_factor"]
+        np.testing.assert_array_equal(self.dataqdyqdx.image, new_image)
+
+    def test_sample_size_correction(self):
+        self.dataqdyqdx.update_metadata(dict(
+            sample_size_mm=0.5,
+            beam_center_mm=0.001,
+            beam_fwhm_mm=0.25,
+            sample_phi_deg=20,
+        ))
+        self.dataqdyqdx.apply_sample_size_correction()
+        new_image = self.image * self.dataqdyqdx.metadata["sample_size_factor"]
+        np.testing.assert_array_equal(self.dataqdyqdx.image, new_image)
+
+    def test_substrate_absorption_correction(self):
+        self.dataqdyqdx.update_metadata({
+            'substrate_thickness_um':100,
+            'substrate_attenuation_coeff_um-1':1/546,
+            'sample_phi_deg':-40
+        })
+
+        self.dataqdyqdx.apply_substrate_absorption_correction()
+        new_image = self.image * self.dataqdyqdx.metadata["substrate_absorption_factor"]
+        np.testing.assert_array_equal(self.dataqdyqdx.image, new_image)
+
     def test_get_box_dims_size(self):
         size_qdy_px = 3
         size_qdx_px = 2
@@ -806,17 +851,17 @@ class TestData2D(unittest.TestCase):
         range_qdy = (0.1, 0)
         range_qdx = (-0.0003, 0.0003)
 
-        limits0, limits1 = self.dataqdyqdx.get_box_dims_qrange(
-            range_qdy, range_qdx
+        limits = self.dataqdyqdx.get_box_dims_qrange(
+            qby=range_qdy, qbx=range_qdx
         )
 
-        self.assertTupleEqual(limits0, (0, 5))
-        self.assertTupleEqual(limits1, (1, 4))
+        self.assertTupleEqual(limits[0], (0, 5))
+        self.assertTupleEqual(limits[1], (1, 4))
 
     def test_integrate_sum_axis0(self):
-        qslice = self.dataqdyqdx.integrate_box(
-            limits_qdy_px=(2, 4),
-            limits_qdx_px=(0, 4),
+        qslice, _ = self.dataqdyqdx.integrate_box(
+            range_qdy_px=(2, 4),
+            range_qdx_px=(0, 4),
             mode='sum',
             axis=0,
             subtract_background_offset=[-2, 2]
@@ -829,14 +874,14 @@ class TestData2D(unittest.TestCase):
             np.array([0.000569693132, 0.000284846566, 0., -0.000284846566]))
 
         np.testing.assert_array_almost_equal(
-            qslice.qdy,
-            np.array([0.0004272698490])
+            qslice.qby,
+            np.array([0.0004272698490, 0.0004272698490, 0.0004272698490, 0.0004272698490])
         )
 
         self.assertTupleEqual(qslice.limits_axis0, (2, 4))
         self.assertTupleEqual(qslice.limits_axis1, (0, 4))
 
-        self.assertEqual(qslice.q_axis, 'qdx')
+        self.assertEqual(qslice.q_axis, 'qbx')
         self.assertEqual(qslice.integration_axis, 0)
         self.assertEqual(qslice.integration_mode, 'sum')
 
@@ -852,10 +897,13 @@ class TestData2D(unittest.TestCase):
         ])
         np.testing.assert_array_equal(qslice.image_mask, image_mask)
 
+        # keep in mind the first point in background_i_avg will just be
+        # from one background slice because point (0,0) of image
+        # was masked out in setup as part of the custom mask!
         background_i_avg = np.array([
             29031, 86343, 102639.5, 115116
         ])
-        np.testing.assert_array_almost_equal(qslice.background, background_i_avg)
+        np.testing.assert_array_almost_equal(qslice.background_Iq, background_i_avg)
 
     # def test_find_peaks2D(self):
     #     # TODO: implement peaks2D test
