@@ -6277,7 +6277,7 @@ class CDSAXS_Model:
             # Find which cylinder layer we're in
             layer_idx = 0
             for i in range(len(cyl_heights) - 1):
-                if disc_height >= cyl_heights[i] and disc_height <= cyl_heights[i + 1]:
+                if (disc_height > cyl_heights[i] or math.isclose(disc_height, cyl_heights[i])) and (disc_height < cyl_heights[i + 1] or math.isclose(disc_height, cyl_heights[i + 1])):
                     layer_idx = i
                     break
             
