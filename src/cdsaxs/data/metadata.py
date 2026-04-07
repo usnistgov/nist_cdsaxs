@@ -33,8 +33,8 @@ SAMPLE_METADATA_KEYWORDS = [
 
 ACCEPTED_Q_AXES = [
     "qdy", "qdx", "qdz", "qd",
-    "qsy", "qsx", "qsz", "qs",
-    "qby", "qbx", "qbz", "qb"
+    "qsy", "qsx", "qsz", "qs", "qsr",
+    "qby", "qbx", "qbz", "qb", "qbr",
 ]
 
 FLOATS = [

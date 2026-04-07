@@ -14,7 +14,7 @@ from scipy.optimize import (
 from tqdm import tqdm
 import seaborn as sns
 
-from .CDSAXS_base_model import CDSAXS_Model
+from CDSAXS_base_model import CDSAXS_Model
 
 class TrapezoidModelArray(CDSAXS_Model):
     """
@@ -151,6 +151,18 @@ class TrapezoidModelArray(CDSAXS_Model):
             
         if hasattr(self, 'Pitch') and self.Pitch is not None:
             self.model_params['Pitch'] = self.Pitch
+        
+        # Multi-stack (SRM) support: store number of stacks and spacing
+        if hasattr(self, 'n_trapezoid_stacks'):
+            try:
+                self.model_params['n_stacks'] = int(self.n_trapezoid_stacks)
+            except Exception:
+                pass
+        if hasattr(self, 'stack_spacing'):
+            try:
+                self.model_params['stack_spacing'] = float(self.stack_spacing)
+            except Exception:
+                pass
             
         return self.model_params
     
@@ -197,6 +209,61 @@ class TrapezoidModelArray(CDSAXS_Model):
             
         if 'Pitch' in self.model_params:
             self.Pitch = self.model_params['Pitch']
+        
+        # Multi-stack (SRM) support: restore number of stacks and spacing
+        if 'n_stacks' in self.model_params:
+            try:
+                self.n_trapezoid_stacks = int(self.model_params['n_stacks'])
+            except Exception:
+                pass
+        if 'stack_spacing' in self.model_params:
+            try:
+                self.stack_spacing = float(self.model_params['stack_spacing'])
+            except Exception:
+                pass
+
+        # ------------------------------------------------------------------
+        # Second independent stack family (geometry + SLD) from model_params
+        # ------------------------------------------------------------------
+        if 'layers_2' in self.model_params and 'trapezoids_2' in self.model_params:
+            try:
+                self.layers2 = int(self.model_params['layers_2'])
+                traps2 = self.model_params['trapezoids_2']
+                # Build PAR2 with same convention as primary PAR
+                self.PAR2 = np.zeros((self.layers2 + 1, 2), dtype=float)
+                for i, trap in enumerate(traps2):
+                    if i <= self.layers2:
+                        self.PAR2[i, 0] = trap['width']
+                        self.PAR2[i, 1] = trap['height']
+            except Exception:
+                # If anything goes wrong, just skip defining PAR2/layers2
+                pass
+
+        if 'slds_2' in self.model_params:
+            try:
+                sld2 = self.model_params['slds_2']
+                if isinstance(sld2, list):
+                    self.sld_values2 = np.array(sld2, dtype=float)
+                else:
+                    self.sld_values2 = np.array([float(sld2)])
+            except Exception:
+                pass
+
+        if 'n_stacks_2' in self.model_params:
+            try:
+                self.n_trapezoid_stacks_2 = int(self.model_params['n_stacks_2'])
+            except Exception:
+                pass
+        if 'stack_spacing_2' in self.model_params:
+            try:
+                self.stack_spacing_2 = float(self.model_params['stack_spacing_2'])
+            except Exception:
+                pass
+        if 'x_offset_2' in self.model_params:
+            try:
+                self.x_offset_2 = float(self.model_params['x_offset_2'])
+            except Exception:
+                pass
             
         # Update SimPar - for array background, use first value for compatibility
         bk_scalar = self.Bk[0] if isinstance(self.Bk, np.ndarray) else self.Bk
@@ -468,15 +535,30 @@ class TrapezoidModelArray(CDSAXS_Model):
                 return False
             return None
     
-    def SymCoordAssign(self, PAR=None, layers=None, sld_values=None):
+    def SymCoordAssign(self, PAR=None, layers=None, sld_values=None,
+                       n_stacks=None, stack_spacing=None):
         """
-        Alternative implementation with even clearer SLD assignment logic.
-        Each coordinate index directly corresponds to its layer index.
+        Coordinate assignment for one or more identical trapezoid stacks.
+        
+        The base (untranslated) stack is built exactly as before in the
+        third‑dimension slice 0. Additional stacks are created by translating
+        the x‑coordinates by a constant offset `stack_spacing`:
+        
+            Coord[:, :, 0]  -> base stack
+            Coord[:, :, 1]  -> base stack shifted by +1 * stack_spacing
+            Coord[:, :, 2]  -> base stack shifted by +2 * stack_spacing
+            ...
+        
+        For backward compatibility:
+        - If `n_stacks` is None, it falls back to `self.n_trapezoid_stacks`
+          when present, otherwise 1.
+        - If `stack_spacing` is None and multiple stacks are requested, it
+          falls back to `self.stack_spacing` or `self.Pitch` if available.
         """
         try:
-            # Parameter validation (same as above)
             using_self = False
             
+            # --- Input / attribute fallbacks ---------------------------------
             if PAR is None:
                 if not hasattr(self, 'PAR'):
                     if hasattr(self, 'model_params'):
@@ -509,46 +591,225 @@ class TrapezoidModelArray(CDSAXS_Model):
             if not isinstance(PAR, np.ndarray) or len(PAR) < layers + 1 or PAR.shape[1] < 2:
                 raise ValueError("Invalid PAR array dimensions")
             
-            # Initialize coordinate array
-            Coord = np.zeros([layers + 1, 5, 1])
+            # --- Determine number of stacks and spacing -----------------------
+            if n_stacks is None:
+                if hasattr(self, 'n_trapezoid_stacks'):
+                    n_stacks = int(self.n_trapezoid_stacks)
+                elif hasattr(self, 'model_params') and 'n_stacks' in self.model_params:
+                    n_stacks = int(self.model_params['n_stacks'])
+                else:
+                    n_stacks = 1
+            else:
+                n_stacks = int(n_stacks)
             
-            # Assign coordinates and SLD values
+            if n_stacks < 1:
+                n_stacks = 1
+            
+            if stack_spacing is None and n_stacks > 1:
+                if hasattr(self, 'stack_spacing'):
+                    stack_spacing = float(self.stack_spacing)
+                elif hasattr(self, 'model_params') and 'stack_spacing' in self.model_params:
+                    stack_spacing = float(self.model_params['stack_spacing'])
+                elif hasattr(self, 'Pitch') and self.Pitch is not None:
+                    stack_spacing = float(self.Pitch)
+            
+            # If no meaningful spacing is available, silently collapse to 1 stack
+            if n_stacks > 1 and (stack_spacing is None or np.isclose(stack_spacing, 0.0)):
+                n_stacks = 1
+            
+            # --- Build base (untranslated) stack in 2D -----------------------
+            base_coord = np.zeros([layers + 1, 5])
+            
             for layer_idx in range(layers):
-                # Each layer_idx corresponds to coordinate index layer_idx
                 T = layer_idx
                 
                 if T == 0:
                     # Bottom layer
-                    Coord[T, 0, 0] = 0
-                    Coord[T, 1, 0] = PAR[0, 0]
-                    Coord[T, 2, 0] = PAR[0, 1]
-                    Coord[T, 3, 0] = 0
+                    base_coord[T, 0] = 0
+                    base_coord[T, 1] = PAR[0, 0]
+                    base_coord[T, 2] = PAR[0, 1]
+                    base_coord[T, 3] = 0
                 else:
                     # Upper layers
-                    Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-                    Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-                    Coord[T, 2, 0] = PAR[T, 1]
-                    Coord[T, 3, 0] = 0
+                    base_coord[T, 0] = base_coord[T-1, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+                    base_coord[T, 1] = base_coord[T, 0] + PAR[T, 0]
+                    base_coord[T, 2] = PAR[T, 1]
+                    base_coord[T, 3] = 0
                 
-                # CLEAR SLD ASSIGNMENT: layer_idx gets sld_array[layer_idx]
-                Coord[T, 4, 0] = sld_array[layer_idx]
+                # SLD for this layer
+                base_coord[T, 4] = sld_array[layer_idx]
             
             # Handle the top vertex (T = layers)
             T = layers
-            Coord[T, 0, 0] = Coord[T-1, 0, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
-            Coord[T, 1, 0] = Coord[T, 0, 0] + PAR[T, 0]
-            Coord[T, 2, 0] = PAR[T, 1]
-            Coord[T, 3, 0] = 0
-            Coord[T, 4, 0] = 0.0  # Top vertex - no layer associated
+            base_coord[T, 0] = base_coord[T-1, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+            base_coord[T, 1] = base_coord[T, 0] + PAR[T, 0]
+            base_coord[T, 2] = PAR[T, 1]
+            base_coord[T, 3] = 0
+            base_coord[T, 4] = 0.0  # Top vertex - no layer associated
             
+            # --- Replicate into multiple translated stacks -------------------
+            if n_stacks == 1:
+                Coord = base_coord[:, :, np.newaxis]
+            else:
+                Coord = np.zeros([layers + 1, 5, n_stacks], dtype=float)
+                for stack_idx in range(n_stacks):
+                    Coord[:, :, stack_idx] = base_coord
+                    dx = stack_idx * stack_spacing
+                    Coord[:, 0, stack_idx] += dx  # left x
+                    Coord[:, 1, stack_idx] += dx  # right x
+            
+            # Always return the coordinate array; when called with self
+            # attributes we also store it on the instance.
             if using_self:
                 self.Coord = Coord
-                return True
-                
+            
             return Coord
             
         except Exception as e:
             print(f"Error in SymCoordAssign_Alternative: {str(e)}")
+            if using_self:
+                return False
+            return None
+
+    def SymCoordAssign_SecondStack(self, PAR=None, layers=None, sld_values=None,
+                                   n_stacks=None, stack_spacing=None,
+                                   x_offset=None):
+        """
+        Coordinate assignment for a second, independent trapezoid stack family.
+        
+        This builds a completely separate set of coordinates (Coord2) that can
+        have its *own* PAR/layers and its own number of stacks and spacing.
+        The entire second family is positioned relative to the first by an
+        additional x‑offset:
+        
+            - Base second stack is shifted by `x_offset` relative to the
+              coordinate frame of the first stack.
+            - Additional stacks in this second family are spaced by
+              `stack_spacing` just like in SymCoordAssign.
+        """
+        try:
+            using_self = False
+            
+            # --- Input / attribute fallbacks ---------------------------------
+            if PAR is None:
+                if hasattr(self, 'PAR2'):
+                    PAR = self.PAR2
+                    using_self = True
+                else:
+                    raise AttributeError("Missing PAR for second stack (PAR2)")
+            
+            if layers is None:
+                if hasattr(self, 'layers2'):
+                    layers = self.layers2
+                else:
+                    raise AttributeError("Missing layers for second stack (layers2)")
+            
+            if sld_values is not None:
+                sld_array = np.array(sld_values, dtype=float)
+            elif hasattr(self, 'sld_values2'):
+                sld_array = self.sld_values2.copy()
+            elif hasattr(self, 'sld_values'):
+                # Fallback: reuse primary SLDs
+                sld_array = self.sld_values.copy()
+            else:
+                sld_array = np.ones(layers, dtype=float)
+            
+            if len(sld_array) != layers:
+                raise ValueError(
+                    f"Second stack SLD array length ({len(sld_array)}) must exactly match "
+                    f"number of layers ({layers})."
+                )
+            
+            if not isinstance(PAR, np.ndarray) or len(PAR) < layers + 1 or PAR.shape[1] < 2:
+                raise ValueError("Invalid PAR array dimensions for second stack")
+            
+            # --- Determine number of stacks and spacing -----------------------
+            if n_stacks is None:
+                if hasattr(self, 'n_trapezoid_stacks_2'):
+                    n_stacks = int(self.n_trapezoid_stacks_2)
+                elif hasattr(self, 'model_params') and 'n_stacks_2' in self.model_params:
+                    n_stacks = int(self.model_params['n_stacks_2'])
+                else:
+                    n_stacks = 1
+            else:
+                n_stacks = int(n_stacks)
+            
+            if n_stacks < 1:
+                n_stacks = 1
+            
+            if stack_spacing is None and n_stacks > 1:
+                if hasattr(self, 'stack_spacing_2'):
+                    stack_spacing = float(self.stack_spacing_2)
+                elif hasattr(self, 'model_params') and 'stack_spacing_2' in self.model_params:
+                    stack_spacing = float(self.model_params['stack_spacing_2'])
+                elif hasattr(self, 'stack_spacing'):
+                    # Fallback: reuse primary spacing
+                    stack_spacing = float(self.stack_spacing)
+            
+            if n_stacks > 1 and (stack_spacing is None or np.isclose(stack_spacing, 0.0)):
+                n_stacks = 1
+            
+            # Overall horizontal offset of this second family
+            if x_offset is None:
+                if hasattr(self, 'x_offset_2'):
+                    x_offset = float(self.x_offset_2)
+                elif hasattr(self, 'model_params') and 'x_offset_2' in self.model_params:
+                    x_offset = float(self.model_params['x_offset_2'])
+                else:
+                    x_offset = 0.0
+            else:
+                x_offset = float(x_offset)
+            
+            # --- Build base (untranslated) second stack in 2D ----------------
+            base_coord = np.zeros([layers + 1, 5])
+            
+            for layer_idx in range(layers):
+                T = layer_idx
+                
+                if T == 0:
+                    base_coord[T, 0] = 0
+                    base_coord[T, 1] = PAR[0, 0]
+                    base_coord[T, 2] = PAR[0, 1]
+                    base_coord[T, 3] = 0
+                else:
+                    base_coord[T, 0] = base_coord[T-1, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+                    base_coord[T, 1] = base_coord[T, 0] + PAR[T, 0]
+                    base_coord[T, 2] = PAR[T, 1]
+                    base_coord[T, 3] = 0
+                
+                base_coord[T, 4] = sld_array[layer_idx]
+            
+            T = layers
+            base_coord[T, 0] = base_coord[T-1, 0] + 0.5 * (PAR[T-1, 0] - PAR[T, 0])
+            base_coord[T, 1] = base_coord[T, 0] + PAR[T, 0]
+            base_coord[T, 2] = PAR[T, 1]
+            base_coord[T, 3] = 0
+            base_coord[T, 4] = 0.0
+            
+            # Apply global offset for this second family
+            base_coord[:, 0] += x_offset
+            base_coord[:, 1] += x_offset
+            
+            # --- Replicate into multiple translated stacks -------------------
+            if n_stacks == 1:
+                Coord2 = base_coord[:, :, np.newaxis]
+            else:
+                Coord2 = np.zeros([layers + 1, 5, n_stacks], dtype=float)
+                for stack_idx in range(n_stacks):
+                    Coord2[:, :, stack_idx] = base_coord
+                    dx = stack_idx * stack_spacing
+                    Coord2[:, 0, stack_idx] += dx
+                    Coord2[:, 1, stack_idx] += dx
+            
+            # Always return the coordinate array; when called with self
+            # attributes we also store it on the instance.
+            if using_self:
+                self.Coord2 = Coord2
+            
+            return Coord2
+        
+        except Exception as e:
+            print(f"Error in SymCoordAssign_SecondStack: {str(e)}")
             if using_self:
                 return False
             return None
@@ -571,6 +832,23 @@ class TrapezoidModelArray(CDSAXS_Model):
             param_type = parts[2]
             return self.model_params['trapezoids'][trap_idx][param_type]
         
+        elif param_name.startswith('trap2_'):
+            # Second-stack trapezoid geometry, e.g. trap2_0_width / trap2_0_height
+            parts = param_name.split('_')
+            trap_idx = int(parts[1])
+            param_type = parts[2]  # 'width' or 'height'
+            # Prefer model_params['trapezoids_2'] if present
+            if hasattr(self, 'model_params') and 'trapezoids_2' in self.model_params:
+                traps2 = self.model_params['trapezoids_2']
+                if trap_idx < len(traps2) and param_type in traps2[trap_idx]:
+                    return traps2[trap_idx][param_type]
+            # Fallback: use PAR2 if defined
+            if hasattr(self, 'PAR2'):
+                col = 0 if param_type == 'width' else 1
+                if trap_idx < self.PAR2.shape[0]:
+                    return float(self.PAR2[trap_idx, col])
+            raise ValueError(f"Unknown second-stack trapezoid parameter: {param_name}")
+        
         elif param_name.startswith('Bk_'):
             bk_idx = int(param_name.split('_')[1])
             if isinstance(self.Bk, np.ndarray):
@@ -586,6 +864,15 @@ class TrapezoidModelArray(CDSAXS_Model):
         
         elif param_name in ['DW', 'I0']:
             return getattr(self, param_name)
+        
+        # SRM-specific scalar parameters that may be optimized
+        elif param_name in ['n_stacks', 'stack_spacing',
+                            'n_stacks_2', 'stack_spacing_2', 'x_offset_2']:
+            if hasattr(self, 'model_params') and param_name in self.model_params:
+                return self.model_params[param_name]
+            if hasattr(self, param_name):
+                return getattr(self, param_name)
+            raise ValueError(f"Unknown SRM parameter: {param_name}")
         
         else:
             # Try to get from model_params
@@ -744,32 +1031,42 @@ class TrapezoidModelArray(CDSAXS_Model):
             if int(layers) + 1 > len(Coord):
                 raise IndexError(f"Not enough rows in Coord ({len(Coord)}) for {int(layers)} layers")
             
-            # Initialize height values and form factor array
-            H1 = Coord[0, 3, 0]
-            H2 = H1
+            # Determine how many trapezoid stacks we have in the 3rd dimension
+            if Coord.ndim == 3:
+                n_stacks = Coord.shape[2]
+            else:
+                # Fallback for any unexpected shapes – treat as a single stack
+                n_stacks = 1
+                Coord = Coord.reshape(Coord.shape[0], Coord.shape[1], 1)
+            
+            # Initialize form factor array
             form = np.zeros([len(Qx[:,1]), len(Qx[1,:])])
             
-            # Calculate form factor
-            for i in range(int(layers)):
-                H2 = H2 + Coord[i, 2, 0]
-                if i > 0:
-                    H1 = H1 + Coord[i-1, 2, 0]
+            # Calculate form factor: sum contribution from each trapezoid stack
+            for stack_idx in range(n_stacks):
+                H1 = Coord[0, 3, stack_idx]
+                H2 = H1
+                
+                for i in range(int(layers)):
+                    H2 = H2 + Coord[i, 2, stack_idx]
+                    if i > 0:
+                        H1 = H1 + Coord[i-1, 2, stack_idx]
+                        
+                    x1 = Coord[i, 0, stack_idx]
+                    x4 = Coord[i, 1, stack_idx]
+                    x2 = Coord[i+1, 0, stack_idx]
+                    x3 = Coord[i+1, 1, stack_idx]
                     
-                x1 = Coord[i, 0, 0]
-                x4 = Coord[i, 1, 0]
-                x2 = Coord[i+1, 0, 0]
-                x3 = Coord[i+1, 1, 0]
-                
-                # Avoid division by zero
-                x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
-                x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
-                
-                SL = Coord[i, 2, 0] / (x2 - x1)
-                SR = -Coord[i, 2, 0] / (x4 - x3)
-                
-                A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
-                A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
-                form = form + (1j/Qx)*(A1-A2)*Coord[i, 4, 0]
+                    # Avoid division by zero
+                    x2 = x1 - 1e-6 if np.isclose(x2, x1) else x2
+                    x4 = x3 - 1e-6 if np.isclose(x4, x3) else x4
+                    
+                    SL = Coord[i, 2, stack_idx] / (x2 - x1)
+                    SR = -Coord[i, 2, stack_idx] / (x4 - x3)
+                    
+                    A1 = (np.exp(1j*Qx*((H1-SR*x4)/SR))/(Qx/SR+Qz))*(np.exp(-1j*H2*(Qx/SR+Qz))-np.exp(-1j*H1*(Qx/SR+Qz)))
+                    A2 = (np.exp(1j*Qx*((H1-SL*x1)/SL))/(Qx/SL+Qz))*(np.exp(-1j*H2*(Qx/SL+Qz))-np.exp(-1j*H1*(Qx/SL+Qz)))
+                    form = form + (1j/Qx)*(A1-A2)*Coord[i, 4, stack_idx]
             
             # If using self attributes, update self.form
             if using_self:
@@ -832,21 +1129,36 @@ class TrapezoidModelArray(CDSAXS_Model):
                     raise AttributeError("Missing required attribute: Bk")
                 Bk = self.Bk
             
-            # Generate coordinates if PAR is provided - uses current SLD values
+            # Generate coordinates for the primary stack family
             if PAR is not None:
                 Coord = self.SymCoordAssign(PAR, layers)
                 if Coord is None or (using_self and Coord is False):
                     raise RuntimeError("Failed to assign coordinates in SymCoordAssign")
             else:
-                # Use existing Coord
                 if not hasattr(self, 'Coord'):
                     raise AttributeError("Missing required attribute: Coord")
                 Coord = self.Coord
             
-            # Calculate form factor using the enhanced coordinates with SLD
+            # Calculate form factor for the primary stack family
             form = self.FreeFormTrapezoid(Coord, layers, Qx, Qz)
             if form is None:
                 raise RuntimeError("Failed to calculate form factor in FreeFormTrapezoid")
+
+            # Optionally add a second, independent stack family if configured
+            try:
+                has_second = hasattr(self, 'PAR2') and hasattr(self, 'layers2')
+            except Exception:
+                has_second = False
+
+            if has_second:
+                Coord2 = self.SymCoordAssign_SecondStack()
+                if Coord2 is None or (isinstance(Coord2, bool) and not Coord2):
+                    raise RuntimeError("Failed to assign coordinates for second stack family")
+                form2 = self.FreeFormTrapezoid(Coord2, int(self.layers2), Qx, Qz)
+                if form2 is None:
+                    raise RuntimeError("Failed to calculate form factor for second stack family")
+                # Total form factor is coherent sum of both families
+                form = form + form2
             
             # Calculate Debye-Waller factor
             M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(DW, 2)), 0.5)
@@ -924,11 +1236,38 @@ class TrapezoidModelArray(CDSAXS_Model):
             else:
                 temp_Bk = self.Bk
             
-            # Initialize SLD array
+            # Initialize SLD array (primary stack family)
             if hasattr(self, 'sld_values'):
                 temp_sld_values = self.sld_values.copy()
             else:
                 temp_sld_values = np.ones(self.layers + 1)
+
+            # ------------------------------------------------------------------
+            # SRM: multi-stack + second-stack temporary variables
+            # ------------------------------------------------------------------
+            # Primary stack family
+            temp_n_stacks = getattr(self, 'n_trapezoid_stacks', None)
+            temp_stack_spacing = getattr(self, 'stack_spacing', None)
+
+            # Second independent stack family
+            has_second = hasattr(self, 'PAR2') and hasattr(self, 'layers2')
+            if has_second:
+                temp_PAR2 = self.PAR2.copy()
+                temp_layers2 = int(self.layers2)
+                if hasattr(self, 'sld_values2'):
+                    temp_sld_values2 = self.sld_values2.copy()
+                else:
+                    temp_sld_values2 = np.ones(temp_layers2, dtype=float)
+                temp_n_stacks_2 = getattr(self, 'n_trapezoid_stacks_2', None)
+                temp_stack_spacing_2 = getattr(self, 'stack_spacing_2', None)
+                temp_x_offset_2 = getattr(self, 'x_offset_2', 0.0)
+            else:
+                temp_PAR2 = None
+                temp_layers2 = 0
+                temp_sld_values2 = None
+                temp_n_stacks_2 = None
+                temp_stack_spacing_2 = None
+                temp_x_offset_2 = 0.0
             
             # Update parameters with optimization values
             for i, param_name in enumerate(param_names):
@@ -962,8 +1301,40 @@ class TrapezoidModelArray(CDSAXS_Model):
                 elif param_name == 'Bk':
                     # Scalar background parameter
                     temp_Bk = optimization_values[i]
+
+                # --------------------------------------------------------------
+                # SRM-specific optimization parameters
+                # --------------------------------------------------------------
+                elif param_name == 'n_stacks':
+                    temp_n_stacks = int(optimization_values[i])
+                elif param_name == 'stack_spacing':
+                    temp_stack_spacing = float(optimization_values[i])
+                elif param_name == 'n_stacks_2':
+                    temp_n_stacks_2 = int(optimization_values[i])
+                elif param_name == 'stack_spacing_2':
+                    temp_stack_spacing_2 = float(optimization_values[i])
+                elif param_name == 'x_offset_2':
+                    temp_x_offset_2 = float(optimization_values[i])
+                elif param_name.startswith('trap2_'):
+                    # Geometry of second stack family: trap2_{i}_{width|height}
+                    parts = param_name.split('_')
+                    if len(parts) >= 3 and temp_PAR2 is not None:
+                        trap2_idx = int(parts[1])
+                        param_type2 = parts[2]
+                        if trap2_idx <= temp_layers2:
+                            if param_type2 == 'width':
+                                temp_PAR2[trap2_idx, 0] = optimization_values[i]
+                            elif param_type2 == 'height':
+                                temp_PAR2[trap2_idx, 1] = optimization_values[i]
+                elif param_name.startswith('sld2_'):
+                    # SLD for second stack family
+                    if temp_sld_values2 is not None:
+                        sld2_idx = int(param_name.split('_')[1])
+                        if sld2_idx < len(temp_sld_values2):
+                            temp_sld_values2[sld2_idx] = optimization_values[i]
+
                 else:
-                    # Global parameter (DW, I0)
+                    # Global parameter (DW, I0) or anything stored in params
                     params[param_name] = optimization_values[i]
             
             # Create temporary PAR array for compatibility
@@ -977,15 +1348,39 @@ class TrapezoidModelArray(CDSAXS_Model):
             temp_DW = params['DW']
             temp_I0 = params['I0']
             
-            # Use SymCoordAssign with current SLD values
-            Coord = self.SymCoordAssign(temp_PAR, self.layers, sld_values=temp_sld_values)
+            # Use SymCoordAssign for the primary stack family, including
+            # potentially optimized stack count / spacing.
+            Coord = self.SymCoordAssign(
+                temp_PAR,
+                self.layers,
+                sld_values=temp_sld_values,
+                n_stacks=temp_n_stacks,
+                stack_spacing=temp_stack_spacing,
+            )
             if Coord is None:
                 raise RuntimeError("Failed to assign coordinates with SLD values")
             
-            # Calculate form factor
+            # Calculate form factor for primary family
             form = self.FreeFormTrapezoid(Coord, self.layers, Qx, Qz)
             if form is None:
                 raise RuntimeError("Failed to calculate form factor")
+
+            # Add contribution from second independent stack family if defined
+            if temp_PAR2 is not None and temp_layers2 > 0:
+                Coord2 = self.SymCoordAssign_SecondStack(
+                    PAR=temp_PAR2,
+                    layers=temp_layers2,
+                    sld_values=temp_sld_values2,
+                    n_stacks=temp_n_stacks_2,
+                    stack_spacing=temp_stack_spacing_2,
+                    x_offset=temp_x_offset_2,
+                )
+                if Coord2 is None or (isinstance(Coord2, bool) and not Coord2):
+                    raise RuntimeError("Failed to assign coordinates for second stack family")
+                form2 = self.FreeFormTrapezoid(Coord2, temp_layers2, Qx, Qz)
+                if form2 is None:
+                    raise RuntimeError("Failed to calculate form factor for second stack family")
+                form = form + form2
             
             # Calculate Debye-Waller factor
             M = np.power(np.exp(-1 * (np.power(Qx, 2) + np.power(Qz, 2)) * np.power(temp_DW, 2)), 0.5)
@@ -1194,23 +1589,86 @@ class TrapezoidModelArray(CDSAXS_Model):
         import matplotlib.pyplot as plt
         import numpy as np
         
-        # Plot trapezoid structure comparison on the same plot
+        # Plot trapezoid + SRM structure comparison on the same plot
         if plot_structure:
             plt.figure(figsize=(10, 6))
             
-            # Plot initial trapezoid structure with dashed lines and transparency
+            # Plot initial primary trapezoid structure with dashed lines
             self._plot_trapezoid_structure(initial_model_params, 
-                                        linestyle='--', 
-                                        color='blue', 
-                                        alpha=0.7,
-                                        label='Initial')
+                                           linestyle='--', 
+                                           color='blue', 
+                                           alpha=0.7,
+                                           label='Initial')
             
-            # Plot optimized trapezoid structure with solid lines
+            # Plot optimized primary trapezoid structure with solid lines
             self._plot_trapezoid_structure(self.model_params, 
-                                        linestyle='-', 
-                                        color='red', 
-                                        alpha=1.0,
-                                        label='Optimized')
+                                           linestyle='-', 
+                                           color='red', 
+                                           alpha=1.0,
+                                           label='Optimized')
+            
+            # ------------------------------------------------------------------
+            # SRM extension: overlay second-stack family (if defined) for both
+            # initial and optimized models on the same axes.
+            # ------------------------------------------------------------------
+            ax = plt.gca()
+
+            def _draw_second_family(mp, linestyle, color, alpha):
+                if 'layers_2' not in mp or 'trapezoids_2' not in mp:
+                    return
+                try:
+                    layers2 = int(mp['layers_2'])
+                    traps2 = mp['trapezoids_2']
+                    if layers2 < 1 or len(traps2) < layers2 + 1:
+                        return
+                except Exception:
+                    return
+
+                x_offset_2 = float(mp.get('x_offset_2', 0.0))
+
+                height2 = 0.0
+                for i in range(layers2 + 1):
+                    if i > 0:
+                        height2 += traps2[i-1]['height']
+
+                    width_i = traps2[i]['width']
+                    # Center second family around x_offset_2
+                    x_left = x_offset_2 - width_i / 2.0
+                    x_right = x_left + width_i
+
+                    # Horizontal segment at this height
+                    ax.plot(
+                        [x_left, x_right],
+                        [height2, height2],
+                        linestyle=linestyle,
+                        color=color,
+                        alpha=alpha,
+                    )
+
+                    # Vertical/diagonal sides up to next layer
+                    if i < layers2:
+                        next_width = traps2[i + 1]['width']
+                        x_next_left = x_offset_2 - next_width / 2.0
+                        x_next_right = x_next_left + next_width
+
+                        ax.plot(
+                            [x_left, x_next_left],
+                            [height2, height2 + traps2[i]['height']],
+                            linestyle=linestyle,
+                            color=color,
+                            alpha=alpha,
+                        )
+                        ax.plot(
+                            [x_right, x_next_right],
+                            [height2, height2 + traps2[i]['height']],
+                            linestyle=linestyle,
+                            color=color,
+                            alpha=alpha,
+                        )
+
+            # Draw second-stack family for initial (blue dashed) and optimized (red solid)
+            _draw_second_family(initial_model_params, linestyle='--', color='blue', alpha=0.7)
+            _draw_second_family(self.model_params, linestyle='-', color='red', alpha=1.0)
             
             plt.title('Trapezoid Structure Comparison')
             plt.legend()
@@ -1522,7 +1980,7 @@ class TrapezoidModelArray(CDSAXS_Model):
         sld_legend_precision=3,
         # Pitch / vacuum / periodic visualization
         show_vacuum_region=True,
-        n_trapezoid_stacks=2,
+        n_trapezoid_stacks=None,
         vacuum_edgecolor='tab:blue',
         vacuum_linestyle='-',
         vacuum_linewidth=1.5,
@@ -1623,14 +2081,52 @@ class TrapezoidModelArray(CDSAXS_Model):
         trapezoids = self.model_params.get('trapezoids', [])
         base_width = float(trapezoids[0]['width']) if trapezoids else None
 
+        # ------------------------------------------------------------------
+        # Determine how many stacks to draw and what spacing to use
+        # so that the geometry plot matches the SRM multi-stack model.
+        # ------------------------------------------------------------------
+        # Number of stacks:
+        if n_trapezoid_stacks is not None:
+            try:
+                n_stacks_plot = int(n_trapezoid_stacks)
+            except Exception:
+                n_stacks_plot = 1
+        elif 'n_stacks' in self.model_params:
+            try:
+                n_stacks_plot = int(self.model_params['n_stacks'])
+            except Exception:
+                n_stacks_plot = 1
+        elif hasattr(self, 'n_trapezoid_stacks'):
+            try:
+                n_stacks_plot = int(self.n_trapezoid_stacks)
+            except Exception:
+                n_stacks_plot = 1
+        else:
+            n_stacks_plot = 1
+
+        if n_stacks_plot < 1:
+            n_stacks_plot = 1
+
+        # First try to get an explicit SRM stack spacing
+        stack_spacing = None
+        if 'stack_spacing' in self.model_params:
+            try:
+                stack_spacing = float(self.model_params['stack_spacing'])
+            except Exception:
+                stack_spacing = None
+        if stack_spacing is None and hasattr(self, 'stack_spacing'):
+            try:
+                stack_spacing = float(self.stack_spacing)
+            except Exception:
+                stack_spacing = None
+
+        # If no explicit SRM spacing, fall back to pitch (periodicity)
         pitch = None
-        # 1) Explicit pitch from model_params
         if 'Pitch' in self.model_params and self.model_params['Pitch'] is not None:
             try:
                 pitch = float(self.model_params['Pitch'])
             except Exception:
                 pitch = None
-        # 2) Fallback to attribute
         if pitch is None and hasattr(self, 'Pitch') and self.Pitch is not None:
             try:
                 pitch = float(self.Pitch)
@@ -1660,25 +2156,25 @@ class TrapezoidModelArray(CDSAXS_Model):
             except Exception:
                 pitch = None
 
-        # Draw a copy of the structure at x + Pitch so the vacuum/air region
-        # between the two stacks is exactly the modeled line-space gap.
-        # This neighboring cell is drawn with the *same* color scheme as the
-        # primary structure so the periodicity is clear.
+        # If SRM spacing is not set, use pitch as spacing for visualization
+        if stack_spacing is None:
+            stack_spacing = pitch
+
+        # Draw additional copies of the *primary* structure to show the
+        # periodic array of trapezoid stacks.
         if (
             show_vacuum_region
-            and pitch is not None
+            and stack_spacing is not None
+            and not np.isclose(stack_spacing, 0.0)
             and base_width is not None
         ):
             # Ensure valid, at least one extra stack
-            try:
-                n_stacks = int(max(1, n_trapezoid_stacks))
-            except Exception:
-                n_stacks = 2
+            n_stacks = int(max(1, n_stacks_plot))
 
             rightmost_x = base_width
 
             for stack_idx in range(1, n_stacks):
-                offset = stack_idx * pitch
+                offset = stack_idx * stack_spacing
                 rightmost_x = max(rightmost_x, offset + base_width)
 
             height = 0.0
@@ -1711,7 +2207,7 @@ class TrapezoidModelArray(CDSAXS_Model):
 
             # Draw each additional stack
             for stack_idx in range(1, n_stacks):
-                offset = stack_idx * pitch
+                offset = stack_idx * stack_spacing
 
                 # Optional shading for this stack
                 if slds_all is not None:
@@ -1811,6 +2307,160 @@ class TrapezoidModelArray(CDSAXS_Model):
             # If user did not explicitly request x-limits, extend to include all stacks
             if xlim is None:
                 plt.xlim(0.0, rightmost_x)
+
+        # ------------------------------------------------------------------
+        # Optional: draw the second, independent stack family used in SRM.
+        # This uses PAR2/layers2 (or model_params entries if you add them)
+        # along with its own stack count, spacing, and x‑offset.
+        # ------------------------------------------------------------------
+        has_second = hasattr(self, 'PAR2') and hasattr(self, 'layers2')
+        if has_second:
+            try:
+                PAR2 = self.PAR2
+                layers2 = int(self.layers2)
+            except Exception:
+                PAR2 = None
+                layers2 = 0
+
+            if isinstance(PAR2, np.ndarray) and layers2 > 0 and len(PAR2) >= layers2 + 1:
+                # Number of stacks for the second family
+                if hasattr(self, 'n_trapezoid_stacks_2'):
+                    try:
+                        n_stacks_2 = int(self.n_trapezoid_stacks_2)
+                    except Exception:
+                        n_stacks_2 = 1
+                elif hasattr(self, 'model_params') and 'n_stacks_2' in self.model_params:
+                    try:
+                        n_stacks_2 = int(self.model_params['n_stacks_2'])
+                    except Exception:
+                        n_stacks_2 = 1
+                else:
+                    n_stacks_2 = 1
+
+                if n_stacks_2 < 1:
+                    n_stacks_2 = 1
+
+                # Spacing within the second family
+                if hasattr(self, 'stack_spacing_2'):
+                    try:
+                        stack_spacing_2 = float(self.stack_spacing_2)
+                    except Exception:
+                        stack_spacing_2 = None
+                elif hasattr(self, 'model_params') and 'stack_spacing_2' in self.model_params:
+                    try:
+                        stack_spacing_2 = float(self.model_params['stack_spacing_2'])
+                    except Exception:
+                        stack_spacing_2 = None
+                else:
+                    # Fallback: reuse primary spacing if available
+                    stack_spacing_2 = stack_spacing
+
+                # Overall horizontal offset of the second family
+                if hasattr(self, 'x_offset_2'):
+                    try:
+                        x_offset_2 = float(self.x_offset_2)
+                    except Exception:
+                        x_offset_2 = 0.0
+                elif hasattr(self, 'model_params') and 'x_offset_2' in self.model_params:
+                    try:
+                        x_offset_2 = float(self.model_params['x_offset_2'])
+                    except Exception:
+                        x_offset_2 = 0.0
+                else:
+                    x_offset_2 = 0.0
+
+                # Build base second-stack geometry (same rules as SymCoordAssign_SecondStack)
+                base_coord2 = np.zeros([layers2 + 1, 5], dtype=float)
+                for layer_idx in range(layers2):
+                    T2 = layer_idx
+                    if T2 == 0:
+                        base_coord2[T2, 0] = 0.0
+                        base_coord2[T2, 1] = PAR2[0, 0]
+                        base_coord2[T2, 2] = PAR2[0, 1]
+                        base_coord2[T2, 3] = 0.0
+                    else:
+                        base_coord2[T2, 0] = (
+                            base_coord2[T2 - 1, 0]
+                            + 0.5 * (PAR2[T2 - 1, 0] - PAR2[T2, 0])
+                        )
+                        base_coord2[T2, 1] = base_coord2[T2, 0] + PAR2[T2, 0]
+                        base_coord2[T2, 2] = PAR2[T2, 1]
+                        base_coord2[T2, 3] = 0.0
+                T2 = layers2
+                base_coord2[T2, 0] = (
+                    base_coord2[T2 - 1, 0]
+                    + 0.5 * (PAR2[T2 - 1, 0] - PAR2[T2, 0])
+                )
+                base_coord2[T2, 1] = base_coord2[T2, 0] + PAR2[T2, 0]
+                base_coord2[T2, 2] = PAR2[T2, 1]
+                base_coord2[T2, 3] = 0.0
+
+                # Apply global offset to this family
+                base_coord2[:, 0] += x_offset_2
+                base_coord2[:, 1] += x_offset_2
+
+                # Width of the base of the second family
+                base_width_2 = base_coord2[0, 1] - base_coord2[0, 0]
+
+                # Draw each stack in the second family
+                max_x_second = base_coord2[:, 1].max()
+                for stack_idx in range(n_stacks_2):
+                    dx2 = stack_idx * (0.0 if stack_spacing_2 is None else stack_spacing_2)
+                    # base line
+                    ax.plot(
+                        [base_coord2[0, 0] + dx2, base_coord2[0, 1] + dx2],
+                        [0.0, 0.0],
+                        linestyle='-',
+                        color=color,
+                        linewidth=linewidth,
+                        alpha=1.0,
+                    )
+
+                    height2 = 0.0
+                    for i2 in range(layers2 + 1):
+                        if i2 > 0:
+                            height2 += PAR2[i2 - 1, 1]
+
+                        # Horizontal segment at this height
+                        x_left2 = base_coord2[i2, 0] + dx2
+                        x_right2 = base_coord2[i2, 1] + dx2
+                        ax.plot(
+                            [x_left2, x_right2],
+                            [height2, height2],
+                            linestyle='-',
+                            color=color,
+                            linewidth=linewidth,
+                            alpha=1.0,
+                        )
+
+                        # Upward sides to next layer
+                        if i2 < layers2:
+                            next_left2 = base_coord2[i2 + 1, 0] + dx2
+                            next_right2 = base_coord2[i2 + 1, 1] + dx2
+                            ax.plot(
+                                [x_left2, next_left2],
+                                [height2, height2 + PAR2[i2, 1]],
+                                linestyle='-',
+                                color=color,
+                                linewidth=linewidth,
+                                alpha=1.0,
+                            )
+                            ax.plot(
+                                [x_right2, next_right2],
+                                [height2, height2 + PAR2[i2, 1]],
+                                linestyle='-',
+                                color=color,
+                                linewidth=linewidth,
+                                alpha=1.0,
+                            )
+
+                        max_x_second = max(max_x_second, x_right2)
+
+                # Ensure x-limits include the second family if user did not fix them
+                if xlim is None and np.isfinite(max_x_second):
+                    cur_xlim = plt.xlim()
+                    new_max = max(cur_xlim[1], max_x_second)
+                    plt.xlim(min(cur_xlim[0], 0.0), new_max)
         
         # Set axis limits if provided (after plotting to override equal aspect if needed)
         if xlim is not None:
@@ -2145,3 +2795,4 @@ class TrapezoidModelArray(CDSAXS_Model):
     
 # Create an alias for backward compatibility
 TrapezoidModel = TrapezoidModelArray
+
