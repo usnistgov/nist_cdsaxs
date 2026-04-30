@@ -21,7 +21,8 @@ def slice_reduced_dataset(
     slice_axis='qsz',
     offset_axis='qsy',
     show_plot=True,
-    plotting_kwargs={}
+    plotting_kwargs={},
+    mode: str = 'mean',
 ) -> ReducedSlices:
     """
     Extracts 1D data slices from a reduced dataset.
@@ -49,6 +50,10 @@ def slice_reduced_dataset(
         image will be shown.
     plotting_kwargs : dict
         Any keyword arguments to pass to the relevant plotting function.
+    mode : str
+        Set whether a mean or sum is performed on the intensity over
+        the bin width. The q components will always be a mean.
+        Default is 'mean'.
 
     Returns
     -------
@@ -91,10 +96,10 @@ def slice_reduced_dataset(
                 for qstr, qlist in q_components.items(): 
                     qlist.append(
                         np.nanmean(getattr(data, qstr)[selection]))
-                # q_offset.append(np.nanmean(getattr(data,offset_axis)[selection]))
-                Iq.append(np.nanmean(data.Iq[selection]))
-                # qsz.extend(list(data.qsz[selection]))
-                # Iq.extend(list(data.Iq[selection]))
+                if mode == 'sum':
+                    Iq.append(np.nansum(data.Iq[selection]))
+                else:
+                    Iq.append(np.nanmean(data.Iq[selection]))
 
         reduced_slice = ReducedData1DSlice(
             q=np.array(q_components[q_axis]),

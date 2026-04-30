@@ -275,7 +275,7 @@ def add_logging_to_model_class():
     """
     Add logging functionality to CDSAXS_Model base class.
     """
-    from CDSAXS_base_model import CDSAXS_Model
+    from .CDSAXS_base_model import CDSAXS_Model
     
     # Original CDSAXS_DiffEvolution method
     original_diff_evolution = CDSAXS_Model.CDSAXS_DiffEvolution

@@ -13,7 +13,7 @@ from scipy.optimize import (
 )
 from tqdm import tqdm
 
-from CDSAXS_base_model import CDSAXS_Model
+from .CDSAXS_base_model import CDSAXS_Model
 
 class CylinderModel(CDSAXS_Model):
     """
