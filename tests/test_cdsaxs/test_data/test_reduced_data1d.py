@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 
-from cdsaxs.data.reduced_slice import ReducedData1D
+from cdsaxs.data.reduced_slice import ReducedData1DSlice
 
 
 class TestReducedData1D(unittest.TestCase):
@@ -24,10 +24,13 @@ class TestReducedData1D(unittest.TestCase):
         self.sample_chi_deg = 3
         self.sample_omega_deg = 4
 
-        self.reduced_data1d = ReducedData1D(
+        self.reduced_data1d = ReducedData1DSlice(
             q=self.q,
             Iq=self.Iq,
             q_axis=self.q_axis,
+            integrated_axis='qsz',
+            offset_axis='qsy',
+            slice_width=0.001,
             dIq=self.dIq,
             mask=self.custom_mask,
             wavelength_nm=self.wavelength_nm,

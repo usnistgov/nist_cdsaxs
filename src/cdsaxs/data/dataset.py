@@ -426,7 +426,7 @@ class Dataset():
         Reset the scattering images to their original orientation
         removing any rotations or flips that may have been performed.
 
-        All transformaitons to the scattering intensity will also be
+        All transformations to the scattering intensity will also be
         undone, including scale, normalize, add and subtract functions.
 
         This function will reset the images to their raw image and so
@@ -915,6 +915,14 @@ class ReducedSlices():
         filter_by_q : dict
             Dictionary of q component and range (min, max) to filter
             the slices by.
+<<<<<<< validate_for_version1
+        q_axis : str
+            Currently only 'qsz' is accepted.
+        integrated_axis : str
+            Currently only 'qsx' is accepted.
+        offset_axis : str
+            Currently only 'qsy' is accepted.
+=======
         TODO: Add more options for exporting axis. Currently hardcoded.
         q_axis : str
             Currently only 'qsz' is accepted.
@@ -925,6 +933,7 @@ class ReducedSlices():
         offset_axis : str
             Currently only 'qsy' is accepted.
             Default is 'qsy'.
+>>>>>>> main
         export_qr : bool
             If set to True, qsr will also be exported in the file.
         decimals : int

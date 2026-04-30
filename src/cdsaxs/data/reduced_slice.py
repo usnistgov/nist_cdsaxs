@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from cdsaxs.data.data1d import Data1D
 
+
 class ReducedData1DSlice(Data1D):
     """
     ReducedData is a child class of Data1D with additional attributes
