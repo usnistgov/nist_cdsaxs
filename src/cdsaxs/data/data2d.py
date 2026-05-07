@@ -1571,7 +1571,7 @@ class Data2D(DataImage):
                 center_qdy = np.unravel_index(
                     np.nanargmin(np.abs(
                         getattr(self, center_qdy[0].lower())
-                        - center_qdy[1])))[0]
+                        - center_qdy[1])), self.image.shape)[0]
             min_y, max_y = self._get_box_dims_size_y(
                 size_qdy_px=width_qdy_px,
                 center=center_qdy,
@@ -1587,7 +1587,7 @@ class Data2D(DataImage):
             if center_qdx is not None:
                 center_qdx = np.unravel_index(np.nanargmin(np.abs(
                     getattr(self, center_qdx[0].lower())
-                    - center_qdx[1])))[1]
+                    - center_qdx[1])), self.image.shape)[1]
             min_x, max_x = self._get_box_dims_size_x(
                 size_qdx_px=width_qdx_px,
                 center=center_qdx,
