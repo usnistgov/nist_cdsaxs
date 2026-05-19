@@ -171,11 +171,6 @@ class DataImage():
             Specifies the constant value used to fill pixels outside the
             image boundaries after rotation. Only applies when resampling_mode
             is set to 'constant'.
-        log_scale : bool, optional
-            Rotate the log-scale of your image. This could help resolve
-            some artifacts caused by certain rotation sampling algorithms
-            but you will lose any pixels that are negative (turned to nan).
-            Deafult value is False.
         use_pillow : bool, optional
             If set to True, the algorithm will use the PILLOW package
             image rotation function instead of sklearn.transform.rotate.
@@ -228,11 +223,17 @@ class DataImage():
             self.mask = np.rot90(self.mask, k=k, axes=(0, 1))
 
     def flip_horizontally(self):
+        """
+        Flip the image and mask horizontally.
+        """
 
         self.image = np.flip(self.image, axis=1)
         self.mask = np.flip(self.mask, axis=1)
 
     def flip_vertically(self):
+        """
+        Flip the image and mask vertically.
+        """
 
         self.image = np.flip(self.image, axis=0)
         self.mask = np.flip(self.mask, axis=0)
@@ -424,7 +425,7 @@ class DataImage():
         image_box : ndarray
             The two dimensional region of interest selected from the
             data image used in the mean operation.
-        max_box : ndarray
+        mask_box : ndarray
             The corresponding region of interest selected from the mask
             and used in the mean operation.
         """
