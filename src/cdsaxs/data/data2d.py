@@ -2989,6 +2989,7 @@ class Data2D(DataImage):
         shift_box_qdx_px=0,
         show_plot=True,
         zoom_plot=True,
+        exclude_q=None,
         **kwargs
     ):
         """
@@ -3018,6 +3019,10 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
+        exclude_q : tuple[float, float], optional
+             Exclude an inclusive region of q from the calculation. 
+             This is generally used to exclude the immediate region 
+             around the beamstop.
             
         Parameters for Box Refinement
         -----------------------------
@@ -3115,6 +3120,7 @@ class Data2D(DataImage):
             range_qdy_px=limits_qdy_px,
             range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
+            exclude_q=exclude_q,
             show_plot=False,
             **kwargs
         )
