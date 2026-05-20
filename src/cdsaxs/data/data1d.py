@@ -40,11 +40,8 @@ class Data1D():
             accepted list below. This will be designated as the primary
             axis, but any of the other axes can be provided as keyword
             arguments (see **kwargs section below).
-        dIq : uncertainity along I, default is None
-            primary_q_axis : set the primary q-axis (listed below) for this
-            dataset. This can then be called with the basic 'q' attribute.
-            If left as None, the default axis will be set randomly to one
-            of the provided keyword arguments with the same length as Iq.
+        dIq : NDArray, optional
+            Uncertainty along I. Default is None.
         mask : NDArray
             One-dimensional boolean array of same dimension as Iq that
             are True at values that shoudl be masked out for all
@@ -192,9 +189,9 @@ class Data1D():
 
         Returns
         -------
-        NDArray : Interpolated I(q) values.
         NDArray : Interpolated q values. This may be different than the
             q_points provided were outside the range of q.
+        NDArray : Interpolated I(q) values.
         """
         use_q = np.copy(
             getattr(self, q_axis) if q_axis is not None else self.q)
@@ -311,6 +308,14 @@ class Data1D():
         the q_axis argument is specified. If resort is left as True,
         all data will be resorted to order the q axis that was transformed
         to the absolute value.
+
+        Parameters
+        ----------
+        q_axis : str, optional
+            q-axis to transform. If None, the primary q-axis is used.
+        resort : bool, optional
+            If True, resort all q arrays and associated data after taking
+            the absolute value of the selected q-axis. Default is True.
 
         Caution, this transformation to the data cannot be reversed.
         """
@@ -446,6 +451,11 @@ class Data1D():
         matplotlib.pyplot.errorbar() method will be passed through
         to the plotting function. See the matplotlib documentation
         for more information.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Figure containing the plotted data.
         """
 
         fig = plotting.plot_data1d(

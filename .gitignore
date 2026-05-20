@@ -180,4 +180,4 @@ cython_debug/
 
 dev_workspace/
 ./validation/
-.github/skills/dev_skills
+.github/skills/dev-skills
