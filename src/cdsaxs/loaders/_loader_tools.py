@@ -27,6 +27,7 @@ def filter_filenames_by_filetype(filenames, filetype):
     Accepted filtypes:
         tiff or tif
         nist-bin
+        smi-h5
     """
     if filetype is None:
         return filenames
@@ -36,6 +37,8 @@ def filter_filenames_by_filetype(filenames, filetype):
                      or 'tiff' == x.split('.')[-1]]
     elif filetype.lower() in ['nist_bin', 'nist-bin']:
         filenames = [x for x in filenames if 'bin' == x.split('.')[-1]]
+    elif filetype.lower() in ['smi-h5', 'smi_h5']:
+        filenames = [x for x in filenames if 'h5' == x.split('.')[-1]]
 
     return filenames
 
@@ -121,6 +124,7 @@ def generate_data_name_from_pattern(data_name_pattern,
 
     if data_name_pattern is not None:
         new_name = data_name_pattern
+        metadata_not_found = []
         while '{' in new_name and '}' in new_name:
             start = new_name.find('{')
             stop = new_name.find('}')
@@ -131,9 +135,12 @@ def generate_data_name_from_pattern(data_name_pattern,
                 value = user_params[key]
             else:
                 value = key
+                metadata_not_found.append(key)
             old_str = "{"+key+"}"
             new_str = str(value)
             new_name = new_name.replace(old_str, new_str)
+        for key in metadata_not_found:
+            new_name = new_name.replace(key, "{"+key+"}")
     elif 'filename' in metadata.keys():
         new_name = metadata['filename']
     else:
