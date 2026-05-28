@@ -132,7 +132,7 @@ def read_smi_h5(filepath):
     metadata['bpm'] = scan['primary']['xbpm3_sumX'][:]
     metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
 
-    seq_num = scan['primary']['seq_num']  
+    seq_num = scan['primary']['seq_num'][:]  
 
     images = []
     for i in range(num_images):
