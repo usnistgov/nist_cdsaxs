@@ -130,13 +130,16 @@ def read_smi_h5(filepath):
     metadata['exposure_time_s'] = scan['config']['pil2M_cam_acquire_time'][0]
     metadata['pixel_size_um'] = 172  # pilatus2m
     metadata['bpm'] = scan['primary']['xbpm3_sumX'][:]
-    metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]    
+    metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
+
+    seq_num = scan['primary']['seq_num'][:]  
 
     images = []
     for i in range(num_images):
         temp_metadata = dict(metadata)
-        temp_metadata['bpm'] = metadata['bpm'][i]
-        temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][i],2)
+        metadata_index = np.where(seq_num == i+1)[0]
+        temp_metadata['bpm'] = metadata['bpm'][metadata_index]
+        temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
         images.append(
             (image_stack[i].astype(np.float64), filepath, temp_metadata)
         )

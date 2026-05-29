@@ -1668,5 +1668,4 @@ def plot_reduced_slices(
     ax.set_ylabel("Intensity")
     ax.set_xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
 
-    plt.close()
     return fig, ax
