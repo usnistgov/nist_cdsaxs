@@ -146,7 +146,7 @@ def substrate_absorption_correction(sample_phi_deg,
     return substrate_absorption_factor
 
 
-def lorentz_factor(scattering_angle_deg, polarization):
+def polarization_factor(scattering_angle_deg, polarization):
     """
     Calculates the lorentz factor for p-polarization as:
         lorentz_factor = cos(scattering_angle)^2
@@ -163,17 +163,45 @@ def lorentz_factor(scattering_angle_deg, polarization):
     Returns
     -------
     float | array-like
-        Lorentz factor at each scattering angle provided. To correct
+        Polarization factor at each scattering angle provided. To correct
         your measured intensity, divide by this factor. If you are
         applying this factor in your model to fit the measured data,
-        mulitple your model by this factor.
+        mulitply your model by this factor.
     """
     if polarization in ["p", "P"]:
-        lorentz = np.cos(np.deg2rad(scattering_angle_deg))**2
+        polar = np.cos(np.deg2rad(scattering_angle_deg))**2
     elif polarization in ["s", "S"]:
-        lorentz = np.ones_like(scattering_angle_deg).astype(float)
+        polar = np.ones_like(scattering_angle_deg).astype(float)
     else:
         raise ValueError(f"The polarization {polarization} is not recognized. "
                          "Use 'p' or 's'.")
+
+    return polar
+
+
+def lorentz_factor(scattering_angle_deg, sample_phi_deg):
+    """
+    Calculates the lorentz factor for p-polarization as:
+        lorentz_factor = cos(scattering_angle)^2
+    The lorentz factor for s-polarized systems is equal to 1.
+
+    Parameters
+    ----------
+    scattering_angle_deg : float | array-like
+        Scattering angle in units of degrees.
+    sample_phi_deg : float
+        Rotation angle of the sample.
+
+    Returns
+    -------
+    float | array-like
+        Lorentz factor at each scattering angle provided. To correct
+        your measured intensity, multiply by this factor. If you are
+        applying this factor in your model to fit the measured data,
+        divide your model by this factor.
+    """
+    sample_phi_deg = float(sample_phi_deg)
+    scattering_angle_deg = np.array(scattering_angle_deg)
+    lorentz = np.cos(np.deg2rad(scattering_angle_deg - sample_phi_deg))
 
     return lorentz
