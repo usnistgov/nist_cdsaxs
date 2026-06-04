@@ -22,3 +22,4 @@ dependencies:
       - tqdm==4.67.1
       - corner==2.2.3
       - h5py==3.16.0
+      - astropy==6.1.7
