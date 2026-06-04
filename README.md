@@ -23,11 +23,7 @@ Notes:
 - If you use conda/mamba, create and activate an environment first, then run the pip commands above.
 - The `-e` (editable) install lets you modify the source and use the changes without re-installing.
 
-## Legay GUI
-The legacy GUI for CD-SAXS data reduction is no longer supported in this package.
-It can be found at the following location: https://github.com/usnistgov/nist_cdsaxs_legacy_gui
-
-## Installation & Usage Instructions (Developers)
+## Create and Activate Environment (Developers)
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
 2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
 3. Create an environment with the `environment_legacy.yml` file:
