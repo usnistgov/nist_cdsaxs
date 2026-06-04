@@ -6,19 +6,19 @@ import numpy as np
 from numpy.typing import NDArray
 from matplotlib.figure import Figure
 
-import cdsaxs.calculators as calculators
-from cdsaxs.data.data_image import DataImage
-from cdsaxs.data.metadata import (
+from .. import calculators
+from .data_image import DataImage
+from .metadata import (
     METADATA_KEYWORDS,
     check_metadata,
     correct_metadata_dtype,
     ACCEPTED_Q_AXES
 )
-from cdsaxs.data.reduced_data1d import ReducedData1D
-import cdsaxs.plotting.plotting as plotting
-import cdsaxs.diffraction as diffraction
-import cdsaxs.tools as tools
-from cdsaxs.tools import (
+from .reduced_data1d import ReducedData1D
+from .. import plotting
+from .. import diffraction
+from .. import tools
+from ..tools import (
     find_peaks_2D,
     find_peaks_2D_one_axis,
     line_fit,

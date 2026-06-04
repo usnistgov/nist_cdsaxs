@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import griddata
 
-import cdsaxs.plotting._plotting_tools as plotting_tools
-import cdsaxs.diffraction as diffraction
+from . import _plotting_tools as plotting_tools
 
 
 def create_even_axis_ticks(data, num=6, includes_zero=True):

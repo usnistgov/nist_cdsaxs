@@ -6,7 +6,7 @@ from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
-import cdsaxs.loaders._loader_tools as loader_tools
+from . import _loader_tools as loader_tools
 
 
 def read_tiff(filepath):

@@ -5,8 +5,8 @@ import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
 import numpy as np
 
-import cdsaxs.plotting._plotting_tools as plotting_tools
-from cdsaxs.plotting._plotting_kwargs import (
+from . import _plotting_tools as plotting_tools
+from ._plotting_kwargs import (
     ERRORBAR_KWARGS,
     SCATTER_KWARGS,
     IMSHOW_KWARGS

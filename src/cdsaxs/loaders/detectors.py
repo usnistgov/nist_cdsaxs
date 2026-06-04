@@ -1,6 +1,6 @@
 import warnings
 
-from cdsaxs.loaders.filetypes import read_tiff
+from .filetypes import read_tiff
 
 
 def read_pilatus(filepath=None):

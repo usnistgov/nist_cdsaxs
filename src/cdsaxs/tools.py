@@ -10,7 +10,7 @@ from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 from skimage import transform
 
-from cdsaxs.calculators import gaussian
+from .calculators import gaussian
 
 
 def default_mask(data):

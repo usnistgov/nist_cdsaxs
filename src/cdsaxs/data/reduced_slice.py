@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from numpy.typing import NDArray
 
-from cdsaxs.data.data1d import Data1D
+from .data1d import Data1D
 
 
 class ReducedData1DSlice(Data1D):
