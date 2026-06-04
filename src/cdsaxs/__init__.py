@@ -11,6 +11,3 @@ import cdsaxs.plotting.plotting
 import cdsaxs.reduction
 import cdsaxs.sample
 import cdsaxs.tools
-import cdsaxs.Fitting
-
-from cdsaxs.Fitting import create_model
