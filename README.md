@@ -23,14 +23,14 @@ Notes:
 - If you use conda/mamba, create and activate an environment first, then run the pip commands above.
 - The `-e` (editable) install lets you modify the source and use the changes without re-installing.
 
-## Create and Activate Environment (Developers)
+## Create and Activate Environment
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
 2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
-3. Create an environment with the `environment_legacy.yml` file:
+3. Create a Python environment; replace 'cdsaxs_dev' with another environment name if you wish:
 ```
-conda env create -f environment_dev.yml
+conda create --name cdsaxs_dev python
 ```
-4. Activate the environment, replacing `cdsaxs_legacy` with your environment name if it is different.
+4. Activate the environment, replacing `cdsaxs_dev` with your environment name if it is different.
 ```
 conda activate cdsaxs_dev
 ```
