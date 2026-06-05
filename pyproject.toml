@@ -3,19 +3,19 @@ requires = ["setuptools >= 61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nist_cdsaxs"
+name = "cdsaxs"
 version = "0.1.0"
 description = "CD-SAXS data reduction from detector to sample coordinate space."
 license = {text = "Public Domain"}
 authors = [
     {name="Dean DeLongchamp", email="dean.delongchamp@nist.gov"},
     {name="R. Joseph Kline", email="r.kline@nist.gov"},
-    {name="Dan Sunday", email="daniel.sunday@nist.gov},
+    {name="Dan Sunday", email="daniel.sunday@nist.gov"},
     {name="Matthew A. Wade", email="matthew.wade@nist.gov"},
     {name="Caitlyn Wolf", email="caitlyn.wolf@nist.gov"},
 ]
 maintainers = [
-    {name="Dan Sunday", email="daniel.sunday@nist.gov},
+    {name="Dan Sunday", email="daniel.sunday@nist.gov"},
     {name="Matthew A. Wade", email="matthew.wade@nist.gov"},
     {name="Caitlyn Wolf", email="caitlyn.wolf@nist.gov"},
 ]
