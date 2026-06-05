@@ -15,7 +15,7 @@ from .metadata import (
     ACCEPTED_Q_AXES
 )
 from .reduced_data1d import ReducedData1D
-from .. import plotting
+from ..plotting import plotting
 from .. import diffraction
 from .. import tools
 from ..tools import (
