@@ -10,7 +10,7 @@ from .data.dataset import (
     ReducedDataset,
     ReducedSlices
 )
-import .plotting.plotting as plotting
+from .plotting import plotting
 
 
 def slice_reduced_dataset(
