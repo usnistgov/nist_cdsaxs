@@ -7,4 +7,4 @@ from .loaders.load_data import (
 )
 
 # import reduction tools
-from reduction import slice_reduced_dataset
+from .reduction import slice_reduced_dataset
