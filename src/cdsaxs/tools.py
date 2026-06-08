@@ -112,7 +112,7 @@ def line_fit(x, y, force_intercept=None):
             fit_intercept=False if force_intercept is not None else True)
         model.fit(x, y)
         slope = float(model.coef_[0][0])
-        intercept = float(model.intercept_)
+        intercept = float(model.intercept_[0])
         if force_intercept is not None:
             intercept = force_intercept[1] - slope * force_intercept[0]
         angle = np.rad2deg(np.arctan(slope))
