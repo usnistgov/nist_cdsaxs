@@ -31,7 +31,7 @@ Notes:
 conda create --name cdsaxs_dev python
 ```
 > [!IMPORTANT]
-> If you're using a Jupyter notebook, use `conda create --name cdsaxs_dev python ipykernel` to install ipykernel as well. Installation with pip is untested.
+> If you're using a Jupyter notebook, use `conda create --name cdsaxs_dev python ipykernel` to install ipykernel as well. Installation with pip did not work in our testing.
 > 
 
 4. Activate the environment, replacing `cdsaxs_dev` with your environment name if it is different.
