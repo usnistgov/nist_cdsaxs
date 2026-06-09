@@ -19,9 +19,10 @@ pip install --upgrade pip setuptools wheel
 pip install -e .[dev]
 ```
 
-Notes:
-- If you use conda/mamba, create and activate an environment first, then run the pip commands above.
-- The `-e` (editable) install lets you modify the source and use the changes without re-installing.
+> [!NOTE]
+> If you use conda/mamba, create and activate an environment first, then run the pip commands above.
+>
+> The `-e` (editable) install lets you modify the source and use the changes without re-installing.
 
 ## Create and Activate Environment
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
@@ -30,6 +31,10 @@ Notes:
 ```
 conda create --name cdsaxs_dev python
 ```
+> [!IMPORTANT]
+> If you're using a Jupyter notebook, use `conda create --name cdsaxs_dev python ipykernel` to install ipykernel as well. Installation with pip did not work in our testing.
+> 
+
 4. Activate the environment, replacing `cdsaxs_dev` with your environment name if it is different.
 ```
 conda activate cdsaxs_dev
