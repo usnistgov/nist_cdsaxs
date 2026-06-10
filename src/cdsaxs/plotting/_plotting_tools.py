@@ -5,7 +5,7 @@ Helpful plotting tools for cdsaxs.
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import griddata
-from scipy.spatial import cKDTree
+from scipy.spatial import KDTree
 from . import _plotting_tools as plotting_tools
 
 
@@ -350,7 +350,7 @@ def generate_interpolated_reduced_data(
     raw_Iq = griddata((qsx, qsz), Iq, (grid_x, grid_z), method=method)
 
     # build KD tree for measured points
-    tree = cKDTree(np.column_stack([qsx, qsz]))
+    tree = KDTree(np.column_stack([qsx, qsz]))
 
     # get k-th nearest neighbors from all points,
     # use median of this data for typical spacing
