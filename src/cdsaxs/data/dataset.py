@@ -746,6 +746,10 @@ class ReducedDataset():
             filter_by_q={},
             filter_by_metadata={},
             interpolated_data=False,
+            grid_size = 1000,
+            method = "cubic",
+            distance_factor = 5,
+            verbose = False,
             **kwargs
     ):
         """
@@ -785,6 +789,10 @@ class ReducedDataset():
             filter_by_q=filter_by_q,
             filter_by_metadata=filter_by_metadata,
             interpolated_data=interpolated_data,
+            grid_size = grid_size,
+            method = method,
+            distance_factor = distance_factor,
+            verbose = verbose,
             **kwargs
         )
 

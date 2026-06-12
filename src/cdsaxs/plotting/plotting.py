@@ -1381,6 +1381,10 @@ def plot_reduced_dataset(
         filter_by_q={},
         filter_by_metadata={},
         interpolated_data=False,
+        grid_size=1000,
+        method="cubic",
+        distance_factor=5,
+        verbose=False,
         **kwargs):
     """
     Plot the reduced dataset as 'qsz' vs 'qsx' using
@@ -1499,6 +1503,10 @@ def plot_reduced_dataset(
                 qsx=q_xaxis,
                 qsz=q_yaxis,
                 Iq=Iqs,
+                grid_size=grid_size,
+                method=method,
+                distance_factor=distance_factor,
+                verbose=verbose
                 # wavelength_nm=wavelengths[0],
                 # sample_phi_deg_range=sample_phi_degs,
             )
