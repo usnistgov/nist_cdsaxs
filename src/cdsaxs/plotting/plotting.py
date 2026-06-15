@@ -1378,6 +1378,7 @@ def plot_reduced_dataset(
         cmap='viridis',
         vmin=None,
         vmax=None,
+        levels=None,
         filter_by_q={},
         filter_by_metadata={},
         interpolated_data=False,
@@ -1510,8 +1511,10 @@ def plot_reduced_dataset(
                 # wavelength_nm=wavelengths[0],
                 # sample_phi_deg_range=sample_phi_degs,
             )
-        if log_scale:
+        if log_scale and levels is None:
             levels = np.logspace(np.log10(vmin), np.log10(vmax), 100)
+        elif levels is not None:
+            levels = levels
         else:
             levels = np.linspace(vmin, vmax, 100)
         data_plot = plt.contourf(
