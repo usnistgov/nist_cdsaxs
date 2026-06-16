@@ -1475,9 +1475,25 @@ def plot_reduced_dataset(
         # wavelengths.append(data.wavelength_nm)
         # sample_phi_degs.append(data.sample_phi_deg)
 
+
+    interp_qsx = []
+    interp_qsz = []
+    interp_iqs = []
+    if interpolated_data:
+        for data in filtered_slices:
+            interp_qsx.append(list(getattr(data, 'qsx')))
+            interp_qsz.append(list(getattr(data, 'qsz')))
+            Iq = np.copy(data.Iq)
+            Iq[data.mask] = np.nan
+            interp_iqs.append(list(Iq))
+
     q_xaxis = np.array(q_xaxis)
     q_yaxis = np.array(q_yaxis)
     Iqs = np.array(Iqs)
+
+    interp_qsx = np.array(interp_qsx)
+    interp_qsz = np.array(interp_qsz)
+    interp_iqs = np.array(interp_iqs)
 
     # if len(list(set(wavelengths))) > 1:
     #     warnings.warn(
@@ -1499,18 +1515,23 @@ def plot_reduced_dataset(
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
 
     if interpolated_data:
+
         x_interp, y_interp, Iq_interp =\
-            plotting_tools.generate_interpolated_reduced_data(
-                qsx=q_xaxis,
-                qsz=q_yaxis,
-                Iq=Iqs,
-                grid_size=grid_size,
-                method=method,
-                distance_factor=distance_factor,
-                verbose=verbose
-                # wavelength_nm=wavelengths[0],
-                # sample_phi_deg_range=sample_phi_degs,
-            )
+            plotting_tools.new_interp_func(interp_iqs, interp_qsx, interp_qsz, q_xaxis, q_yaxis, Iqs)
+
+        # x_interp, y_interp, Iq_interp =\
+        #     plotting_tools.generate_interpolated_reduced_data(
+        #         qsx=q_xaxis,
+        #         qsz=q_yaxis,
+        #         Iq=Iqs,
+        #         grid_size=grid_size,
+        #         method=method,
+        #         distance_factor=distance_factor,
+        #         verbose=verbose
+        #         # wavelength_nm=wavelengths[0],
+        #         # sample_phi_deg_range=sample_phi_degs,
+        #     )
+        
         if log_scale and levels is None:
             levels = np.logspace(np.log10(vmin), np.log10(vmax), 100)
         elif levels is not None:

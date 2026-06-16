@@ -4,7 +4,7 @@ Helpful plotting tools for cdsaxs.
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import griddata
+import scipy.interpolate as interpolate
 from scipy.spatial import KDTree
 from . import _plotting_tools as plotting_tools
 
@@ -347,7 +347,7 @@ def generate_interpolated_reduced_data(
     )
 
     # interpolate over everything
-    raw_Iq = griddata((qsx, qsz), Iq, (grid_x, grid_z), method=method)
+    raw_Iq = interpolate.griddata((qsx, qsz), Iq, (grid_x, grid_z), method=method)
 
     # build KD tree for measured points
     tree = KDTree(np.column_stack([qsx, qsz]))
@@ -381,3 +381,41 @@ def generate_interpolated_reduced_data(
               f"({kept/total:.1%}) within the admissible radius.")
 
     return grid_x, grid_z, grid_Iq
+
+def new_interp_func(I_listoflists, x_listoflists, y_listoflists, qsx, qsz, Iqs):
+
+    # remove_nan = np.isnan(Iqs)
+    # qsx = qsx[~remove_nan]
+    # qsz = qsz[~remove_nan]
+    # Iqs = Iqs[~remove_nan]
+    
+    new_x_axis = np.linspace(np.min(qsx), np.max(qsx), 1000)
+    new_y_axis = np.linspace(np.min(qsz), np.max(qsz), 1000)
+
+    I_listoflists = [i for i in I_listoflists if len(i) != 0]  # drop empty rows
+    x_listoflists = [i for i in x_listoflists if len(i) != 0]
+    y_listoflists = [i for i in y_listoflists if len(i) != 0]
+    I_array_new_axes = np.empty((len(new_y_axis), len(new_x_axis)))
+    I_array_newx_oldy = np.empty((len(I_listoflists), len(new_x_axis)))
+    y_array_newx_oldy = np.empty((len(I_listoflists), len(new_x_axis)))
+    I_fns = [interpolate.interp1d(x_listoflists[i], I_listoflists[i], bounds_error=False) for i in range(len(I_listoflists))]
+    y_fns = [interpolate.interp1d(x_listoflists[i], y_listoflists[i], bounds_error=False) for i in range(len(I_listoflists))]
+    # linear interpolation on newx, oldy for each oldy
+    for row in range(len(I_listoflists)):
+        I_array_newx_oldy[row, :] = I_fns[row](new_x_axis)
+        y_array_newx_oldy[row, :] = y_fns[row](new_x_axis)
+    # linear interpolation on newx, newy
+    for col in range(len(new_x_axis)):
+        I_fn = interpolate.interp1d(y_array_newx_oldy[:, col], I_array_newx_oldy[:, col], bounds_error=False)
+        I_array_new_axes[:, col] = I_fn(new_y_axis)
+
+    # return_i_arr = []
+    # for row in range(len(I_array_new_axes)):
+    #     return_i_arr.extend(I_array_new_axes[row])
+
+    grid_x, grid_z = np.meshgrid(
+        new_x_axis,
+        new_y_axis,
+    )
+
+    return grid_x, grid_z, I_array_new_axes
