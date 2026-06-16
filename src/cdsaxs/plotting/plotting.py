@@ -1382,6 +1382,7 @@ def plot_reduced_dataset(
         filter_by_q={},
         filter_by_metadata={},
         interpolated_data=False,
+        interpolation_type=1,
         grid_size=1000,
         method="cubic",
         distance_factor=5,
@@ -1412,6 +1413,20 @@ def plot_reduced_dataset(
     interpolated_data : bool
         If set to True, the data will be interpolated onto a grid for
         viewing.
+    interpolation_type : int
+        If set to 0, will use the scipy griddata interpolation method.
+        If set to 1, will use the old python gui method (recommended).
+    grid_size : int
+        Sets the size of the grid you want to interpolate to.
+    method : str
+        Options: "cubic", "nearest", "linear". For use with the scipy
+        griddata interpolation method.
+    distance_factor : float
+        Sets the distance factor for masking interpolation that is 
+        too far from a real point. For use with the scipy
+        griddata interpolation method.
+    verbose : bool
+        Print verbose output
 
     **kwargs
     --------
@@ -1475,11 +1490,12 @@ def plot_reduced_dataset(
         # wavelengths.append(data.wavelength_nm)
         # sample_phi_degs.append(data.sample_phi_deg)
 
-
+    
     interp_qsx = []
     interp_qsz = []
     interp_iqs = []
-    if interpolated_data:
+
+    if interpolated_data and interpolation_type == 1:
         for data in filtered_slices:
             interp_qsx.append(list(getattr(data, 'qsx')))
             interp_qsz.append(list(getattr(data, 'qsz')))
@@ -1516,21 +1532,24 @@ def plot_reduced_dataset(
 
     if interpolated_data:
 
-        x_interp, y_interp, Iq_interp =\
-            plotting_tools.new_interp_func(interp_iqs, interp_qsx, interp_qsz, q_xaxis, q_yaxis, Iqs)
+        
+        if interpolation_type == 0:
+            x_interp, y_interp, Iq_interp =\
+                plotting_tools.generate_interpolated_reduced_data(
+                    qsx=q_xaxis,
+                    qsz=q_yaxis,
+                    Iq=Iqs,
+                    grid_size=grid_size,
+                    method=method,
+                    distance_factor=distance_factor,
+                    verbose=verbose
+                    # wavelength_nm=wavelengths[0],
+                    # sample_phi_deg_range=sample_phi_degs,
+                )
 
-        # x_interp, y_interp, Iq_interp =\
-        #     plotting_tools.generate_interpolated_reduced_data(
-        #         qsx=q_xaxis,
-        #         qsz=q_yaxis,
-        #         Iq=Iqs,
-        #         grid_size=grid_size,
-        #         method=method,
-        #         distance_factor=distance_factor,
-        #         verbose=verbose
-        #         # wavelength_nm=wavelengths[0],
-        #         # sample_phi_deg_range=sample_phi_degs,
-        #     )
+        else:
+            x_interp, y_interp, Iq_interp =\
+                plotting_tools.new_interp_func(interp_iqs, interp_qsx, interp_qsz, q_xaxis, q_yaxis, grid_size, verbose)
         
         if log_scale and levels is None:
             levels = np.logspace(np.log10(vmin), np.log10(vmax), 100)

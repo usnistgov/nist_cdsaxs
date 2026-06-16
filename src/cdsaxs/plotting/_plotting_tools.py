@@ -382,40 +382,89 @@ def generate_interpolated_reduced_data(
 
     return grid_x, grid_z, grid_Iq
 
-def new_interp_func(I_listoflists, x_listoflists, y_listoflists, qsx, qsz, Iqs):
+def new_interp_func(I_listoflists, x_listoflists, y_listoflists, qsx, qsz, grid_size, verbose):
 
-    # remove_nan = np.isnan(Iqs)
-    # qsx = qsx[~remove_nan]
-    # qsz = qsz[~remove_nan]
-    # Iqs = Iqs[~remove_nan]
-    
-    new_x_axis = np.linspace(np.min(qsx), np.max(qsx), 1000)
-    new_y_axis = np.linspace(np.min(qsz), np.max(qsz), 1000)
+    """
+    From the old python gui
 
+    Bilinear interpolation of 2D data (structured on at least one axis) to new axes
+    Unlike griddata, does not generate convex hull with excess interpolated data
+
+    Old gui took in 2D arrays for Qsx, Qsz, Iq. New interp function took in 1D array of these values.
+    Current replacement is just changing the processing from .extend() to .append().
+
+    Creates x, y axis from linspace of the 1d array.
+
+    Args:
+        I_listoflists: 2D array or list of lists, rows: old y axis, cols: old x axes, values: I at each point
+        x_listoflists: 2D array or list of lists, rows: old y axis, cols: old x axes, values: old x at each point
+        y_listoflists: 2D array or list of lists, rows: old y axis, cols: old x axes, values: old y at each point
+        qsx: 1D array or list of x values
+        qsz: 1D array or list of z values
+        grid_size: size of grid
+    """
+    if verbose:
+        print("Creating new axis from qsx, qsz")
+    new_x_axis = np.linspace(np.min(qsx), np.max(qsx), grid_size)
+    new_y_axis = np.linspace(np.min(qsz), np.max(qsz), grid_size)
+    if verbose:
+        print("Created new axis from qsx, qsz")
+
+    if verbose:
+        print("Dropping empty rows")
     I_listoflists = [i for i in I_listoflists if len(i) != 0]  # drop empty rows
     x_listoflists = [i for i in x_listoflists if len(i) != 0]
     y_listoflists = [i for i in y_listoflists if len(i) != 0]
+    if verbose:
+        print("Dropped empty rows")
+
+    if verbose:
+        print("Creating new helper axes")
     I_array_new_axes = np.empty((len(new_y_axis), len(new_x_axis)))
     I_array_newx_oldy = np.empty((len(I_listoflists), len(new_x_axis)))
     y_array_newx_oldy = np.empty((len(I_listoflists), len(new_x_axis)))
+    if verbose:
+        print("Created new helper axes")
+
+    if verbose:
+        print("Creating Iq interpolation function")
     I_fns = [interpolate.interp1d(x_listoflists[i], I_listoflists[i], bounds_error=False) for i in range(len(I_listoflists))]
+    if verbose:
+        print("Created Iq interpolation function")
+        print("Creating y interpolation function")
     y_fns = [interpolate.interp1d(x_listoflists[i], y_listoflists[i], bounds_error=False) for i in range(len(I_listoflists))]
+    if verbose:
+        print("Created Iq interpolation function")
+    
+    if verbose:
+        print("Interpolating on newx, oldy for each oldy")
     # linear interpolation on newx, oldy for each oldy
     for row in range(len(I_listoflists)):
         I_array_newx_oldy[row, :] = I_fns[row](new_x_axis)
         y_array_newx_oldy[row, :] = y_fns[row](new_x_axis)
+
+    if verbose:
+        print("Success")
+        print("Interpolating on newx, newy")
     # linear interpolation on newx, newy
     for col in range(len(new_x_axis)):
         I_fn = interpolate.interp1d(y_array_newx_oldy[:, col], I_array_newx_oldy[:, col], bounds_error=False)
         I_array_new_axes[:, col] = I_fn(new_y_axis)
 
+    if verbose:
+        print("Success")
+
     # return_i_arr = []
     # for row in range(len(I_array_new_axes)):
     #     return_i_arr.extend(I_array_new_axes[row])
 
+    if verbose:
+        print("Meshing x and y axis")
     grid_x, grid_z = np.meshgrid(
         new_x_axis,
         new_y_axis,
     )
-
+    if verbose:
+        print("Success")
+        
     return grid_x, grid_z, I_array_new_axes
