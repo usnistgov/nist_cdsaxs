@@ -46,11 +46,10 @@ class Dataset():
             name: str = None,
             sample: str = None
     ):
+        self.datas={}
         if datas is not None:
             self.add_data(datas)
-        else:
-            self.datas = {}
-
+            
         self.name = name
         self.sample = sample
 
