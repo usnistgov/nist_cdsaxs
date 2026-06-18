@@ -153,8 +153,6 @@ def read_als_11_0_1_2(filepath):
 
     image, filepath, header = read_fits(filepath)
 
-    # orient the detector image with our coordinate system
-    image = np.flipud(np.rot90(image, 3))
 
     metadata = {}
     metadata['energy_ev'] = header['Beamline Energy']
@@ -170,8 +168,12 @@ def read_als_11_0_1_2(filepath):
     date = header['DATE']
     if float(date[:4]) <= 2025:
         metadata['pixel_size_um'] = 27
+        # orient the detector image with our coordinate system
+        image = np.flipud(np.rot90(image, 3))
     else:
         metadata['pixel_size_um'] = 9
+        # orient the detector image with our coordinate system
+        image = np.flipud(np.rot90(image, 2))
 
     return image, filepath, metadata
 
