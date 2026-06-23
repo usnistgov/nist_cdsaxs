@@ -462,7 +462,7 @@ def new_interp_func(I_listoflists, x_listoflists, y_listoflists, qsx, qsz, grid_
         print("Meshing x and y axis")
     grid_x, grid_z = np.meshgrid(
         new_x_axis,
-        new_y_axis,
+        new_y_axis
     )
     if verbose:
         print("Success")
