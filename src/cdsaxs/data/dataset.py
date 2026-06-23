@@ -745,6 +745,11 @@ class ReducedDataset():
             filter_by_q={},
             filter_by_metadata={},
             interpolated_data=False,
+            use_legacy_interpolation=False,
+            grid_size = 1000,
+            method = "cubic",
+            distance_factor = 5,
+            verbose = False,
             **kwargs
     ):
         """
@@ -769,6 +774,20 @@ class ReducedDataset():
         interpolated_data : bool
             If set to True, the data will be interpolated onto a grid for
             viewing.
+        use_legacy_interpolation : bool
+            If set to True, will use the old scipy griddata interpolation method.
+            If set to False, will use the 2.7 python gui method (recommended).
+        grid_size : int
+            Sets the size of the grid you want to interpolate to.
+        method : str
+            Options: "cubic", "nearest", "linear". For use with the scipy
+            griddata interpolation method.
+        distance_factor : float
+            Sets the distance factor for masking interpolation that is 
+            too far from a real point. For use with the scipy
+            griddata interpolation method.
+        verbose : bool
+            Print verbose output
 
         **kwargs
         --------
@@ -784,6 +803,11 @@ class ReducedDataset():
             filter_by_q=filter_by_q,
             filter_by_metadata=filter_by_metadata,
             interpolated_data=interpolated_data,
+            use_legacy_interpolation=use_legacy_interpolation,
+            grid_size = grid_size,
+            method = method,
+            distance_factor = distance_factor,
+            verbose = verbose,
             **kwargs
         )
 
