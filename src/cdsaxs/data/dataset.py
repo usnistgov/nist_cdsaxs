@@ -745,7 +745,7 @@ class ReducedDataset():
             filter_by_q={},
             filter_by_metadata={},
             interpolated_data=False,
-            interpolation_type=1,
+            use_legacy_interpolation=False,
             grid_size = 1000,
             method = "cubic",
             distance_factor = 5,
@@ -774,9 +774,9 @@ class ReducedDataset():
         interpolated_data : bool
             If set to True, the data will be interpolated onto a grid for
             viewing.
-        interpolation_type : int
-            If set to 0, will use the scipy griddata interpolation method.
-            If set to 1, will use the old python gui method (recommended).
+        use_legacy_interpolation : bool
+            If set to True, will use the old scipy griddata interpolation method.
+            If set to False, will use the 2.7 python gui method (recommended).
         grid_size : int
             Sets the size of the grid you want to interpolate to.
         method : str
@@ -803,7 +803,7 @@ class ReducedDataset():
             filter_by_q=filter_by_q,
             filter_by_metadata=filter_by_metadata,
             interpolated_data=interpolated_data,
-            interpolation_type=interpolation_type,
+            use_legacy_interpolation=use_legacy_interpolation,
             grid_size = grid_size,
             method = method,
             distance_factor = distance_factor,

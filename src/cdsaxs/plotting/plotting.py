@@ -1382,7 +1382,7 @@ def plot_reduced_dataset(
         filter_by_q={},
         filter_by_metadata={},
         interpolated_data=False,
-        interpolation_type=1,
+        use_legacy_interpolation=False,
         grid_size=1000,
         method="cubic",
         distance_factor=5,
@@ -1413,9 +1413,9 @@ def plot_reduced_dataset(
     interpolated_data : bool
         If set to True, the data will be interpolated onto a grid for
         viewing.
-    interpolation_type : int
-        If set to 0, will use the scipy griddata interpolation method.
-        If set to 1, will use the old python gui method (recommended).
+    use_legacy_interpolation : bool
+        If set to True, will use the old scipy griddata interpolation method.
+        If set to False, will use the 2.7 python gui method (recommended).
     grid_size : int
         Sets the size of the grid you want to interpolate to.
     method : str
@@ -1495,7 +1495,7 @@ def plot_reduced_dataset(
     interp_qsz = []
     interp_iqs = []
 
-    if interpolated_data and interpolation_type == 1:
+    if interpolated_data and (not(use_legacy_interpolation)):
         for data in filtered_slices:
             interp_qsx.append(list(getattr(data, 'qsx')))
             interp_qsz.append(list(getattr(data, 'qsz')))
@@ -1533,7 +1533,7 @@ def plot_reduced_dataset(
     if interpolated_data:
 
         
-        if interpolation_type == 0:
+        if use_legacy_interpolation:
             x_interp, y_interp, Iq_interp =\
                 plotting_tools.generate_interpolated_reduced_data(
                     qsx=q_xaxis,
