@@ -343,7 +343,7 @@ def generate_interpolated_reduced_data(
     # create grid
     grid_x, grid_z = np.meshgrid(
         np.linspace(np.min(qsx), np.max(qsx), grid_size),
-        np.linspace(np.min(qsz), np.max(qsz), grid_size),
+        np.linspace(np.min(qsz), np.max(qsz), grid_size)
     )
 
     # interpolate over everything
