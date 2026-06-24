@@ -132,9 +132,18 @@ def read_nist_edf(filepath):
     metadata['sample_omega_deg'] = float(header['CD_Rx'])
     metadata['center_px'] = (float(header["Center_2"]), float(header["Center_1"]))
     metadata['sdd_cm'] = float(header["SampleDistance"]) * 1e2  # m to cm
-    metadata['sample_reference'] = header["sample_reference"]
-    metadata['sample_name'] = header['sample_name']
-    metadata['sample_comment'] = header['sample_comment']
+    try:
+        metadata['sample_reference'] = header["sample_reference"]
+    except:
+        pass
+    try:
+        metadata['sample_name'] = header['sample_name']
+    except:
+        pass
+    try:
+        metadata['sample_comment'] = header['sample_comment']
+    except:
+        pass
     metadata['date'] = header["Date"]
     metadata['sample_stage_x'] = float(header["x"])
     metadata['sample_stage_y'] = float(header["z"])
