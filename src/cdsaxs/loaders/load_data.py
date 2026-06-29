@@ -5,16 +5,16 @@ import warnings
 import numpy as np
 from tqdm import tqdm
 
-from cdsaxs.data.data2d import Data2D
-from cdsaxs.data.dataset import Dataset
-from cdsaxs.data.metadata import (
+from ..data.data2d import Data2D
+from ..data.dataset import Dataset
+from ..data.metadata import (
     METADATA_KEYWORDS,
     check_metadata,
     correct_metadata_dtype
 )
-import cdsaxs.loaders._loader_tools as loader_tools
-from cdsaxs.loaders.detectors import read_pilatus
-from cdsaxs.loaders.filetypes import (
+from . import _loader_tools as loader_tools
+from .detectors import read_pilatus
+from .filetypes import (
     read_tiff,
     read_nist_bin,
     read_smi_h5

@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from cdsaxs.data.reduced_slice import ReducedData1DSlice
-from cdsaxs.data.dataset import (
+from .data.reduced_slice import ReducedData1DSlice
+from .data.dataset import (
     ReducedDataset,
     ReducedSlices
 )
-import cdsaxs.plotting.plotting as plotting
+from .plotting import plotting
 
 
 def slice_reduced_dataset(

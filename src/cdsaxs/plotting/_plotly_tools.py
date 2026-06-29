@@ -4,14 +4,7 @@ import plotly.colors
 import plotly.express as px
 import plotly.graph_objects as go
 
-import cdsaxs.plotting._plotting_tools as plotting_tools
-from scipy.interpolate import griddata
-
-import cdsaxs.diffraction as diffraction
-from cdsaxs.data.dataset import Dataset, IntegratedDataset
-from cdsaxs.data.dataset import ReducedDataset, ReducedSlices
-from cdsaxs.data.metadata import ACCEPTED_Q_AXES
-
+from . import _plotting_tools as plotting_tools
 
 def plot_scattering_image(
     image: NDArray,

@@ -13,9 +13,9 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from cdsaxs.tools import default_mask
-from cdsaxs.data.metadata import ACCEPTED_Q_AXES
-from cdsaxs.plotting import plotting
+from ..tools import default_mask
+from .metadata import ACCEPTED_Q_AXES
+from ..plotting import plotting
 
 
 class Data1D():

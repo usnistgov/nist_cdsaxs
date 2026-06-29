@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from cdsaxs.tools import default_mask, rotate_image, rotate_image_pillow
+from ..tools import default_mask, rotate_image, rotate_image_pillow
 
 
 class DataImage():

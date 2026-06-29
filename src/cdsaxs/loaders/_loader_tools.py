@@ -5,7 +5,7 @@ import os
 import re
 import warnings
 
-from cdsaxs.data.metadata import (
+from ..data.metadata import (
     METADATA_KEYWORDS,
     correct_metadata_dtype
 )
