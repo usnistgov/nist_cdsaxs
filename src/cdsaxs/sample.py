@@ -1,11 +1,8 @@
 """
 Simple Sample class that holds information about the sample material."
 """
-import warnings
-
 import numpy as np
 
-from cdsaxs.data.metadata import check_metadata
 # TODO: create special commonly used samples, such as AgBeh or empty
 
 

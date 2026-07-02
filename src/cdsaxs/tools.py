@@ -10,7 +10,7 @@ from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 from skimage import transform
 
-from cdsaxs.calculators import gaussian
+from .calculators import gaussian
 
 
 def default_mask(data):
@@ -107,12 +107,12 @@ def line_fit(x, y, force_intercept=None):
             "are required. Assuming a horizontal line."
         )
     try:
-        # fit = linregress(x, y)
         model = LinearRegression(
             fit_intercept=False if force_intercept is not None else True)
         model.fit(x, y)
         slope = float(model.coef_[0][0])
-        intercept = float(model.intercept_)
+        intercept = np.asarray(model.intercept_).item() # convert to scalar
+
         if force_intercept is not None:
             intercept = force_intercept[1] - slope * force_intercept[0]
         angle = np.rad2deg(np.arctan(slope))

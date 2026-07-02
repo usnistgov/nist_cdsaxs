@@ -5,8 +5,8 @@ import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
 import numpy as np
 
-import cdsaxs.plotting._plotting_tools as plotting_tools
-from cdsaxs.plotting._plotting_kwargs import (
+from . import _plotting_tools as plotting_tools
+from ._plotting_kwargs import (
     ERRORBAR_KWARGS,
     SCATTER_KWARGS,
     IMSHOW_KWARGS
@@ -1378,9 +1378,15 @@ def plot_reduced_dataset(
         cmap='viridis',
         vmin=None,
         vmax=None,
+        levels=None,
         filter_by_q={},
         filter_by_metadata={},
         interpolated_data=False,
+        use_legacy_interpolation=False,
+        grid_size=1000,
+        method="cubic",
+        distance_factor=5,
+        verbose=False,
         **kwargs):
     """
     Plot the reduced dataset as 'qsz' vs 'qsx' using
@@ -1407,6 +1413,20 @@ def plot_reduced_dataset(
     interpolated_data : bool
         If set to True, the data will be interpolated onto a grid for
         viewing.
+    use_legacy_interpolation : bool
+        If set to True, will use the old scipy griddata interpolation method.
+        If set to False, will use the 2.7 python gui method (recommended).
+    grid_size : int
+        Sets the size of the grid you want to interpolate to.
+    method : str
+        Options: "cubic", "nearest", "linear". For use with the scipy
+        griddata interpolation method.
+    distance_factor : float
+        Sets the distance factor for masking interpolation that is 
+        too far from a real point. For use with the scipy
+        griddata interpolation method.
+    verbose : bool
+        Print verbose output
 
     **kwargs
     --------
@@ -1470,9 +1490,26 @@ def plot_reduced_dataset(
         # wavelengths.append(data.wavelength_nm)
         # sample_phi_degs.append(data.sample_phi_deg)
 
+    
+    interp_qsx = []
+    interp_qsz = []
+    interp_iqs = []
+
+    if interpolated_data and (not(use_legacy_interpolation)):
+        for data in filtered_slices:
+            interp_qsx.append(list(getattr(data, 'qsx')))
+            interp_qsz.append(list(getattr(data, 'qsz')))
+            Iq = np.copy(data.Iq)
+            Iq[data.mask] = np.nan
+            interp_iqs.append(list(Iq))
+
     q_xaxis = np.array(q_xaxis)
     q_yaxis = np.array(q_yaxis)
     Iqs = np.array(Iqs)
+
+    interp_qsx = np.array(interp_qsx)
+    interp_qsz = np.array(interp_qsz)
+    interp_iqs = np.array(interp_iqs)
 
     # if len(list(set(wavelengths))) > 1:
     #     warnings.warn(
@@ -1494,16 +1531,30 @@ def plot_reduced_dataset(
         norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
 
     if interpolated_data:
-        x_interp, y_interp, Iq_interp =\
-            plotting_tools.generate_interpolated_reduced_data(
-                qsx=q_xaxis,
-                qsz=q_yaxis,
-                Iq=Iqs,
-                # wavelength_nm=wavelengths[0],
-                # sample_phi_deg_range=sample_phi_degs,
-            )
-        if log_scale:
+
+        
+        if use_legacy_interpolation:
+            x_interp, y_interp, Iq_interp =\
+                plotting_tools.generate_interpolated_reduced_data(
+                    qsx=q_xaxis,
+                    qsz=q_yaxis,
+                    Iq=Iqs,
+                    grid_size=grid_size,
+                    method=method,
+                    distance_factor=distance_factor,
+                    verbose=verbose
+                    # wavelength_nm=wavelengths[0],
+                    # sample_phi_deg_range=sample_phi_degs,
+                )
+
+        else:
+            x_interp, y_interp, Iq_interp =\
+                plotting_tools.new_interp_func(interp_iqs, interp_qsx, interp_qsz, q_xaxis, q_yaxis, grid_size, verbose)
+        
+        if log_scale and levels is None:
             levels = np.logspace(np.log10(vmin), np.log10(vmax), 100)
+        elif levels is not None:
+            levels = levels
         else:
             levels = np.linspace(vmin, vmax, 100)
         data_plot = plt.contourf(
@@ -1668,5 +1719,4 @@ def plot_reduced_slices(
     ax.set_ylabel("Intensity")
     ax.set_xlabel(plotting_tools.generate_formatted_axis_label(q_axis))
 
-    plt.close()
     return fig, ax

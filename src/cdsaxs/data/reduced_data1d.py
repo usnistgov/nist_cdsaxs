@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-from cdsaxs.data.data1d import Data1D
+from .data1d import Data1D
 
 
 class ReducedData1D(Data1D):

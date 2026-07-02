@@ -5,18 +5,19 @@ import warnings
 import numpy as np
 from tqdm import tqdm
 
-from cdsaxs.data.data2d import Data2D
-from cdsaxs.data.dataset import Dataset
-from cdsaxs.data.metadata import (
+from ..data.data2d import Data2D
+from ..data.dataset import Dataset
+from ..data.metadata import (
     METADATA_KEYWORDS,
     check_metadata,
     correct_metadata_dtype
 )
-import cdsaxs.loaders._loader_tools as loader_tools
-from cdsaxs.loaders.detectors import read_pilatus
-from cdsaxs.loaders.filetypes import (
+from . import _loader_tools as loader_tools
+from .detectors import read_pilatus
+from .filetypes import (
     read_tiff,
-    read_nist_bin
+    read_nist_bin,
+    read_smi_h5
 )
 
 
@@ -135,6 +136,7 @@ def LoadData(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'smi-h5'
     detector_type : str
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
@@ -199,19 +201,55 @@ def LoadData(
         # handle negative values between detector panels in the images as nan
         image[image < 0] = np.nan
 
+    elif filetype.lower() in ['smi_h5', 'smi-h5']:
+        image_stack = read_smi_h5(filepath=filepath)
+        # handle negative values between detector panels in the images as nan
+        for image, _, _ in image_stack:
+            image[image < 0] = np.nan
+
     else:
         raise ValueError(
             f"Did not recognize the filetype {filetype}."
         )
 
-    metadata['data_directory'] = os.path.dirname(data_filepath)
-    metadata['filename'] = os.path.basename(data_filepath)
+    if filetype.lower() not in ['smi_h5', 'smi-h5']:
+        metadata['data_directory'] = os.path.dirname(data_filepath)
+        metadata['filename'] = os.path.basename(data_filepath)
 
-    if name is not None:
-        metadata['name'] = name
+        if name is not None:
+            metadata['name'] = name
 
-    return Data2D(
-        image, **metadata, **user_params)
+        return Data2D(
+            image, **metadata, **user_params)
+    
+
+    else:
+        data2d_list = []
+        for image, data_filepath, metadata_add in image_stack:
+            temp_metadata = dict(metadata)
+            
+            for key, value in metadata_add.items():
+                if key in temp_metadata.keys():
+                    warnings.warn(
+                        f"Metadata for {key} was provided by the user and"
+                        "also extracted from the data files. I will not"
+                        "overwrite the information provided by the user"
+                        "but please make sure this is correct."
+                    )
+                else:
+                    temp_metadata[key] = value
+
+            temp_metadata['data_directory'] = os.path.dirname(data_filepath)
+            temp_metadata['filename'] = os.path.basename(data_filepath)
+
+            if name is not None:
+                new_name = loader_tools.generate_data_name_from_pattern(
+                    name, temp_metadata, user_params)
+                temp_metadata['name'] = new_name
+            
+            data2d_list.append(Data2D(image, **temp_metadata, **user_params))
+        
+        return data2d_list
 
 
 def LoadDataset(
@@ -224,7 +262,7 @@ def LoadDataset(
     metadata=None,
     user_params=None,
     verbose=True,
-    filetype=None,
+    filetype=None, 
     detector_type=None
 ):
     """
@@ -305,6 +343,7 @@ def LoadDataset(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'smi-h5'
     detector_type : str
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
@@ -319,6 +358,8 @@ def LoadDataset(
 
     if filenames is None:
         filenames = [x for x in os.listdir(directory_path)]
+    if not isinstance(filenames, list):
+        filenames = [filenames]
     filenames = loader_tools.filter_filenames_by_filetype(filenames, filetype)
 
     if verbose:
@@ -376,7 +417,11 @@ def LoadDataset(
                 detector_type=detector_type,
                 name=new_name
             )
-            dataset.add_data(data)
+            if isinstance(data, list):
+                for d in data:
+                    dataset.add_data(d)
+            else:
+                dataset.add_data(data)
 
             if verbose:
                 pbar.update(1)

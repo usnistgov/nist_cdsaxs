@@ -1,27 +1,51 @@
 # nist_cdsaxs
 _Insert a description of our software, including a statement of purpose and maturity and description of repo contents._
 
-## Installation Instructions
-_Insert basic installation instructions here._
+## Installation
 
-## Legay GUI
-The legacy GUI for CD-SAXS data reduction is no longer supported in this package.
-It can be found at the following location: https://github.com/usnistgov/nist_cdsaxs_legacy_gui
+The package follows a standard Python layout (`src/` with `pyproject.toml`). You can install it with pip.
 
-## Installation & Usage Instructions (Developers)
+Basic install (recommended):
+
+```bash
+pip install --upgrade pip setuptools wheel
+pip install .
+```
+
+Editable/developer install with optional dev tools:
+
+```bash
+pip install --upgrade pip setuptools wheel
+pip install -e .[dev]
+```
+
+> [!NOTE]
+> If you use conda/mamba, create and activate an environment first, then run the pip commands above.
+>
+> The `-e` (editable) install lets you modify the source and use the changes without re-installing.
+
+## Create and Activate Environment
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
 2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
-3. Create an environment with the `environment_legacy.yml` file:
+3. Create a Python environment; replace 'cdsaxs_dev' with another environment name if you wish:
 ```
-conda env create -f environment_dev.yml
+conda create --name cdsaxs_dev python
 ```
-4. Activate the environment, replacing `cdsaxs_legacy` with your environment name if it is different.
+> [!IMPORTANT]
+> If you're using a Jupyter notebook, use `conda create --name cdsaxs_dev python ipykernel` to install ipykernel as well. Installation with pip did not work in our testing.
+> 
+
+4. Activate the environment, replacing `cdsaxs_dev` with your environment name if it is different.
 ```
 conda activate cdsaxs_dev
 ```
+After activating the development environment, install the repo in editable mode:
 
-To access the developers version of the code until proper installation is enabled,
-you may need to add the 'cdsaxs/src' directory to your python path.
+```
+pip install -e .[dev]
+```
+
+This is preferred over manually modifying `PYTHONPATH`.
 
 ## Citation Information
 _Insert information here about how to cite this software._

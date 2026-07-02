@@ -1,11 +1,12 @@
 import os
 
+import h5py
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
-import cdsaxs.loaders._loader_tools as loader_tools
+from . import _loader_tools as loader_tools
 
 
 def read_tiff(filepath):
@@ -90,3 +91,57 @@ def read_nist_bin(filepath):
     metadata['pixel_size_um'] = float(sample_meta['Pixel Size '])
 
     return image, filepath, metadata
+
+def read_smi_h5(filepath):
+    """
+    Load an image and metadata from an H5 file from the SMI beamline
+    at NSLS-II. This will load an entire cd-saxs scan, i.e., set of
+    images, not just one image at a time.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the bin file to be loaded.
+        The paired info file should be in the same directory and have
+        the same filename (apart from the different extension).
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
+    """
+
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    # load the entire scan
+    scan = h5py.File(filepath, 'r')
+    
+    # extract image stack and number of images in the scan
+    image_stack = scan['raw_images']['pil2M_image'][:]
+    num_images = image_stack.shape[0]
+    
+    metadata = {}
+    metadata['energy_ev'] = scan['baseline']['energy_energy'][0]
+    metadata['sdd_cm'] = scan['baseline']['pil2M_motor_z'][0]/10
+    metadata['exposure_time_s'] = scan['config']['pil2M_cam_acquire_time'][0]
+    metadata['pixel_size_um'] = 172  # pilatus2m
+    metadata['bpm'] = scan['primary']['xbpm3_sumX'][:]
+    metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
+
+    seq_num = scan['primary']['seq_num'][:]  
+
+    images = []
+    for i in range(num_images):
+        temp_metadata = dict(metadata)
+        metadata_index = np.where(seq_num == i+1)[0]
+        temp_metadata['bpm'] = metadata['bpm'][metadata_index][0]
+        temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
+        images.append(
+            (image_stack[i].astype(np.float64), filepath, temp_metadata)
+        )
+
+    return images
