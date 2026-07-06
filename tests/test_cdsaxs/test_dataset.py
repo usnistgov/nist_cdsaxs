@@ -83,6 +83,30 @@ class TestDataset(unittest.TestCase):
 
         return data1, data2, data3
 
+    def _make_real_dataset_for_transformations(self):
+        data1 = self._make_data('data-1', 1)
+        data2 = self._make_data('data-2', 2)
+
+        data1.image = np.array(
+            [[1., 2., 3.],
+             [4., 5., 6.]],
+            dtype=np.float64,
+        )
+        data1._raw_image = np.copy(data1.image)
+        data1.reset_mask(use_raw_image=True)
+
+        data2.image = np.array(
+            [[10., 20., 30.],
+             [40., 50., 60.]],
+            dtype=np.float64,
+        )
+        data2._raw_image = np.copy(data2.image)
+        data2.reset_mask(use_raw_image=True)
+
+        self.dataset.add_data([data1, data2])
+
+        return data1, data2
+
     def test_add_data_single_instance(self):
         data = self._make_data('data-1', 1)
 
@@ -333,3 +357,46 @@ class TestDataset(unittest.TestCase):
         data1.reset_image.assert_called_once_with()
         data2.reset_image.assert_not_called()
         data3.reset_image.assert_not_called()
+
+    def test_scale_all_data_mutates_only_selected_real_data(self):
+        data1, data2 = self._make_real_dataset_for_transformations()
+
+        self.dataset.scale_all_data(2, keys=['data-1'])
+
+        np.testing.assert_array_equal(
+            data1.image,
+            np.array([[2., 4., 6.], [8., 10., 12.]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            data2.image,
+            np.array([[10., 20., 30.], [40., 50., 60.]], dtype=np.float64),
+        )
+
+    def test_rotate_all_data_ccw_mutates_only_selected_real_data(self):
+        data1, data2 = self._make_real_dataset_for_transformations()
+
+        self.dataset.rotate_all_data_ccw(1, keys=['data-2'])
+
+        np.testing.assert_array_equal(
+            data1.image,
+            np.array([[1., 2., 3.], [4., 5., 6.]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            data2.image,
+            np.array([[30., 60.], [20., 50.], [10., 40.]], dtype=np.float64),
+        )
+
+    def test_reset_all_data_restores_only_selected_real_data(self):
+        data1, data2 = self._make_real_dataset_for_transformations()
+
+        self.dataset.flip_all_data_horizontally(keys=['data-1', 'data-2'])
+        self.dataset.reset_all_data(keys=['data-1'])
+
+        np.testing.assert_array_equal(
+            data1.image,
+            np.array([[1., 2., 3.], [4., 5., 6.]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            data2.image,
+            np.array([[30., 20., 10.], [60., 50., 40.]], dtype=np.float64),
+        )
