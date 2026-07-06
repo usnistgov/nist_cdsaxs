@@ -195,6 +195,8 @@ class Dataset():
                     f"Didn't recognize filter for {key} of {value}."
                 )
 
+        return keys
+
     def update_all_user_params(
             self, params: dict, overwrite: bool = True,
             keys: list = None):

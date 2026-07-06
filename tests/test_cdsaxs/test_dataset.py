@@ -38,6 +38,23 @@ class TestDataset(unittest.TestCase):
             **self.metadata,
         )
 
+    def _make_filtered_dataset(self):
+        data1 = self._make_data('data-1', 1)
+        data2 = self._make_data('data-2', 2)
+        data3 = self._make_data('data-3', 3)
+
+        data1.update_metadata({'sample_phi_deg': -5}, hide_q_warnings=True)
+        data2.update_metadata({'sample_phi_deg': 0}, hide_q_warnings=True)
+        data3.update_metadata({'sample_phi_deg': 5}, hide_q_warnings=True)
+
+        data1.update_user_params({'group': 'A', 'run': 1})
+        data2.update_user_params({'group': 'B', 'run': 2})
+        data3.update_user_params({'group': 'A', 'run': 3})
+
+        self.dataset.add_data([data1, data2, data3])
+
+        return data1, data2, data3
+
     def test_add_data_single_instance(self):
         data = self._make_data('data-1', 1)
 
@@ -103,3 +120,57 @@ class TestDataset(unittest.TestCase):
         self.assertEqual(len(caught), 1)
         self.assertIn('Could not delete missing-data data', str(caught[0].message))
         self.assertDictEqual(self.dataset.datas, {'data-1': data})
+
+    def test_filter_data_by_metadata_tuple_range(self):
+        self._make_filtered_dataset()
+
+        keys = self.dataset.filter_data_by_metadata(sample_phi_deg=(-1, 5))
+
+        self.assertCountEqual(keys, ['data-2', 'data-3'])
+
+    def test_filter_data_by_metadata_scalar_value(self):
+        self._make_filtered_dataset()
+
+        keys = self.dataset.filter_data_by_metadata(sample_phi_deg=0)
+
+        self.assertEqual(keys, ['data-2'])
+
+    def test_filter_data_by_metadata_user_param(self):
+        self._make_filtered_dataset()
+
+        keys = self.dataset.filter_data_by_metadata(group='A')
+
+        self.assertCountEqual(keys, ['data-1', 'data-3'])
+
+    def test_filter_data_by_metadata_list_of_values(self):
+        self._make_filtered_dataset()
+
+        keys = self.dataset.filter_data_by_metadata(run=[1, 3])
+
+        self.assertCountEqual(keys, ['data-1', 'data-3'])
+
+    def test_filter_data_by_metadata_list_of_ranges(self):
+        self._make_filtered_dataset()
+
+        keys = self.dataset.filter_data_by_metadata(sample_phi_deg=[(-6, -4), (4, 6)])
+
+        self.assertCountEqual(keys, ['data-1', 'data-3'])
+
+    def test_filter_data_by_metadata_combines_filters(self):
+        self._make_filtered_dataset()
+
+        keys = self.dataset.filter_data_by_metadata(group='A', sample_phi_deg=(0, 10))
+
+        self.assertEqual(keys, ['data-3'])
+
+    def test_filter_data_by_metadata_invalid_filter_type_raises(self):
+        self._make_filtered_dataset()
+
+        with self.assertRaises(ValueError):
+            self.dataset.filter_data_by_metadata(sample_phi_deg={'min': 0, 'max': 1})
+
+    def test_filter_data_by_metadata_invalid_list_item_raises(self):
+        self._make_filtered_dataset()
+
+        with self.assertRaises(ValueError):
+            self.dataset.filter_data_by_metadata(sample_phi_deg=[0, {'min': 0}])
