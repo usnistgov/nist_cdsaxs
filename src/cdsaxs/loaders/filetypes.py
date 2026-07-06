@@ -20,13 +20,12 @@ def read_tiff(filepath):
 
     Returns
     -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary of the header information where the key: value paris
-        correpond to the tag.name: tag.value pairs of the header tags.
+    image : NDArray
+        Two-dimensional image array loaded from the TIFF file.
+    filepath : str
+        Normalized filepath used to load the data.
+    header : dict
+        Header information as tag-name to tag-value pairs.
     """
     filepath = loader_tools.clean_filepath(filepath=filepath)
 
@@ -61,12 +60,13 @@ def read_nist_bin(filepath):
 
     Returns
     -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary with metadata keyword: value pairs.
+    image : NDArray
+        Two-dimensional image array loaded from the BIN file.
+    filepath : str
+        Normalized filepath used to load the data.
+    metadata : dict
+        Metadata dictionary containing accepted metadata key-value pairs
+        extracted from the paired INFO file.
     """
 
     filepath = loader_tools.clean_filepath(filepath=filepath)
@@ -101,18 +101,13 @@ def read_smi_h5(filepath):
     Parameters
     ----------
     filepath : str, path
-        Path to the bin file to be loaded.
-        The paired info file should be in the same directory and have
-        the same filename (apart from the different extension).
+        Path to the H5 file to be loaded.
 
     Returns
     -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary with metadata keyword: value pairs.
+    images : list[tuple[NDArray, str, dict]]
+        List of per-image tuples containing the image array, normalized
+        filepath, and metadata dictionary for each image in the scan.
     """
 
     filepath = loader_tools.clean_filepath(filepath=filepath)

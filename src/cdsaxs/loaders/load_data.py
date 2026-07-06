@@ -63,16 +63,21 @@ def filter_filenames(
 
     Parameters
     ----------
-    dir_path : str
+    directory_path : str
         Path to the directory where the files are located.
     filter_substrings : list, optional
         List of substring filters for the files. If not provided,
         this function will return a list of all filenames in the
         directory.
-    file_extension  : str, optional
+    file_extension : str, optional
         A file extension can be provided as an additional filter
         on the files. A file extension could also be provided in the
         filter_substrings keyword.
+
+    Returns
+    -------
+    filenames : list[str]
+        Filenames in directory_path that satisfy the requested filters.
 
     """
     directory_path = loader_tools.clean_filepath(directory_path)
@@ -120,13 +125,11 @@ def LoadData(
         the proper reader from the file extension. This can be
         overwritten by providing the keyword argument 'filetype'.
     metadata : dict, optional
-        Dictionary of metadata keyword, value pairs to be added to
-        the metadata attribute of the 2D data instance.
-        See metadata.py for full list of accepted keywords.
+        Metadata key-value pairs to add to the loaded 2D data object.
+        See metadata.py for the full list of accepted metadata keys.
     user_params : dict, optional
-        Dictionary of user specified keyword, value pairs that provide
-        additional parameters about the data that are outside the scope
-        of the code's standard metadata.
+        User-defined key-value pairs that store additional information
+        outside the package's standard metadata set.
     name : str, optional
         Name for the two-dimensional data instance.
     filetype : str, optional
@@ -143,6 +146,12 @@ def LoadData(
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+
+    Returns
+    -------
+    data : Data2D | list[Data2D]
+        Loaded 2D data object. For SMI H5 input, a list of Data2D
+        objects is returned, one per image in the scan.
     """
 
     # clean the filepath and try to determine filetype if not provided
@@ -297,14 +306,13 @@ def LoadDataset(
         enclosed in {}. For example, if two images had filenames of:
             sample1_phi0_sdd_500_run001.tif
             sample1_phi-1_sdd_500_run002.tif
-        The following pattern could be provided to extract meatadata
+        The following pattern could be provided to extract metadata
         parameters of 'sample_phi_deg' and 'sdd_cm' as well as user
-        parameter 'run' for each data:
+        parameter 'run' for each file:
             sample1_phi{sample_phi_deg}_sdd_{sdd_cm}_run{run}.tif
         NOTE: conflicts can arise if both this pattern and the
-        metadata_csv_filepath are provided. Metadata parameters
-        specified in both places can result in one overwriting the
-        other.
+        CSV metadata loader are used. Metadata parameters specified in
+        both places can result in one source overwriting the other.
     metadata_scales : dict, optional
         If any of the metadata was provided in incorrect units, a
         scaling value can be provided to perform unit conversions. The
@@ -327,13 +335,11 @@ def LoadDataset(
         of 20 degrees:
             "Sample 4, Angle: 20 deg"
     metadata : dict, optional
-        Dictionary of metadata keyword, value pairs to be added to
-        the metadata attribute of all the 2D data instances.
-        See metadata.py for full list of accepted keywords.
+        Metadata key-value pairs to add to every loaded 2D data object.
+        See metadata.py for the full list of accepted metadata keys.
     user_params : dict, optional
-        Dictionary of user specified keyword, value pairs that provide
-        additional parameters about the data that are outside the scope
-        of the code's standard metadata.
+        User-defined key-value pairs that store additional information
+        outside the package's standard metadata set.
     verbose : bool, optional
         If set to True, a progress bar will be displayed during the
         loading process. Set to False to turn off this feature.
@@ -350,6 +356,11 @@ def LoadDataset(
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+
+    Returns
+    -------
+    dataset : Dataset
+        Dataset containing the loaded 2D data objects.
         """
 
     dataset = Dataset(name=dataset_name)
@@ -452,14 +463,13 @@ def LoadDataset_MetadataCSV(
     Parameters
     ----------
     dataset_name : str
+        User-specified name given to the dataset.
     metadata_csv_filepath : str, path
-        The filepath to the csv file used to define the metadata for
-        each tiff image loaded. The column headers should specifiy
-        the metadata parameter or unique user-specified parameter the
-        value should be assigned to. An accepted metadata keyword must
-        be used otherwise the program will assign the information to
-        the user_params attribute of the data. The csv file should be
-        located in the same directory as the data.
+        Filepath to the CSV file used to define metadata for each image
+        loaded. Column headers should specify either an accepted
+        metadata key or a user-defined parameter name. Values for
+        unrecognized keys are stored in user_params. The CSV file should
+        be located in the same directory as the data files.
         Accepted metadata keywords:
         ---------------------------
             "filename" (required)
@@ -482,13 +492,13 @@ def LoadDataset_MetadataCSV(
     verbose : bool, optional
         If set to True, a progress bar will be displayed during the
         loading process. Set to False to turn off this feature.
-        Default value is True
-    filetype : str
+        Default is True.
+    filetype : str, optional
         Specify the filetype so that the proper reader is used.
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
-    detector_type : str
+    detector_type : str, optional
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's
         header (or other location in the file depending on the type).
@@ -506,6 +516,12 @@ def LoadDataset_MetadataCSV(
         The data name would be for a sample at a phi rotation angle
         of 20 degrees:
             "Sample 4, Angle: 20 deg"
+
+    Returns
+    -------
+    dataset : Dataset
+        Dataset containing the loaded 2D data objects defined by the CSV
+        metadata table.
     """
 
     dataset = Dataset(name=dataset_name)
