@@ -5,7 +5,9 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from cdsaxs.data.data2d import Data2D
-from cdsaxs.data.dataset import Dataset
+from cdsaxs.data.dataset import Dataset, ReducedDataset, ReducedSlices
+from cdsaxs.data.reduced_data1d import ReducedData1D
+from cdsaxs.data.reduced_slice import ReducedData1DSlice
 
 
 class TestDataset(unittest.TestCase):
@@ -106,6 +108,50 @@ class TestDataset(unittest.TestCase):
         self.dataset.add_data([data1, data2])
 
         return data1, data2
+
+    def _make_reduced_data1d(self, q_offset=0.0, label='data'):
+        q = np.array([0.1, 0.2, 0.3], dtype=float) + q_offset
+        image_roi = np.ones((2, 3), dtype=float)
+        image_mask = np.zeros((2, 3), dtype=bool)
+        return ReducedData1D(
+            q=q,
+            Iq=np.array([1.0, 2.0, 3.0], dtype=float),
+            q_axis='qsx',
+            data2d=label,
+            limits_axis0=(0, 2),
+            limits_axis1=(0, 3),
+            integration_mode='sum',
+            integration_axis=0,
+            image_roi=image_roi,
+            image_mask=image_mask,
+            qsy=np.zeros_like(q),
+        )
+
+    def _make_reduced_slice(self, q_offset=0.0):
+        q = np.array([0.1, 0.2, 0.3], dtype=float) + q_offset
+        return ReducedData1DSlice(
+            q=q,
+            Iq=np.array([1.0, 2.0, 3.0], dtype=float),
+            q_axis='qsz',
+            integrated_axis='qsx',
+            offset_axis='qsy',
+            slice_width=0.01,
+            qsy=np.zeros_like(q),
+        )
+
+    def _make_dataset_with_mocked_integrations(self):
+        data1 = self._make_data('data-1', 1)
+        data2 = self._make_data('data-2', 2)
+
+        qslice1 = self._make_reduced_data1d(label='data-1')
+        qslice2 = self._make_reduced_data1d(q_offset=0.5, label='data-2')
+
+        data1.integrate_box = MagicMock(return_value=(qslice1, 'fig-1'))
+        data2.integrate_box = MagicMock(return_value=(qslice2, 'fig-2'))
+
+        self.dataset.add_data([data1, data2])
+
+        return data1, data2, qslice1, qslice2
 
     def test_add_data_single_instance(self):
         data = self._make_data('data-1', 1)
@@ -400,3 +446,108 @@ class TestDataset(unittest.TestCase):
             data2.image,
             np.array([[30., 20., 10.], [60., 50., 40.]], dtype=np.float64),
         )
+
+    def test_integrate_dataset_returns_reduced_dataset_for_selected_string_key(self):
+        data1, data2, qslice1, _ = self._make_dataset_with_mocked_integrations()
+
+        reduced_dataset = self.dataset.integrate_dataset(keys='data-1', axis='qdx')
+
+        self.assertIsInstance(reduced_dataset, ReducedDataset)
+        self.assertEqual(reduced_dataset.datas, [qslice1])
+        data1.integrate_box.assert_called_once_with(
+            mode='sum',
+            axis='qdx',
+            show_plot=False,
+            subtract_background_offset=None,
+            width_qdy_px=None,
+            width_qdx_px=None,
+            range_qdy_px=None,
+            range_qdx_px=None,
+            center_qdy=None,
+            center_qdx=None,
+            shift_box_qdy_px=0,
+            shift_box_qdx_px=0,
+        )
+        data2.integrate_box.assert_not_called()
+
+    def test_integrate_dataset_dispatches_dict_parameters_per_key(self):
+        data1, data2, qslice1, qslice2 = self._make_dataset_with_mocked_integrations()
+
+        reduced_dataset = self.dataset.integrate_dataset(
+            keys=['data-1', 'data-2'],
+            mode='mean',
+            axis=0,
+            subtract_background_offset=3,
+            width_qdy_px={'data-1': 10, 'data-2': 20},
+            width_qdx_px={'data-1': 11, 'data-2': 21},
+            range_qdy_px={'data-1': (0, 2), 'data-2': (1, 3)},
+            range_qdx_px={'data-1': (4, 6), 'data-2': (5, 7)},
+            center_qdy={'data-1': ('qsy', 0.1), 'data-2': ('qsy', 0.2)},
+            center_qdx={'data-1': ('qsx', 0.3), 'data-2': ('qsx', 0.4)},
+            shift_box_qdy_px={'data-1': 1, 'data-2': 2},
+            shift_box_qdx_px={'data-1': 3, 'data-2': 4},
+        )
+
+        self.assertEqual(reduced_dataset.datas, [qslice1, qslice2])
+        data1.integrate_box.assert_called_once_with(
+            mode='mean',
+            axis=0,
+            show_plot=False,
+            subtract_background_offset=3,
+            width_qdy_px=10,
+            width_qdx_px=11,
+            range_qdy_px=(0, 2),
+            range_qdx_px=(4, 6),
+            center_qdy=('qsy', 0.1),
+            center_qdx=('qsx', 0.3),
+            shift_box_qdy_px=1,
+            shift_box_qdx_px=3,
+        )
+        data2.integrate_box.assert_called_once_with(
+            mode='mean',
+            axis=0,
+            show_plot=False,
+            subtract_background_offset=3,
+            width_qdy_px=20,
+            width_qdx_px=21,
+            range_qdy_px=(1, 3),
+            range_qdx_px=(5, 7),
+            center_qdy=('qsy', 0.2),
+            center_qdx=('qsx', 0.4),
+            shift_box_qdy_px=2,
+            shift_box_qdx_px=4,
+        )
+
+    def test_reduced_dataset_add_data_accepts_single_list_and_nested_dataset(self):
+        qslice1 = self._make_reduced_data1d(label='data-1')
+        qslice2 = self._make_reduced_data1d(q_offset=0.5, label='data-2')
+        nested = ReducedDataset(datas=qslice2)
+        reduced_dataset = ReducedDataset()
+
+        reduced_dataset.add_data(qslice1)
+        reduced_dataset.add_data([nested])
+
+        self.assertEqual(reduced_dataset.datas, [qslice1, qslice2])
+
+    def test_reduced_dataset_add_data_invalid_type_raises(self):
+        reduced_dataset = ReducedDataset()
+
+        with self.assertRaises(ValueError):
+            reduced_dataset.add_data('not reduced data')
+
+    def test_reduced_slices_add_slices_accepts_single_list_and_nested_container(self):
+        slice1 = self._make_reduced_slice()
+        slice2 = self._make_reduced_slice(q_offset=0.5)
+        nested = ReducedSlices(slices=slice2)
+        reduced_slices = ReducedSlices()
+
+        reduced_slices.add_slices(slice1)
+        reduced_slices.add_slices([nested])
+
+        self.assertEqual(reduced_slices.data, [slice1, slice2])
+
+    def test_reduced_slices_add_slices_invalid_type_raises(self):
+        reduced_slices = ReducedSlices()
+
+        with self.assertRaises(ValueError):
+            reduced_slices.add_slices('not reduced slices')
