@@ -22,10 +22,10 @@ class DataImage():
             from top to bottom and the second dimension corresponds to
             image columns from left to right.
         mask : NDArray, optional
-            Two-dimensional boolean array of same dimensions as image
-            that are True at pixel values that should be masked out
-            for all operations. These pixels will be masked in addition
-            to the default masked pixels of nan, inf, -inf. The user
+            Two-dimensional boolean array with the same shape as image.
+            True values mark pixels that should be masked in all
+            operations. These pixels are masked in addition to the
+            default invalid-value mask for nan, inf, and -inf. The user
             can overwrite these defaults using the overwrite_mask
             method but we caution against this as not all operations
             are tested without masking nan, inf, and -inf.
@@ -73,10 +73,10 @@ class DataImage():
         Parameters
         ----------
         mask : NDArray
-            Two-dimensional boolean array of same dimensions as the
-            data image. Pixels that are True will be masked out for
-            all data operations. This will NOT unmask any previously
-            masked points.
+            Two-dimensional boolean array with the same shape as the
+            data image. True values mark pixels that should be masked in
+            all operations. This will not unmask any previously masked
+            pixels.
         """
         if mask.shape != self.image.shape:
             raise ValueError(
@@ -98,10 +98,9 @@ class DataImage():
         Parameters
         ----------
         mask : NDArray
-            Two-dimensional boolean array of same dimensions as the
-            data image. Pixels that are True will be masked out for
-            all data operations. This will unmask any previously
-            masked points.
+            Two-dimensional boolean array with the same shape as the
+            data image. True values mark pixels that should be masked in
+            all operations. This replaces the current mask.
         """
         self.mask = self.mask*False + mask
 
@@ -252,7 +251,8 @@ class DataImage():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array used to multiply the image intensities.
+            Scalar or array with the same shape as the image, used to
+            multiply the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -273,8 +273,8 @@ class DataImage():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array whose reciprocal is used to normalize the image
-            intensities.
+            Scalar or array with the same shape as the image. Its
+            reciprocal is used to normalize the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -297,7 +297,8 @@ class DataImage():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array to subtract from the image intensities.
+            Scalar or array with the same shape as the image, subtracted
+            from the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -317,7 +318,8 @@ class DataImage():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array to add to the image intensities.
+            Scalar or array with the same shape as the image, added to
+            the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -393,13 +395,13 @@ class DataImage():
         Returns
         -------
         sum_intensity : ndarray
-            One dimensional array of summed intensity of the defined
+            One-dimensional array of summed intensity for the defined
             region of interest summed over the selected axis or axes.
         image_box : ndarray
-            The two dimensional region of interest selected from the
+            Two-dimensional region of interest selected from the
             data image used in the summation.
         mask_box : ndarray
-            The corresponding region of interest selected from the mask
+            Corresponding region of interest selected from the mask
             and used in the summation.
         """
         image_box = self.image[

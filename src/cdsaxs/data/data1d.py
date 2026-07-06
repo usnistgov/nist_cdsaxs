@@ -45,8 +45,8 @@ class Data1D():
         dIq : NDArray, optional
             Uncertainty in Iq. Default is None.
         mask : NDArray
-            One-dimensional boolean array of same dimension as Iq that
-            is True at values that should be masked out for all
+            One-dimensional boolean array with the same shape as Iq.
+            True values mark points that should be masked in all
             operations.
             All points that are nan will be masked out by default. It
             will NOT mask out inf or -inf by default; this is different
@@ -242,7 +242,8 @@ class Data1D():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array used to multiply Iq.
+            Scalar or array with the same shape as Iq, used to multiply
+            Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -263,7 +264,8 @@ class Data1D():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array whose reciprocal is used to normalize Iq.
+            Scalar or array with the same shape as Iq. Its reciprocal is
+            used to normalize Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -286,7 +288,8 @@ class Data1D():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array to subtract from Iq.
+            Scalar or array with the same shape as Iq, subtracted from
+            Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -306,7 +309,7 @@ class Data1D():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array to add to Iq.
+            Scalar or array with the same shape as Iq, added to Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -368,10 +371,10 @@ class Data1D():
         Parameters
         ----------
         mask : NDArray
-            One-dimensional boolean array of same dimensions as the
-            Iq. Points that are True will be masked out for
-            all data operations. This will NOT unmask any previously
-            masked points.
+            One-dimensional boolean array with the same shape as Iq.
+            True values mark points that should be masked in all
+            operations. This will not unmask any previously masked
+            points.
         """
         mask = mask.reshape(-1)
         if len(mask) != len(self.Iq):
@@ -389,10 +392,9 @@ class Data1D():
         Parameters
         ----------
         mask : NDArray
-            One-dimensional boolean array of same dimensions as the
-            Iq. Points that are True will be masked out for
-            all data operations. This will unmask any previously
-            masked points.
+            One-dimensional boolean array with the same shape as Iq.
+            True values mark points that should be masked in all
+            operations. This replaces the current mask.
         """
         self.mask = self.mask*False + mask
 

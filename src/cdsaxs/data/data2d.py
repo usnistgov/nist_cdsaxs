@@ -236,9 +236,9 @@ class Data2D(DataImage):
             by passing 'name' metadata. This name is used as a key in the
             dictionaries storing the data objects within the dataset class.
         mask : NDArray
-            Two-dimensional boolean array of same dimensions as image
-            that are True at pixel values that should be masked out
-            for all operations.
+            Two-dimensional boolean array with the same shape as image.
+            True values mark pixels that should be masked in all
+            operations.
             All pixels that are nan, inf, or -inf will be masked by
             default.
         hide_q_warnings : bool, optional
@@ -424,8 +424,8 @@ class Data2D(DataImage):
         Parameters
         ----------
         metadata : dict
-            Key : value pairs of accepted metadata (key) and their
-            values. See class docstring for list of accepted keywords.
+            Key-value pairs of accepted metadata and their values. See
+            the class docstring for the list of accepted keywords.
         overwrite : bool
             If set to True, any metadata provided to this method will
             overwrite the existing value in the instance if it already
@@ -475,8 +475,8 @@ class Data2D(DataImage):
         Parameters
         ----------
         params : dict
-            Key : value pairs of user-specified parameters for this
-            data instance.
+            Key-value pairs of user-specified parameters for this data
+            instance.
         overwrite : bool
             If set to True, any parameters provided to this method will
             overwrite the existing value in this instance if it already

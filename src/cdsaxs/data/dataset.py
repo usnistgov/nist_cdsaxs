@@ -122,17 +122,15 @@ class Dataset():
         Parameters
         ----------
         metadata : dict
-            Key : value pairs of accepted metadata (key) and their
-            values. See Data2D class docstring for list of accepted
-            keywords.
+            Key-value pairs of accepted metadata and their values. See
+            the Data2D class docstring for the list of accepted keywords.
         overwrite : bool
             If set to True, any metadata provided to this method will
             overwrite the existing value in the instance if it already
             exists in self.metadata.
             Default value is True.
         keys : list
-            List of keys to the datas dictionary to select which data
-            the update should apply to.
+            Dataset keys identifying which entries to update.
         verbose : bool
             If set to True, a progress bar is shown while metadata are
             updated. This can be helpful when q calculations are being
@@ -184,7 +182,7 @@ class Dataset():
         Returns
         -------
         keys : list
-            List of data keys that meet the provided metadata criteria.
+            Dataset keys that meet the provided metadata criteria.
         """
 
         keys = list(self.datas.keys())
@@ -229,16 +227,15 @@ class Dataset():
         Parameters
         ----------
         params : dict
-            Key : value pairs of user-specified parameters for this
-            data instance.
+            Key-value pairs of user-specified parameters for each data
+            instance.
         overwrite : bool
             If set to True, any parameters provided to this method will
             overwrite the existing value in this instance if it already
             exists in self.user_params.
             Default value is True.
         keys : list
-            List of keys to the datas dictionary to select which data
-            the update should apply to.
+            Dataset keys identifying which entries to update.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -261,8 +258,8 @@ class Dataset():
             List of accepted metadata keywords or user parameter keys
             that should be used to normalize the data.
         keys : list | None
-            Dataset keys identifying the subset of data to normalize.
-            If set to None, applies normalization to all data in the dataset.
+            Dataset keys identifying which entries to update. If None,
+            normalization is applied to all data in the dataset.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -282,8 +279,8 @@ class Dataset():
             List of accepted metadata keywords or user parameter keys
             that should be used to scale the data.
         keys : list | None
-            Dataset keys identifying the subset of data to scale.
-            If set to None, applies scaling to all data in the dataset.
+            Dataset keys identifying which entries to update. If None,
+            scaling is applied to all data in the dataset.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -300,8 +297,9 @@ class Dataset():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array whose reciprocal is used to normalize each
-            selected dataset entry.
+            Scalar or array used to normalize each selected dataset
+            entry. If an array is provided, it must match the shape of
+            the target data.
         keys : list | None, optional
             Dataset keys identifying which entries to update.
         """
@@ -320,6 +318,8 @@ class Dataset():
         ----------
         value : float | NDArray
             Scalar or array used to scale each selected dataset entry.
+            If an array is provided, it must match the shape of the
+            target data.
         keys : list, optional
             Dataset keys identifying which entries to update.
         """
@@ -337,7 +337,9 @@ class Dataset():
         Parameters
         ----------
         value : float | NDArray
-            Scalar or array added to each selected dataset entry.
+            Scalar or array added to each selected dataset entry. If an
+            array is provided, it must match the shape of the target
+            data.
         keys : list, optional
             Dataset keys identifying which entries to update.
         """
@@ -356,6 +358,8 @@ class Dataset():
         ----------
         value : float | NDArray
             Scalar or array subtracted from each selected dataset entry.
+            If an array is provided, it must match the shape of the
+            target data.
         keys : list, optional
             Dataset keys identifying which entries to update.
         """
@@ -414,9 +418,9 @@ class Dataset():
             Number of 90 degree steps to rotate the image in the
             counterclockwise direction.
         keys : list
-            List of datas keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -432,9 +436,9 @@ class Dataset():
         Parameters
         ----------
         keys : list
-            List of dataset keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -450,9 +454,9 @@ class Dataset():
         Parameters
         ----------
         keys : list
-            List of dataset keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -477,9 +481,9 @@ class Dataset():
         Parameters
         ----------
         keys : list
-            List of dataset keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -498,9 +502,9 @@ class Dataset():
         Parameters
         ----------
         keys : list, optional
-            List of dataset keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         angles : dict, optional
             The rotation angle can be set manually by providing the
             angles in a dictionary where the key corresponds to the
