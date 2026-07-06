@@ -1,5 +1,6 @@
 import unittest
 import warnings
+from unittest.mock import MagicMock
 
 import numpy as np
 
@@ -50,6 +51,33 @@ class TestDataset(unittest.TestCase):
         data1.update_user_params({'group': 'A', 'run': 1})
         data2.update_user_params({'group': 'B', 'run': 2})
         data3.update_user_params({'group': 'A', 'run': 3})
+
+        self.dataset.add_data([data1, data2, data3])
+
+        return data1, data2, data3
+
+    def _make_mocked_dataset(self):
+        data1 = self._make_data('data-1', 1)
+        data2 = self._make_data('data-2', 2)
+        data3 = self._make_data('data-3', 3)
+
+        for data in [data1, data2, data3]:
+            data.update_metadata = MagicMock()
+            data.update_user_params = MagicMock()
+            data.normalize_by_metadata = MagicMock()
+            data.scale_by_metadata = MagicMock()
+            data.normalize_data = MagicMock()
+            data.scale_data = MagicMock()
+            data.add_to_data = MagicMock()
+            data.subtract_from_data = MagicMock()
+            data.apply_footprint_correction = MagicMock()
+            data.apply_sample_size_correction = MagicMock()
+            data.apply_substrate_absorption_correction = MagicMock()
+            data.reset_intensity = MagicMock()
+            data.rotate_image_ccw = MagicMock()
+            data.flip_horizontally = MagicMock()
+            data.flip_vertically = MagicMock()
+            data.reset_image = MagicMock()
 
         self.dataset.add_data([data1, data2, data3])
 
@@ -174,3 +202,134 @@ class TestDataset(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.dataset.filter_data_by_metadata(sample_phi_deg=[0, {'min': 0}])
+
+    def test_update_all_metadata_applies_to_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.update_all_metadata(
+            {'sample_phi_deg': 10},
+            overwrite=False,
+            keys=['data-1', 'data-3'],
+            verbose=False,
+        )
+
+        data1.update_metadata.assert_called_once_with(
+            metadata={'sample_phi_deg': 10},
+            overwrite=False,
+        )
+        data2.update_metadata.assert_not_called()
+        data3.update_metadata.assert_called_once_with(
+            metadata={'sample_phi_deg': 10},
+            overwrite=False,
+        )
+
+    def test_update_all_user_params_applies_to_all_by_default(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.update_all_user_params({'group': 'A'}, overwrite=False)
+
+        for data in [data1, data2, data3]:
+            data.update_user_params.assert_called_once_with(
+                params={'group': 'A'},
+                overwrite=False,
+            )
+
+    def test_normalize_all_data_by_metadata_applies_to_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.normalize_all_data_by_metadata(['I0'], keys=['data-2'])
+
+        data1.normalize_by_metadata.assert_not_called()
+        data2.normalize_by_metadata.assert_called_once_with(['I0'])
+        data3.normalize_by_metadata.assert_not_called()
+
+    def test_scale_all_data_by_metadata_applies_to_all_by_default(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.scale_all_data_by_metadata(['exposure_time_s'])
+
+        for data in [data1, data2, data3]:
+            data.scale_by_metadata.assert_called_once_with(['exposure_time_s'])
+
+    def test_normalize_all_data_applies_scalar_to_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.normalize_all_data(5, keys=['data-1', 'data-2'])
+
+        data1.normalize_data.assert_called_once_with(5)
+        data2.normalize_data.assert_called_once_with(5)
+        data3.normalize_data.assert_not_called()
+
+    def test_scale_all_data_applies_array_to_all_by_default(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+        scale = np.ones((3, 3), dtype=np.float64)
+
+        self.dataset.scale_all_data(scale)
+
+        for data in [data1, data2, data3]:
+            data.scale_data.assert_called_once_with(scale)
+
+    def test_add_to_all_data_applies_to_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.add_to_all_data(2, keys=['data-3'])
+
+        data1.add_to_data.assert_not_called()
+        data2.add_to_data.assert_not_called()
+        data3.add_to_data.assert_called_once_with(2)
+
+    def test_subtract_from_all_data_applies_to_all_by_default(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.subtract_from_all_data(3)
+
+        for data in [data1, data2, data3]:
+            data.subtract_from_data.assert_called_once_with(3)
+
+    def test_apply_corrections_and_reset_intensity_respect_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.apply_footprint_correction(keys=['data-1'])
+        self.dataset.apply_sample_size_correction(keys=['data-2'])
+        self.dataset.apply_substrate_absorption_correction(keys=['data-3'])
+        self.dataset.reset_all_data_intensity(keys=['data-1', 'data-3'])
+
+        data1.apply_footprint_correction.assert_called_once_with()
+        data2.apply_footprint_correction.assert_not_called()
+        data3.apply_footprint_correction.assert_not_called()
+
+        data1.apply_sample_size_correction.assert_not_called()
+        data2.apply_sample_size_correction.assert_called_once_with()
+        data3.apply_sample_size_correction.assert_not_called()
+
+        data1.apply_substrate_absorption_correction.assert_not_called()
+        data2.apply_substrate_absorption_correction.assert_not_called()
+        data3.apply_substrate_absorption_correction.assert_called_once_with()
+
+        data1.reset_intensity.assert_called_once_with()
+        data2.reset_intensity.assert_not_called()
+        data3.reset_intensity.assert_called_once_with()
+
+    def test_rotate_flip_and_reset_apply_to_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.rotate_all_data_ccw(2, keys=['data-2'])
+        self.dataset.flip_all_data_horizontally(keys=['data-1', 'data-3'])
+        self.dataset.flip_all_data_vertically(keys=['data-3'])
+        self.dataset.reset_all_data(keys=['data-1'])
+
+        data1.rotate_image_ccw.assert_not_called()
+        data2.rotate_image_ccw.assert_called_once_with(2)
+        data3.rotate_image_ccw.assert_not_called()
+
+        data1.flip_horizontally.assert_called_once_with()
+        data2.flip_horizontally.assert_not_called()
+        data3.flip_horizontally.assert_called_once_with()
+
+        data1.flip_vertically.assert_not_called()
+        data2.flip_vertically.assert_not_called()
+        data3.flip_vertically.assert_called_once_with()
+
+        data1.reset_image.assert_called_once_with()
+        data2.reset_image.assert_not_called()
+        data3.reset_image.assert_not_called()
