@@ -12,7 +12,19 @@ from ..data.metadata import (
 
 
 def clean_filepath(filepath):
-    """checks filepath length and returns an os formatted absolute path"""
+    """
+    Normalize a file path to an absolute OS-formatted path.
+
+    Parameters
+    ----------
+    filepath : str | os.PathLike
+        File path to normalize.
+
+    Returns
+    -------
+    cleaned_filepath : str
+        Absolute file path formatted for the current operating system.
+    """
     filepath = os.path.abspath(filepath)
     if len(filepath) > 256:
         warnings.warn(
@@ -24,10 +36,24 @@ def clean_filepath(filepath):
 
 def filter_filenames_by_filetype(filenames, filetype):
     """
-    Accepted filtypes:
-        tiff or tif
-        nist-bin
-        smi-h5
+    Filter filenames by a supported file type.
+
+    Parameters
+    ----------
+    filenames : list[str]
+        Filenames to filter.
+    filetype : str | None
+        File type filter to apply. 
+        Supported values are:
+            'tiff' or 'tif'
+            'nist-bin' or 'nist_bin' 
+            'smi-h5' or 'smi_h5'
+        If None, filenames is returned unchanged.
+
+    Returns
+    -------
+    filtered_filenames : list[str]
+        Filenames that match the requested file type.
     """
     if filetype is None:
         return filenames
@@ -56,7 +82,8 @@ def extract_metadata_from_pattern(metadata, user_params, filename,
         metadata keywords.
     user_params : dict
         Additional metadata parameters with user-specified keys.
-    filename : filename from which to extract the metadata
+    filename : str
+        Filename from which to extract metadata values.
     metadata_pattern : str
         Extract metadata from information stored in the filenames.
         A pattern for the filenames can be provided where the
@@ -64,23 +91,29 @@ def extract_metadata_from_pattern(metadata, user_params, filename,
         enclosed in {}. For example, if two images had filenames of:
             sample1_phi0_sdd_500_run001.tif
             sample1_phi-1_sdd_500_run002.tif
-        The following pattern could be provided to extract meatadata
+        The following pattern could be provided to extract metadata
         parameters of 'sample_phi_deg' and 'sdd_cm' as well as user
-        parameter 'run' for each data:
+        parameter 'run' for each file:
             sample1_phi{sample_phi_deg}_sdd_{sdd_cm}_run{run}.tif
         NOTE: conflicts can arise if both this pattern and the
-        metadata_csv_filepath are provided. Metadata parameters
-        specified in both places can result in one overwriting the
-        other.
-    metadata_scales : dict
-        If any of the metadata was provided in incorrect units, a
+        CSV metadata loader are used. Metadata parameters specified in
+        both places can result in one source overwriting the other.
+    metadata_scales : dict | None
+        If any extracted metadata was provided in incorrect units, a
         scaling value can be provided to perform unit conversions. The
-        argument should be provided as a dictionary where the key
-        is the metadata keyword or user_params keyword, and the
-        value is the amount by which to scale or multiply the
-        parameter's current value.
-        NOTE: this will only apply to values extracted from the metadata
-        pattern of the filenames.
+        argument should be a dictionary where each key is a metadata or
+        user_params key and each value is the factor used to scale the
+        extracted value. This only applies to values extracted from
+        metadata_pattern.
+
+    Returns
+    -------
+    metadata : dict
+        Updated metadata dictionary containing values extracted from the
+        filename pattern.
+    user_params : dict
+        Updated user parameter dictionary containing extracted values for
+        keys outside the accepted metadata set.
 
     """
     filename = os.path.basename(filename)
@@ -112,8 +145,22 @@ def generate_data_name_from_pattern(data_name_pattern,
                                     metadata={},
                                     user_params={}):
     """
-    Generate the name for a signle data instance from a pattern and the
-    metadata parameters.
+    Generate a data name from a pattern, metadata, and user parameters.
+
+    Parameters
+    ----------
+    data_name_pattern : str | None
+        Naming pattern containing placeholders in braces.
+    metadata : dict, optional
+        Metadata values available for placeholder substitution.
+    user_params : dict, optional
+        User-defined values available for placeholder substitution.
+
+    Returns
+    -------
+    new_name : str | None
+        Generated data name. If no pattern is provided, the filename
+        metadata value is used when available.
     """
 
     # handle any None metadata or user_params that may get passed

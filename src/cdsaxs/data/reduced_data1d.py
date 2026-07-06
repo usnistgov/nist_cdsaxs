@@ -48,57 +48,62 @@ class ReducedData1D(Data1D):
         Parameters
         ----------
         q : NDArray
-            Scattering vector, units Ang^-1
+            Primary scattering vector values in Ang^-1.
         Iq : NDArray
             Scattering intensity as a function of q
         q_axis : str
-            Defines q as one of the accepted axes.
-            See Data1D for more details on accepted axes.
-        mask : NDArray
-            One-dimensional boolean array of same dimension as Iq that
-            are True at values that shoudl be masked out for all
-            operations.
-            All points that are nan will be masked out by default. It
-            will NOT mask out inf or -inf by default; this is different
-            behavior than the 2D data classes.
+            Name of the accepted q axis represented by q.
+            See Data1D for the list of accepted axes.
         data2d : DataQdyQdx
-            Instance of DataQdyQdx used to create the slice. This will
-            create a pointer to that data instance in the original
-            dataset rather than a copy of that instance. Be cautious as
-            the underlying data could change after the creation of
-            the q slice. However, the region of interest from the image
-            actually used in the integration will be saved as
-            the image_roi attribute of this class.
-        limits_axis0 : tuple
-            Indexing limits of the image region of interest
-            in the first dimension, [min, max).
-        limits_axis1 : tuple
-            Indexing limits of the image region of interest
-            in the second dimension, [min, max).
+            Source 2D dataset used to create the reduced profile. This stores
+            a reference to the original objec as a pointer rather than a copy.
+            Be cautions as the underling data could change after the creation of
+            the q slice. However, the region of interest from the image actually
+            used in the the integration will be saved as image_roi and will not change.
+        limits_axis0 : tuple[int, int]
+            Index limits [min, max) for the selected region of interest along
+            axis 0 of the source image.
+        limits_axis1 : tuple[int, int]
+            Index limits [min, max) for the selected region of interest along
+            axis 1 of the source image.
         integration_mode : str
-            Integration mode of either 'sum' or 'mean'.
+            Integration mode used to reduce the ROI. Accepted values are
+            'sum' and 'mean'.
         integration_axis : int
-            Axis over which integration was performed, 0 or 1.
+            Image axis over which the ROI was integrated. Accepted values are
+            0 and 1.
         image_roi : NDArray
-            Two dimensional region of interest selected from the original
-            image over which the integration was performed.
+            Two-dimensional region of interest extracted from the source image
+            and used for the integration.
         image_mask : NDArray
-            Two dimensional array marking masked pixels during the
-            operation.
-        background : NDArray | float
-            Background intensity subtracted during the integration step.
-            This should be a single value or an array of same length as
-            Iq.
+            Two-dimensional boolean mask for image_roi, where True marks
+            pixels excluded from the integration.
+        background_Iq : array-like | float, optional
+            Background intensity subtracted from the reduced profile. Provide
+            either a single value or an array with the same length as Iq.
+        background_qslices : object, optional
+            Background slice data associated with the reduction, if available.
+        mask : NDArray, optional
+            One-dimensional boolean mask for the reduced profile, where True
+            marks points excluded from downstream operations. NaN values are
+            masked automatically. Inf and -inf are not masked automatically.
         dIq : NDArray, optional
-            Uncertainity along I.
-            Default is None
+            Uncertainty values associated with Iq.
+        wavelength_nm : float, optional
+            X-ray wavelength in nm associated with the reduced profile.
+        sample_phi_deg : float, optional
+            Sample phi angle in degrees.
+        sample_chi_deg : float, optional
+            Sample chi angle in degrees.
+        sample_omega_deg : float, optional
+            Sample omega angle in degrees.
 
         **kwargs
         --------
         Any of the accepted scattering vectors or their components
-        below can be provided as keyword arguments and become attributes
-        of this class. They must all be the same length as Iq or a single
-        value if applicable to the whole dataset.
+        below can be provided as keyword arguments and become attributes of
+        this class. Each value must either match the length of Iq or be a
+        scalar that applies to the full profile.
 
         qdy : Scattering vector component along y axis of detector frame.
         qdx : Scattering vector component along x axis of detector frame.
@@ -110,16 +115,16 @@ class ReducedData1D(Data1D):
         qs  : Scattering vector in the sample frame.
         qby : Scattering vector component along y axis of the lab frame
         qbx : Scattering vector component along x axis of the lab frame
-        qbz : Scattering vector comopnent along z axis of the lab frame; in
+        qbz : Scattering vector component along z axis of the lab frame; in
             the lab frame the beam path is aligned to the z-axis
         qb  : Scattering vector in the beam/lab frame; when the detector is
             positioned normal to the incident beam, the lab and detector
             coordinates will align
 
         Additionally, any of the scattering vectors or their components
-        as the selected region of interest can be provided by appending
-        _roi to the name. For example, qdy_roi would be a two
-        dimensional array that corresponds to qdy for the image_roi
+        for the selected region of interest can be provided by appending
+        _roi to the name. For example, qdy_roi would be a two-dimensional
+        array containing qdy values for image_roi.
 
         """
 
@@ -212,18 +217,26 @@ class ReducedData1D(Data1D):
 
     def mirror_q(self, q_axis=None, resort=True):
         """
-        Mirror the data across q = 0. This is identical to taking the
-        absolute value of q for every data point. No additional
-        resampling or interpolation is performed.
+        Mirror the data across q = 0 by taking the absolute value of q.
+        No additional resampling or interpolation is performed.
 
-        The primary q-axis set as the q attribute will be used in this
-        operation unless another q_axis is specified.
+        The primary q axis stored in q is used unless q_axis is specified.
 
-        If resort is left as True, all data will be ordered based on a
-        resorting of the q axis that underwent the absolute value
-        operation.
+        If resort is True, all arrays are reordered to match the mirrored
+        q axis.
 
-        Caution, this operation cannot be undone and the instance will
-        have to be regenerated.
+        Caution: This operation modifies the instance in place and cannot be undone.
+
+        Parameters
+        ----------
+        q_axis : str, optional
+            Name of the q axis to mirror. If None, the primary q axis is used.
+        resort : bool, optional
+            If True, reorder the data after mirroring so q remains sorted.
+
+        Returns
+        -------
+        mirrored_data : None
+            This method updates the current instance in place.
         """
         super().abs_q(q_axis=q_axis, resort=resort)

@@ -17,15 +17,15 @@ def read_pilatus(filepath=None):
 
     Returns
     -------
-    NDArray, None
-        Image from the tiff file if the filepath is provided.
-        Otherwise, this is None
-    str, None
-        Formatted filepath from which the image was loaded. If filepath
+    image : NDArray | None
+        Image loaded from the TIFF file. If filepath is not provided,
+        this is None.
+    filepath : str | None
+        Normalized filepath from which the image was loaded. If filepath
         is not provided, this is None.
-    dict
+    metadata : dict
         Metadata dictionary with accepted metadata keywords extracted
-        from the tiff file header.
+        from the TIFF header.
     """
     image, filepath, header = read_tiff(filepath=filepath)
     metadata = pilatus_header_to_metadata(header)
@@ -46,9 +46,9 @@ def pilatus_header_to_metadata(header):
 
     Returns
     -------
-    dict
+    metadata : dict
         Metadata dictionary with accepted metadata keywords extracted
-        from the tiff file header.
+        from the TIFF header.
     """
     metadata = {}
 
@@ -72,8 +72,18 @@ def pilatus_header_to_metadata(header):
 
 def extract_exposure_time_pilatus(header):
     """
-    Extract exposure time in seconds from the TIFF file header"
-    of a Pilaturs detectr."
+    Extract the exposure time in seconds from a Pilatus TIFF header.
+
+    Parameters
+    ----------
+    header : dict
+        TIFF header represented as tag-name to tag-value pairs.
+
+    Returns
+    -------
+    exposure_time_s : float | None
+        Exposure time in seconds. Returns None when the value cannot be
+        extracted or is reported in unexpected units.
     """
 
     try:
@@ -98,7 +108,18 @@ def extract_exposure_time_pilatus(header):
 
 def extract_pixel_size_pilatus(header):
     """
-    Extract pixel time in um from the TIFF file header.
+    Extract the pixel size in micrometers from a Pilatus TIFF header.
+
+    Parameters
+    ----------
+    header : dict
+        TIFF header represented as tag-name to tag-value pairs.
+
+    Returns
+    -------
+    pixel_size_um : float | None
+        Pixel size in micrometers. Returns None when the value cannot be
+        extracted or is reported in unexpected units.
     """
 
     try:
