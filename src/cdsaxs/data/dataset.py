@@ -15,7 +15,6 @@ from .reduced_slice import (
     ReducedData1DSlice
 )
 from ..plotting import plotting
-from ..sample import Sample
 
 
 class Dataset():
@@ -33,25 +32,18 @@ class Dataset():
         however, this will not be a problem.
     name : str
         Custom name of the dataset.
-    sample : Sample
-        Instance of the Sample class that details the sample measured
-        when collecting the dataset. Information such as sample
-        thickness and attenuation coefficients should be added here to
-        enable the relevant data corrections.
     """
 
     def __init__(
             self,
             datas: list[Data2D] = None,
             name: str = None,
-            sample: str = None
     ):
         self.datas={}
         if datas is not None:
             self.add_data(datas)
             
         self.name = name
-        self.sample = sample
 
     def add_data(self, datas: Data2D | list[Data2D]):
         """
@@ -96,18 +88,6 @@ class Dataset():
             except KeyError:
                 warnings.warn(f"Could not delete {name} data as it was"
                             "not part of the dataset.")
-
-    def assign_sample(self, sample: Sample):
-        """
-        Assign the measured sample with an instance of the Sample class.
-
-        Parameters
-        ----------
-        sample : Sample
-            Sample assigned to this dataset.
-        """
-        # TODO: implement required sample checks
-        self.sample = sample
 
     def update_all_metadata(self,
                             metadata: dict,
