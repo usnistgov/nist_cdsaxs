@@ -30,6 +30,7 @@ def slice_reduced_dataset(
     Parameters
     ----------
     dataset : ReducedDataset
+        Reduced dataset containing one-dimensional reduced patterns to slice.
     q_values : list
         List of the slice locations along the specified q_axis.
     q_widths : float | list
@@ -57,7 +58,11 @@ def slice_reduced_dataset(
 
     Returns
     -------
-    ReducedSlices
+    reduced_slices : ReducedSlices
+        Collection of extracted one-dimensional slices.
+    fig : matplotlib.figure.Figure | None
+        Figure showing the selected slice regions when show_plot is True;
+        otherwise None.
     """
 
     if not isinstance(q_widths, list):

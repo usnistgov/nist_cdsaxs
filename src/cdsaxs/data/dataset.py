@@ -54,7 +54,14 @@ class Dataset():
         self.sample = sample
 
     def add_data(self, datas: Data2D | list[Data2D]):
-        """Add one or more Data2D instances to the dataset."""
+        """
+        Add one or more Data2D instances to the dataset.
+
+        Parameters
+        ----------
+        datas : Data2D | list[Data2D]
+            One Data2D instance or a list of Data2D instances to add.
+        """
         datas = [datas] if not isinstance(datas, list) else datas
         for data in datas:
             if data.name in self.datas.keys():
@@ -68,8 +75,14 @@ class Dataset():
                     datas: Data2D | list[Data2D] | str | list[str]):
         """
         Remove one or more Data2D instances from the dataset.
-        One or more isntances of Data2D can be provided or a list
-        of keys to the datas dictionary.
+
+        Entries can be identified either by passing Data2D instances or by
+        passing keys from the datas dictionary.
+
+        Parameters
+        ----------
+        datas : Data2D | list[Data2D] | str | list[str]
+            Data objects or dataset keys identifying entries to remove.
         """
         if type(datas) is not list:
             datas = [datas]
@@ -87,6 +100,11 @@ class Dataset():
     def assign_sample(self, sample: Sample):
         """
         Assign the measured sample with an instance of the Sample class.
+
+        Parameters
+        ----------
+        sample : Sample
+            Sample assigned to this dataset.
         """
         # TODO: implement required sample checks
         self.sample = sample
@@ -97,29 +115,26 @@ class Dataset():
                             keys: list = None,
                             verbose: bool = True):
         """
-        Add or update metadata for all Data2D stored in this Dataset.
+        Add or update metadata for all Data2D objects stored in this Dataset.
         Existing metadata parameters can be updated by keeping the
         overwrite argument to True.
 
         Parameters
         ----------
         metadata : dict
-            Key : value pairs of accepted metadata (key) and their
-            values. See Data2D class docstring for list of accepted
-            keywords.
+            Key-value pairs of accepted metadata and their values. See
+            the Data2D class docstring for the list of accepted keywords.
         overwrite : bool
             If set to True, any metadata provided to this method will
             overwrite the existing value in the instance if it already
             exists in self.metadata.
             Default value is True.
         keys : list
-            List of keys to the datas dictionary to select which data
-            the update should apply to.
+            Dataset keys identifying which entries to update.
         verbose : bool
-            If set to True, a progress bar will appear as each data
-            metadata is updated. This can be helpful when the q
-            calcultation if being updated for relevant metadata
-            changes. 
+            If set to True, a progress bar is shown while metadata are
+            updated. This can be helpful when q calculations are being
+            refreshed after metadata changes.
             Default value is True.
         """
         if keys is None:
@@ -138,13 +153,15 @@ class Dataset():
 
     def filter_data_by_metadata(self, **filters):
         """
-        Filter the data by any of the metadata or user_params.
-        All filter criteria must be met to be returned from this method.
+        Filter the dataset by metadata or user_params values.
+
+        All filter criteria must be satisfied for a data entry to be
+        returned by this method.
 
         Parameters
         ----------
         **filters
-            The metadata filters are provided as keyword arguments.
+            Metadata filters provided as keyword arguments.
             The argument name should match any of the keys in the
             metadata or user_params of the data.
             The value type of these keyword arguments will specify the
@@ -164,8 +181,8 @@ class Dataset():
 
         Returns
         -------
-        list
-            List of data keys that meet the provided metadata criteria.
+        keys : list
+            Dataset keys that meet the provided metadata criteria.
         """
 
         keys = list(self.datas.keys())
@@ -202,23 +219,23 @@ class Dataset():
             self, params: dict, overwrite: bool = True,
             keys: list = None):
         """
-        Add key: value pairs to the user params for all Data2D.
-        Existing parameters can be updated by keeping the overwrite
-        argument as True.
+        Add key-value pairs to the user_params dictionary for all Data2D
+        objects.
+
+        Existing parameters can be updated by leaving overwrite set to True.
 
         Parameters
         ----------
         params : dict
-            Key : value pairs of user-specified parameters for this
-            data instance.
+            Key-value pairs of user-specified parameters for each data
+            instance.
         overwrite : bool
             If set to True, any parameters provided to this method will
             overwrite the existing value in this instance if it already
-            exists in self.uer_params.
+            exists in self.user_params.
             Default value is True.
         keys : list
-            List of keys to the datas dictionary to select which data
-            the update should apply to.
+            Dataset keys identifying which entries to update.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -230,18 +247,19 @@ class Dataset():
             self, normalize_by, keys=None):
         """
         Normalize all data by the selected metadata or user parameters.
-        This will not reset any previous normalization. If a new
-        series or normalizations is desired, please run reset normalization
-        first or change reset_first to True.
+        This will not reset any previous normalization. 
+        
+        If a new series or normalizations is desired, please
+        run reset normalization first or change reset_first to True.
 
         Parameters
         ----------
         normalize_by : list
             List of accepted metadata keywords or user parameter keys
             that should be used to normalize the data.
-        keys : list
-            A list of datas keys can be used to only apply the normalization
-            to a subset of the data in datas.
+        keys : list | None
+            Dataset keys identifying which entries to update. If None,
+            normalization is applied to all data in the dataset.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -253,22 +271,16 @@ class Dataset():
     def scale_all_data_by_metadata(
             self, scale_by, keys=None):
         """
-        Scale the image by the desired value.
-        This does not undo any previous scalings unless reset_scale is
-        called first or reset_first is set to True.
+        Scale all data using the selected metadata or user parameter values.
 
         Parameters
         ----------
-        value : float or int
-            Value by which to scale the data.
-        reset_first : boolean
-            If set to True, any previous scaling will be rest
-            before applying the new requested scale.
-            If left as False, the new parameters will be factored into
-            the existing scaling factor.
-        keys : list
-            A list of datas keys can be used to only apply the scaling
-            to a subset of the data in datas.
+        scale_by : list
+            List of accepted metadata keywords or user parameter keys
+            that should be used to scale the data.
+        keys : list | None
+            Dataset keys identifying which entries to update. If None,
+            scaling is applied to all data in the dataset.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -279,8 +291,17 @@ class Dataset():
 
     def normalize_all_data(self, value, keys=None):
         """
-        Scale the data by the recipricol of the specified value.or array
-        of values that match the dimensions of the data image.
+        Normalize all selected data by the reciprocal of the provided value
+        or array.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array used to normalize each selected dataset
+            entry. If an array is provided, it must match the shape of
+            the target data.
+        keys : list | None, optional
+            Dataset keys identifying which entries to update.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -291,8 +312,16 @@ class Dataset():
 
     def scale_all_data(self, value, keys=None):
         """
-        Scale the data by the recipricol of the specified value.or array
-        of values that match the dimensions of the data image.
+        Scale all selected data by the provided value or array.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array used to scale each selected dataset entry.
+            If an array is provided, it must match the shape of the
+            target data.
+        keys : list, optional
+            Dataset keys identifying which entries to update.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -303,8 +332,16 @@ class Dataset():
 
     def add_to_all_data(self, value, keys=None):
         """
-        Scale the data by the recipricol of the specified value.or array
-        of values that match the dimensions of the data image.
+        Add the provided value or array to all selected data.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array added to each selected dataset entry. If an
+            array is provided, it must match the shape of the target
+            data.
+        keys : list, optional
+            Dataset keys identifying which entries to update.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -315,8 +352,16 @@ class Dataset():
 
     def subtract_from_all_data(self, value, keys=None):
         """
-        Scale the data by the recipricol of the specified value.or array
-        of values that match the dimensions of the data image.
+        Subtract the provided value or array from all selected data.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array subtracted from each selected dataset entry.
+            If an array is provided, it must match the shape of the
+            target data.
+        keys : list, optional
+            Dataset keys identifying which entries to update.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -370,12 +415,12 @@ class Dataset():
         Parameters
         ----------
         steps : int
-            Number of 90 degree steps to rotation the image in the
+            Number of 90 degree steps to rotate the image in the
             counterclockwise direction.
         keys : list
-            List of datas keys that identify which data this method
-            should be applied to. If not provide, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -391,9 +436,9 @@ class Dataset():
         Parameters
         ----------
         keys : list
-            List of datas keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -409,9 +454,9 @@ class Dataset():
         Parameters
         ----------
         keys : list
-            List of datas keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -436,9 +481,9 @@ class Dataset():
         Parameters
         ----------
         keys : list
-            List of datas keys that identify which data this method
-            should be applied to. If not provided, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         """
         if keys is None:
             keys = list(self.datas.keys())
@@ -457,9 +502,9 @@ class Dataset():
         Parameters
         ----------
         keys : list, optional
-            List of datas keys that identify which data this method
-            should be applied to. If not provide, this method will be
-            applied to all Data2D instances in datas.
+            Dataset keys identifying which entries to update. If not
+            provided, this method is applied to all Data2D instances in
+            datas.
         angles : dict, optional
             The rotation angle can be set manually by providing the
             angles in a dictionary where the key corresponds to the
@@ -486,7 +531,7 @@ class Dataset():
         Other Parameters
         ----------------
         **kwargs
-            Keyword arguments accetped by the rotate_image function
+            Keyword arguments accepted by the rotate_image function
             in Data2D can be passed through this method.
         """
 

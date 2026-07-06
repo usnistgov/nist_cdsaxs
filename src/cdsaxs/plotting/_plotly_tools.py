@@ -21,6 +21,44 @@ def plot_scattering_image(
     width=500,
     aspect='equal'
 ):
+    """
+    Create a Plotly figure for a 2D scattering image.
+
+    Parameters
+    ----------
+    image : NDArray
+        Two-dimensional image array to display.
+    mask : NDArray, optional
+        Two-dimensional boolean mask for image, where True marks pixels
+        excluded from the plotted intensity map.
+    axis0_vals : array-like, optional
+        Coordinate values corresponding to axis 0 of image.
+    axis1_vals : array-like, optional
+        Coordinate values corresponding to axis 1 of image.
+    axis0_type : str, optional
+        Axis label or q-axis name for the y axis.
+    axis1_type : str, optional
+        Axis label or q-axis name for the x axis.
+    title : str, optional
+        Figure title.
+    log_scale : bool, optional
+        If True, display intensity on a log10 scale.
+    vmin : float, optional
+        Lower bound of the displayed color range.
+    vmax : float, optional
+        Upper bound of the displayed color range.
+    cmap : str, optional
+        Plotly continuous color scale name.
+    width : int, optional
+        Figure width in pixels.
+    aspect : str, optional
+        Aspect handling passed to plotly.express.imshow.
+
+    Returns
+    -------
+    fig : go.Figure
+        Plotly figure containing the scattering image.
+    """
     #########################
     # determine color range #
     #########################
@@ -113,6 +151,31 @@ def add_roi_to_scattering_image(
         label=None,
         showlegend=False,
 ):
+    """
+    Add a rectangular region-of-interest outline to a Plotly figure.
+
+    Parameters
+    ----------
+    fig : go.Figure
+        Plotly figure to update.
+    limits_axis0 : tuple[int, int]
+        Index limits [min, max) for the ROI along axis 0.
+    limits_axis1 : tuple[int, int]
+        Index limits [min, max) for the ROI along axis 1.
+    color : str, optional
+        Line color for the ROI outline.
+    linestyle : str, optional
+        Plotly dash style for the ROI outline.
+    label : str, optional
+        Legend label for the ROI trace.
+    showlegend : bool, optional
+        If True, show the ROI trace in the legend.
+
+    Returns
+    -------
+    fig : go.Figure
+        Updated Plotly figure with the ROI outline added.
+    """
 
     (min0, max0) = limits_axis0
     (min1, max1) = limits_axis1

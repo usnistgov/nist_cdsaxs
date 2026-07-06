@@ -11,7 +11,7 @@ class DataImage():
                  image: NDArray[np.floating],
                  mask: NDArray[np.bool] = None):
         """
-        Generic 2D data class with basic image functionalities. This
+        Generic 2D data class with basic image functionality. This
         class is not tied to any diffraction information.
 
         Attributes
@@ -22,10 +22,10 @@ class DataImage():
             from top to bottom and the second dimension corresponds to
             image columns from left to right.
         mask : NDArray, optional
-            Two-dimensional boolean array of same dimensions as image
-            that are True at pixel values that should be masked out
-            for all operations. These pixels will be masked in addition
-            to the default masked pixels of nan, inf, -inf. The user
+            Two-dimensional boolean array with the same shape as image.
+            True values mark pixels that should be masked in all
+            operations. These pixels are masked in addition to the
+            default invalid-value mask for nan, inf, and -inf. The user
             can overwrite these defaults using the overwrite_mask
             method but we caution against this as not all operations
             are tested without masking nan, inf, and -inf.
@@ -33,9 +33,9 @@ class DataImage():
         Protected Attributes
         --------------------
         _data_transformations : list of tuples
-            Will keep track of intensity data transformations, including
-            a normalization, scaling, adding or subtracting by or of a
-            specified value. Each item in the list is a tuple of
+            Tracks intensity transformations applied to the image,
+            including normalization, scaling, addition, and subtraction.
+            Each item in the list is a tuple of
             (transformation, value) where transformation can be:
                 normalize
                 scale
@@ -49,7 +49,7 @@ class DataImage():
             reset to the original image regardless of any data
             transformations performed.
         _masked_image : NDArray
-            Retrieve the current image of the DataImage instance with
+            Current image of the DataImage instance with
             all masked points replaced with np.nan.
         """
         self.image = image
@@ -73,10 +73,10 @@ class DataImage():
         Parameters
         ----------
         mask : NDArray
-            Two-dimensional boolean array of same dimensions as the
-            data image. Pixels that are True will be masked out for
-            all data operations. This will NOT unmask any previously
-            masked points.
+            Two-dimensional boolean array with the same shape as the
+            data image. True values mark pixels that should be masked in
+            all operations. This will not unmask any previously masked
+            pixels.
         """
         if mask.shape != self.image.shape:
             raise ValueError(
@@ -86,9 +86,10 @@ class DataImage():
 
     def _overwrite_mask(self, mask):
         """
-        Set a new mask for the data. This will unmask all previously
-        masked points and only mask the points provided to this
-        function call.
+        Replace the current mask with a new mask.
+
+        This operation unmasks all previously masked points and then masks
+        only the points provided in this call.
 
         Be cautious of this operation as other functions assume that
         all nan, inf, -inf points in the original data are always
@@ -97,19 +98,26 @@ class DataImage():
         Parameters
         ----------
         mask : NDArray
-            Two-dimensional boolean array of same dimensions as the
-            data image. Pixels that are True will be masked out for
-            all data operations. This will unmask any previously
-            masked points.
+            Two-dimensional boolean array with the same shape as the
+            data image. True values mark pixels that should be masked in
+            all operations. This replaces the current mask.
         """
         self.mask = self.mask*False + mask
 
     def reset_mask(self, use_raw_image=False):
         """
-        Reset to the default mask to only mask out pixels with values of nan,
-        inf, or -inf. By default, the current image after any data
+        Reset the mask to the default mask, only masking out 
+        values of nan, inf, or -inf. 
+        
+        By default, the current image after any data
         transformations will be used. The raw image can be used by
         switching the keyword argument 'use_raw_image' to True.
+
+        Parameters
+        ----------
+        use_raw_image : bool, optional
+            If True, rebuild the mask from the original raw image instead of
+            the current transformed image.
         """
         self.mask = default_mask(
             self._raw_image if use_raw_image else self.image
@@ -127,6 +135,7 @@ class DataImage():
         """
         Rotate the image counterclockwise by the specified angle about
         the rotation center.
+        
         NOTE: This operation will convert any masked points in your
         array to nan prior to the image rotation so they are not used
         in the resampling algorithms. The mask will then be reset to
@@ -141,9 +150,7 @@ class DataImage():
             Center of rotation (y, x).
             Default is the upper left pixel.
         resampling_mode : str, optional
-            Set the resampling method used during the rotation.
-            The box rotation works by rotating the image underneath then
-            extracting the box for integration. Resampling modes are
+            Set the resampling method used during rotation. Resampling modes are
             chosen from the sklearn.transform.warp method. Options are:
                 nearest_neighbor
                 bilinear (default)
@@ -152,8 +159,7 @@ class DataImage():
                 biquartic
                 biquintic
             Default value is 'bilinear'.
-            If use_pillow is set to True, then the options for the
-            PILLOW package rotation algorithm are different:
+            If use_pillow is True, the PILLOW package uses different options:
                 nearest
                 bilinear
                 bicubic
@@ -171,16 +177,11 @@ class DataImage():
             Specifies the constant value used to fill pixels outside the
             image boundaries after rotation. Only applies when resampling_mode
             is set to 'constant'.
-        log_scale : bool, optional
-            Rotate the log-scale of your image. This could help resolve
-            some artifacts caused by certain rotation sampling algorithms
-            but you will lose any pixels that are negative (turned to nan).
-            Deafult value is False.
         use_pillow : bool, optional
             If set to True, the algorithm will use the PILLOW package
             image rotation function instead of sklearn.transform.rotate.
             The fill_mode argument is not used and the resampling_mode
-            options are slightly different, see the above description.
+            options are slightly different; see the description above.
         """
 
         if not use_pillow:
@@ -203,12 +204,11 @@ class DataImage():
 
     def rotate_image_ccw(self, steps=1):
         """
-        Rotate the image counterclockwise by 90 degrees, or by a
-        specified number of 90 degree steps.
+        Rotate the image counterclockwise in 90 degree increments.
 
-        The original image can be recalled using reset_image(), but this
-        will also undo any other scaling, normalizations, adding, or
-        subtracting applied to the image intensity.
+        The original image can be restored with reset_image(), but that
+        also removes any intensity scaling, normalization, addition, or
+        subtraction that has been applied.
 
         Parameters
         ----------
@@ -228,11 +228,17 @@ class DataImage():
             self.mask = np.rot90(self.mask, k=k, axes=(0, 1))
 
     def flip_horizontally(self):
+        """
+        Flip the image and mask horizontally.
+        """
 
         self.image = np.flip(self.image, axis=1)
         self.mask = np.flip(self.mask, axis=1)
 
     def flip_vertically(self):
+        """
+        Flip the image and mask vertically.
+        """
 
         self.image = np.flip(self.image, axis=0)
         self.mask = np.flip(self.mask, axis=0)
@@ -241,6 +247,12 @@ class DataImage():
         """
         Scale the data by the specified value or array of values
         that match the dimensions of the data image.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array with the same shape as the image, used to
+            multiply the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -255,8 +267,14 @@ class DataImage():
 
     def normalize_data(self, value):
         """
-        Scale the data by the recipricol of the specified value.or array
+        Scale the data by the recipricol of the specified value or array
         of values that match the dimensions of the data image.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array with the same shape as the image. Its
+            reciprocal is used to normalize the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -275,6 +293,12 @@ class DataImage():
         """
         Subtract a specified single value or an array of values that
         matches the image dimensions from the image data.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array with the same shape as the image, subtracted
+            from the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -290,6 +314,12 @@ class DataImage():
         """
         Add a specified single value or an array of values that
         matches the image dimensions to the image data.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array with the same shape as the image, added to
+            the image intensities.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -303,8 +333,8 @@ class DataImage():
 
     def reset_intensity(self):
         """
-        Resets any normailzation, scaling, added or subtracted values
-        applied to the image data intensity.
+        Reset any normalization, scaling, addition, or subtraction
+        applied to the image intensity.
         """
         for transform, value in reversed(self._data_transformations):
             if transform == "add":
@@ -319,10 +349,10 @@ class DataImage():
 
     def reset_image(self):
         """
-        Resets the image to the raw image and also resets the applied
-        mask. This will undo any orientation transformations to the
-        image as well as any scaling, normalization, additions or
-        subtractions applied to the image.
+        Reset the image to the raw image and restore the default mask.
+
+        This removes any orientation changes as well as any intensity
+        scaling, normalization, addition, or subtraction.
         """
         self._data_transformations = []
         self.image = np.copy(self._raw_image)
@@ -365,13 +395,13 @@ class DataImage():
         Returns
         -------
         sum_intensity : ndarray
-            One dimensional array of summed intensity of the defined
+            One-dimensional array of summed intensity for the defined
             region of interest summed over the selected axis or axes.
         image_box : ndarray
-            The two dimensional region of interest selected from the
+            Two-dimensional region of interest selected from the
             data image used in the summation.
         mask_box : ndarray
-            The corresponding region of interest selected from the mask
+            Corresponding region of interest selected from the mask
             and used in the summation.
         """
         image_box = self.image[
@@ -420,11 +450,11 @@ class DataImage():
         -------
         mean_intensity : ndarray
             One dimensional array of mean intensity of the defined
-            region of interest over the selected axis or axes.
+            region of interest averaged over the selected axis or axes.
         image_box : ndarray
             The two dimensional region of interest selected from the
             data image used in the mean operation.
-        max_box : ndarray
+        mask_box : ndarray
             The corresponding region of interest selected from the mask
             and used in the mean operation.
         """
