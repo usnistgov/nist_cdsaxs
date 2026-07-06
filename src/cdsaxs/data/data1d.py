@@ -4,7 +4,7 @@ This module contains classes for handling one-dimensional data, I vs. q.
 Data1D : General one-dimensional scattering data class for I vs. q.
 IntegratedQSlice(Data1D) : Child class of Data1D. Contains one-
     dimensional scattering data extracted from integration across a
-    defined area of two-dimensional scattering data. Holds historic
+    defined area of two-dimensional scattering data. Retains historic 
     information about the generation of the integrated slice.
 """
 
@@ -33,18 +33,20 @@ class Data1D():
 
         Parameters
         ----------
-        q : scattering vector
-        Iq : scattering intensity as a function of q
+        q : NDArray
+            Scattering vector values for the primary q axis.
+        Iq : NDArray
+            Scattering intensity as a function of q.
         q_axis : str
             The axis for the provided scattering vector q from the
             accepted list below. This will be designated as the primary
             axis, but any of the other axes can be provided as keyword
             arguments (see **kwargs section below).
         dIq : NDArray, optional
-            Uncertainty along I. Default is None.
+            Uncertainty in Iq. Default is None.
         mask : NDArray
             One-dimensional boolean array of same dimension as Iq that
-            are True at values that shoudl be masked out for all
+            is True at values that should be masked out for all
             operations.
             All points that are nan will be masked out by default. It
             will NOT mask out inf or -inf by default; this is different
@@ -158,9 +160,9 @@ class Data1D():
             mode='linear',
             q_axis=None):
         """
-        Linearly interpolates the one-dimensional dataset and extract
+        Linearly interpolate the one-dimensional dataset and extract
         intensity values at the specified interpolated q-values. Please
-        refer to the numpy.interp documentation for in-depth description
+        refer to the numpy.interp documentation for an in-depth description
         of the interpolation method used.
 
         The user is asked to carefully consider this operation to
@@ -170,7 +172,7 @@ class Data1D():
         Parameters
         ----------
         q_points : NDArray
-            q-values at which to extract interpolated intensities.
+            q values at which to extract interpolated intensities.
         mode : str
             Interpolation mode. The interpolation performed is linear,
             but this can be performed on either log axis if desired and
@@ -189,9 +191,11 @@ class Data1D():
 
         Returns
         -------
-        NDArray : Interpolated q values. This may be different than the
-            q_points provided were outside the range of q.
-        NDArray : Interpolated I(q) values.
+        q_points : NDArray
+            Interpolated q values. This may be different than the
+            requested q_points were outside the range of q.
+        interpolated_Iq : NDArray
+            Interpolated I(q) values.
         """
         use_q = np.copy(
             getattr(self, q_axis) if q_axis is not None else self.q)
@@ -234,6 +238,11 @@ class Data1D():
         """
         Scale the data by the specified value or array of values that
         match the dimensions of Iq.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array used to multiply Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -250,6 +259,11 @@ class Data1D():
         """
         Scale the data by the reciprocal of the specified value or array
         of values that match the dimensions of Iq.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array whose reciprocal is used to normalize Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -268,6 +282,11 @@ class Data1D():
         """
         Subtract a specified single value or an array of values that
         matches the dimensions of Iq from the Iq data.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array to subtract from Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -283,6 +302,11 @@ class Data1D():
         """
         Add a specified single value or an array of values that
         matches the dimensions of Iq to the Iq data.
+
+        Parameters
+        ----------
+        value : float | NDArray
+            Scalar or array to add to Iq.
         """
         if type(value) is float or type(value) is int:
             value = float(value)
@@ -296,7 +320,7 @@ class Data1D():
 
     def reset_data_transformations(self):
         """
-        Resets any normailzation, scaling, added or subtracted values
+        Reset any normalization, scaling, addition, or subtraction
         applied to the Iq data.
         """
         self.Iq = np.copy(self._raw_Iq)
@@ -304,10 +328,11 @@ class Data1D():
 
     def abs_q(self, q_axis=None, resort=True):
         """
-        Apply absolute value to the primary q axis, or another q axis if
-        the q_axis argument is specified. If resort is left as True,
-        all data will be resorted to order the q axis that was transformed
-        to the absolute value.
+        Apply absolute value to the primary q axis, or another 
+        q axis if the q_axis argument is specified. 
+        
+        If resort is True,all data will be resorted to order 
+        the q axis that was transformed to the absolute value.
 
         Parameters
         ----------
@@ -337,8 +362,8 @@ class Data1D():
 
     def mask_points(self, mask):
         """
-        Add points to the data mask. This will not unmask any previously
-        masked points in the image.
+        Add points to the data mask without unmasking existing masked
+        points.
 
         Parameters
         ----------
@@ -373,7 +398,7 @@ class Data1D():
 
     def reset_mask(self):
         """
-        Reset the mask to only mask out pixels with values of nan.
+        Reset the mask so that only nan values are masked.
         """
         self.mask = np.isnan(self.Iq)  # mask out nan
 

@@ -43,7 +43,9 @@ ACCEPTED_Q_KEYWORDS = ACCEPTED_Q_AXES
 def combine_data2d(*data2d: Data2D, name=None):
     """
     Combine two or more instances of Data2D into a single instance
-    of Data2D. This operation is not sensitive to any data
+    of Data2D. 
+    
+    NOTE: This operation is not sensitive to any data
     transformations or orientation changes that have been performed and
     so the user should carefully consider when to perform this operation.
 
@@ -67,12 +69,11 @@ def combine_data2d(*data2d: Data2D, name=None):
     Parameters
     ----------
     *data2d : Data2D
-        Any number of Data2D instances can be passed to this
-        function and summed together.
+        Any number of Data2D instances to combine.
 
     Returns
     -------
-    Data2D
+    new_data : Data2D
         New Data2D instance containing the combined image, mask,
         metadata, and user parameters.
     """
@@ -189,11 +190,11 @@ class Data2D(DataImage):
             **kwargs
     ):
         """
-        This class contains 2D scattering images with coordinates of
-        y vs x defined in the detector coordinate frame with positive y
+        This class stores 2D scattering images with coordinates defined
+        as y vs x in the detector coordinate frame, with positive y
         in the upward vertical direction and positive x in the left
-        horizontal direction. The z axis is then defined as normal
-        incidence to follow the right-hand rule.
+        horizontal direction. The z axis is defined as the surface normal
+        to follow the right-hand rule.
 
         In many instances the detector coordinates will align with the lab
         frame, where the z axis aligns with the beam path and the detector
@@ -211,12 +212,12 @@ class Data2D(DataImage):
         about the positive y-axis in sample coordinate space by
         'sample_phi_deg' + 'sample_phi_offset' degrees from normal
         incidence. If chi and omega rotations are present, this class
-        assumes that the series of rotation is extrinsic in the order
-        of omega (rotationa about x-axis), chi (rotation about z-axis),
+        assumes that the rotation sequence is extrinsic in the order
+        of omega (rotation about the x-axis), chi (rotation about the z-axis),
         and phi (rotation about y-axis).
 
         If the sample undergoes a different series of rotation, this
-        can be changed using _set_sample_rotation method, but we caution
+        can be changed using the _set_sample_rotation method, but we caution
         the user to only use this with a full understanding of its
         implications on the conversion from detector/beam-based
         coordinate system q to the sample coordinate system q.
@@ -249,7 +250,7 @@ class Data2D(DataImage):
         ----------------
         **kwargs
             Relevant scattering metadata to the image acquisition can
-            be passed as additional keyword argument. Any keywords
+            be passed as additional keyword arguments. Any keywords
             recognized as metadata by the cdsaxs code will be saved in
             the metadata attribute. The remaining information will be
             stored in the user_params dictionary.
@@ -338,7 +339,7 @@ class Data2D(DataImage):
             'intrinsic'.
             An 'intrinsic' rotation is performed on the
             coordinate system after the previous rotation is performed.
-            An 'extrinsic' rotation is perfromed on the original
+            An 'extrinsic' rotation is performed on the original
             coordinate system prior to any rotations.
         first_axis : str
             Axis about which the first rotation is performed.
@@ -490,7 +491,7 @@ class Data2D(DataImage):
 
     def _reset_q_attributes(self):
         """
-        Reset all q_attributes to None.
+        Reset all q attributes to None.
         """
         q_attributes = ['qby_1d', 'qbx_1d',
                         'qb', 'qby', 'qbx', 'qbz',
@@ -508,7 +509,7 @@ class Data2D(DataImage):
         ----------
         suppress_errors : bool, optional
             If set to True, this method will try to calculate the
-            q vectors if the required metadata is availabe, but it
+            q vectors if the required metadata is available, but it
             will not raise an error if the parameters are not available.
             Default value is False.
         """
