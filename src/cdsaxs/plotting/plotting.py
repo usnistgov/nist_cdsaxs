@@ -43,13 +43,13 @@ def plot_image(
         Pass a figure instance to add to an existing plot rather than
         creating a new one with this function.
     mask : NDArray
-        Two dimensional boolean array where pixels set to True are
-        masked.
+        Two-dimensional boolean mask for image, where True marks pixels
+        excluded from the plotted intensity map.
     log_scale : bool
         If set to True, intensity values are plotted on a log scale.
         Default value is True.
     axis0_vals : list, NDArray
-        One dimensional list of values that cooresponds to axis 0 of
+        One-dimensional values that correspond to axis 0 of
         the image.
     axis0_type : str
         Defines the y-axis q-component or the label for the y-axis.
@@ -66,7 +66,7 @@ def plot_image(
         'equal' : default, ensures that the pixels are square
         'auto' : changes the aspect ratio to fit within the plotting
             area of the figure
-        float : manually set the aspct ratio of the pixel height vs width
+        float : manually set the aspect ratio of the pixel height vs width
     vmin : float
         Set the minimum value of the intensity color range.
     vmax : float
@@ -89,6 +89,11 @@ def plot_image(
     --------
     Any of the keyword arguments for matplotlib.pyplot.imshow can be
     used. See the matplotlib documentation for more information.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure containing the plotted image.
     """
 
     # determine colorbar range
@@ -232,6 +237,11 @@ def plot_image_add_roi(
         The line format for the region outline.
         Default is '-'.
         Use accepted formats for matplotlib.errorbar.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure with the ROI outline added.
     """
     fig = plt.figure(fig)
 
@@ -335,6 +345,11 @@ def plot_errorbar(
     --------
     Any additional keyword arguments accepted by
     matplotlib.pyplot.errorbar can be provided.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure containing the plotted trace.
     """
 
     fig = plt.figure(fig)
@@ -412,7 +427,7 @@ def plot_data2d(
         'equal' : default, ensures that the pixels are square
         'auto' : changes the aspect ratio to fit within the plotting
             area of the figure
-        float : manually set the aspct ratio of the pixel height vs width
+        float : manually set the aspect ratio of the pixel height vs width
     vmin : float
         Set the minimum value of the intensity color range.
     vmax : float
@@ -435,6 +450,11 @@ def plot_data2d(
     --------
     Any of the keyword arguments for matplotlib.pyplot.imshow can be
     used. See the matplotlib documentation for more information.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure containing the plotted 2D data.
     """
 
     fig = plot_image(
@@ -524,7 +544,7 @@ def plot_data1d(
         Default is None.
     fig : matplotlib.figure, optional
         Pass along the matplotlib figure instance if the trace should
-        be added to the figure rather than craeting a new one.
+        be added to the figure rather than creating a new one.
         Default is None.
     title : str, optional
         Set the plot title.
@@ -534,6 +554,11 @@ def plot_data1d(
     --------
     Any additional keyword arguments accepted by
     matplotlib.pyplot.errorbar can be provided.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure containing the plotted 1D data.
     """
     fig = plt.figure(fig)
 
@@ -623,7 +648,7 @@ def plot_qslice(
         Range along the y-axis for the 1D data.
     show_backgrounds : bool
         If set to True, the background slice information will also
-        be shown in the blots.
+        be shown in the plots.
     show_legend : bool
         If set to True, the legends will be shown on the plots.
     color_integration_box : str
@@ -637,6 +662,17 @@ def plot_qslice(
         Set the color of the background traces. Currently only one
         color is accepted and all backgrounds will be displayed as
         this color.
+
+    Returns
+    -------
+    fig_box : matplotlib.figure.Figure
+        Figure showing the image ROI used for the integration.
+    fig_slice : matplotlib.figure.Figure
+        Figure showing the reduced 1D slice and optional average
+        background.
+    fig_background : matplotlib.figure.Figure | None
+        Figure showing individual background slices, or None when no
+        background slices are available.
     """
 
     # plot the image roi used in the integration
@@ -790,7 +826,7 @@ def plot_data2d_integrate_box(
         Range along the y-axis for the 1D data.
     show_backgrounds : bool
         If set to True, the background slice information will also
-        be shown in the blots.
+        be shown in the plots.
     show_legend : bool
         If set to True, the legends will be shown on the plots.
     color_integration_box : str
@@ -809,6 +845,19 @@ def plot_data2d_integrate_box(
     --------
         Accepted keyword arguments to matplotlib.pyplot.errorbar
         function.
+
+    Returns
+    -------
+    fig_image : matplotlib.figure.Figure
+        Figure showing the full 2D image with integration and optional
+        background ROIs.
+    fig_box : matplotlib.figure.Figure
+        Figure showing the extracted integration box.
+    fig_slice : matplotlib.figure.Figure
+        Figure showing the reduced 1D slice.
+    fig_backgrounds : matplotlib.figure.Figure | None
+        Figure showing background slices, or None when backgrounds are
+        not available.
     """
     fig_image = plot_data2d(
         qslice.data2d,
