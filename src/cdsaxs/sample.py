@@ -20,6 +20,8 @@ class Sample():
         not the measurement, that may be used for corrections during
         data reduction and analysis.
 
+        TODO: Implement the sample class to hold sample metadata and user parameters. This will be used for sample-specific corrections during data reduction and analysis.
+        
         name : str, optional
             Identifier for the sample.
         sample_metadata : dict, optional
@@ -42,10 +44,15 @@ class Sample():
         Metadata Keywords
         -----------------
         sample_size_mm
+            Sample size used for footprint corrections.
         substrate_thickness_um
+            Substrate thickness in micrometers.
         substrate_attenuation_coeff_um-1
+            Substrate attenuation coefficient in inverse micrometers.
         pitch_nm
+            Nominal pitch in nanometers for calibration samples.
         q_peak_positions
+            Known q peak positions for calibration or reference materials.
         """
         pass
 #         self.metadata = {}
