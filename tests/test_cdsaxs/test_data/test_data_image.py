@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+from unittest.mock import patch
 
 from cdsaxs.data.data_image import DataImage
 
@@ -164,6 +165,72 @@ class TestDataImage(unittest.TestCase):
             self.data2d.image, expected_image,
             err_msg="The clockwise 630 degree rotation resulted in the"
             " wrong image.")
+
+    def test_rotate_image_uses_skimage_helper_and_resets_mask(self):
+        rotated_image = np.full(self.data2d.image.shape, 5.0)
+        rotated_image[1, 2] = np.nan
+
+        with patch("cdsaxs.data.data_image.rotate_image",
+                   return_value=rotated_image) as mock_rotate:
+            self.data2d.rotate_image(
+                12.5,
+                rotation_center=(2, 3),
+                resampling_mode="bicubic",
+                fill_mode="edge",
+                fill_constant=-7.0,
+                preserve_range=True,
+            )
+
+        np.testing.assert_array_equal(self.data2d.image, rotated_image)
+        np.testing.assert_array_equal(self.data2d.mask, np.isnan(rotated_image))
+
+        expected_masked_image = np.copy(self.image)
+        expected_masked_image[self.custom_mask + np.isnan(self.image)] = np.nan
+        mock_rotate.assert_called_once()
+        np.testing.assert_array_equal(
+            mock_rotate.call_args.args[0],
+            expected_masked_image,
+        )
+        self.assertEqual(mock_rotate.call_args.kwargs["degrees"], 12.5)
+        self.assertEqual(mock_rotate.call_args.kwargs["rotation_center"], (2, 3))
+        self.assertEqual(mock_rotate.call_args.kwargs["resampling_mode"], "bicubic")
+        self.assertEqual(mock_rotate.call_args.kwargs["fill_mode"], "edge")
+        self.assertEqual(mock_rotate.call_args.kwargs["fill_constant"], -7.0)
+        self.assertTrue(mock_rotate.call_args.kwargs["preserve_range"])
+
+    def test_rotate_image_uses_pillow_helper_and_preserves_shape(self):
+        rotated_image = np.arange(self.data2d.image.size, dtype=float).reshape(
+            self.data2d.image.shape
+        )
+        rotated_image[0, 1] = np.nan
+
+        with patch("cdsaxs.data.data_image.rotate_image_pillow",
+                   return_value=rotated_image) as mock_rotate:
+            self.data2d.rotate_image(
+                -30,
+                rotation_center=(4, 1),
+                resampling_mode="nearest",
+                use_pillow=True,
+                expand=False,
+            )
+
+        self.assertEqual(self.data2d.image.shape, self.image.shape)
+        np.testing.assert_array_equal(self.data2d.image, rotated_image)
+        np.testing.assert_array_equal(self.data2d.mask, np.isnan(rotated_image))
+
+        expected_masked_image = np.copy(self.image)
+        expected_masked_image[self.custom_mask + np.isnan(self.image)] = np.nan
+        mock_rotate.assert_called_once()
+        np.testing.assert_array_equal(
+            mock_rotate.call_args.args[0],
+            expected_masked_image,
+        )
+        self.assertEqual(mock_rotate.call_args.kwargs["degrees"], -30)
+        self.assertEqual(mock_rotate.call_args.kwargs["rotation_center"], (4, 1))
+        self.assertEqual(mock_rotate.call_args.kwargs["resampling_mode"], "nearest")
+        self.assertFalse(mock_rotate.call_args.kwargs["expand"])
+        self.assertNotIn("fill_mode", mock_rotate.call_args.kwargs)
+        self.assertNotIn("fill_constant", mock_rotate.call_args.kwargs)
 
     def test_flip_horizontally(self):
         expected_image = np.array(
