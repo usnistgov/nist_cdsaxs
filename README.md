@@ -92,9 +92,9 @@ VS Code. Click on the file and make sure to select the appropriate
 Python environment to run the notebook.
 
 
-## CD-SAXS Coordinate Conventions
-All data imported into this software should follow the below coordinate
-conventions. This may require assigning metadata named according to the
+## Coordinate Conventions and Variables
+All data imported into this software should follow the coordinate
+conventions defined below. This may require assigning metadata named according to the
 beamline's coordinate conventions appropriately to this software's
 naming convention. Image transformations, such as rotations or flips, 
 may also be required to ensure the data is processed correctly. While 
@@ -146,21 +146,15 @@ $\phi_d$ in the image.
 The scattering vector, $q$, and it's x-, y-, and z-components can be 
 defined in any of the coordinate systems using the `nist_cdsaxs` software. 
 At normal incidence of the sample and detector, the q-components are identical, e.g., $q_{sx}=q_{dx}=q_{bx}$. 
-
-Sample and detector positions and rotations, as well as information about the 
-X-ray source energy are provided to the software in the `metadata` attribute
-of the `Data2D` class. Please refer to the example Jupyter notebook for more 
-information about how to access this attribute. Table 1 below provides a summary 
-of selected metadata that can be imported into the software as well as some of the 
-calculated values. Also provided are the corresponding variable names in 
-the `nist_cdsaxs` software. Additional metadata relevant to specific data 
-corrections, e.g., footprint correction, are defined in the example notebook 
-where the application of the correction is first introduced.
+All variables defined in Figures 1 and 2 are summarized in Table 1. The table 
+also matches these quantities to the corresponding variable name(s) in the 
+`nist_cdsaxs` software.
 
 
-**Table 1.** Selected metadata and calculated values from the nist_cdsaxs software and the corresponding software variable names.
+**Table 1.** variable definitions from Figures 1 and 2 and their corresponding 
+variable name in the `nist_cdsaxs` software.
 
-| Variable | Name in `nist_cdsaxs` | Definition | Units |
+| Figure Variable | Variable Name in `nist_cdsaxs` | Definition | Units |
 | --- | --- | --- | --- |
 | $\theta$ | `theta_deg` | Scattering angle; angle between the transmitted and scattered beam. | degrees |
 | $q$ | `q` | Scattering vector. | $\AA^{-1}$ |
@@ -177,11 +171,41 @@ where the application of the correction is first introduced.
 | $\chi$ | `sample_chi_deg` + `sample_chi_offset_deg` | Counterclockwise sample rotation about positive z-axis in sample-coodrinate space. | degrees |
 | $\omega$ | `sample_omega_deg` + `sample_omega_offset_deg` | Counterclockwise sample rotation about positive x-axis in sample-coodrinate space. | degrees |
 | $\phi_d$ | `detector_phi_deg` - `detector_phi0_deg` | Detector rotation angle about the positive $y_s$ axis. | degrees |
-| $\lambda$ | `wavelength_nm` | X-ray source wavelength. | nm |
-|  | `energy_ev` | X-ray source energy. | eV |
-|  | `sdd_cm` | Sample-to-detector distance. | cm |
-|  | `exposure_time_s` | Count time of the measurement. | s |
-|  | `pixel_size_um` | Pixel size of the detector. | $\mu m$ |
+| $\Delta d_y$ | `detector_y_mm` - `detector_y0_mm` | Detector translation along the $y_d$ axis. | mm |
+
+[!NOTE]
+Some properties above are defined as the summation or difference of two variables in 
+the software. These include $\phi$, $\chi$, $\omega$, and $\phi_d$. The offsets by 
+default are always set to 0. However, if there is a difference between the nominal 0 position 
+and normal incidence, an offset can be applied by the user to correct for this.
+
+All metadata is stored in the `metadata` attribute
+of the `Data2D` class. Please refer to the example Jupyter notebook for more 
+information about how to access this attribute. Table 1 below provides a summary 
+of accepted metadata that can be imported into the software. Users can also store 
+additional information in the `user_params` attribute. These quantities can be used to 
+perform data transformations, such as normalizations, but are not standard metadata 
+recognized by the software and the user is responsible for applying these properties correction. 
+Additional metadata required for specific corrections, including the footprint correction 
+and absoprtion correction, are introduced in greater detail in the example notebook.
+
+**Table 2.** Metadata of the `nist_cdsaxs` software.
+
+| Metadata in `nist_cdsaxs` | Definition | Units |
+| --- | --- | --- |
+| `wavelength_nm` | X-ray source wavelength. | nm |
+| `energy_ev` | X-ray source energy. | eV |
+| `sdd_cm` | Sample-to-detector distance. | cm |
+| `exposure_time_s` | Count time of the measurement. | s |
+| `pixel_size_um` | Pixel size of the detector. | $\mu m$ |
+| `scaling_factor`
+| `I0`
+| `beam_current` 
+| `data_directory`
+| `filename`
+| `name`
+| `center_px` 
+
 
 
 
