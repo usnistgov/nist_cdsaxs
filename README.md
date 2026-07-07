@@ -57,6 +57,11 @@ pip install -e .[dev]
 This is preferred over manually modifying `PYTHONPATH`.
 
 ## Usage
+This software is meant to be used in a Jupyter notebook. While some
+aspects of the reduction can be automated as a Python script, currently
+we recommend a notebook as visual checks that the data is integrated 
+appropriately are important.
+
 An example Jupyter notebook has been provided in `examples`. It outlines  
 the required reduction steps as well as some of the additional 
 functionality included in this software. Please follow this notebook 
@@ -98,6 +103,88 @@ this upon import, we encourage the user to confirm data is loaded
 correctly as beamline conventions and data export formats can change 
 over time.
 
+Figure 1 shows the coordinate conventions for a typical
+transmission CD-SAXS measurement where the primary rotation of the 
+sample is defined as $\phi$, and the scattering angle is defined as 
+$\theta$. There are three coordinate systems: sample-based, detector-
+based, and beam-based coordinates. The subscript of s, d, or b 
+indicates the coordinate base. The sample coordinate system is
+defined with the origin at the center incident position of the beam on 
+the sample. The sample is normal to the incident beam when the sample rotation 
+angles are all zero. At normal incidence, the z axis aligns with the beam path and 
+the y-axis is the primary rotation axis during the measurement. The origin for the 
+detector-based and beam-based coordinate systems is positioned at the 
+incident position of the transmitted beam onto the detector at its face. The 
+detector is normal to the incident beam. The y-axes are always parallel. 
+The z-axes and y-axes are all parallel when the sample is positioned at normal incidence.
+
+<div style="max-width: 500px; margin: 0 auto;">
+  <img src="extras/images/coordinates.png" alt="Coordinates" style="width: 95%;">
+  <p><strong>Figure 1.</strong> Coordinate system of transmission CD-SAXS measurement as 
+  defined in the nist_cdsaxs software.</p>
+</div>
+
+The software can also reduce data from a CD-SAXS measurement where the 
+detector rotates about the positive $y_s$ axis and translates along the
+$y_d$ axis. This may occur when X-ray source energy is low and the 
+scattering angles are high. In this case, the detector-based and beam-
+based coordinate systems diverge, as shown in Figure 2. The origin in the 
+beam-based coordinate system remains at the incident position of the 
+transmitted beam and the detector when the detector is at the normal 
+incidence position prior to any rotation or translation. The origin in 
+the detector-based coordinate system follows the same location on the 
+detector phase as it rotates. This detector rotation angle is shown as 
+$\phi_d$ in the image.
+
+<div style="max-width: 500px; margin: 0 auto;">
+  <img src="extras/images/coordinates_with_detector_rotation.png" alt="Coordinates with Detector Rotation" style="width: 95%;">
+  <p><strong>Figure 2.</strong> Coordinate system of transmission CD-SAXS measurement as 
+  defined in the nist_cdsaxs software with a rotation of the detector about 
+  positive y-axis in sample coordinate space.</p>
+</div>
+
+The scattering vector, $q$, and it's x-, y-, and z-components can be 
+defined in any of the coordinate systems using the `nist_cdsaxs` software. 
+At normal incidence of the sample and detector, the q-components are identical, e.g., $q_{sx}=q_{dx}=q_{bx}$. 
+
+Sample and detector positions and rotations, as well as information about the 
+X-ray source energy are provided to the software in the `metadata` attribute
+of the `Data2D` class. Please refer to the example Jupyter notebook for more 
+information about how to access this attribute. Table 1 below provides a summary 
+of selected metadata that can be imported into the software as well as some of the 
+calculated values. Also provided are the corresponding variable names in 
+the `nist_cdsaxs` software. Additional metadata relevant to specific data 
+corrections, e.g., footprint correction, are defined in the example notebook 
+where the application of the correction is first introduced.
+
+
+**Table 1.** Selected metadata and calculated values from the nist_cdsaxs software and the corresponding software variable names.
+
+| Variable | Name in `nist_cdsaxs` | Definition | Units |
+| --- | --- | --- | --- |
+| $\theta$ | `theta_deg` | Scattering angle; angle between the transmitted and scattered beam. | degrees |
+| $q$ | `q` | Scattering vector. | $\AA^{-1}$ |
+| $q_{sx}$ | `qsx` | Scattering vector x-axis component in sample-coordinate space. | $\AA^{-1}$ |
+| $q_{sy}$ | `qsy` | Scattering vector y-axis component in sample-coordinate space. | $\AA^{-1}$ |
+| $q_{sz}$ | `qsz` | Scattering vector z-axis component in sample-coordinate space. | $\AA^{-1}$ |
+| $q_{bx}$ | `qbx` | Scattering vector x-axis component in beam-coordinate space. | $\AA^{-1}$ |
+| $q_{by}$ | `qby` | Scattering vector y-axis component in beam-coordinate space. | $\AA^{-1}$ |
+| $q_{bz}$ | `qbz` | Scattering vector z-axis component in beam-coordinate space. | $\AA^{-1}$ |
+| $q_{dx}$ | `qdx` | Scattering vector x-axis component in detector-coordinate space. | $\AA^{-1}$ |
+| $q_{dy}$ | `qdy` | Scattering vector y-axis component in detector-coordinate space. | $\AA^{-1}$ |
+| $q_{dz}$ | `qdz` | Scattering vector z-axis component in detector-coordinate space. | $\AA^{-1}$ |
+| $\phi$ | `sample_phi_deg` + `sample_phi_offset_deg` | Primary sample rotation; counterclockwise about positive y-axis in sample-coodrinate space. | degrees |
+| $\chi$ | `sample_chi_deg` + `sample_chi_offset_deg` | Counterclockwise sample rotation about positive z-axis in sample-coodrinate space. | degrees |
+| $\omega$ | `sample_omega_deg` + `sample_omega_offset_deg` | Counterclockwise sample rotation about positive x-axis in sample-coodrinate space. | degrees |
+| $\phi_d$ | `detector_phi_deg` - `detector_phi0_deg` | Detector rotation angle about the positive $y_s$ axis. | degrees |
+| $\lambda$ | `wavelength_nm` | X-ray source wavelength. | nm |
+|  | `energy_ev` | X-ray source energy. | eV |
+|  | `sdd_cm` | Sample-to-detector distance. | cm |
+|  | `exposure_time_s` | Count time of the measurement. | s |
+|  | `pixel_size_um` | Pixel size of the detector. | $\mu m$ |
+
+
+
 ## Citation Information
 _More information about citation information will be available soon._
 
@@ -127,9 +214,9 @@ _Contributors are listed in alphabetical order by last name._
 
 ## Disclaimers
 
-A portion of this repository, including source code and documentation, 
-was written with the assistance of artificial intelligence (AI). All  
-code and text generated by the AI models has been reviewed and tested by 
-a human developer. 
+A portion of this repository (approximately 5%-10%), including source 
+code and documentation, was written with the assistance of artificial 
+intelligence (AI). All code and text generated by the AI models has been 
+reviewed and tested by a human developer. 
 
 Certain commercial or open-source software may be identified in this project to foster understanding. Such identification does not imply recommendation or endorsement by the National Institute of Standards and Technology, nor does it imply that the software identified are necessarily the best available for the purpose.
