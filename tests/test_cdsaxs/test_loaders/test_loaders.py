@@ -101,9 +101,15 @@ class TestLoadData(unittest.TestCase):
 
     def setUp(self):
         image_file = "../../data/test_loaders/smi.tif"
+        nist_file = "../../data/test_loaders/nist.bin"
+        simple_file = "../../data/test_loaders/simple.tif"
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.filepath = os.path.abspath(
             os.path.join(current_dir, image_file))
+        self.nist_filepath = os.path.abspath(
+            os.path.join(current_dir, nist_file))
+        self.simple_filepath = os.path.abspath(
+            os.path.join(current_dir, simple_file))
         self.data = load_data.LoadData(filepath=self.filepath,
                                      detector_type='Pilatus',
                                      metadata={'center_px': (100, 100)},
@@ -146,6 +152,30 @@ class TestLoadData(unittest.TestCase):
         data = load_data.LoadData(filepath=self.filepath, name="new name",
                                 metadata={'name': 'Test Load Data Name'})
         self.assertEqual(data.name, "new name")
+
+    def test_load_tiff_without_detector_type_uses_tiff_reader(self):
+        data = load_data.LoadData(filepath=self.simple_filepath)
+
+        expected_image = np.array([
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, -9],
+            [10, 11, 12],
+        ], dtype=np.float64)
+
+        np.testing.assert_array_equal(data.image, expected_image)
+        self.assertEqual(data.metadata['filename'], os.path.basename(self.simple_filepath))
+        self.assertEqual(data.metadata['data_directory'], os.path.dirname(self.simple_filepath))
+
+    def test_load_nist_bin_real_fixture_extracts_metadata_and_cleans_negative_pixels(self):
+        data = load_data.LoadData(filepath=self.nist_filepath)
+
+        self.assertEqual(data.metadata['filename'], os.path.basename(self.nist_filepath))
+        self.assertEqual(data.metadata['data_directory'], os.path.dirname(self.nist_filepath))
+        self.assertEqual(data.metadata['wavelength_nm'], 0.13404)
+        self.assertEqual(data.metadata['exposure_time_s'], 600)
+        self.assertEqual(data.metadata['pixel_size_um'], 172)
+        self.assertFalse(np.any(data.image < 0))
 
     def test_unknown_extension_without_filetype_raises_value_error(self):
         with self.assertRaisesRegex(ValueError, 'Did not recognize the filtype extension'):
