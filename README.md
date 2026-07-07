@@ -158,15 +158,15 @@ variable name in the `nist_cdsaxs` software.
 | --- | --- | --- | --- |
 | $\theta$ | `theta_deg` | Scattering angle; angle between the transmitted and scattered beam. | degrees |
 | $q$ | `q` | Scattering vector. | $\AA^{-1}$ |
-| $q_{sx}$ | `qsx` | Scattering vector x-axis component in sample-coordinate space. | $\AA^{-1}$ |
-| $q_{sy}$ | `qsy` | Scattering vector y-axis component in sample-coordinate space. | $\AA^{-1}$ |
-| $q_{sz}$ | `qsz` | Scattering vector z-axis component in sample-coordinate space. | $\AA^{-1}$ |
-| $q_{bx}$ | `qbx` | Scattering vector x-axis component in beam-coordinate space. | $\AA^{-1}$ |
-| $q_{by}$ | `qby` | Scattering vector y-axis component in beam-coordinate space. | $\AA^{-1}$ |
-| $q_{bz}$ | `qbz` | Scattering vector z-axis component in beam-coordinate space. | $\AA^{-1}$ |
-| $q_{dx}$ | `qdx` | Scattering vector x-axis component in detector-coordinate space. | $\AA^{-1}$ |
-| $q_{dy}$ | `qdy` | Scattering vector y-axis component in detector-coordinate space. | $\AA^{-1}$ |
-| $q_{dz}$ | `qdz` | Scattering vector z-axis component in detector-coordinate space. | $\AA^{-1}$ |
+| $q_{sx}$ | `qsx` | Scattering vector x-axis component in sample-coordinate space. | ${Å}^{-1}$ |
+| $q_{sy}$ | `qsy` | Scattering vector y-axis component in sample-coordinate space. | ${Å}^{-1}$ |
+| $q_{sz}$ | `qsz` | Scattering vector z-axis component in sample-coordinate space. | ${Å}^{-1}$ |
+| $q_{bx}$ | `qbx` | Scattering vector x-axis component in beam-coordinate space. | ${Å}^{-1}$ |
+| $q_{by}$ | `qby` | Scattering vector y-axis component in beam-coordinate space. | ${Å}^{-1}$ |
+| $q_{bz}$ | `qbz` | Scattering vector z-axis component in beam-coordinate space. | ${Å}^{-1}$ |
+| $q_{dx}$ | `qdx` | Scattering vector x-axis component in detector-coordinate space. | ${Å}^{-1}$ |
+| $q_{dy}$ | `qdy` | Scattering vector y-axis component in detector-coordinate space. | ${Å}^{-1}$ |
+| $q_{dz}$ | `qdz` | Scattering vector z-axis component in detector-coordinate space. | ${Å}^{-1}$ |
 | $\phi$ | `sample_phi_deg` + `sample_phi_offset_deg` | Primary sample rotation; counterclockwise about positive y-axis in sample-coodrinate space. | degrees |
 | $\chi$ | `sample_chi_deg` + `sample_chi_offset_deg` | Counterclockwise sample rotation about positive z-axis in sample-coodrinate space. | degrees |
 | $\omega$ | `sample_omega_deg` + `sample_omega_offset_deg` | Counterclockwise sample rotation about positive x-axis in sample-coodrinate space. | degrees |
