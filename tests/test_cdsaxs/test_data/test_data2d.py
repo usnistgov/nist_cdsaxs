@@ -2,12 +2,94 @@ import numpy as np
 import unittest
 
 from cdsaxs.calculators import wavelength_to_energy
-from cdsaxs.data.data2d import Data2D
+from cdsaxs.data.data2d import Data2D, combine_data2d
 
 
 class TestCombineData2D(unittest.TestCase):
-    # TODO: implement a test for combining two instances of Data2D
-    pass
+    def _make_metadata(self, exposure_time_s=None):
+        metadata = {
+            'center_px': (1, 1),
+            'wavelength_nm': 0.07,
+            'pixel_size_um': 172,
+            'sdd_cm': 542,
+            'sample_phi_deg': 0,
+            'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
+        }
+        if exposure_time_s is not None:
+            metadata['exposure_time_s'] = exposure_time_s
+        return metadata
+
+    def _make_data(self, name, image, mask=None, exposure_time_s=None, **user_params):
+        return Data2D(
+            image=np.array(image, dtype=np.float64),
+            name=name,
+            mask=np.array(mask, dtype=bool) if mask is not None else None,
+            hide_q_warnings=True,
+            **self._make_metadata(exposure_time_s=exposure_time_s),
+            **user_params,
+        )
+
+    def test_combine_data2d_sums_images_unions_masks_and_exposure_time(self):
+        data1 = self._make_data(
+            'first',
+            image=[[1.0, np.nan], [3.0, 4.0]],
+            mask=[[False, True], [False, False]],
+            exposure_time_s=2,
+            sample_id='A',
+        )
+        data2 = self._make_data(
+            'second',
+            image=[[10.0, 20.0], [30.0, 40.0]],
+            mask=[[False, False], [True, False]],
+            exposure_time_s=5,
+            sample_id='B',
+        )
+
+        combined = combine_data2d(data1, data2)
+
+        np.testing.assert_array_equal(
+            combined.image,
+            np.array([[11.0, 20.0], [33.0, 44.0]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            combined.mask,
+            np.array([[False, True], [True, False]], dtype=bool),
+        )
+        self.assertEqual(combined.metadata['exposure_time_s'], 7)
+        self.assertEqual(combined.user_params['sample_id'], 'A')
+        self.assertEqual(combined.name, 'first')
+
+    def test_combine_data2d_uses_explicit_name_override(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)), exposure_time_s=1)
+        data2 = self._make_data('second', image=np.full((3, 3), 2.0), exposure_time_s=2)
+
+        combined = combine_data2d(data1, data2, name='combined-data')
+
+        self.assertEqual(combined.name, 'combined-data')
+
+    def test_combine_data2d_keeps_first_metadata_when_exposure_missing(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)), exposure_time_s=3)
+        data2 = self._make_data('second', image=np.full((3, 3), 2.0))
+
+        combined = combine_data2d(data1, data2)
+
+        self.assertEqual(combined.metadata['exposure_time_s'], 3)
+
+    def test_combine_data2d_raises_for_mismatched_image_shapes(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)))
+        data2 = self._make_data('second', image=np.ones((2, 3)))
+
+        with self.assertRaisesRegex(ValueError, 'All Data2D images must have the same shape'):
+            combine_data2d(data1, data2)
 
 
 class TestData2D(unittest.TestCase):

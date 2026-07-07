@@ -80,18 +80,34 @@ def combine_data2d(*data2d: Data2D, name=None):
 
     # initialize information from the first 2d data instance
     first_data = data2d[0]
-    metadata = first_data.metadata
-    user_params = first_data.user_params
-    mask = first_data.mask
-    image = first_data.image
+    metadata = dict(first_data.metadata)
+    user_params = dict(first_data.user_params)
+    mask = np.array(first_data.mask, copy=True)
+    image = np.array(first_data.image, copy=True)
     if name is None:
         name = first_data.name
 
+    # Data2D derives energy from wavelength and vice versa, so avoid
+    # passing both back into the constructor when cloning metadata.
+    if 'wavelength_nm' in metadata and 'energy_ev' in metadata:
+        del metadata['energy_ev']
+
     for data in data2d[1:]:
+        if data.image.shape != first_data.image.shape:
+            raise ValueError(
+                "All Data2D images must have the same shape to be combined. "
+                f"Expected {first_data.image.shape}, got {data.image.shape}."
+            )
+        if data.mask.shape != first_data.mask.shape:
+            raise ValueError(
+                "All Data2D masks must have the same shape to be combined. "
+                f"Expected {first_data.mask.shape}, got {data.mask.shape}."
+            )
         if 'exposure_time_s' in data.metadata.keys():
             metadata['exposure_time_s'] += data.metadata['exposure_time_s']
         mask += data.mask
-        image = np.nansum(image, data.image)
+        # Sum the two images elementwise while treating NaNs as missing data.
+        image = np.nansum(np.stack([image, data.image]), axis=0)
 
     new_data = Data2D(
         image=image,
