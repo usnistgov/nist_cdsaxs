@@ -96,21 +96,12 @@ def plot_image(
         Figure containing the plotted image.
     """
 
-    # determine colorbar range
-    # if log_scale make sure that vmin is 0.1 at a minimum
-    if vmin is None:
-        vmin = np.max(
-            [np.nanmin(image[image > 0]), 0.1]
-            ) if log_scale else 0
-    if vmax is None:
-        vmax = np.nanmax(image)
-
     # set masked points to nan in the image to be plotted
     plotting_image = np.array(image)
+    if mask is None:
+        mask = np.zeros_like(plotting_image).astype(bool)
     plotting_image[mask] = np.nan
 
-    if mask is None:
-        mask = np.ones_like(plotting_image).astype(bool)
     # mask out other pixels that are either infinity or nan and
     # somehow did not get included in the standard mask
     mask_inf = ((np.isinf(plotting_image)
@@ -144,6 +135,25 @@ def plot_image(
                                   ~np.isnan(plotting_image))
         plotting_image[mask_less_than_equal_0] = np.nan
         mask_image[mask_less_than_equal_0] = 0.5
+
+    # determine colorbar range from the actual plotted data so LogNorm
+    # remains valid after masking invalid and nonpositive pixels.
+    finite_plotting_values = plotting_image[np.isfinite(plotting_image)]
+    if vmin is None:
+        if log_scale:
+            if finite_plotting_values.size == 0:
+                vmin = 0.1
+            else:
+                vmin = np.max([np.nanmin(finite_plotting_values), 0.1])
+        else:
+            vmin = 0
+    if vmax is None:
+        if finite_plotting_values.size == 0:
+            vmax = vmin * 10 if log_scale else vmin + 1
+        else:
+            vmax = np.nanmax(finite_plotting_values)
+    if log_scale and vmax <= vmin:
+        vmax = vmin * 10
 
     # plotting data
     fig = plt.figure(fig)

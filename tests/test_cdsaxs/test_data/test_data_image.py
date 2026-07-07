@@ -232,6 +232,30 @@ class TestDataImage(unittest.TestCase):
         self.assertNotIn("fill_mode", mock_rotate.call_args.kwargs)
         self.assertNotIn("fill_constant", mock_rotate.call_args.kwargs)
 
+    def test_rotate_image_real_90_degree_rotation_masks_fill_pixels(self):
+        image = np.array(
+            [[1.0, 2.0],
+             [3.0, 4.0]],
+            dtype=np.float64,
+        )
+        data = DataImage(image=image, mask=np.array([[False, True], [False, False]]))
+
+        data.rotate_image(
+            90,
+            rotation_center=(0, 0),
+            resampling_mode="bilinear",
+            fill_mode="constant",
+            fill_constant=np.nan,
+            preserve_range=True,
+        )
+
+        self.assertEqual(data.image.shape, image.shape)
+        np.testing.assert_array_equal(
+            data.image,
+            np.array([[1.0, 3.0], [np.nan, np.nan]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(data.mask, np.isnan(data.image))
+
     def test_flip_horizontally(self):
         expected_image = np.array(
             [[20338., 48676., 20215., 44386.],

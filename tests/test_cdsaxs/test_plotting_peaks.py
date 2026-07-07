@@ -259,3 +259,89 @@ class TestPeakPlotting(unittest.TestCase):
         self.assertIsNotNone(fig_background)
         self.assertEqual(fig_slice.axes[0].get_yscale(), 'log')
         self.assertEqual(fig_background.axes[0].get_yscale(), 'log')
+
+    def test_plot_image_adds_mask_and_invalid_overlays(self):
+        image = np.array(
+            [[1.0, 2.0],
+             [np.inf, np.nan]],
+            dtype=float,
+        )
+        mask = np.array(
+            [[False, True],
+             [False, False]],
+            dtype=bool,
+        )
+
+        fig = plotting.plot_image(
+            image,
+            mask=mask,
+            log_scale=False,
+            color_mask='blue',
+            color_inf='green',
+            color_nan='red',
+        )
+
+        self.assertIsNotNone(fig)
+        ax = fig.axes[0]
+        self.assertEqual(len(ax.images), 2)
+        np.testing.assert_array_equal(
+            ax.images[0].get_array(),
+            np.array([[1.0, np.nan], [np.nan, np.nan]], dtype=float),
+        )
+        np.testing.assert_array_equal(
+            ax.images[1].get_array(),
+            np.array([[np.nan, 0.0], [0.5, 1.0]], dtype=float),
+        )
+
+    def test_plot_image_log_scale_handles_single_positive_finite_value(self):
+        image = np.array(
+            [[1.0, 0.0],
+             [np.inf, np.nan]],
+            dtype=float,
+        )
+        mask = np.array(
+            [[False, True],
+             [False, False]],
+            dtype=bool,
+        )
+
+        fig = plotting.plot_image(
+            image,
+            mask=mask,
+            log_scale=True,
+        )
+
+        self.assertIsNotNone(fig)
+        ax = fig.axes[0]
+        self.assertEqual(len(ax.images), 2)
+        self.assertEqual(ax.images[0].norm.vmin, 1.0)
+        self.assertEqual(ax.images[0].norm.vmax, 10.0)
+
+    def test_plot_image_add_roi_draws_expected_outline(self):
+        fig = plotting.plot_image(np.arange(9, dtype=float).reshape(3, 3), mask=np.zeros((3, 3), dtype=bool), log_scale=False)
+
+        fig = plotting.plot_image_add_roi(
+            limits_axis0=(1, 3),
+            limits_axis1=(0, 2),
+            fig=fig,
+            show_legend=False,
+            color='black',
+        )
+
+        ax = fig.axes[0]
+        line = ax.lines[-1]
+        np.testing.assert_array_equal(line.get_xdata(), np.array([-0.5, -0.5, 1.5, 1.5, -0.5]))
+        np.testing.assert_array_equal(line.get_ydata(), np.array([0.5, 2.5, 2.5, 0.5, 0.5]))
+
+    def test_plot_errorbar_forwards_log_scale_flags_to_axes(self):
+        fig = plotting.plot_errorbar(
+            x=np.array([1.0, 10.0], dtype=float),
+            y=np.array([2.0, 20.0], dtype=float),
+            log_scale_x=True,
+            log_scale_y=True,
+            show_legend=False,
+        )
+
+        ax = fig.axes[0]
+        self.assertEqual(ax.get_xscale(), 'log')
+        self.assertEqual(ax.get_yscale(), 'log')
