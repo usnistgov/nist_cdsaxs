@@ -157,7 +157,7 @@ variable name in the `nist_cdsaxs` software.
 | Figure Variable | Variable Name in `nist_cdsaxs` | Definition | Units |
 | --- | --- | --- | --- |
 | $\theta$ | `theta_deg` | Scattering angle; angle between the transmitted and scattered beam. | degrees |
-| $q$ | `q` | Scattering vector. | $\AA^{-1}$ |
+| $q$ | `q` | Scattering vector. | ${Å}^{-1}$ |
 | $q_{sx}$ | `qsx` | Scattering vector x-axis component in sample-coordinate space. | ${Å}^{-1}$ |
 | $q_{sy}$ | `qsy` | Scattering vector y-axis component in sample-coordinate space. | ${Å}^{-1}$ |
 | $q_{sz}$ | `qsz` | Scattering vector z-axis component in sample-coordinate space. | ${Å}^{-1}$ |
