@@ -526,7 +526,7 @@ class Dataset():
         for key in keys:
             data = self.datas[key]
             if key in angles.keys():
-                rotation_angle = np.deg2rad(angles[key])
+                rotation_angle = angles[key]
             else:
                 phi = np.deg2rad(data.metadata['sample_phi_deg']
                                 + data.metadata['sample_phi_offset_deg'])

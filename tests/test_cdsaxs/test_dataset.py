@@ -82,6 +82,7 @@ class TestDataset(unittest.TestCase):
             data.flip_horizontally = MagicMock()
             data.flip_vertically = MagicMock()
             data.reset_image = MagicMock()
+            data.rotate_image = MagicMock()
 
         self.dataset.add_data([data1, data2, data3])
 
@@ -421,6 +422,74 @@ class TestDataset(unittest.TestCase):
         data1.reset_image.assert_called_once_with()
         data2.reset_image.assert_not_called()
         data3.reset_image.assert_not_called()
+
+    def test_apply_rotation_correction_uses_manual_angles_and_selected_keys(self):
+        data1, data2, data3 = self._make_mocked_dataset()
+
+        self.dataset.apply_rotation_correction_all_data(
+            keys=['data-1', 'data-3'],
+            angles={'data-1': 12.5, 'data-3': -7.0},
+            verbose=False,
+            order=1,
+            reshape=False,
+        )
+
+        data1.rotate_image.assert_called_once_with(
+            12.5,
+            rotation_center=data1.metadata['center_px_detector'],
+            order=1,
+            reshape=False,
+        )
+        data2.rotate_image.assert_not_called()
+        data3.rotate_image.assert_called_once_with(
+            -7.0,
+            rotation_center=data3.metadata['center_px_detector'],
+            order=1,
+            reshape=False,
+        )
+
+        data1.update_user_params.assert_called_once_with(
+            {'rotation_correction_angle_deg': 12.5}
+        )
+        data2.update_user_params.assert_not_called()
+        data3.update_user_params.assert_called_once_with(
+            {'rotation_correction_angle_deg': -7.0}
+        )
+
+    def test_apply_rotation_correction_computes_angle_from_metadata(self):
+        data1, _, _ = self._make_mocked_dataset()
+        data1.metadata.update({
+            'sample_phi_deg': 10.0,
+            'sample_phi_offset_deg': 2.0,
+            'sample_omega_deg': -4.0,
+            'sample_omega_offset_deg': 1.0,
+            'sample_chi_deg': 6.0,
+            'sample_chi_offset_deg': -0.5,
+        })
+
+        phi = np.deg2rad(12.0)
+        omega = np.deg2rad(-3.0)
+        chi = np.deg2rad(5.5)
+        expected_angle = np.rad2deg(np.atan(
+            np.tan(chi) * np.cos(phi)
+            - np.sin(phi) * np.tan(omega) / np.cos(chi)
+        ))
+
+        self.dataset.apply_rotation_correction_all_data(
+            keys=['data-1'],
+            verbose=False,
+        )
+
+        data1.rotate_image.assert_called_once()
+        actual_angle = data1.rotate_image.call_args.args[0]
+        self.assertAlmostEqual(actual_angle, expected_angle)
+        self.assertEqual(
+            data1.rotate_image.call_args.kwargs['rotation_center'],
+            data1.metadata['center_px_detector'],
+        )
+        data1.update_user_params.assert_called_once_with(
+            {'rotation_correction_angle_deg': actual_angle}
+        )
 
     def test_scale_all_data_mutates_only_selected_real_data(self):
         data1, data2 = self._make_real_dataset_for_transformations()
