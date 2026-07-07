@@ -965,14 +965,6 @@ class ReducedSlices():
         filter_by_q : dict
             Dictionary of q component and range (min, max) to filter
             the slices by.
-<<<<<<< validate_for_version1
-        q_axis : str
-            Currently only 'qsz' is accepted.
-        integrated_axis : str
-            Currently only 'qsx' is accepted.
-        offset_axis : str
-            Currently only 'qsy' is accepted.
-=======
         TODO: Add more options for exporting axis. Currently hardcoded.
         q_axis : str
             Currently only 'qsz' is accepted.
@@ -983,7 +975,6 @@ class ReducedSlices():
         offset_axis : str
             Currently only 'qsy' is accepted.
             Default is 'qsy'.
->>>>>>> main
         export_qr : bool
             If set to True, qsr will also be exported in the file.
         decimals : int
