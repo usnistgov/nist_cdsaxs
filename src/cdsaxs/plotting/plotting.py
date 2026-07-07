@@ -1622,8 +1622,12 @@ def plot_reduced_dataset(
             cmap=cmap,
             norm=norm,
             **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
-    cbar_ticks = np.power(10, np.arange(
-        np.ceil(np.log10(vmin)), np.floor(np.log10(vmax))+1, 1))
+    if log_scale:
+        cbar_ticks = np.power(10, np.arange(
+            np.ceil(np.log10(vmin)), np.floor(np.log10(vmax)) + 1, 1
+        ))
+    else:
+        cbar_ticks = np.linspace(vmin, vmax, 6)
     colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)
     colorbar.set_label('Intensity')
 
@@ -1743,7 +1747,12 @@ def plot_reduced_slices(
                 keep.append(False)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    sort_axis = [getattr(data, integrated_axis) for data in filtered_slices]
+    sort_axis = []
+    for data in filtered_slices:
+        axis_value = getattr(data, integrated_axis)
+        if np.size(axis_value) == 1:
+            axis_value = np.asarray(axis_value).reshape(-1)[0]
+        sort_axis.append(axis_value)
     sort_by_slice_axis = np.argsort(sort_axis)
     # filtered_slices = filtered_slices[sort_by_slice_axis]
 
@@ -1753,10 +1762,15 @@ def plot_reduced_slices(
     # for i, data in enumerate(filtered_slices):
         q = np.copy(getattr(data, q_axis))
         Iq = np.copy(data.Iq)
+        label = getattr(data, integrated_axis)
+        # Reduced slice metadata may store scalar q values as length-1 arrays;
+        # flatten them so legend labels read as 0.2 instead of [0.2].
+        if np.size(label) == 1:
+            label = np.asarray(label).reshape(-1)[0]
         sort_q = np.argsort(q)
         ax.errorbar(q[sort_q],
                     Iq[sort_q]*10**(i*-1*offset_order) + offset_value*i,
-                    label=getattr(data, integrated_axis),
+                    label=label,
                     fmt='o-', **kwargs)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1),
