@@ -1011,6 +1011,11 @@ class ReducedSlices():
             q_int = getattr(r_slice, integrated_axis)
             q_offset = getattr(r_slice, offset_axis)
 
+            # Data1D stores scalar q metadata as length-1 arrays; flatten so
+            # exported headers contain plain values like 0.4 instead of [0.4].
+            if np.size(q_int) == 1:
+                q_int = np.asarray(q_int).reshape(-1)[0]
+
             # sort by q
             sorted_indexes = np.argsort(q)
             q = q[sorted_indexes]

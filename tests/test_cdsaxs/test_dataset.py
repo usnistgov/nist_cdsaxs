@@ -1,5 +1,7 @@
 import unittest
 import warnings
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -137,6 +139,22 @@ class TestDataset(unittest.TestCase):
             offset_axis='qsy',
             slice_width=0.01,
             qsy=np.zeros_like(q),
+        )
+
+    def _make_export_slice(self, q, iq, qsx, qsy, qsr=None):
+        kwargs = {'qsy': np.array(qsy, dtype=float)}
+        if qsr is not None:
+            kwargs['qsr'] = np.array(qsr, dtype=float)
+
+        return ReducedData1DSlice(
+            q=np.array(q, dtype=float),
+            Iq=np.array(iq, dtype=float),
+            q_axis='qsz',
+            integrated_axis='qsx',
+            offset_axis='qsy',
+            slice_width=0.01,
+            qsx=qsx,
+            **kwargs,
         )
 
     def _make_dataset_with_mocked_integrations(self):
@@ -551,3 +569,114 @@ class TestDataset(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             reduced_slices.add_slices('not reduced slices')
+
+    def test_reduced_slices_export_returns_sorted_padded_columns(self):
+        slice1 = self._make_export_slice(
+            q=[0.3, 0.1, 0.2],
+            iq=[3.0, 1.0, 2.0],
+            qsx=0.4,
+            qsy=[0.03, 0.01, 0.02],
+        )
+        slice2 = self._make_export_slice(
+            q=[0.4, 0.2, 0.3],
+            iq=[4.0, np.nan, -1.0],
+            qsx=0.8,
+            qsy=[0.04, 0.02, 0.03],
+        )
+        reduced_slices = ReducedSlices(slices=[slice1, slice2])
+
+        with TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / 'reduced_slices.csv'
+            datas = reduced_slices.export_reduced_slices(filepath=export_path)
+
+        expected = np.array([
+            [r'$q_x (\AA^{-1})$', r'$q_y (\AA^{-1})$', r'$q_z (\AA^{-1})$', r'$I (A.U.)$', r'$q_x (\AA^{-1})$', r'$q_y (\AA^{-1})$', r'$q_z (\AA^{-1})$', r'$I (A.U.)$'],
+            ['0.4', '0.01', '0.1', '1.0', '0.8', '0.04', '0.4', '4.0'],
+            ['0.4', '0.02', '0.2', '2.0', '', '', '', ''],
+            ['0.4', '0.03', '0.3', '3.0', '', '', '', ''],
+        ], dtype=str)
+
+        np.testing.assert_array_equal(datas, expected)
+
+    def test_reduced_slices_export_includes_qr_when_requested(self):
+        slice1 = self._make_export_slice(
+            q=[0.2, 0.1],
+            iq=[2.0, 1.0],
+            qsx=0.5,
+            qsy=[0.02, 0.01],
+            qsr=[0.22, 0.11],
+        )
+        reduced_slices = ReducedSlices(slices=[slice1])
+
+        with TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / 'reduced_slices_qr.csv'
+            datas = reduced_slices.export_reduced_slices(
+                filepath=export_path,
+                export_qr=True,
+            )
+
+        expected = np.array([
+            [r'$q_x (\AA^{-1})$', r'$q_y (\AA^{-1})$', r'$q_z (\AA^{-1})$', r'$q_r (\AA^{-1})$', r'$I (A.U.)$'],
+            ['0.5', '0.01', '0.1', '0.11', '1.0'],
+            ['0.5', '0.02', '0.2', '0.22', '2.0'],
+        ], dtype=str)
+
+        np.testing.assert_array_equal(datas, expected)
+
+    def test_reduced_slices_export_filters_by_q_range(self):
+        keep_slice = self._make_export_slice(
+            q=[0.1, 0.2],
+            iq=[1.0, 2.0],
+            qsx=0.3,
+            qsy=[0.01, 0.02],
+        )
+        drop_slice = self._make_export_slice(
+            q=[0.1, 0.2],
+            iq=[1.0, 2.0],
+            qsx=0.7,
+            qsy=[0.05, 0.06],
+        )
+        reduced_slices = ReducedSlices(slices=[keep_slice, drop_slice])
+
+        with TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / 'filtered_reduced_slices.csv'
+            datas = reduced_slices.export_reduced_slices(
+                filepath=export_path,
+                filter_by_q={'qsy': (0.0, 0.03)},
+            )
+
+        expected = np.array([
+            [r'$q_x (\AA^{-1})$', r'$q_y (\AA^{-1})$', r'$q_z (\AA^{-1})$', r'$I (A.U.)$'],
+            ['0.3', '0.01', '0.1', '1.0'],
+            ['0.3', '0.02', '0.2', '2.0'],
+        ], dtype=str)
+
+        np.testing.assert_array_equal(datas, expected)
+
+    def test_reduced_slices_export_handles_empty_and_partially_empty_slices(self):
+        empty_slice = self._make_export_slice(
+            q=[0.2, 0.1],
+            iq=[0.0, np.nan],
+            qsx=0.2,
+            qsy=[0.02, 0.01],
+        )
+        partial_slice = self._make_export_slice(
+            q=[0.3, 0.1, 0.2],
+            iq=[-1.0, 5.0, np.nan],
+            qsx=0.6,
+            qsy=[0.03, 0.01, 0.02],
+        )
+        reduced_slices = ReducedSlices(slices=[empty_slice, partial_slice])
+
+        with TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / 'empty_reduced_slices.csv'
+            datas = reduced_slices.export_reduced_slices(filepath=export_path)
+
+        expected = np.array([
+            [r'$q_x (\AA^{-1})$', r'$q_y (\AA^{-1})$', r'$q_z (\AA^{-1})$', r'$I (A.U.)$', r'$q_x (\AA^{-1})$', r'$q_y (\AA^{-1})$', r'$q_z (\AA^{-1})$', r'$I (A.U.)$'],
+            ['', '', '', '', '0.6', '0.01', '0.1', '5.0'],
+            ['', '', '', '', '', '', '', ''],
+            ['', '', '', '', '', '', '', ''],
+        ], dtype=str)
+
+        np.testing.assert_array_equal(datas, expected)
