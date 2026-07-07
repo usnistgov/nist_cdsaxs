@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+from unittest.mock import patch
 
 from cdsaxs.calculators import wavelength_to_energy
 from cdsaxs.data.data2d import Data2D, combine_data2d
@@ -987,13 +988,123 @@ class TestData2D(unittest.TestCase):
         ])
         np.testing.assert_array_almost_equal(qslice.background_Iq, background_i_avg)
 
-    # def test_find_peaks2D(self):
-    #     # TODO: implement peaks2D test
-    #     pass
+    def test_find_peaks2d_forwards_roi_filters_q_and_plots(self):
+        helper_peaks = np.array([[0.5, 1.0], [2.0, 2.5]], dtype=float)
 
-    # def test_find_peaks2D_one_axis(self):
-    #     # TODO: implement peaks2D one axis test
-    #     pass
+        with patch("cdsaxs.data.data2d.find_peaks_2D",
+                   return_value=helper_peaks.copy()) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d",
+                      return_value="figure") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D(
+                range_qdy_px=(1, 5),
+                range_qdx_px=(1, 4),
+                exclude_qdy=(0.0006, 0.0011),
+                exclude_qdx=[(0.0002, 0.0004)],
+                log_scale=False,
+                refinement_size=9,
+                show_plot=True,
+                zoom_plot=False,
+                plotting_kwargs={"cmap": "magma"},
+                min_distance=3,
+            )
+
+        expected_roi = self.image[1:5, 1:4]
+        expected_mask = self.dataqdyqdx.mask[1:5, 1:4]
+        np.testing.assert_array_equal(mock_find.call_args.args[0], expected_roi)
+        np.testing.assert_array_equal(mock_find.call_args.kwargs["mask"], expected_mask)
+        self.assertFalse(mock_find.call_args.kwargs["log_scale"])
+        self.assertEqual(mock_find.call_args.kwargs["refinement_size"], 9)
+        self.assertEqual(mock_find.call_args.kwargs["min_distance"], 3)
+
+        np.testing.assert_allclose(peaks, np.array([[3.0, 3.5]]))
+        np.testing.assert_allclose(peaks_q, np.array([[0.000284846566, -0.000284846566]]))
+        self.assertEqual(fig, "figure")
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            limits_axis0=(1, 5),
+            limits_axis1=(1, 4),
+            zoom_plot=False,
+            cmap="magma",
+        )
+
+    def test_find_peaks2d_returns_none_figure_without_plot(self):
+        helper_peaks = np.array([[1.0, 0.0]], dtype=float)
+
+        with patch("cdsaxs.data.data2d.find_peaks_2D",
+                   return_value=helper_peaks.copy()) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D(
+                range_qdy_px=(0, 3),
+                range_qdx_px=(0, 2),
+                show_plot=False,
+            )
+
+        np.testing.assert_allclose(peaks, np.array([[1.0, 0.0]]))
+        np.testing.assert_allclose(peaks_q, np.array([[0.000854539698, 0.000569693132]]))
+        self.assertIsNone(fig)
+        mock_find.assert_called_once()
+        mock_plot.assert_not_called()
+
+    def test_find_peaks2d_one_axis_defaults_peak_axis_and_filters_q(self):
+        helper_peaks = np.array([[0.5, 1.0], [2.0, 2.5]], dtype=float)
+
+        with patch("cdsaxs.data.data2d.find_peaks_2D_one_axis",
+                   return_value=helper_peaks.copy()) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d",
+                      return_value="axis-figure") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D_one_axis(
+                range_qdy_px=(1, 6),
+                range_qdx_px=(1, 3),
+                exclude_q=(0.0006, 0.0011),
+                integration_mode="mean",
+                log_scale=False,
+                refinement_size=5,
+                algorithm="scipy",
+                zoom_plot=False,
+                show_plot=True,
+                distance=4,
+            )
+
+        expected_roi = self.image[1:6, 1:3]
+        expected_mask = self.dataqdyqdx.mask[1:6, 1:3]
+        np.testing.assert_array_equal(mock_find.call_args.args[0], expected_roi)
+        np.testing.assert_array_equal(mock_find.call_args.kwargs["mask"], expected_mask)
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 0)
+        self.assertEqual(mock_find.call_args.kwargs["integration_mode"], "mean")
+        self.assertFalse(mock_find.call_args.kwargs["log_scale"])
+        self.assertEqual(mock_find.call_args.kwargs["refinement_size"], 5)
+        self.assertEqual(mock_find.call_args.kwargs["algorithm"], "scipy")
+        self.assertEqual(mock_find.call_args.kwargs["distance"], 4)
+
+        np.testing.assert_allclose(peaks, np.array([[3.0, 3.5]]))
+        np.testing.assert_allclose(peaks_q, np.array([[0.000284846566, -0.000284846566]]))
+        self.assertEqual(fig, "axis-figure")
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            limits_axis0=(1, 6),
+            limits_axis1=(1, 3),
+            zoom_plot=False,
+            distance=4,
+        )
+
+    def test_find_peaks2d_one_axis_remaps_peak_axis_and_handles_empty_peaks(self):
+        with patch("cdsaxs.data.data2d.find_peaks_2D_one_axis",
+                   return_value=np.array([], dtype=float)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D_one_axis(
+                range_qdy_px=(0, 4),
+                range_qdx_px=(0, 4),
+                peak_axis="qdx",
+                show_plot=False,
+            )
+
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        self.assertEqual(peaks.shape, (0, 2))
+        self.assertEqual(peaks_q.shape, (0, 2))
+        self.assertIsNone(fig)
+        mock_plot.assert_not_called()
 
     # def test_find_beam_center(self):
     #     # TODO: implement find center test
