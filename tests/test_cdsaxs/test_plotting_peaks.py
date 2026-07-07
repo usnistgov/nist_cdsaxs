@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from cdsaxs.data.data2d import Data2D
+from cdsaxs.data.reduced_data1d import ReducedData1D
 from cdsaxs.plotting import plotting
 
 
@@ -52,6 +53,51 @@ class TestPeakPlotting(unittest.TestCase):
 
     def tearDown(self):
         plt.close('all')
+
+    def _make_qslice_with_backgrounds(self):
+        background_slice_1 = ReducedData1D(
+            q=np.array([0.001, 0.002, 0.003], dtype=float),
+            Iq=np.array([2.0, 3.0, 4.0], dtype=float),
+            q_axis='qbx',
+            mask=np.zeros(3, dtype=bool),
+            data2d=self.data2d,
+            limits_axis0=(0, 2),
+            limits_axis1=(0, 3),
+            integration_mode='mean',
+            integration_axis=0,
+            image_roi=np.ones((2, 3), dtype=float),
+            image_mask=np.zeros((2, 3), dtype=bool),
+            background=0.0,
+        )
+        background_slice_2 = ReducedData1D(
+            q=np.array([0.001, 0.002, 0.003], dtype=float),
+            Iq=np.array([1.5, 2.5, 3.5], dtype=float),
+            q_axis='qbx',
+            mask=np.zeros(3, dtype=bool),
+            data2d=self.data2d,
+            limits_axis0=(0, 2),
+            limits_axis1=(0, 3),
+            integration_mode='mean',
+            integration_axis=0,
+            image_roi=np.ones((2, 3), dtype=float),
+            image_mask=np.zeros((2, 3), dtype=bool),
+            background=0.0,
+        )
+        return ReducedData1D(
+            q=np.array([0.001, 0.002, 0.003], dtype=float),
+            Iq=np.array([10.0, 20.0, 30.0], dtype=float),
+            q_axis='qbx',
+            mask=np.zeros(3, dtype=bool),
+            data2d=self.data2d,
+            limits_axis0=(0, 2),
+            limits_axis1=(0, 3),
+            integration_mode='mean',
+            integration_axis=0,
+            image_roi=np.ones((2, 3), dtype=float),
+            image_mask=np.zeros((2, 3), dtype=bool),
+            background_Iq=np.array([1.0, 2.0, 3.0], dtype=float),
+            background_qslices=[background_slice_1, background_slice_2],
+        )
 
     def test_plot_data2d_find_peaks2d_returns_zoomed_figure_with_peak_overlay(self):
         peaks = np.array([[2.5, 1.5], [4.0, 3.0]], dtype=float)
@@ -198,3 +244,18 @@ class TestPeakPlotting(unittest.TestCase):
 
         self.assertIsNotNone(fig)
         self.assertIn('24.57 cm', fig.axes[0].get_title())
+
+    def test_plot_qslice_background_figure_uses_log_scale_when_requested(self):
+        qslice = self._make_qslice_with_backgrounds()
+
+        fig_box, fig_slice, fig_background = plotting.plot_qslice(
+            qslice,
+            log_scale=True,
+            show_backgrounds=True,
+        )
+
+        self.assertIsNotNone(fig_box)
+        self.assertIsNotNone(fig_slice)
+        self.assertIsNotNone(fig_background)
+        self.assertEqual(fig_slice.axes[0].get_yscale(), 'log')
+        self.assertEqual(fig_background.axes[0].get_yscale(), 'log')

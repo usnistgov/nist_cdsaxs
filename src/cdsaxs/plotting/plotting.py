@@ -700,7 +700,7 @@ def plot_qslice(
     # plot the 1D slice from the integration with or without background
     fig_slice = plot_data1d(
         qslice,
-        log_scale=log_scale,
+        log_scale_y=log_scale,
         label="QSlice I(q)",
         zorder=1000,
         color=color_slice,
