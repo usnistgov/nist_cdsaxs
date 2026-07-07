@@ -1,6 +1,8 @@
 import os
+import io
 import unittest
 import warnings
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import numpy as np
@@ -448,6 +450,101 @@ class TestLoadDataset(unittest.TestCase):
                 self.assertEqual(
                     user_params[key],
                     value)
+
+    def test_single_filename_string_is_loaded(self):
+        filename = 'W204_F2measure1_5.2m_16.1keV_num60_00deg_bpm0.417_id857181_combined.tif'
+
+        dataset = load_data.LoadDataset(
+            'single file dataset',
+            self.data_directory,
+            filenames=filename,
+            metadata_pattern=(
+                '{sample}measure1_{sdd_cm}m_{energy_ev}keV'
+                '_num{num}_{sample_phi_deg}deg_bpm{bpm}_id{id}_combined.tif'
+            ),
+            metadata_scales={'sdd_cm': 100, 'energy_ev': 1000},
+            verbose=False,
+            filetype='tif',
+        )
+
+        self.assertEqual(list(dataset.datas.keys()), [filename])
+        self.assertEqual(dataset.datas[filename].metadata['sample_phi_deg'], 0.0)
+
+    def test_filetype_filters_out_non_matching_filenames(self):
+        with patch('cdsaxs.loaders.load_data.os.listdir', return_value=['keep.tif', 'skip.csv', 'also_skip.txt']):
+            with patch('cdsaxs.loaders.load_data.LoadData') as load_data_mock:
+                load_data_mock.return_value = load_data.Data2D(
+                    image=np.ones((2, 2), dtype=float),
+                    filename='keep.tif',
+                    data_directory=self.data_directory,
+                )
+
+                dataset = load_data.LoadDataset(
+                    'filtered dataset',
+                    self.data_directory,
+                    verbose=False,
+                    filetype='tif',
+                )
+
+        load_data_mock.assert_called_once()
+        self.assertEqual(load_data_mock.call_args.kwargs['filepath'], os.path.join(self.data_directory, 'keep.tif'))
+        self.assertEqual(list(dataset.datas.keys()), ['keep.tif'])
+
+    def test_metadata_pattern_conflicts_preserve_user_values_with_warnings(self):
+        filename = 'W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_id857176_combined.tif'
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            dataset = load_data.LoadDataset(
+                'conflict dataset',
+                self.data_directory,
+                filenames=[filename],
+                metadata_pattern=(
+                    '{sample}measure1_{sdd_cm}m_{energy_ev}keV'
+                    '_num{num}_{sample_phi_deg}deg_bpm{bpm}_id{id}_combined.tif'
+                ),
+                metadata_scales={'sdd_cm': 100, 'energy_ev': 1000},
+                metadata={'sample_phi_deg': 99.0},
+                user_params={'sample': 'manual-sample'},
+                verbose=False,
+                filetype='tif',
+            )
+
+        data = dataset.datas[filename]
+        self.assertEqual(data.metadata['sample_phi_deg'], 99.0)
+        self.assertEqual(data.user_params['sample'], 'manual-sample')
+        self.assertIn('Metadata for sample_phi_deg was provided by the user', stdout.getvalue())
+        self.assertIn('User params for sample was provided by the user', stdout.getvalue())
+
+    def test_generated_name_uses_pattern_values(self):
+        filename = 'W204_F2measure1_5.2m_16.1keV_num65_05deg_bpm0.413_id857186_combined.tif'
+
+        dataset = load_data.LoadDataset(
+            'named dataset',
+            self.data_directory,
+            filenames=[filename],
+            metadata_pattern=(
+                '{sample}measure1_{sdd_cm}m_{energy_ev}keV'
+                '_num{num}_{sample_phi_deg}deg_bpm{bpm}_id{id}_combined.tif'
+            ),
+            metadata_scales={'sdd_cm': 100, 'energy_ev': 1000},
+            data_name_pattern='sample-{sample}-phi-{sample_phi_deg}-run-{num}',
+            verbose=False,
+            filetype='tif',
+        )
+
+        self.assertEqual(list(dataset.datas.keys()), ['sample-W204_F2-phi-5.0-run-65'])
+
+    def test_metadata_pattern_mismatch_raises_attribute_error(self):
+        with self.assertRaises(AttributeError):
+            load_data.LoadDataset(
+                'bad pattern dataset',
+                self.data_directory,
+                filenames=['W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_id857176_combined.tif'],
+                metadata_pattern='does_not_match_{sample_phi_deg}.tif',
+                verbose=False,
+                filetype='tif',
+            )
 
         user_params = {
             'sample': 'W204_F2',
