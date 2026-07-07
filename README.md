@@ -1,7 +1,7 @@
 # nist_cdsaxs
 The purpose of the 'nist_cdsaxs' software is to enable reduction of 
 transmission critical-dimension small-angle X-ray scattering (CD-SAXS) 
-data. It converts the scattering vector, q, from beam- or 
+data. It converts the scattering vector, $q$, from beam- or 
 detector-based coordinates to sample-based coordinates. 
 
 Reduced CD-SAXS data slices, i.e. 1D scattering intensity 
@@ -107,16 +107,16 @@ Figure 1 shows the coordinate conventions for a typical
 transmission CD-SAXS measurement where the primary rotation of the 
 sample is defined as $\phi$, and the scattering angle is defined as 
 $\theta$. There are three coordinate systems: sample-based, detector-
-based, and beam-based coordinates. The subscript of s, d, or b 
+based, and beam-based coordinates. The subscript of $s$, $d$, or $b$ 
 indicates the coordinate base. The sample coordinate system is
 defined with the origin at the center incident position of the beam on 
 the sample. The sample is normal to the incident beam when the sample rotation 
-angles are all zero. At normal incidence, the z axis aligns with the beam path and 
-the y-axis is the primary rotation axis during the measurement. The origin for the 
+angles are all zero. At normal incidence, the $z$ axis aligns with the beam path and 
+the $y$-axis is the primary rotation axis during the measurement. The origin for the 
 detector-based and beam-based coordinate systems is positioned at the 
 incident position of the transmitted beam onto the detector at its face. The 
-detector is normal to the incident beam. The y-axes are always parallel. 
-The z-axes and y-axes are all parallel when the sample is positioned at normal incidence.
+detector is normal to the incident beam. The $y$-axes are always parallel. 
+The $z$-axes and $y$-axes are all parallel when the sample is positioned at normal incidence.
 
 <div style="max-width: 500px; margin: 0 auto;">
   <img src="extras/images/coordinates.png" alt="Coordinates" style="width: 95%;">
