@@ -198,15 +198,10 @@ and absoprtion correction, are introduced in greater detail in the example noteb
 | `sdd_cm` | Sample-to-detector distance. | cm |
 | `exposure_time_s` | Count time of the measurement. | s |
 | `pixel_size_um` | Pixel size of the detector. | $\mu m$ |
-| `scaling_factor`
-| `I0`
-| `beam_current` 
-| `data_directory`
-| `filename`
-| `name`
-| `center_px` 
-
-
+| `data_directory` | String that specifies the path to the directory containing the file from which the data was imported. | None |
+| `filename` | String that specifies the name of the file from which the data was imported. | None |
+| `name` | String; name of the data that also corresponds to the key for this Data2D class in the datas attribute of Dataset. See example notebook for more details. | None |
+| `center_px` | Tuple; beam center position in pixels (center_row, center_column) starting from the top left of the image where rows are counted from top to bottom and columns are counted from left to right. | None |
 
 
 ## Citation Information
