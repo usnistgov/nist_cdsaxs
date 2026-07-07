@@ -546,6 +546,15 @@ class TestLoadDataset(unittest.TestCase):
                 filetype='tif',
             )
 
+    def test_unsupported_filetype_propagates_value_error(self):
+        with self.assertRaisesRegex(ValueError, 'Did not recognize the filetype bogus-type'):
+            load_data.LoadDataset(
+                'unsupported filetype dataset',
+                self.data_directory,
+                verbose=False,
+                filetype='bogus-type',
+            )
+
         user_params = {
             'sample': 'W204_F2',
             'num': '60',

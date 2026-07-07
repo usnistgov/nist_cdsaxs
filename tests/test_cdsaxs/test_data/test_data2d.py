@@ -92,6 +92,14 @@ class TestCombineData2D(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'All Data2D images must have the same shape'):
             combine_data2d(data1, data2)
 
+    def test_combine_data2d_raises_for_mismatched_mask_shapes(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)))
+        data2 = self._make_data('second', image=np.ones((3, 3)))
+        data2.mask = np.zeros((2, 3), dtype=bool)
+
+        with self.assertRaisesRegex(ValueError, 'All Data2D masks must have the same shape'):
+            combine_data2d(data1, data2)
+
 
 class TestData2D(unittest.TestCase):
 
