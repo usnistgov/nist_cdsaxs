@@ -1,5 +1,7 @@
 import os
 import unittest
+import warnings
+from unittest.mock import patch
 
 import numpy as np
 
@@ -144,6 +146,141 @@ class TestLoadData(unittest.TestCase):
         data = load_data.LoadData(filepath=self.filepath, name="new name",
                                 metadata={'name': 'Test Load Data Name'})
         self.assertEqual(data.name, "new name")
+
+    def test_unknown_extension_without_filetype_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, 'Did not recognize the filtype extension'):
+            load_data.LoadData(filepath='C:/tmp/example.unknown')
+
+    def test_unsupported_explicit_filetype_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, 'Did not recognize the filetype bogus-type'):
+            load_data.LoadData(filepath=self.filepath, filetype='bogus-type')
+
+    def test_metadata_validation_failure_propagates_before_loading(self):
+        with patch('cdsaxs.loaders.load_data.check_metadata', side_effect=ValueError('bad metadata')) as check_mock:
+            with patch('cdsaxs.loaders.load_data.read_tiff') as read_tiff_mock:
+                with self.assertRaisesRegex(ValueError, 'bad metadata'):
+                    load_data.LoadData(
+                        filepath=self.filepath,
+                        filetype='tiff',
+                        metadata={'invalid_key': 'value'},
+                    )
+
+        check_mock.assert_called_once()
+        read_tiff_mock.assert_not_called()
+
+    def test_pilatus_user_metadata_wins_with_warning_and_negative_pixels_become_nan(self):
+        image = np.array([[1.0, -2.0], [3.0, 4.0]], dtype=float)
+        metadata_add = {'center_px': (9, 9), 'pixel_size_um': 172}
+
+        with patch('cdsaxs.loaders.load_data.read_pilatus', return_value=(image, self.filepath, metadata_add)):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                data = load_data.LoadData(
+                    filepath=self.filepath,
+                    filetype='tiff',
+                    detector_type='Pilatus',
+                    metadata={'center_px': (100, 100)},
+                )
+
+        self.assertTupleEqual(data.metadata['center_px'], (100, 100))
+        self.assertEqual(data.metadata['pixel_size_um'], 172)
+        self.assertTrue(np.isnan(data.image[0, 1]))
+        self.assertTrue(any('Metadata for center_px was provided by the user' in str(w.message) for w in caught))
+
+    def test_nist_bin_user_metadata_wins_with_warning_and_negative_pixels_become_nan(self):
+        image = np.array([[1.0, -2.0], [3.0, 4.0]], dtype=float)
+        metadata_add = {'wavelength_nm': 0.1, 'pixel_size_um': 172}
+
+        with patch('cdsaxs.loaders.load_data.read_nist_bin', return_value=(image, self.filepath, metadata_add)):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                data = load_data.LoadData(
+                    filepath=self.filepath,
+                    filetype='nist-bin',
+                    metadata={'wavelength_nm': 0.2},
+                )
+
+        self.assertEqual(data.metadata['wavelength_nm'], 0.2)
+        self.assertEqual(data.metadata['pixel_size_um'], 172)
+        self.assertTrue(np.isnan(data.image[0, 1]))
+        self.assertTrue(any('Metadata for wavelength_nm was provided by the user' in str(w.message) for w in caught))
+
+    def test_smi_h5_user_metadata_wins_and_negative_pixels_become_nan(self):
+        image_stack = [
+            (
+                np.array([[1.0, -2.0], [3.0, 4.0]], dtype=float),
+                self.filepath,
+                {'sample_phi_deg': 5.0, 'pixel_size_um': 172},
+            )
+        ]
+
+        with patch('cdsaxs.loaders.load_data.read_smi_h5', return_value=image_stack):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                datas = load_data.LoadData(
+                    filepath='C:/tmp/scan.h5',
+                    filetype='smi-h5',
+                    metadata={'sample_phi_deg': 1.0},
+                )
+
+        self.assertEqual(len(datas), 1)
+        self.assertEqual(datas[0].metadata['sample_phi_deg'], 1.0)
+        self.assertEqual(datas[0].metadata['pixel_size_um'], 172)
+        self.assertTrue(np.isnan(datas[0].image[0, 1]))
+        self.assertTrue(any('Metadata for sample_phi_deg was provided by the user' in str(w.message) for w in caught))
+
+    def test_smi_h5_returns_list_of_data2d_with_generated_names(self):
+        image_stack = [
+            (
+                np.array([[1.0, -2.0], [3.0, 4.0]], dtype=float),
+                'C:/tmp/scan.h5',
+                {'sample_phi_deg': 1.0, 'bpm': 10.0, 'pixel_size_um': 172},
+            ),
+            (
+                np.array([[5.0, 6.0], [7.0, -8.0]], dtype=float),
+                'C:/tmp/scan.h5',
+                {'sample_phi_deg': 2.0, 'bpm': 20.0, 'pixel_size_um': 172},
+            ),
+        ]
+
+        with patch('cdsaxs.loaders.load_data.read_smi_h5', return_value=image_stack):
+            datas = load_data.LoadData(
+                filepath='C:/tmp/scan.h5',
+                filetype='smi-h5',
+                name='phi-{sample_phi_deg}-bpm-{bpm}',
+            )
+
+        self.assertEqual(len(datas), 2)
+        self.assertEqual(datas[0].name, 'phi-1.0-bpm-10.0')
+        self.assertEqual(datas[1].name, 'phi-2.0-bpm-20.0')
+        self.assertEqual(datas[0].metadata['filename'], 'scan.h5')
+        self.assertEqual(os.path.normpath(datas[0].metadata['data_directory']), os.path.normpath('C:/tmp'))
+        self.assertTrue(np.isnan(datas[0].image[0, 1]))
+        self.assertTrue(np.isnan(datas[1].image[1, 1]))
+
+    def test_smi_h5_metadata_merge_preserves_user_values(self):
+        image_stack = [
+            (
+                np.array([[1.0, 2.0], [3.0, 4.0]], dtype=float),
+                'C:/tmp/scan.h5',
+                {'sample_phi_deg': 5.0, 'bpm': 10.0, 'pixel_size_um': 172},
+            )
+        ]
+
+        with patch('cdsaxs.loaders.load_data.read_smi_h5', return_value=image_stack):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                datas = load_data.LoadData(
+                    filepath='C:/tmp/scan.h5',
+                    filetype='smi-h5',
+                    metadata={'sample_phi_deg': 9.0},
+                    user_params={'scan_id': 'abc'},
+                )
+
+        self.assertEqual(len(datas), 1)
+        self.assertEqual(datas[0].metadata['sample_phi_deg'], 9.0)
+        self.assertEqual(datas[0].user_params['scan_id'], 'abc')
+        self.assertTrue(any('Metadata for sample_phi_deg was provided by the user' in str(w.message) for w in caught))
 
 
 class TestLoadDataset(unittest.TestCase):

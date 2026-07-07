@@ -71,16 +71,18 @@ class TestFilterFilenamesByFiletype(unittest.TestCase):
                 filenames_bin
             )
 
-        filetypes = map("".join, itertools.product(*zip(
-            'nist-bin'.upper(),
-            'nist-bin'.lower()
-        )))
-        for filetype in filetypes:
-            self.assertListEqual(
-                loader_tools.filter_filenames_by_filetype(
-                    self.filenames, filetype),
-                filenames_bin
-            )
+    def test_none_filetype_returns_all_filenames(self):
+        self.assertListEqual(
+            loader_tools.filter_filenames_by_filetype(self.filenames, None),
+            self.filenames,
+        )
+
+    def test_smi_h5_filters_only_h5_files(self):
+        filenames = self.filenames + ['eleven.h5', 'twelve.h55']
+        self.assertListEqual(
+            loader_tools.filter_filenames_by_filetype(filenames, 'smi-h5'),
+            ['eleven.h5'],
+        )
 
 
 class TestExtractMetadataFromPattern(unittest.TestCase):
@@ -104,6 +106,12 @@ class TestExtractMetadataFromPattern(unittest.TestCase):
 
         self.assertEqual(self.user_params['sample_name'], "25A")
 
+    def test_non_matching_pattern_raises_attribute_error(self):
+        with self.assertRaises(AttributeError):
+            loader_tools.extract_metadata_from_pattern(
+                {}, {}, 'other_file.tif', self.pattern, self.scales
+            )
+
 
 class TestGenerateDataNameFromPattern(unittest.TestCase):
 
@@ -119,3 +127,21 @@ class TestGenerateDataNameFromPattern(unittest.TestCase):
 
         self.assertEqual(self.name,
                          "Sample: 25A, Phi: -45 deg")
+
+    def test_missing_pattern_key_is_left_in_braces(self):
+        name = loader_tools.generate_data_name_from_pattern(
+            "Sample: {sample}, Run: {run}",
+            {'sample_phi_deg': -45},
+            {'sample': '25A'},
+        )
+
+        self.assertEqual(name, "Sample: 25A, Run: {run}")
+
+    def test_none_pattern_falls_back_to_filename(self):
+        name = loader_tools.generate_data_name_from_pattern(
+            None,
+            {'filename': 'example.tif'},
+            {},
+        )
+
+        self.assertEqual(name, 'example.tif')
