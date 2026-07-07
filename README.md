@@ -62,7 +62,7 @@ aspects of the reduction can be automated as a Python script, currently
 we recommend a notebook as visual checks that the data is integrated 
 appropriately are important.
 
-An example Jupyter notebook has been provided in `examples`. It outlines  
+An example Jupyter notebook has been provided in `examples`. It outlines
 the required reduction steps as well as some of the additional 
 functionality included in this software. Please follow this notebook 
 and the included descriptions carefully as some steps need to be 
