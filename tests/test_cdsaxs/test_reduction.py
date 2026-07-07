@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -156,3 +157,47 @@ class TestSliceReducedDataset(unittest.TestCase):
         self.assertEqual(reduced_slice.integrated_axis, 'qsx')
         self.assertEqual(reduced_slice.slice_axis, 'qsz')
         self.assertEqual(reduced_slice.offset_axis, 'qsy')
+
+    def test_axis_remapping_uses_requested_axes(self):
+        reduced_slices, _ = slice_reduced_dataset(
+            dataset=self._make_dataset(),
+            q_values=[0.02],
+            q_widths=0.02,
+            q_axis='qsz',
+            slice_axis='qsx',
+            offset_axis='qsy',
+            show_plot=False,
+        )
+
+        reduced_slice = reduced_slices.data[0]
+        self.assertEqual(reduced_slice.q_axis, 'qsx')
+        self.assertEqual(reduced_slice.integrated_axis, 'qsz')
+        self.assertEqual(reduced_slice.slice_axis, 'qsx')
+        self.assertEqual(reduced_slice.offset_axis, 'qsy')
+        np.testing.assert_allclose(reduced_slice.q, np.array([0.1, 0.2]))
+        np.testing.assert_allclose(reduced_slice.qsx, np.array([0.1, 0.2]))
+        self.assertAlmostEqual(reduced_slice.qsz, 0.02)
+        np.testing.assert_allclose(reduced_slice.qsy, np.array([0.0, 0.0]))
+
+    def test_show_plot_true_calls_plotting_with_expected_q_bins(self):
+        expected_fig = object()
+        dataset = self._make_dataset()
+
+        with patch('cdsaxs.reduction.plotting.plot_slice_reduced_dataset', return_value=expected_fig) as plot_mock:
+            reduced_slices, fig = slice_reduced_dataset(
+                dataset=dataset,
+                q_values=[0.1, 0.2],
+                q_widths=0.002,
+                show_plot=True,
+                plotting_kwargs={'interpolated_data': True, 'slice_color': 'cyan'},
+            )
+
+        self.assertIs(fig, expected_fig)
+        self.assertEqual(len(reduced_slices.data), 2)
+        plot_mock.assert_called_once()
+
+        call_kwargs = plot_mock.call_args.kwargs
+        self.assertIs(call_kwargs['reduced_dataset'], dataset)
+        self.assertEqual(call_kwargs['q_bins'], [(0.099, 0.1, 0.101), (0.199, 0.2, 0.201)])
+        self.assertTrue(call_kwargs['interpolated_data'])
+        self.assertEqual(call_kwargs['slice_color'], 'cyan')
