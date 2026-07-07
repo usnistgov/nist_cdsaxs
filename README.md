@@ -218,12 +218,12 @@ Joseph Kline r.kline@nist.gov
 [Polymers Processing Group](https://www.nist.gov/mml/materials-science-and-engineering-division/polymers-processing-group)   
 
 ## Contributors
-Dean M. DeLongchamp  
-Joseph Kline  
-Logan Magaha  
-Daniel Sunday  
-Matthew A. Wade  
-Caitlyn M. Wolf  
+Dean M. DeLongchamp, [@delongchamp](https://github.com/delongchamp)  
+Joseph Kline, [@rjkline](https://github.com/rjkline)  
+Logan Magaha, [@lgackey](https://github.com/lgackey)  
+Daniel Sunday, [@dsunday](https://github.com/dsunday)  
+Matthew A. Wade, [@MatthewAWade](https://github.com/MatthewAWade)  
+Caitlyn M. Wolf, [@caitwolf](https://github.com/caitwolf)  
 
 _Contributors are listed in alphabetical order by last name._
 
