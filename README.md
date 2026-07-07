@@ -70,26 +70,26 @@ performed in order.
 
 To run the notebook via Jupyter lab in a browser:
 1. Ensure that `nist_cdsaxs` is installed following the directions above.
-2. In the terminal, navigate to the `exampls` folder in this repository.
-3. Activate the Python environment in which nist_cdsaxs is installed. 
-For example, if the environment is called cdsaxs_dev, this command would 
+2. In the terminal, navigate to the `examples` folder in this repository.
+3. Activate the Python environment in which `nist_cdsaxs` is installed. 
+For example, if the environment is called `cdsaxs_dev`, this command would 
 be:
 ```
 conda activate cdsaxs_dev
 ```
-4. Launch jupyter lab with the following command:
+4. Launch Jupyter lab with the following command:
 ```
 jupyter lab
 ```
-5. Your browser should open up Jupyter lab autmoatically and the 
+5. Your browser should open up Jupyter lab automatically and the 
 available notebooks will be shown in the file browser on the left of 
 the screen. If you browser did not open, you may need to type in the 
 address provided in the terminal after you run step 4.
 
-[!NOTE]
-You can also run the Jupyter notebook from any compatible IDE, such as
-VS Code. Click on the file and make sure to select the appropriate 
-Python environment to run the notebook.
+> [!NOTE]
+> You can also run the Jupyter notebook from any compatible IDE, such as
+> VS Code. Click on the file and make sure to select the appropriate 
+> Python environment to run the notebook.
 
 
 ## Coordinate Conventions and Variables
@@ -173,11 +173,11 @@ variable name in the `nist_cdsaxs` software.
 | $\phi_d$ | `detector_phi_deg` - `detector_phi0_deg` | Detector rotation angle about the positive $y_s$ axis. | degrees |
 | $\Delta d_y$ | `detector_y_mm` - `detector_y0_mm` | Detector translation along the $y_d$ axis. | mm |
 
-[!NOTE]
-Some properties above are defined as the summation or difference of two variables in 
-the software. These include $\phi$, $\chi$, $\omega$, and $\phi_d$. The offsets by 
-default are always set to 0. However, if there is a difference between the nominal 0 position 
-and normal incidence, an offset can be applied by the user to correct for this.
+> [!NOTE]
+> Some properties above are defined as the summation or difference of two variables in 
+> the software. These include $\phi$, $\chi$, $\omega$, and $\phi_d$. The offsets by 
+> default are always set to 0. However, if there is a difference between the nominal 0 position 
+> and normal incidence, an offset can be applied by the user to correct for this.
 
 All metadata is stored in the `metadata` attribute
 of the `Data2D` class. Please refer to the example Jupyter notebook for more 
