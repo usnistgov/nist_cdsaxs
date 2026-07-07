@@ -1106,14 +1106,260 @@ class TestData2D(unittest.TestCase):
         self.assertIsNone(fig)
         mock_plot.assert_not_called()
 
-    # def test_find_beam_center(self):
-    #     # TODO: implement find center test
-    #     pass
+    def test_find_beam_center_from_peaks_returns_center_without_update(self):
+        original_center = self.dataqdyqdx.metadata["center_px"]
+        peaks = np.array([[4.0, 3.0], [4.0, 1.0]], dtype=float)
 
-    # def test_find_sdd(self):
-    #     # TODO: implement find sdd test
-    #     pass
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.line_fit",
+                      return_value=(0.0, 0.0, 4.0)) as mock_line_fit, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig") as mock_plot:
+            center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                show_plot=True,
+                zoom_plot=False,
+            )
 
-    # def test_find_detector_rotation_correction(self):
-    #     # TODO: implement find detector rotation correction test
-    #     pass
+        self.assertEqual(center, (4.0, 2.0))
+        self.assertEqual(fig, "beam-fig")
+        self.assertEqual(self.dataqdyqdx.metadata["center_px"], original_center)
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        mock_line_fit.assert_called_once()
+        mock_plot.assert_called_once()
+        self.assertIs(mock_plot.call_args.args[0], self.dataqdyqdx)
+        np.testing.assert_array_equal(
+            mock_plot.call_args.kwargs["peaks"],
+            np.array([[4.0, 1.0], [4.0, 3.0]]),
+        )
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis0"], (2, 6))
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis1"], (0, 4))
+        self.assertFalse(mock_plot.call_args.kwargs["zoom_plot"])
+        self.assertEqual(mock_plot.call_args.kwargs["show_beam_center"], (4.0, 2.0))
+
+    def test_find_beam_center_from_peaks_updates_metadata_and_honors_guess(self):
+        peaks = np.array([[4.0, 3.0], [4.0, 1.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.line_fit",
+                      return_value=(0.0, 0.0, 4.0)), \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig") as mock_plot:
+            center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                beam_center_guess=(4.0, 2.2),
+                update=True,
+                show_plot=True,
+            )
+
+        self.assertEqual(center, (4.0, 2.0))
+        self.assertEqual(fig, "beam-fig")
+        self.assertEqual(self.dataqdyqdx.metadata["center_px"], (4.0, 2.0))
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        self.assertTrue(mock_plot.call_args.kwargs["show_beam_center"])
+
+    def test_find_beam_center_from_peaks_raises_for_asymmetric_or_missing_peaks(self):
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.array([[4.0, 3.0]], dtype=float), None, None)), \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig") as mock_plot:
+            with self.assertRaisesRegex(ValueError, "not symmetric"):
+                self.dataqdyqdx.find_beam_center_from_peaks(
+                    range_qdy_px=(2, 6),
+                    range_qdx_px=(0, 4),
+                    show_plot=True,
+                )
+
+        self.assertFalse(mock_plot.call_args.kwargs["show_beam_center"])
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.empty((0, 2)), None, None)), \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig"):
+            with self.assertRaisesRegex(ValueError, "No peaks detected"):
+                self.dataqdyqdx.find_beam_center_from_peaks(
+                    range_qdy_px=(2, 6),
+                    range_qdx_px=(0, 4),
+                    show_plot=True,
+                )
+
+    def test_find_beam_center_from_peaks_ignores_selected_peaks(self):
+        peaks = np.array([[4.0, 0.5], [4.0, 1.0], [4.0, 3.0], [4.0, 3.5]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)), \
+                patch("cdsaxs.data.data2d.line_fit",
+                      return_value=(0.0, 0.0, 4.0)):
+            center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                ignore_peaks=[0, 3],
+                show_plot=False,
+            )
+
+        self.assertEqual(center, (4.0, 2.0))
+        self.assertIsNone(fig)
+
+    def test_find_sdd_from_reference_peaks_returns_and_updates(self):
+        peaks = np.array([[4.0, 1.0], [4.0, 3.0]], dtype=float)
+        peaks_q = np.array([[0.0, 0.0], [0.0, 0.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, peaks_q, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_sdd",
+                      return_value="sdd-fig") as mock_plot:
+            average_sdd, std_sdd, fig = self.dataqdyqdx.find_sdd_from_reference_peaks(
+                pitch_nm=100,
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                update=True,
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertEqual((average_sdd, std_sdd), (24.57, 0.0))
+        self.assertEqual(self.dataqdyqdx.metadata["sdd_cm"], 24.57)
+        self.assertEqual(fig, "sdd-fig")
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        mock_plot.assert_called_once()
+        self.assertIs(mock_plot.call_args.args[0], self.dataqdyqdx)
+        np.testing.assert_array_equal(
+            mock_plot.call_args.kwargs["peaks"],
+            np.array([[4.0, 1.0], [4.0, 3.0]]),
+        )
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis0"], (2, 6))
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis1"], (0, 4))
+        self.assertFalse(mock_plot.call_args.kwargs["zoom_plot"])
+        self.assertEqual(mock_plot.call_args.kwargs["sdd_cm"], (24.57, 0.0))
+
+    def test_find_sdd_from_reference_peaks_respects_peak_orders_and_ignore_orders(self):
+        peaks = np.array([[4.0, 0.0], [4.0, 1.0], [4.0, 3.0]], dtype=float)
+        peaks_q = np.zeros_like(peaks)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, peaks_q, None)):
+            average_sdd, std_sdd, fig = self.dataqdyqdx.find_sdd_from_reference_peaks(
+                pitch_nm=100,
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                peak_orders=np.array([-2, -1, 1]),
+                ignore_orders=[-2],
+                show_plot=False,
+            )
+
+        self.assertEqual((average_sdd, std_sdd), (0.0, 24.57))
+        self.assertIsNone(fig)
+
+    def test_calculate_omega_returns_expected_angle(self):
+        self.dataqdyqdx.update_metadata(
+            {
+                "sample_phi_deg": 30,
+                "sample_phi_offset_deg": 0,
+                "sample_chi_deg": 10,
+                "sample_chi_offset_deg": 0,
+            },
+            overwrite=True,
+            hide_q_warnings=True,
+        )
+
+        omega = self.dataqdyqdx.calculate_omega(5)
+
+        self.assertAlmostEqual(omega, 7.3194743104)
+
+    def test_find_chi_from_peaks_returns_real_angle_and_warns_on_insufficient_peaks(self):
+        peaks = np.array([[2.0, 1.0], [5.0, 2.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_detector_rotation_correction",
+                      return_value="chi-fig") as mock_plot:
+            angle, fig = self.dataqdyqdx.find_chi_from_peaks(
+                range_qdy_px=(0, 7),
+                range_qdx_px=(0, 4),
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertAlmostEqual(angle, 63.4349488229)
+        self.assertEqual(fig, "chi-fig")
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        plotted_line = mock_plot.call_args.kwargs["line"]
+        self.assertAlmostEqual(plotted_line[0], -63.4349488229)
+        self.assertAlmostEqual(plotted_line[1], -2.0)
+        self.assertAlmostEqual(plotted_line[2], 0.0)
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            line=mock_plot.call_args.kwargs["line"],
+            limits_axis0=(0, 7),
+            limits_axis1=(0, 4),
+            zoom_plot=False,
+        )
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None)):
+            with self.assertWarnsRegex(UserWarning, "Insuffient peaks"):
+                angle, fig = self.dataqdyqdx.find_chi_from_peaks(
+                    range_qdy_px=(0, 7),
+                    range_qdx_px=(0, 4),
+                    show_plot=False,
+                )
+
+        self.assertTrue(np.isnan(angle))
+        self.assertIsNone(fig)
+
+    def test_find_omega_from_peaks_uses_real_angle_math_and_warns_on_insufficient_peaks(self):
+        peaks = np.array([[2.0, 1.0], [5.0, 2.0]], dtype=float)
+        self.dataqdyqdx.update_metadata(
+            {
+                "sample_phi_deg": 30,
+                "sample_phi_offset_deg": 0,
+                "sample_chi_deg": 10,
+                "sample_chi_offset_deg": 0,
+            },
+            overwrite=True,
+            hide_q_warnings=True,
+        )
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_detector_rotation_correction",
+                      return_value="omega-fig") as mock_plot:
+            omega, fig = self.dataqdyqdx.find_omega_from_peaks(
+                range_qdy_px=(0, 7),
+                range_qdx_px=(0, 4),
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertAlmostEqual(omega, -74.6322033805)
+        self.assertEqual(fig, "omega-fig")
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        plotted_line = mock_plot.call_args.kwargs["line"]
+        self.assertAlmostEqual(plotted_line[0], -63.4349488229)
+        self.assertAlmostEqual(plotted_line[1], -2.0)
+        self.assertAlmostEqual(plotted_line[2], 0.0)
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            line=mock_plot.call_args.kwargs["line"],
+            limits_axis0=(0, 7),
+            limits_axis1=(0, 4),
+            zoom_plot=False,
+        )
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None)):
+            with self.assertWarnsRegex(UserWarning, "Insuffient peaks"):
+                omega, fig = self.dataqdyqdx.find_omega_from_peaks(
+                    range_qdy_px=(0, 7),
+                    range_qdx_px=(0, 4),
+                    show_plot=False,
+                )
+
+        self.assertTrue(np.isnan(omega))
+        self.assertIsNone(fig)
