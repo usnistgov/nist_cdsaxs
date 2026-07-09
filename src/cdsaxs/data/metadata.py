@@ -49,6 +49,8 @@ FLOATS = [
     "pitch_nm", "image_rotation_angle",
     "detector_phi_deg", "detector_phi0_deg", "detector_phi_scale",
     "detector_y_mm", "detector_y0_mm",
+    "beam_center_mm", "beam_fwhm_mm",
+    "footprint_factor", "sample_size_factor", "substrate_absorption_factor"
 ]
 
 INTEGERS = [
@@ -61,7 +63,25 @@ STRINGS = [
 
 def correct_metadata_dtype(name, value):
     """
-    Correct the data type for metadata values.
+    Convert a metadata value to the expected type for a recognized key.
+
+    Parameters
+    ----------
+    name : str
+        Metadata key to validate and convert.
+    value : object
+        Metadata value associated with name.
+
+    Returns
+    -------
+    corrected_value : object
+        Converted metadata value. If name is not a recognized metadata key,
+        the original value is returned unchanged after issuing a warning.
+
+    Raises
+    ------
+    ValueError
+        Raised when value cannot be converted to the expected type for name.
     """
 
     if name in FLOATS:
@@ -94,12 +114,27 @@ def correct_metadata_dtype(name, value):
 
 def check_metadata(metadata, sample_mode=False):
     """
-    Check the metadata dictionary for:
-    - unaccepted metadata keywords
-    - overspecified wavelength/energy (onle one should be set)
+    Validate metadata keys and check for overspecified 
+    wavelengths/energy inputs (only one should be set).
 
-    If sample_mode is set to True, it will check the metadata against
-    the accepted sample metadata keywords.
+    Parameters
+    ----------
+    metadata : dict
+        Metadata dictionary to validate.
+    sample_mode : bool, optional
+        If True, validate metadata against sample-specific metadata keys.
+        If False, validate against the full accepted metadata key list.
+
+    Returns
+    -------
+    is_valid : bool
+        True when metadata passes validation.
+
+    Raises
+    ------
+    ValueError
+        Raised when metadata contains unsupported keys or when both
+        energy_ev and wavelength_nm are provided.
     """
     if sample_mode:
         unaccepted_keywords = [

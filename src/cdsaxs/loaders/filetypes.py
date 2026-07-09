@@ -1,12 +1,16 @@
 import os
 
+<<<<<<< HEAD
 import fabio as fabio
+=======
+import h5py
+>>>>>>> 9d04f9cbd333a1387f6d09faf234f5d09bb0e3e1
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
-import cdsaxs.loaders._loader_tools as loader_tools
+from . import _loader_tools as loader_tools
 
 
 def read_tiff(filepath):
@@ -20,13 +24,12 @@ def read_tiff(filepath):
 
     Returns
     -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary of the header information where the key: value paris
-        correpond to the tag.name: tag.value pairs of the header tags.
+    image : NDArray
+        Two-dimensional image array loaded from the TIFF file.
+    filepath : str
+        Normalized filepath used to load the data.
+    header : dict
+        Header information as tag-name to tag-value pairs.
     """
     filepath = loader_tools.clean_filepath(filepath=filepath)
 
@@ -61,12 +64,13 @@ def read_nist_bin(filepath):
 
     Returns
     -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary with metadata keyword: value pairs.
+    image : NDArray
+        Two-dimensional image array loaded from the BIN file.
+    filepath : str
+        Normalized filepath used to load the data.
+    metadata : dict
+        Metadata dictionary containing accepted metadata key-value pairs
+        extracted from the paired INFO file.
     """
 
     filepath = loader_tools.clean_filepath(filepath=filepath)
@@ -97,22 +101,6 @@ def read_nist_edf(filepath):
     """
     Load an image and metadata from the Xenocs Xeuss Pro instrument
     at NIST that stores data in edf files.
-
-    Parameters
-    ----------
-    filepath : str, path
-        Path to the bin file to be loaded.
-        The paired info file should be in the same directory and have
-        the same filename (apart from the different extension).
-
-    Returns
-    -------
-    NDArray
-        Two-dimensional numpy array that contains the image data.
-    str
-        Formatted filepath used to load the data.
-    dict
-        Dictionary with metadata keyword: value pairs.
     """
 
     filepath = loader_tools.clean_filepath(filepath=filepath)
@@ -149,3 +137,65 @@ def read_nist_edf(filepath):
     metadata['sample_stage_y'] = float(header["z"])
 
     return image, filepath, metadata
+
+    
+def read_smi_h5(filepath):
+    """
+    Load an image and metadata from an H5 file from the SMI beamline
+    at NSLS-II. This will load an entire cd-saxs scan, i.e., set of
+    images, not just one image at a time.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the bin file to be loaded.
+        The paired info file should be in the same directory and have
+        the same filename (apart from the different extension).
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
+        Path to the H5 file to be loaded.
+
+    Returns
+    -------
+    images : list[tuple[NDArray, str, dict]]
+        List of per-image tuples containing the image array, normalized
+        filepath, and metadata dictionary for each image in the scan.
+    """
+
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+    
+    # load the entire scan
+    scan = h5py.File(filepath, 'r')
+    
+    # extract image stack and number of images in the scan
+    image_stack = scan['raw_images']['pil2M_image'][:]
+    num_images = image_stack.shape[0]
+    
+    metadata = {}
+    metadata['energy_ev'] = scan['baseline']['energy_energy'][0]
+    metadata['sdd_cm'] = scan['baseline']['pil2M_motor_z'][0]/10
+    metadata['exposure_time_s'] = scan['config']['pil2M_cam_acquire_time'][0]
+    metadata['pixel_size_um'] = 172  # pilatus2m
+    metadata['bpm'] = scan['primary']['xbpm3_sumX'][:]
+    metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
+
+    seq_num = scan['primary']['seq_num'][:]  
+
+    images = []
+    for i in range(num_images):
+        temp_metadata = dict(metadata)
+        metadata_index = np.where(seq_num == i+1)[0]
+        temp_metadata['bpm'] = metadata['bpm'][metadata_index][0]
+        temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
+        images.append(
+            (image_stack[i].astype(np.float64), filepath, temp_metadata)
+        )
+
+    return images

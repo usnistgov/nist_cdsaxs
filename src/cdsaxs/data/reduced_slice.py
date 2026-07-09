@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from numpy.typing import NDArray
 
-from cdsaxs.data.data1d import Data1D
+from .data1d import Data1D
+
 
 class ReducedData1DSlice(Data1D):
     """
@@ -37,8 +38,10 @@ class ReducedData1DSlice(Data1D):
 
         Parameters
         ----------
-        q : scattering vector
-        Iq : scattering intensity as a function of q
+        q : NDArray
+            Primary scattering vector values for the slice.
+        Iq : NDArray
+            Scattering intensity values corresponding to q.
         q_axis : str
             The axis for the provided scattering vector q from the
             accepted list below. This will be designated as the primary
@@ -53,26 +56,20 @@ class ReducedData1DSlice(Data1D):
             integrated_axis. This will point to the keyword argument
             value that should also be provided.
         slice_width : float
-            Width of the integration box that generated this slice.
-        dIq : uncertainity along I, default is None
-            primary_q_axis : set the primary q-axis (listed below) for this
-            dataset. This can then be called with the basic 'q' attribute.
-            If left as None, the default axis will be set randomly to one
-            of the provided keyword arguments with the same length as Iq.
-        mask : NDArray
-            One-dimensional boolean array of same dimension as Iq that
-            are True at values that shoudl be masked out for all
-            operations.
-            All points that are nan will be masked out by default. It
-            will NOT mask out inf or -inf by default; this is different
-            behavior than the 2D data classes.
+            Width of the integration region used to generate the slice.
+        dIq : NDArray, optional
+            Uncertainty values associated with Iq.
+        mask : NDArray, optional
+            One-dimensional boolean mask for the reduced profile, where True
+            marks points excluded from downstream operations. NaN values are
+            masked automatically. Inf and -inf are not masked automatically.
 
         **kwargs
         --------
         Any of the accepted scattering vectors or their components
-        below can be provided as keyword arguments and become attributes
-        of this class. They must all be the same length as Iq or a single
-        value if applicable to the whole dataset.
+        below can be provided as keyword arguments and become attributes of
+        this class. Each value must either match the length of Iq or be a
+        scalar that applies to the full profile.
 
         qdy : Scattering vector component along y axis of detector frame.
         qdx : Scattering vector component along x axis of detector frame.
@@ -84,8 +81,8 @@ class ReducedData1DSlice(Data1D):
         qs  : Scattering vector in the sample frame.
         qby : Scattering vector component along y axis of the lab frame
         qbx : Scattering vector component along x axis of the lab frame
-        qbz : Scattering vector comopnent along z axis of the lab frame; in
-            the lab frame the beam path is aligned to the z-axis 
+        qbz : Scattering vector component along z axis of the lab frame; in
+            the lab frame the beam path is aligned to the z-axis
         qb  : Scattering vector in the beam/lab frame; when the detector is
             positioned normal to the incident beam, the lab and detector
             coordinates will align

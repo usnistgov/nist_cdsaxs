@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from cdsaxs.data.reduced_slice import ReducedData1DSlice
-from cdsaxs.data.dataset import (
+from .data.reduced_slice import ReducedData1DSlice
+from .data.dataset import (
     ReducedDataset,
     ReducedSlices
 )
-import cdsaxs.plotting.plotting as plotting
+from .plotting import plotting
 
 
 def slice_reduced_dataset(
@@ -30,6 +30,7 @@ def slice_reduced_dataset(
     Parameters
     ----------
     dataset : ReducedDataset
+        Reduced dataset containing one-dimensional reduced patterns to slice.
     q_values : list
         List of the slice locations along the specified q_axis.
     q_widths : float | list
@@ -57,7 +58,11 @@ def slice_reduced_dataset(
 
     Returns
     -------
-    ReducedSlices
+    reduced_slices : ReducedSlices
+        Collection of extracted one-dimensional slices.
+    fig : matplotlib.figure.Figure | None
+        Figure showing the selected slice regions when show_plot is True;
+        otherwise None.
     """
 
     if not isinstance(q_widths, list):
@@ -69,15 +74,21 @@ def slice_reduced_dataset(
         )
 
     integrated_axis = q_axis
-    q_axis = slice_axis
+    q_axis = slice_axis         #TODO: FIX arbitrary renaming to match rest of q conventions
 
     q_ranges = [
         (val-width/2, val+width/2) for val, width in zip(q_values, q_widths)
     ]
     slices = []
     for i, (qmin, qmax) in enumerate(q_ranges):
-        q = []
-        q_offset = []
+        q_components = {
+            'qsx': [],
+            'qsy': [],
+            'qsz': [],
+            'qsr': [],
+            'qs': [],
+        }
+        # q_offset = []
         Iq = []
         for data in dataset.datas:
             selection = np.where(
@@ -87,16 +98,16 @@ def slice_reduced_dataset(
             if len(selection) > 0\
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
-                q.append(np.nanmean(getattr(data, q_axis)[selection]))
-                q_offset.append(
-                    np.nanmean(getattr(data, offset_axis)[selection]))
+                for qstr, qlist in q_components.items(): 
+                    qlist.append(
+                        np.nanmean(getattr(data, qstr)[selection]))
                 if mode == 'sum':
                     Iq.append(np.nansum(data.Iq[selection]))
                 else:
                     Iq.append(np.nanmean(data.Iq[selection]))
 
         reduced_slice = ReducedData1DSlice(
-            q=np.array(q),
+            q=np.array(q_components[q_axis]),
             Iq=np.array(Iq),
             q_axis=q_axis,
             integrated_axis=integrated_axis,
@@ -105,9 +116,10 @@ def slice_reduced_dataset(
         )
         # TODO: removing rounding to maintain data integrity
         setattr(reduced_slice, integrated_axis,
-                np.round(np.mean([qmin, qmax]), 4))
-        setattr(reduced_slice, offset_axis,
-                np.array(q_offset))
+                np.round(np.mean([qmin, qmax]), 4)) #TODO: removing rounding to maintain data integrity
+        for qstr, qlist in q_components.items():
+            if qstr != integrated_axis:
+                setattr(reduced_slice, qstr, np.array(qlist))
         slices.append(reduced_slice)
 
     reduced_slices = ReducedSlices(slices=slices)

@@ -11,24 +11,65 @@ EV_NM = 1239.8420452127
 
 def wavelength_to_energy(wavelength_nm: float) -> float:
     """
-    Returns energy in eV from wavelength provided in nm.
+    Convert wavelength in nm to energy in eV.
+
+    Parameters
+    ----------
+    wavelength_nm : float
+        Wavelength in nanometers.
+
+    Returns
+    -------
+    energy_ev : float
+        Energy in electronvolts.
     """
     return EV_NM/wavelength_nm
 
 
 def energy_to_wavelength(energy_ev: float) -> float:
     """
-    Returns wavelength in nm from energy provided in eV.
+    Convert energy in eV to wavelength in nm.
+
+    Parameters
+    ----------
+    energy_ev : float
+        Energy in electronvolts.
+
+    Returns
+    -------
+    wavelength_nm : float
+        Wavelength in nanometers.
     """
     return EV_NM/energy_ev
 
 
 def gaussian(x, mean, std_dev, scale, offset):
     """
-    Calculates a Gaussian distribution following:
+    Calculate a Gaussian peak with an additive constant background.
+
+    The returned values follow:
 
     f(x) = (scale / (sqrt(2*pi)*std_dev)) * exp(-(x-mean)^2/(2*std_dev^2)) + offset
-    TODO: format above equation to render correctly in docs
+
+    TODO: Format the above equation to render correctly in docs
+    
+    Parameters
+    ----------
+    x : array-like
+        Positions at which to evaluate the Gaussian.
+    mean : float
+        Center position of the Gaussian peak.
+    std_dev : float
+        Standard deviation of the Gaussian peak.
+    scale : float
+        Integrated area under the Gaussian peak.
+    offset : float
+        Constant background added to the Gaussian.
+
+    Returns
+    -------
+    gaussian_values : ndarray
+        Gaussian values evaluated at x.
     """
 
     x = np.array(x)
@@ -60,7 +101,7 @@ def footprint_correction(sample_phi_deg):
 
     Returns
     -------
-    float | array-like
+    cos_sample_phi : float | array-like
         Footprint correction value at each provided rotation angle.
         To apply the correction to the scattering intensity, multiply
         by the returned value.
@@ -73,8 +114,10 @@ def footprint_correction(sample_phi_deg):
 
 def sample_size_correction(sample_phi_deg, fwhm_mm, center_mm, sample_size_mm):
     """
-    Calculate the sample size correction.
-    TODO: flush out this doc string from legacy notes
+    Calculate the sample-size correction for a Gaussian beam profile.
+
+    This correction accounts for the change in exposed sample length
+    with sample rotation and for beam/sample mis-centering.
 
     Parameters
     ----------
@@ -83,12 +126,16 @@ def sample_size_correction(sample_phi_deg, fwhm_mm, center_mm, sample_size_mm):
         coordinate space.
         Units are degrees.
     fwhm_mm : float
+        Full width at half maximum of the incident beam footprint in
+        millimeters.
     center_mm : float
+        Offset between the beam center and sample center in millimeters.
     sample_size_mm : float
+        Sample size along the beam footprint direction in millimeters.
 
     Returns
     -------
-    float | array-like
+    sample_size_factor : float | array-like
         Sample size correction value at each provided rotation angle.
         To apply the correction to the scattering intensity, multiply
         by the returned value.
@@ -132,7 +179,7 @@ def substrate_absorption_correction(sample_phi_deg,
 
     Returns
     -------
-    float | array-like
+    substrate_absorption_factor : float | array-like
         Substrate absorption correction at each provided rotation angle.
         To apply the correction to the scattering intensity, multiply
         by the returned value.
