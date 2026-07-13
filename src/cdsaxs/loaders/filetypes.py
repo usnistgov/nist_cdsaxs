@@ -1,10 +1,7 @@
 import os
 
-<<<<<<< HEAD
 import fabio as fabio
-=======
 import h5py
->>>>>>> 9d04f9cbd333a1387f6d09faf234f5d09bb0e3e1
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
