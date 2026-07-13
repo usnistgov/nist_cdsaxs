@@ -220,6 +220,7 @@ Joseph Kline r.kline@nist.gov
 ## Contributors
 Dean M. DeLongchamp, [@delongchamp](https://github.com/delongchamp)  
 Joseph Kline, [@rjkline](https://github.com/rjkline)  
+Christopher Liman  
 Logan Magaha, [@lgackey](https://github.com/lgackey)  
 Daniel Sunday, [@dsunday](https://github.com/dsunday)  
 Matthew A. Wade, [@MatthewAWade](https://github.com/MatthewAWade)  
