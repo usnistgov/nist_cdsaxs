@@ -1,6 +1,5 @@
 import os
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
@@ -72,35 +71,72 @@ class TestReadNistBin(unittest.TestCase):
 
 class TestReadSmiH5(unittest.TestCase):
 
-    def test_read_smi_h5_returns_per_image_metadata(self):
-        fake_scan = {
-            'raw_images': {'pil2M_image': np.array([
-                [[1.0, 2.0], [3.0, 4.0]],
-                [[5.0, 6.0], [7.0, 8.0]],
-            ], dtype=float)},
-            'baseline': {
-                'energy_energy': np.array([16100.0]),
-                'pil2M_motor_z': np.array([2980.0]),
-            },
-            'config': {'pil2M_cam_acquire_time': np.array([2.5])},
-            'primary': {
-                'xbpm3_sumX': np.array([10.0, 20.0]),
-                'stage_phi': np.array([-1.5, 2.5]),
-                'seq_num': np.array([1, 2]),
-            },
-        }
+    def setUp(self):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.single_scan_filepath = os.path.abspath(
+            os.path.join(current_dir, '../../data/test_loaders/mock_smi_h5_single_scan.h5')
+        )
+        self.multiple_scan_filepath = os.path.abspath(
+            os.path.join(current_dir, '../../data/test_loaders/mock_smi_h5_multiple_scans.h5')
+        )
 
-        with patch('cdsaxs.loaders.filetypes.h5py.File', return_value=fake_scan):
-            images = filetypes.read_smi_h5('C:/tmp/scan.h5')
+    def test_read_smi_h5_single_scan_real_fixture(self):
+        images = filetypes.read_smi_h5(self.single_scan_filepath)
 
-        self.assertEqual(len(images), 2)
-        np.testing.assert_array_equal(images[0][0], np.array([[1.0, 2.0], [3.0, 4.0]]))
-        self.assertEqual(images[0][1], os.path.abspath('C:/tmp/scan.h5'))
-        self.assertEqual(images[0][2]['energy_ev'], 16100.0)
-        self.assertEqual(images[0][2]['sdd_cm'], 298.0)
-        self.assertEqual(images[0][2]['exposure_time_s'], 2.5)
-        self.assertEqual(images[0][2]['pixel_size_um'], 172)
-        self.assertEqual(images[0][2]['bpm'], 10.0)
-        self.assertEqual(images[0][2]['sample_phi_deg'], 1.5)
-        self.assertEqual(images[1][2]['bpm'], 20.0)
-        self.assertEqual(images[1][2]['sample_phi_deg'], -2.5)
+        self.assertEqual(len(images), 1)
+        image, filepath, metadata = images[0]
+
+        self.assertEqual(filepath, self.single_scan_filepath)
+        self.assertEqual(image.dtype, np.float64)
+        self.assertEqual(image.shape, (128, 128))
+        self.assertEqual(image[0, 0], 74.0)
+        self.assertEqual(image[0, 1], 75.0)
+        self.assertEqual(image[1, 0], 83.0)
+        self.assertEqual(image[-1, -1], 86.0)
+        self.assertEqual(metadata['energy_ev'], 1.7000000000000002)
+        self.assertEqual(metadata['sdd_cm'], 0.16)
+        self.assertEqual(metadata['exposure_time_s'], 1.5)
+        self.assertEqual(metadata['pixel_size_um'], 172)
+        self.assertEqual(metadata['bpm'], 1.8)
+        self.assertEqual(metadata['sample_phi_deg'], -2.1)
+
+    def test_read_smi_h5_uses_seq_num_offset_from_fixture(self):
+        images = filetypes.read_smi_h5(self.multiple_scan_filepath)
+
+        self.assertEqual(images[0][2]['bpm'], 1.8)
+        self.assertEqual(images[1][2]['bpm'], 1.82)
+        self.assertEqual(images[0][2]['sample_phi_deg'], -2.1)
+        self.assertEqual(images[1][2]['sample_phi_deg'], -2.12)
+
+    def test_read_smi_h5_multiple_scans_real_fixture(self):
+        images = filetypes.read_smi_h5(self.multiple_scan_filepath)
+
+        self.assertEqual(len(images), 61)
+
+        first_image, first_filepath, first_metadata = images[0]
+        middle_image, middle_filepath, middle_metadata = images[30]
+        last_image, last_filepath, last_metadata = images[-1]
+
+        self.assertEqual(first_filepath, self.multiple_scan_filepath)
+        self.assertEqual(middle_filepath, self.multiple_scan_filepath)
+        self.assertEqual(last_filepath, self.multiple_scan_filepath)
+
+        self.assertEqual(first_image.dtype, np.float64)
+        self.assertEqual(first_image[0, 0], 74.0)
+        self.assertEqual(first_image[-1, -1], 86.0)
+        self.assertEqual(middle_image[0, 0], 90.0)
+        self.assertEqual(middle_image[-1, -1], 85.0)
+        self.assertEqual(last_image[0, 0], 89.0)
+        self.assertEqual(last_image[-1, -1], 84.0)
+
+        self.assertEqual(first_metadata['energy_ev'], 1.7000000000000002)
+        self.assertEqual(first_metadata['sdd_cm'], 0.16)
+        self.assertEqual(first_metadata['exposure_time_s'], 1.5)
+        self.assertEqual(first_metadata['pixel_size_um'], 172)
+        self.assertEqual(first_metadata['bpm'], 1.8)
+        self.assertEqual(first_metadata['sample_phi_deg'], -2.1)
+
+        self.assertEqual(middle_metadata['bpm'], 2.4000000000000004)
+        self.assertEqual(middle_metadata['sample_phi_deg'], -2.7)
+        self.assertEqual(last_metadata['bpm'], 3.0)
+        self.assertEqual(last_metadata['sample_phi_deg'], -3.3)

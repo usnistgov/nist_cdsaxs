@@ -128,11 +128,12 @@ def read_smi_h5(filepath):
     metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
 
     seq_num = scan['primary']['seq_num'][:]  
+    seq_start = int(seq_num[0])
 
     images = []
     for i in range(num_images):
         temp_metadata = dict(metadata)
-        metadata_index = np.where(seq_num == i+1)[0]
+        metadata_index = np.where(seq_num == i + seq_start)[0]
         temp_metadata['bpm'] = metadata['bpm'][metadata_index][0]
         temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
         images.append(

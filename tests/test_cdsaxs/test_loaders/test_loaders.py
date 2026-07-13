@@ -287,6 +287,8 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(datas[1].name, 'phi-2.0-bpm-20.0')
         self.assertEqual(datas[0].metadata['filename'], 'scan.h5')
         self.assertEqual(os.path.normpath(datas[0].metadata['data_directory']), os.path.normpath('C:/tmp'))
+        self.assertEqual(datas[0].user_params['bpm'], 10.0)
+        self.assertEqual(datas[1].user_params['bpm'], 20.0)
         self.assertTrue(np.isnan(datas[0].image[0, 1]))
         self.assertTrue(np.isnan(datas[1].image[1, 1]))
 
@@ -312,7 +314,75 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(len(datas), 1)
         self.assertEqual(datas[0].metadata['sample_phi_deg'], 9.0)
         self.assertEqual(datas[0].user_params['scan_id'], 'abc')
+        self.assertEqual(datas[0].user_params['bpm'], 10.0)
         self.assertTrue(any('Metadata for sample_phi_deg was provided by the user' in str(w.message) for w in caught))
+
+    def test_load_smi_h5_single_scan_real_fixture(self):
+        h5_filepath = os.path.abspath(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                '../../data/test_loaders/mock_smi_h5_single_scan.h5',
+            )
+        )
+
+        datas = load_data.LoadData(filepath=h5_filepath, filetype='smi-h5')
+
+        self.assertEqual(len(datas), 1)
+        data = datas[0]
+        self.assertEqual(data.image.dtype, np.float64)
+        self.assertEqual(data.image.shape, (128, 128))
+        self.assertEqual(data.image[0, 0], 74.0)
+        self.assertEqual(data.image[0, 1], 75.0)
+        self.assertEqual(data.image[1, 0], 83.0)
+        self.assertEqual(data.image[-1, -1], 86.0)
+        self.assertEqual(data.metadata['filename'], os.path.basename(h5_filepath))
+        self.assertEqual(data.metadata['data_directory'], os.path.dirname(h5_filepath))
+        self.assertEqual(data.metadata['energy_ev'], 1.7000000000000002)
+        self.assertEqual(data.metadata['sdd_cm'], 0.16)
+        self.assertEqual(data.metadata['exposure_time_s'], 1.5)
+        self.assertEqual(data.metadata['pixel_size_um'], 172)
+        self.assertEqual(data.metadata['sample_phi_deg'], -2.1)
+        self.assertEqual(data.user_params['bpm'], 1.8)
+
+    def test_load_smi_h5_multiple_scans_real_fixture(self):
+        h5_filepath = os.path.abspath(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                '../../data/test_loaders/mock_smi_h5_multiple_scans.h5',
+            )
+        )
+
+        datas = load_data.LoadData(
+            filepath=h5_filepath,
+            filetype='smi-h5',
+            name='phi-{sample_phi_deg}-bpm-{bpm}',
+        )
+
+        self.assertEqual(len(datas), 61)
+
+        first_data = datas[0]
+        middle_data = datas[30]
+        last_data = datas[-1]
+
+        self.assertEqual(first_data.name, 'phi--2.1-bpm-1.8')
+        self.assertEqual(middle_data.name, 'phi--2.7-bpm-2.4000000000000004')
+        self.assertEqual(last_data.name, 'phi--3.3-bpm-3.0')
+
+        self.assertEqual(first_data.metadata['filename'], os.path.basename(h5_filepath))
+        self.assertEqual(first_data.metadata['data_directory'], os.path.dirname(h5_filepath))
+        self.assertEqual(first_data.image[0, 0], 74.0)
+        self.assertEqual(first_data.image[-1, -1], 86.0)
+        self.assertEqual(middle_data.image[0, 0], 90.0)
+        self.assertEqual(middle_data.image[-1, -1], 85.0)
+        self.assertEqual(last_data.image[0, 0], 89.0)
+        self.assertEqual(last_data.image[-1, -1], 84.0)
+
+        self.assertEqual(first_data.user_params['bpm'], 1.8)
+        self.assertEqual(first_data.metadata['sample_phi_deg'], -2.1)
+        self.assertEqual(middle_data.user_params['bpm'], 2.4000000000000004)
+        self.assertEqual(middle_data.metadata['sample_phi_deg'], -2.7)
+        self.assertEqual(last_data.user_params['bpm'], 3.0)
+        self.assertEqual(last_data.metadata['sample_phi_deg'], -3.3)
 
 
 class TestLoadDataset(unittest.TestCase):
