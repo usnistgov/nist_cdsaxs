@@ -183,5 +183,4 @@ dev_workspace/
 .github/skills/dev-skills
 
 # example data
-examples/export/metadata/*
-examples/export/reduced_slices/*
+examples/export/*
