@@ -984,3 +984,41 @@ def export_metadata(dataset, timestamp):
         print(f"Metadata exported to ./export/{timestamp}/metadata_{timestamp}.csv successfully.")
     except Exception as e:
         print(f"Error writing CSV: {e}")
+
+def export_data_transformations(dataset, timestamp):
+    """
+    Export the data transformations of a dataset
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset containing the data transformations to export.
+    
+    timestamp: str
+        Timestamp for the export directory.
+
+    Returns
+    -------
+    None
+    """
+    try:
+        with open(f"./export/{timestamp}/data_transformations_{timestamp}.csv", mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+
+            writer.writerow(["Transformation Type:", "Value", "Key"])
+
+            # get keys
+            keyslist = []
+            for key in dataset.datas.keys():
+                writer.writerow([key])
+
+                for transform_tuple in dataset.datas[key].data_transformations:
+
+                    list_of_transforms = []
+                    for transform in transform_tuple:
+                        list_of_transforms.append(transform)
+                    writer.writerow(list_of_transforms)
+
+        print(f"Data transformations exported to ./export/{timestamp}/data_transformations_{timestamp}.csv successfully.")
+    except Exception as e:
+        print(f"Error writing CSV: {e}")
