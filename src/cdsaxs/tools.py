@@ -933,6 +933,21 @@ def find_maximum_rectangular_roi(data):
     return (min0, max0), (min1, max1), height, width, area
 
 def export_metadata(dataset, timestamp):
+    """
+    Export the metadata of a dataset
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset containing the metadata to export.
+    
+    timestamp: str
+        Timestamp for the export directory.
+
+    Returns
+    -------
+    None
+    """
     try:
         with open(f"./export/{timestamp}/metadata_{timestamp}.csv", mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
