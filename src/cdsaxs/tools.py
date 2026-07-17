@@ -961,12 +961,24 @@ def export_metadata(dataset, timestamp):
             headers = ["Key"] + keyslist
             writer.writerow(headers)
 
+            writer.writerow(["Metadata:"])
+
             # write metadata rows
             for key in dataset.datas[keyslist[0]].metadata.keys():
                 row = [key]
 
                 for k in keyslist:
                     row.append(dataset.datas[k].metadata.get(key))
+                writer.writerow(row)
+                
+            writer.writerow(["User Parameters:"])
+
+            # write user param rows
+            for key in dataset.datas[keyslist[0]].user_params.keys():
+                row = [key]
+
+                for k in keyslist:
+                    row.append(dataset.datas[k].user_params.get(key))
                 writer.writerow(row)
             
         print(f"Metadata exported to ./export/{timestamp}/metadata_{timestamp}.csv successfully.")
