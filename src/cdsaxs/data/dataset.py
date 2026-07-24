@@ -42,7 +42,7 @@ class Dataset():
         self.datas={}
         if datas is not None:
             self.add_data(datas)
-            
+
         self.name = name
 
     def add_data(self, datas: Data2D | list[Data2D]):
@@ -152,7 +152,7 @@ class Dataset():
             int | float : Data must equal this value exactly.
             str : Data must equal this exactly.
             If multiple criteria for the same metadata must be met,
-            a list of any of these values can be used. 
+            a list of any of these values can be used.
             list[tuple] : Data must fall within one of the ranges
                 provided.
             list[int | float] : Data must equal one of the values in the
@@ -229,8 +229,8 @@ class Dataset():
             self, normalize_by, keys=None):
         """
         Normalize all data by the selected metadata or user parameters.
-        This will not reset any previous normalization. 
-        
+        This will not reset any previous normalization.
+
         If a new series or normalizations is desired, please
         run reset normalization first or change reset_first to True.
 
@@ -414,7 +414,7 @@ class Dataset():
     def flip_all_data_horizontally(self, keys=None):
         """
         Flip images horizontally.
-        
+
         Parameters
         ----------
         keys : list
@@ -773,10 +773,10 @@ class ReducedDataset():
             filter_by_metadata={},
             interpolated_data=False,
             use_legacy_interpolation=False,
-            grid_size = 1000,
-            method = "cubic",
-            distance_factor = 5,
-            verbose = False,
+            grid_size=1000,
+            method="cubic",
+            distance_factor=5,
+            verbose=False,
             **kwargs
     ):
         """
@@ -810,7 +810,7 @@ class ReducedDataset():
             Options: "cubic", "nearest", "linear". For use with the scipy
             griddata interpolation method.
         distance_factor : float
-            Sets the distance factor for masking interpolation that is 
+            Sets the distance factor for masking interpolation that is
             too far from a real point. For use with the scipy
             griddata interpolation method.
         verbose : bool
