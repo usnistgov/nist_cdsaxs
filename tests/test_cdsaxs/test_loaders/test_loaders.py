@@ -169,6 +169,14 @@ class TestLoadData(unittest.TestCase):
                 crop_region=(100, None),
             )
 
+    def test_keep_raw_image_false(self):
+        data = load_data.LoadData(
+            filepath=self.filepath,
+            keep_raw_image=False,
+        )
+
+        self.assertIsNone(data._raw_image)
+
 
 class TestLoadDataset(unittest.TestCase):
 
@@ -217,6 +225,38 @@ class TestLoadDataset(unittest.TestCase):
             image[100:, :],
         )
         self.assertTupleEqual(data.metadata['center_px'], (100, 200))
+
+    def test_keep_raw_image_false(self):
+        dataset = load_data.LoadDataset(
+            "no raw dataset",
+            self.data_directory,
+            filenames=[
+                "W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_"
+                "id857176_combined.tif",
+            ],
+            filetype='tif',
+            verbose=False,
+            keep_raw_image=False,
+        )
+
+        data = next(iter(dataset.datas.values()))
+        self.assertIsNone(data._raw_image)
+
+    def test_reset_all_data_raises_without_raw_image(self):
+        dataset = load_data.LoadDataset(
+            "no raw dataset",
+            self.data_directory,
+            filenames=[
+                "W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_"
+                "id857176_combined.tif",
+            ],
+            filetype='tif',
+            verbose=False,
+            keep_raw_image=False,
+        )
+
+        with self.assertRaisesRegex(ValueError, "raw image was not retained"):
+            dataset.reset_all_data()
 
     def test_datas_keys(self):
         keys = [
@@ -381,6 +421,17 @@ class TestLoadDataset_MetadataCSV(unittest.TestCase):
 
     def test_dataset_name(self):
         self.assertEqual(self.dataset.name, "test dataset")
+
+    def test_keep_raw_image_false(self):
+        dataset = load_data.LoadDataset_MetadataCSV(
+            "test dataset",
+            self.csv_path,
+            keep_raw_image=False,
+            verbose=False,
+        )
+
+        data = next(iter(dataset.datas.values()))
+        self.assertIsNone(data._raw_image)
 
     def test_datas_keys(self):
         keys = [

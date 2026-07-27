@@ -98,6 +98,7 @@ def combine_data2d(*data2d: Data2D, name=None):
         image=image,
         name=name,
         mask=mask,
+        keep_raw_image=True,
         **metadata,
         **user_params,
     )
@@ -187,6 +188,7 @@ class Data2D(DataImage):
             image: NDArray[np.floating],
             name: str = None,
             mask: NDArray[np.bool] = None,
+            keep_raw_image: bool = True,
             hide_q_warnings=False,
             **kwargs
     ):
@@ -242,6 +244,11 @@ class Data2D(DataImage):
             operations.
             All pixels that are nan, inf, or -inf will be masked by
             default.
+        keep_raw_image : bool, optional
+            If True, store a copy of the original image so reset_image()
+            can restore the initial state. If False, the raw image is
+            not retained and reset operations that require it will raise
+            an error.
         hide_q_warnings : bool, optional
             Hide any warnings that may occur attempting to
             calculate the scattering vector during init.
@@ -258,7 +265,8 @@ class Data2D(DataImage):
         """
 
         # run base class init
-        super().__init__(image=image, mask=mask)
+        super().__init__(image=image, mask=mask,
+                 keep_raw_image=keep_raw_image)
 
         self.metadata = {}
         self._sample_rotation = {}

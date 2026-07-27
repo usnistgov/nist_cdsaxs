@@ -27,6 +27,10 @@ class TestDataImage(unittest.TestCase):
         np.testing.assert_array_equal(self.data2d.mask,
                                       self.custom_mask + np.isnan(self.image))
 
+    def test_init_without_raw_image(self):
+        data = DataImage(self.image, keep_raw_image=False)
+        self.assertIsNone(data._raw_image)
+
     def test_mask_points(self):
         mask = self.image == 99999
         self.data2d.mask_points(mask)
@@ -46,6 +50,12 @@ class TestDataImage(unittest.TestCase):
         self.data2d.reset_mask()
 
         np.testing.assert_array_equal(self.data2d.mask, mask)
+
+    def test_reset_mask_use_raw_image_without_raw_image(self):
+        data = DataImage(self.image, keep_raw_image=False)
+
+        with self.assertRaisesRegex(ValueError, "raw image was not retained"):
+            data.reset_mask(use_raw_image=True)
 
     def test_data2d_rotate_ccw90(self):
         """test 90 degree rotation counter-clockwise"""
@@ -164,6 +174,12 @@ class TestDataImage(unittest.TestCase):
             self.data2d.image, expected_image,
             err_msg="The clockwise 630 degree rotation resulted in the"
             " wrong image.")
+
+    def test_reset_image_without_raw_image(self):
+        data = DataImage(self.image, keep_raw_image=False)
+
+        with self.assertRaisesRegex(ValueError, "raw image was not retained"):
+            data.reset_image()
 
     def test_flip_horizontally(self):
         expected_image = np.array(

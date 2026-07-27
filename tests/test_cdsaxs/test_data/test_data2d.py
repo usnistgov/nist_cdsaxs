@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+from copy import deepcopy
 
 from cdsaxs._dtypes import REAL_DTYPE
 from cdsaxs.calculators import wavelength_to_energy
@@ -59,6 +60,20 @@ class TestData2D(unittest.TestCase):
         np.testing.assert_array_equal(self.dataqdyqdx.mask,
                                       self.custom_mask + np.isnan(self.image))
 
+    def test_init_without_raw_image(self):
+        metadata = deepcopy(self.metadata)
+        metadata.pop('energy_ev', None)
+        data = Data2D(
+            image=self.image,
+            mask=self.custom_mask,
+            keep_raw_image=False,
+            hide_q_warnings=True,
+            **metadata,
+            **self.user_params,
+        )
+
+        self.assertIsNone(data._raw_image)
+
     def test_metadata(self):
         key = 'center_px'
         self.assertTupleEqual(self.dataqdyqdx.metadata[key], self.metadata[key])
@@ -83,6 +98,22 @@ class TestData2D(unittest.TestCase):
         self.dataqdyqdx.update_metadata({'sample_phi_deg': 20}, hide_q_warnings=True)
         key = 'sample_phi_deg'
         self.assertEqual(self.dataqdyqdx.metadata[key], 20)
+
+    def test_reset_image_without_raw_image(self):
+        metadata = deepcopy(self.metadata)
+        metadata.pop('energy_ev', None)
+        data = Data2D(
+            image=self.image,
+            name='test data',
+            mask=self.custom_mask,
+            keep_raw_image=False,
+            hide_q_warnings=True,
+            **metadata,
+            **self.user_params,
+        )
+
+        with self.assertRaisesRegex(ValueError, "raw image was not retained"):
+            data.reset_image()
 
     def test_update_metadata_overwrite(self):
         self.dataqdyqdx.update_metadata({'wavelength_nm': 0.1},

@@ -172,6 +172,7 @@ def LoadData(
     detector_type=None,
     beamline=None,
     crop_region=None,
+    keep_raw_image=True,
 ):
     """
     Create an instance of Data2D from a single data file.
@@ -213,6 +214,11 @@ def LoadData(
         included and stop is excluded. For example,
         keeping the bottom 100 rows of a 200 x 400 image would use
         ``((100, None), (None, None))``.
+    keep_raw_image : bool, optional
+        If True, retain a copy of the original image so reset_image()
+        can restore the initial state. If False, the raw image is not
+        retained and reset operations that require it will raise an
+        error.
 
     Returns
     -------
@@ -351,8 +357,14 @@ def LoadData(
             if name is not None:
                 metadata['name'] = name
 
+        metadata_name = metadata.pop('name', None)
+        data_name = name if name is not None else metadata_name
+
         return Data2D(
-            image, **metadata, **user_params)
+            image,
+            name=data_name,
+            keep_raw_image=keep_raw_image,
+            **metadata, **user_params)
 
     else:
         data2d_list = []
@@ -384,7 +396,17 @@ def LoadData(
                     name, temp_metadata, user_params)
                 temp_metadata['name'] = new_name
 
-            data2d_list.append(Data2D(image, **temp_metadata, **user_params))
+            data_name = temp_metadata.pop('name', None)
+
+            data2d_list.append(
+                Data2D(
+                    image,
+                    name=data_name,
+                    keep_raw_image=keep_raw_image,
+                    **temp_metadata,
+                    **user_params,
+                )
+            )
 
         return data2d_list
 
@@ -403,6 +425,7 @@ def LoadDataset(
     detector_type=None,
     beamline=None,
     crop_region=None,
+    keep_raw_image=True,
 ):
     """
     General data loader to create a dataset from a CD-SAXS angle scan
@@ -492,6 +515,11 @@ def LoadDataset(
         ordering: ``((row_start, row_stop), (col_start, col_stop))``.
         Bounds follow standard numpy slicing semantics where start is
         included and stop is excluded.
+    keep_raw_image : bool, optional
+        If True, retain a copy of each original image so reset_image()
+        can restore the initial state. If False, the raw image is not
+        retained and reset operations that require it will raise an
+        error.
 
     Returns
     -------
@@ -572,6 +600,7 @@ def LoadDataset(
                 beamline=beamline,
                 name_pattern=data_name_pattern,
                 crop_region=crop_region,
+                keep_raw_image=keep_raw_image,
             )
             if isinstance(data, list):
                 for d in data:
@@ -600,6 +629,7 @@ def LoadDataset_MetadataCSV(
     detector_type=None,
     data_name_pattern=None,
     crop_region=None,
+    keep_raw_image=True,
 ):
     """
     General data loader to create a dataset from a CD-SAXS angle scan
@@ -668,6 +698,11 @@ def LoadDataset_MetadataCSV(
         ordering: ``((row_start, row_stop), (col_start, col_stop))``.
         Bounds follow standard numpy slicing semantics where start is
         included and stop is excluded.
+    keep_raw_image : bool, optional
+        If True, retain a copy of each original image so reset_image()
+        can restore the initial state. If False, the raw image is not
+        retained and reset operations that require it will raise an
+        error.
 
     Returns
     -------
@@ -713,6 +748,7 @@ def LoadDataset_MetadataCSV(
                 detector_type=detector_type,
                 name_pattern=data_name_pattern,
                 crop_region=crop_region,
+                keep_raw_image=keep_raw_image,
             )
 
             dataset.add_data(data)
