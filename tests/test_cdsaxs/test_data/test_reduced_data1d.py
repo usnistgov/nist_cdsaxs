@@ -1,6 +1,7 @@
 import numpy as np
 import unittest
 
+from cdsaxs._dtypes import REAL_DTYPE
 from cdsaxs.data.reduced_slice import ReducedData1DSlice
 
 
@@ -9,14 +10,14 @@ class TestReducedData1D(unittest.TestCase):
     def setUp(self):
         self.q = np.array(
             [0.001, 0.002, 0.003, 0.004,
-             0.005, 0.006, 0.007, 0.01, 0.02]).astype(float)
+             0.005, 0.006, 0.007, 0.01, 0.02]).astype(REAL_DTYPE)
         self.Iq = np.array(
-            [1, 11, 100, 0, 100, 10, 1000, 1001, np.nan]).astype(float)
+            [1, 11, 100, 0, 100, 10, 1000, 1001, np.nan]).astype(REAL_DTYPE)
         self.dIq = np.array(
             [0.001, 0.001, 0.001, 0.001, 0.002,
-             0.002, 0.002, 0.002, np.nan]).astype(float)
+             0.002, 0.002, 0.002, np.nan]).astype(REAL_DTYPE)
         self.q_axis = 'qsx'
-        self.qsy = np.ones_like(self.q, dtype=float)*0
+        self.qsy = np.zeros_like(self.q, dtype=REAL_DTYPE)
         self.custom_mask = np.array([True, False, False, False, False, False,
                                      False, False, False,])
         self.wavelength_nm = 0.1

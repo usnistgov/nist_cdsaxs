@@ -1,6 +1,7 @@
 import numpy as np
 import unittest
 
+from cdsaxs._dtypes import REAL_DTYPE
 from cdsaxs.calculators import wavelength_to_energy
 from cdsaxs.data.data2d import Data2D
 
@@ -20,7 +21,7 @@ class TestData2D(unittest.TestCase):
              [60019., 70069.,   np.nan, 65941.],
              [18439., 82922., 99999., 91001.],
              [10592., 19847., 10893., 41683.],
-             [15954.,  3109., 35295., 61517.]]).astype(np.float64)
+             [15954.,  3109., 35295., 61517.]]).astype(REAL_DTYPE)
         self.custom_mask = np.isnan(self.image)
         self.custom_mask[0, 0] = True
         self.custom_mask[3, 2] = False
@@ -143,7 +144,7 @@ class TestData2D(unittest.TestCase):
              [48676., 45711., 61100.,   np.nan, 99999., 10893., 35295.],
              [20215., 49702.,  9052., 70069., 82922., 19847.,  3109.],
              [44386., 64811.,  4701., 60019., 18439., 10592., 15954.]]
-        ).astype(np.float64)
+        ).astype(REAL_DTYPE)
         expected_qxzs = np.array([0.001139386259, 0.000854539696,
                                   0.000569693132, 0.000284846566, 0.,
                                   -0.000284846566, -0.000569693132])
@@ -185,7 +186,7 @@ class TestData2D(unittest.TestCase):
              [46325., 61100.,  9052.,  4701.],
              [77210., 45711., 49702., 64811.],
              [20338., 48676., 20215., 44386.]]
-        ).astype(np.float64)
+        ).astype(REAL_DTYPE)
         expected_qxzs = np.array([0.000284846566, 0., -0.000284846566,
                                  -0.000569693132])
         expected_qys = np.array([0.000569693132, 0.000284846566, 0.,
@@ -226,7 +227,7 @@ class TestData2D(unittest.TestCase):
              [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
              [35295., 10893., 99999.,   np.nan, 61100., 45711., 48676.],
              [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
-        ).astype(np.float64)
+        ).astype(REAL_DTYPE)
         expected_qxzs = np.array([0.000569693132, 0.000284846566, 0.,
                                   -0.000284846566, -0.000569693132,
                                   -0.000854539696, -0.001139386259])
@@ -663,7 +664,9 @@ class TestData2D(unittest.TestCase):
         self.dataqdyqdx.add_to_data(5)
         self.dataqdyqdx.scale_data(1.3)
         self.dataqdyqdx.reset_intensity()
-        np.testing.assert_array_almost_equal(self.dataqdyqdx.image, self.image)
+        np.testing.assert_allclose(
+            self.dataqdyqdx.image, self.image, rtol=1e-7, atol=1e-2
+        )
 
     def test_normalize_metadata(self):
         value = 2

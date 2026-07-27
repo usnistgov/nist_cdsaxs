@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 
 import cdsaxs.loaders.filetypes as filetypes
+from cdsaxs._dtypes import REAL_DTYPE
 
 
 class TestReadTiff(unittest.TestCase):
@@ -19,7 +20,7 @@ class TestReadTiff(unittest.TestCase):
             [4, 5, 6],
             [7, 8, -9],
             [10, 11, 12]
-        ]).astype(np.float64)
+        ]).astype(REAL_DTYPE)
 
         self.return_read = filetypes.read_tiff(self.filepath)
 
@@ -27,7 +28,7 @@ class TestReadTiff(unittest.TestCase):
         image = self.return_read[0]
 
         np.testing.assert_array_equal(image, self.image)
-        self.assertEqual(image.dtype, np.float64)
+        self.assertEqual(image.dtype, REAL_DTYPE)
 
     def test_filepath(self):
         filepath = self.return_read[1]

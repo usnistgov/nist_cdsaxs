@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from .._dtypes import REAL_DTYPE
 from .data1d import Data1D
 
 
@@ -198,7 +199,7 @@ class ReducedData1D(Data1D):
             setattr(self, key, value)
 
         if background_Iq is not None:
-            background_Iq = np.array(background_Iq).reshape(-1).astype(float)
+            background_Iq = np.asarray(background_Iq, dtype=REAL_DTYPE).reshape(-1)
             if len(background_Iq) == 1 or len(background_Iq) == len(self.Iq):
                 self.background_Iq = background_Iq
             else:

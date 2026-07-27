@@ -7,6 +7,7 @@ from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
+from .._dtypes import REAL_DTYPE
 from . import _loader_tools as loader_tools
 
 
@@ -32,13 +33,13 @@ def read_tiff(filepath):
 
     try:
         image = Image.open(filepath)
-        image = np.array(image).astype(np.float64)
+        image = np.asarray(image, dtype=REAL_DTYPE)
         header = {
             TAGS[key]: image.tag[key] for key in image.tag_v2
             if key in TAGS.keys()
             }
     except:
-        image = tifffile.imread(filepath).astype(np.float64)
+        image = tifffile.imread(filepath).astype(REAL_DTYPE)
         with tifffile.TiffFile(filepath) as tif:
             header = {
                 tag.name: tag.value
@@ -137,7 +138,7 @@ def read_smi_h5(filepath):
         temp_metadata['bpm'] = metadata['bpm'][metadata_index][0]
         temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
         images.append(
-            (image_stack[i].astype(np.float64), filepath, temp_metadata)
+            (image_stack[i].astype(REAL_DTYPE), filepath, temp_metadata)
         )
 
     return images
@@ -165,7 +166,7 @@ def read_fits(filepath):
     filepath = loader_tools.clean_filepath(filepath=filepath)
 
     # load image
-    image = fits.getdata(filepath, ext=2).astype(np.float64)
+    image = fits.getdata(filepath, ext=2).astype(REAL_DTYPE)
 
     # header dictionary
     info = [hdu.header for hdu in fits.open(filepath)][0]

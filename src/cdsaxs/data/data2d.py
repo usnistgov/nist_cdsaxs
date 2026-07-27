@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from matplotlib.figure import Figure
 
+from .._dtypes import REAL_DTYPE
 from .. import calculators
 from .data_image import DataImage
 from .metadata import (
@@ -2032,7 +2033,7 @@ class Data2D(DataImage):
         peaks[:, 1] = peaks[:, 1] + min1
 
         if self.qby_1d is not None and self.qbx_1d is not None:
-            peaks_q = np.ones_like(peaks).astype(np.float64)
+            peaks_q = np.ones_like(peaks, dtype=REAL_DTYPE)
 
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
@@ -2290,7 +2291,7 @@ class Data2D(DataImage):
         peaks[:, 1] = peaks[:, 1] + min1
 
         if self.qby_1d is not None and self.qbx_1d is not None:
-            peaks_q = np.ones_like(peaks).astype(np.float64)
+            peaks_q = np.ones_like(peaks, dtype=REAL_DTYPE)
 
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
