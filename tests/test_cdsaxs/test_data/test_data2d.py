@@ -1,6 +1,8 @@
 import numpy as np
 import unittest
+from copy import deepcopy
 
+from cdsaxs._dtypes import REAL_DTYPE
 from cdsaxs.calculators import wavelength_to_energy
 from cdsaxs.data.data2d import Data2D
 
@@ -20,7 +22,7 @@ class TestData2D(unittest.TestCase):
              [60019., 70069.,   np.nan, 65941.],
              [18439., 82922., 99999., 91001.],
              [10592., 19847., 10893., 41683.],
-             [15954.,  3109., 35295., 61517.]]).astype(np.float64)
+             [15954.,  3109., 35295., 61517.]]).astype(REAL_DTYPE)
         self.custom_mask = np.isnan(self.image)
         self.custom_mask[0, 0] = True
         self.custom_mask[3, 2] = False
@@ -58,6 +60,20 @@ class TestData2D(unittest.TestCase):
         np.testing.assert_array_equal(self.dataqdyqdx.mask,
                                       self.custom_mask + np.isnan(self.image))
 
+    def test_init_without_raw_image(self):
+        metadata = deepcopy(self.metadata)
+        metadata.pop('energy_ev', None)
+        data = Data2D(
+            image=self.image,
+            mask=self.custom_mask,
+            keep_raw_image=False,
+            hide_q_warnings=True,
+            **metadata,
+            **self.user_params,
+        )
+
+        self.assertIsNone(data._raw_image)
+
     def test_metadata(self):
         key = 'center_px'
         self.assertTupleEqual(self.dataqdyqdx.metadata[key], self.metadata[key])
@@ -82,6 +98,22 @@ class TestData2D(unittest.TestCase):
         self.dataqdyqdx.update_metadata({'sample_phi_deg': 20}, hide_q_warnings=True)
         key = 'sample_phi_deg'
         self.assertEqual(self.dataqdyqdx.metadata[key], 20)
+
+    def test_reset_image_without_raw_image(self):
+        metadata = deepcopy(self.metadata)
+        metadata.pop('energy_ev', None)
+        data = Data2D(
+            image=self.image,
+            name='test data',
+            mask=self.custom_mask,
+            keep_raw_image=False,
+            hide_q_warnings=True,
+            **metadata,
+            **self.user_params,
+        )
+
+        with self.assertRaisesRegex(ValueError, "raw image was not retained"):
+            data.reset_image()
 
     def test_update_metadata_overwrite(self):
         self.dataqdyqdx.update_metadata({'wavelength_nm': 0.1},
@@ -143,7 +175,7 @@ class TestData2D(unittest.TestCase):
              [48676., 45711., 61100.,   np.nan, 99999., 10893., 35295.],
              [20215., 49702.,  9052., 70069., 82922., 19847.,  3109.],
              [44386., 64811.,  4701., 60019., 18439., 10592., 15954.]]
-        ).astype(np.float64)
+        ).astype(REAL_DTYPE)
         expected_qxzs = np.array([0.001139386259, 0.000854539696,
                                   0.000569693132, 0.000284846566, 0.,
                                   -0.000284846566, -0.000569693132])
@@ -185,7 +217,7 @@ class TestData2D(unittest.TestCase):
              [46325., 61100.,  9052.,  4701.],
              [77210., 45711., 49702., 64811.],
              [20338., 48676., 20215., 44386.]]
-        ).astype(np.float64)
+        ).astype(REAL_DTYPE)
         expected_qxzs = np.array([0.000284846566, 0., -0.000284846566,
                                  -0.000569693132])
         expected_qys = np.array([0.000569693132, 0.000284846566, 0.,
@@ -226,7 +258,7 @@ class TestData2D(unittest.TestCase):
              [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
              [35295., 10893., 99999.,   np.nan, 61100., 45711., 48676.],
              [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
-        ).astype(np.float64)
+        ).astype(REAL_DTYPE)
         expected_qxzs = np.array([0.000569693132, 0.000284846566, 0.,
                                   -0.000284846566, -0.000569693132,
                                   -0.000854539696, -0.001139386259])
@@ -663,7 +695,9 @@ class TestData2D(unittest.TestCase):
         self.dataqdyqdx.add_to_data(5)
         self.dataqdyqdx.scale_data(1.3)
         self.dataqdyqdx.reset_intensity()
-        np.testing.assert_array_almost_equal(self.dataqdyqdx.image, self.image)
+        np.testing.assert_allclose(
+            self.dataqdyqdx.image, self.image, rtol=1e-7, atol=1e-2
+        )
 
     def test_normalize_metadata(self):
         value = 2

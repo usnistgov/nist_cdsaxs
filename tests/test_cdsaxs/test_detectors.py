@@ -6,6 +6,7 @@ import numpy as np
 import cdsaxs.loaders.detectors as detectors
 import cdsaxs.loaders.filetypes as filetypes
 import cdsaxs.loaders.load_data as load_data
+from cdsaxs._dtypes import REAL_DTYPE
 
 
 class TestPilatusHeader(unittest.TestCase):
@@ -69,7 +70,7 @@ class TestReadPilatus(unittest.TestCase):
     def test_image(self):
         np.testing.assert_array_almost_equal(self.image_check, self.image)
         self.assertEqual(self.image[735, 450], 12)
-        self.assertEqual(self.image.dtype, np.float64)
+        self.assertEqual(self.image.dtype, REAL_DTYPE)
 
     def test_filepath(self):
         self.assertEqual(self.filepath_check, self.filepath)

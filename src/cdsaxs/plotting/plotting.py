@@ -291,6 +291,7 @@ def plot_errorbar(
         yticks_labels=None,
         fig=None,
         title=None,
+        zorder=None,
         **kwargs
 ):
     """
@@ -356,6 +357,7 @@ def plot_errorbar(
 
     plt.errorbar(
         x, y,
+        zorder=zorder,
         **{x: y for x, y in kwargs.items() if x in ERRORBAR_KWARGS})
 
     if log_scale_y:
@@ -610,6 +612,7 @@ def plot_qslice(
         show_legend=True,
         color_slice='darkcyan',
         color_avg_background='grey',
+        color_slice_before_background_sub="darkcyan",
         **kwargs):
     """
     Create the individual plots that show the integration of a scattering
@@ -714,15 +717,27 @@ def plot_qslice(
     if show_backgrounds and qslice.background_Iq is not None:
         fig_slice = plot_errorbar(
             qslice.q,
-            qslice.background_Iq,
+            qslice.Iq + qslice.background_Iq,
             fig=fig_slice,
-            label="Avg. Background",
-            zorder=100,
-            color=color_avg_background,
+            label="Before Bkgd. Sub.",
+            zorder=1,
+            color=color_slice_before_background_sub,
             show_legend=show_legend,
             fmt='o-',
             **kwargs
         )
+        fig_slice = plot_errorbar(
+            qslice.q,
+            qslice.background_Iq,
+            fig=fig_slice,
+            label="Avg. Background",
+            zorder=1,
+            c=color_avg_background,
+            show_legend=show_legend,
+            fmt='o-',
+            **kwargs
+        )
+        
 
     # plot all the individual backgrounds
     if show_backgrounds and qslice.background_Iq is not None:
@@ -730,7 +745,7 @@ def plot_qslice(
             qslice.q,
             qslice.background_Iq,
             label="Avg. Background",
-            zorder=100,
+            zorder=10,
             log_scale_y=log_scale,
             xlabel=plotting_tools.generate_formatted_axis_label(qslice.q_axis),
             ylabel="Intensity",
@@ -778,6 +793,7 @@ def plot_data2d_integrate_box(
         color_background_box='orange',
         color_slice='black',
         color_avg_background='grey',
+        color_slice_before_background_sub='darkcyan',
         **kwargs
 ):
     """

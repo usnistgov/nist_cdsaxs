@@ -1,6 +1,7 @@
 import numpy as np
 import unittest
 
+from cdsaxs._dtypes import REAL_DTYPE
 from cdsaxs.data.data1d import Data1D
 
 
@@ -9,14 +10,14 @@ class TestData1D(unittest.TestCase):
     def setUp(self):
         self.q = np.array(
             [0.001, 0.002, 0.003, 0.004,
-             0.005, 0.006, 0.007, 0.01, 0.02]).astype(float)
+             0.005, 0.006, 0.007, 0.01, 0.02]).astype(REAL_DTYPE)
         self.Iq = np.array(
-            [1, 11, 100, 0, 100, 10, 1000, 1001, np.nan]).astype(float)
+            [1, 11, 100, 0, 100, 10, 1000, 1001, np.nan]).astype(REAL_DTYPE)
         self.dIq = np.array(
             [0.001, 0.001, 0.001, 0.001, 0.002,
-             0.002, 0.002, 0.002, np.nan]).astype(float)
+             0.002, 0.002, 0.002, np.nan]).astype(REAL_DTYPE)
         self.q_axis = 'qsx'
-        self.qsy = np.ones_like(self.q, dtype=float)*0
+        self.qsy = np.zeros_like(self.q, dtype=REAL_DTYPE)
         self.custom_mask = np.array([True, False, False, False, False, False,
                                      False, False, False,])
 
@@ -63,8 +64,8 @@ class TestData1D(unittest.TestCase):
         # remove the last point because it should be filtered out by
         # the interpolation function (it is outside of the data range
         # after the masked points have been removed!)
-        np.testing.assert_array_almost_equal(
-            interpolated_Iq, test_interpolated_Iq[:-1])
+        np.testing.assert_allclose(
+            interpolated_Iq, test_interpolated_Iq[:-1], rtol=1e-6, atol=2e-5)
         np.testing.assert_array_almost_equal(
             interpolated_q, test_interpolated_q[:-1])
 
@@ -80,8 +81,8 @@ class TestData1D(unittest.TestCase):
         # remove the last point because it should be filtered out by
         # the interpolation function (it is outside of the data range
         # after the masked points have been removed!)
-        np.testing.assert_array_almost_equal(
-            interpolated_Iq, test_interpolated_Iq[:-1])
+        np.testing.assert_allclose(
+            interpolated_Iq, test_interpolated_Iq[:-1], rtol=5e-6, atol=1e-4)
         np.testing.assert_array_almost_equal(
             interpolated_q, test_interpolated_q[:-1])
 
@@ -97,8 +98,8 @@ class TestData1D(unittest.TestCase):
         # remove the last point because it should be filtered out by
         # the interpolation function (it is outside of the data range
         # after the masked points have been removed!)
-        np.testing.assert_array_almost_equal(
-            interpolated_Iq, test_interpolated_Iq[:-1])
+        np.testing.assert_allclose(
+            interpolated_Iq, test_interpolated_Iq[:-1], rtol=5e-6, atol=1e-4)
         np.testing.assert_array_almost_equal(
             interpolated_q, test_interpolated_q[:-1])
 
@@ -125,8 +126,8 @@ class TestData1D(unittest.TestCase):
 
         self.data1d.scale_data(scale_value)
 
-        np.testing.assert_array_almost_equal(
-            self.data1d.Iq, test_scaled_Iq
+        np.testing.assert_allclose(
+            self.data1d.Iq, test_scaled_Iq, rtol=1e-7, atol=2e-3
         )
         self.assertTupleEqual(
             self.data1d._data_transformations[0],

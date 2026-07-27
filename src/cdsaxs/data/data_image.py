@@ -9,7 +9,8 @@ from ..tools import default_mask, rotate_image, rotate_image_pillow
 class DataImage():
     def __init__(self,
                  image: NDArray[np.floating],
-                 mask: NDArray[np.bool] = None):
+                 mask: NDArray[np.bool] = None,
+                 keep_raw_image: bool = True):
         """
         Generic 2D data class with basic image functionality. This
         class is not tied to any diffraction information.
@@ -29,6 +30,11 @@ class DataImage():
             can overwrite these defaults using the overwrite_mask
             method but we caution against this as not all operations
             are tested without masking nan, inf, and -inf.
+        keep_raw_image : bool, optional
+            If True, store a copy of the original image so reset_image()
+            can restore the initial state. If False, the raw image is
+            not retained and reset operations that require it will raise
+            an error.
 
         Protected Attributes
         --------------------
@@ -53,11 +59,20 @@ class DataImage():
             all masked points replaced with np.nan.
         """
         self.image = image
-        self._raw_image = np.copy(self.image)
+        self._raw_image = np.copy(self.image) if keep_raw_image else None
         self.mask = default_mask(self.image)
         if mask is not None:
             self.mask_points(mask)
         self._data_transformations = []
+
+    def _require_raw_image(self):
+        if self._raw_image is None:
+            raise ValueError(
+                "The raw image was not retained, so this reset operation "
+                "is unavailable. Recreate the data with keep_raw_image=True "
+                "to enable reset behavior."
+            )
+        return self._raw_image
 
     @property
     def _masked_image(self):
@@ -120,7 +135,7 @@ class DataImage():
             the current transformed image.
         """
         self.mask = default_mask(
-            self._raw_image if use_raw_image else self.image
+            self._require_raw_image() if use_raw_image else self.image
         )
 
     def rotate_image(self,
@@ -355,7 +370,7 @@ class DataImage():
         scaling, normalization, addition, or subtraction.
         """
         self._data_transformations = []
-        self.image = np.copy(self._raw_image)
+        self.image = np.copy(self._require_raw_image())
         self.reset_mask()
 
     def sum_box(

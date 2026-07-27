@@ -76,6 +76,14 @@ functionality included in this software. Please follow this notebook
 and the included descriptions carefully as some steps need to be 
 performed in order.
 
+When loading data, the original 2D image is retained by default so
+`reset_image()` can restore the initial state after rotations, flips,
+or intensity transformations. If memory usage is a concern, the loaders
+and `Data2D` constructor accept `keep_raw_image=False` to skip storing
+that copy. In that mode, reset operations that require the original
+image, including `Dataset.reset_all_data()`, will raise an error instead
+of silently restoring data.
+
 To run the notebook via Jupyter lab in a browser:
 1. Ensure that `nist_cdsaxs` is installed following the directions above.
 2. In the terminal, navigate to the `examples` folder in this repository.

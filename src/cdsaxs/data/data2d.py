@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from matplotlib.figure import Figure
 
+from .._dtypes import REAL_DTYPE
 from .. import calculators
 from .data_image import DataImage
 from .metadata import (
@@ -97,6 +98,7 @@ def combine_data2d(*data2d: Data2D, name=None):
         image=image,
         name=name,
         mask=mask,
+        keep_raw_image=True,
         **metadata,
         **user_params,
     )
@@ -186,6 +188,7 @@ class Data2D(DataImage):
             image: NDArray[np.floating],
             name: str = None,
             mask: NDArray[np.bool] = None,
+            keep_raw_image: bool = True,
             hide_q_warnings=False,
             **kwargs
     ):
@@ -241,6 +244,11 @@ class Data2D(DataImage):
             operations.
             All pixels that are nan, inf, or -inf will be masked by
             default.
+        keep_raw_image : bool, optional
+            If True, store a copy of the original image so reset_image()
+            can restore the initial state. If False, the raw image is
+            not retained and reset operations that require it will raise
+            an error.
         hide_q_warnings : bool, optional
             Hide any warnings that may occur attempting to
             calculate the scattering vector during init.
@@ -257,7 +265,8 @@ class Data2D(DataImage):
         """
 
         # run base class init
-        super().__init__(image=image, mask=mask)
+        super().__init__(image=image, mask=mask,
+                 keep_raw_image=keep_raw_image)
 
         self.metadata = {}
         self._sample_rotation = {}
@@ -1601,7 +1610,7 @@ class Data2D(DataImage):
                 center_qdy = np.unravel_index(
                     np.nanargmin(np.abs(
                         getattr(self, center_qdy[0].lower())
-                        - center_qdy[1])))[0]
+                        - center_qdy[1])), self.image.shape)[0]
             min_y, max_y = self._get_box_dims_size_y(
                 size_qdy_px=width_qdy_px,
                 center=center_qdy,
@@ -1617,7 +1626,7 @@ class Data2D(DataImage):
             if center_qdx is not None:
                 center_qdx = np.unravel_index(np.nanargmin(np.abs(
                     getattr(self, center_qdx[0].lower())
-                    - center_qdx[1])))[1]
+                    - center_qdx[1])), self.image.shape)[1]
             min_x, max_x = self._get_box_dims_size_x(
                 size_qdx_px=width_qdx_px,
                 center=center_qdx,
@@ -2032,7 +2041,7 @@ class Data2D(DataImage):
         peaks[:, 1] = peaks[:, 1] + min1
 
         if self.qby_1d is not None and self.qbx_1d is not None:
-            peaks_q = np.ones_like(peaks).astype(np.float64)
+            peaks_q = np.ones_like(peaks, dtype=REAL_DTYPE)
 
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
@@ -2290,7 +2299,7 @@ class Data2D(DataImage):
         peaks[:, 1] = peaks[:, 1] + min1
 
         if self.qby_1d is not None and self.qbx_1d is not None:
-            peaks_q = np.ones_like(peaks).astype(np.float64)
+            peaks_q = np.ones_like(peaks, dtype=REAL_DTYPE)
 
             peaks_q[:, 0] = np.interp(
                 peaks[:, 0],
@@ -2836,8 +2845,8 @@ class Data2D(DataImage):
         sdd_cm_orders = pixel_distances_cm / np.tan(theta_rad)
 
         # calculate average SDD from all peaks
-        average_sdd = np.round(np.mean(sdd_cm_orders), 2)
-        std_sdd = np.round(np.std(sdd_cm_orders), 2)
+        average_sdd = np.round(np.mean(sdd_cm_orders), 4)
+        std_sdd = np.round(np.std(sdd_cm_orders), 4)
 
         if update:
             self.update_metadata({'sdd_cm': average_sdd}, overwrite=True)

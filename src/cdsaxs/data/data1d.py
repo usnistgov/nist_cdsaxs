@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from .._dtypes import REAL_DTYPE
 from ..tools import default_mask
 from .metadata import ACCEPTED_Q_AXES
 from ..plotting import plotting
@@ -79,6 +80,7 @@ class Data1D():
             positioned normal to the incident beam, the lab and detector
             coordinates will align
         """
+        setattr(self, 'sample_phi_deg', np.array(kwargs.pop('sample_phi_deg', [None])))
         if q_axis in kwargs.keys():
             raise ValueError(
                 f"You have provided {q_axis} twice, once as the positional"
@@ -95,14 +97,14 @@ class Data1D():
             self.q_axis = q_axis
 
         # check q axes with length of Iq
-        self.Iq = np.array(Iq).reshape(-1).astype(float)
+        self.Iq = np.asarray(Iq, dtype=REAL_DTYPE).reshape(-1)
         self._raw_Iq = np.copy(Iq)
 
         self.mask = default_mask(self.Iq)
         if mask is not None:
             self.mask_points(mask)
 
-        q = np.array(q).reshape(-1).astype(float)
+        q = np.asarray(q, dtype=REAL_DTYPE).reshape(-1)
         if len(q) != len(self.Iq):
             raise ValueError(
                 f"Iq and q need to be the same length. They were provided "
@@ -124,7 +126,7 @@ class Data1D():
                 setattr(self, key, q_key)
 
         if dIq is not None:
-            dIq = np.array(dIq).reshape(-1).astype(float)
+            dIq = np.asarray(dIq, dtype=REAL_DTYPE).reshape(-1)
             if len(dIq) != len(self.Iq):
                 raise ValueError(
                     f"Iq and dIq need to be the same length. They were provided "
@@ -141,7 +143,7 @@ class Data1D():
 
     @q.setter
     def q(self, new_q):
-        new_q = np.array(new_q).reshape(-1).astype(float)
+        new_q = np.asarray(new_q, dtype=REAL_DTYPE).reshape(-1)
         if len(new_q) != len(self.Iq):
             raise ValueError(
                 "The length of q should equal that of Iq."

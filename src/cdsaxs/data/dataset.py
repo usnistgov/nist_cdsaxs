@@ -39,10 +39,10 @@ class Dataset():
             datas: list[Data2D] = None,
             name: str = None,
     ):
-        self.datas={}
+        self.datas = {}
         if datas is not None:
             self.add_data(datas)
-            
+
         self.name = name
 
     def add_data(self, datas: Data2D | list[Data2D]):
@@ -473,7 +473,7 @@ class Dataset():
             data.reset_image()
 
     def apply_rotation_correction_all_data(
-            self, keys=None, angles={}, verbose=True, **kwargs):
+            self, keys=None, angles={}, verbose=True, use_qsy=False, **kwargs):
         """
         Apply a rotation correction to all data images that aligns
         the qsy and qsx axes with the qby and qbx axes, respectively,
@@ -525,6 +525,18 @@ class Dataset():
             data = self.datas[key]
             if key in angles.keys():
                 rotation_angle = np.deg2rad(angles[key])
+            elif use_qsy:
+                abs_limit = 0.004*np.nanmax(data.qsy)
+                points = np.where(np.abs(data.qsy) <= abs_limit)
+                counter = 0
+                while len(points[0]) > 200 and counter < 1000:
+                    abs_limit /= 2
+                    counter += 1
+                    points = np.where(np.abs(data.qsy) <= abs_limit)
+                x_fit = list(points[1]) + [data.metadata['center_px_detector'][1]]
+                y_fit = list(points[0]) + [data.metadata['center_px_detector'][0]]
+                m, _ = np.polyfit(x_fit, y_fit, 1)
+                rotation_angle = np.rad2deg(np.arctan2(m, 1))
             else:
                 phi = np.deg2rad(data.metadata['sample_phi_deg']
                                 + data.metadata['sample_phi_offset_deg'])
@@ -945,6 +957,7 @@ class ReducedSlices():
             filter_by_q={},
             q_axis='qsz',
             integrated_axis='qsx',
+            export_phi=False,
             offset_axis='qsy',
             export_qr=False,
             decimals=5):
@@ -963,14 +976,6 @@ class ReducedSlices():
         filter_by_q : dict
             Dictionary of q component and range (min, max) to filter
             the slices by.
-<<<<<<< validate_for_version1
-        q_axis : str
-            Currently only 'qsz' is accepted.
-        integrated_axis : str
-            Currently only 'qsx' is accepted.
-        offset_axis : str
-            Currently only 'qsy' is accepted.
-=======
         TODO: Add more options for exporting axis. Currently hardcoded.
         q_axis : str
             Currently only 'qsz' is accepted.
@@ -981,7 +986,6 @@ class ReducedSlices():
         offset_axis : str
             Currently only 'qsy' is accepted.
             Default is 'qsy'.
->>>>>>> main
         export_qr : bool
             If set to True, qsr will also be exported in the file.
         decimals : int
@@ -1016,6 +1020,7 @@ class ReducedSlices():
             q = getattr(r_slice, q_axis)
             Iq = getattr(r_slice, '_masked_Iq')
             q_int = getattr(r_slice, integrated_axis)
+            phi = getattr(r_slice, 'sample_phi_deg')
             q_offset = getattr(r_slice, offset_axis)
 
             # sort by q
@@ -1023,6 +1028,7 @@ class ReducedSlices():
             q = q[sorted_indexes]
             q_offset = q_offset[sorted_indexes]
             Iq = Iq[sorted_indexes]
+            phi = phi[sorted_indexes]
 
             select = (~np.isnan(Iq)) & (Iq > 0)
             num_points = len(q[select])
@@ -1065,8 +1071,15 @@ class ReducedSlices():
                     np.round(Iq, decimals=decimals).astype(str)[select],
                     [""]*(length-len(Iq[select])))
                     )
+            
+            new_phi = np.hstack(
+                ([f'phi (degrees)'],
+                    np.round(phi, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(phi[select])))
+                    )
 
             datas.append(new_Iq)
+            datas.append(new_phi)
 
         datas = np.array(datas).T
         np.savetxt(filepath, datas, delimiter=',', fmt='%s')

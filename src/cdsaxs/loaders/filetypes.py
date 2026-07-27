@@ -1,11 +1,13 @@
 import os
 
 import h5py
+from astropy.io import fits
 import numpy as np
 from PIL import Image
 from PIL.TiffTags import TAGS
 import tifffile
 
+from .._dtypes import REAL_DTYPE
 from . import _loader_tools as loader_tools
 
 
@@ -31,13 +33,13 @@ def read_tiff(filepath):
 
     try:
         image = Image.open(filepath)
-        image = np.array(image).astype(np.float64)
+        image = np.asarray(image, dtype=REAL_DTYPE)
         header = {
             TAGS[key]: image.tag[key] for key in image.tag_v2
             if key in TAGS.keys()
             }
     except:
-        image = tifffile.imread(filepath).astype(np.float64)
+        image = tifffile.imread(filepath).astype(REAL_DTYPE)
         with tifffile.TiffFile(filepath) as tif:
             header = {
                 tag.name: tag.value
@@ -136,7 +138,92 @@ def read_smi_h5(filepath):
         temp_metadata['bpm'] = metadata['bpm'][metadata_index][0]
         temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
         images.append(
-            (image_stack[i].astype(np.float64), filepath, temp_metadata)
+            (image_stack[i].astype(REAL_DTYPE), filepath, temp_metadata)
         )
 
     return images
+
+
+def read_fits(filepath):
+    """
+    Load an image and header from a fits file.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the fits file to be loaded.
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary of the header information where the key: value pairs.
+    """
+
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    # load image
+    image = fits.getdata(filepath, ext=2).astype(REAL_DTYPE)
+
+    # header dictionary
+    info = [hdu.header for hdu in fits.open(filepath)][0]
+    header = dict(info)
+
+    return image, filepath, header
+
+
+def read_als_11_0_1_2(filepath):
+
+    """
+    Load an image and metadata from data collected at beamline 11.0.1.2
+    at ALS.
+
+    CAUTION: This loader assumes data collected in 2025 or earlier
+    uses a detector with a 27 um pixel size. Any data collected in
+    2026 or later is assumed to have a pixel size of 9 um.
+
+    Parameters
+    ----------
+    filepath : str, path
+        Path to the fits file to be loaded.
+
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
+    """
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    image, filepath, header = read_fits(filepath)
+
+
+    metadata = {}
+    metadata['energy_ev'] = header['Beamline Energy']
+    metadata['sample_phi_deg'] = header['Sample Theta'] + 90
+    metadata['I0'] = header['AI 3 Izero']
+    metadata['exposure_time_s'] = header['EXPOSURE']
+    metadata['beam_current'] = header['Beam Current']
+    metadata['detector_phi_deg'] = header['CCD Theta']
+    metadata['detector_y_mm'] = header['CCD X']
+    metadata['CCD Y'] = header['CCD Y']
+    metadata['epu_polarization'] = header['EPU Polarization']
+    metadata['beam_stop_position'] = header['Beam Stop']
+    date = header['DATE']
+    if float(date[:4]) <= 2025:
+        metadata['pixel_size_um'] = 27
+        # orient the detector image with our coordinate system
+        image = np.flipud(np.rot90(image, 3))
+    else:
+        metadata['pixel_size_um'] = 9
+        # orient the detector image with our coordinate system
+        image = np.flipud(np.rot90(image, 2))
+
+    return image, filepath, metadata

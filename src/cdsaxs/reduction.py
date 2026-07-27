@@ -90,6 +90,7 @@ def slice_reduced_dataset(
         }
         # q_offset = []
         Iq = []
+        phi = []
         for data in dataset.datas:
             selection = np.where(
                     (getattr(data, integrated_axis) >= qmin) &
