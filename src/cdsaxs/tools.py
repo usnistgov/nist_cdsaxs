@@ -10,13 +10,23 @@ from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 from skimage import transform
 
-from cdsaxs.calculators import gaussian
+from .calculators import gaussian
 
 
 def default_mask(data):
 
     """
-    Generate a default mask of points that are nan, inf, or -inf.
+    Generate a boolean mask for invalid numeric values.
+
+    Parameters
+    ----------
+    data : array-like
+        Input numeric data.
+
+    Returns
+    -------
+    mask : ndarray
+        Boolean mask that is True where data contains nan, inf, or -inf.
     """
     data = np.array(data)
     mask = np.isnan(data)
@@ -43,9 +53,9 @@ def find_gaussian_peakloc(x, y, p0=None):
 
     Returns
     -------
-    float
+    peak_x : float
         Peak location based on the Gaussian fit.
-    list
+    popt : list
         Optimized parameters mean, std_dev, scale, and offset from the
         Gaussian fit.
     """
@@ -90,9 +100,30 @@ def find_gaussian_peakloc(x, y, p0=None):
 
 def line_fit(x, y, force_intercept=None):
     """
-    Fit a line to the x, y data and return angle, slope, intercept.
-    The angle is defined counterclockwise from the x-axis.
-    In the case of a vertical line, slope and intercept are returned as nan.
+    Fit a line to x and y data and return angle, slope, and intercept.
+
+    The angle is defined counterclockwise from the x-axis. If the fit is
+    constrained with force_intercept, the returned line passes through that
+    point. In the case of a vertical line, slope and intercept are returned
+    as nan.
+
+    Parameters
+    ----------
+    x : array-like
+        x coordinates of the data points.
+    y : array-like
+        y coordinates of the data points.
+    force_intercept : tuple | None, optional
+        Point (x, y) through which the fitted line must pass.
+
+    Returns
+    -------
+    angle : float
+        Line angle in degrees.
+    slope : float
+        Fitted slope.
+    intercept : float
+        Fitted intercept.
     """
     x = np.array(x).reshape(-1, 1)
     y = np.array(y).reshape(-1, 1)
@@ -107,12 +138,12 @@ def line_fit(x, y, force_intercept=None):
             "are required. Assuming a horizontal line."
         )
     try:
-        # fit = linregress(x, y)
         model = LinearRegression(
             fit_intercept=False if force_intercept is not None else True)
         model.fit(x, y)
         slope = float(model.coef_[0][0])
-        intercept = float(model.intercept_)
+        intercept = np.asarray(model.intercept_).item() # convert to scalar
+
         if force_intercept is not None:
             intercept = force_intercept[1] - slope * force_intercept[0]
         angle = np.rad2deg(np.arctan(slope))
@@ -128,7 +159,19 @@ def line_fit(x, y, force_intercept=None):
 def gaussian_refine_peak_2D(image):
 
     """
-    Refine a peak in 2D with two Gaussian fits, one along either axis.
+    Refine a two-dimensional peak position with one Gaussian fit per axis.
+
+    Parameters
+    ----------
+    image : ndarray
+        Two-dimensional image region containing a single dominant peak.
+
+    Returns
+    -------
+    a_opt : float
+        Refined peak position along axis 0.
+    b_opt : float
+        Refined peak position along axis 1.
     """
 
     try:
@@ -227,7 +270,7 @@ def rotate_image(image,
 
     Returns
     -------
-    ndarray
+    image : ndarray
         Two-dimensional rotated image of same dimensions as 'image'.
     """
 
@@ -308,7 +351,7 @@ def rotate_image_pillow(
 
     Returns
     -------
-    ndarray
+    image : ndarray
         Two-dimensional rotated image of same dimensions as 'image'.
     """
 
@@ -408,10 +451,10 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
 
     Returns
     -------
-    NDArray
+    coordinates : NDArray
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
-    NDArray
+    coordinates_px : NDArray
         An n x 2 array of peak coordinate positions rounded to the
         nearest pixels will be returned for n number of peaks found.
     """
@@ -552,7 +595,7 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
 
     Returns
     -------
-    NDArray
+    coordinates : NDArray
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
     """
@@ -713,7 +756,7 @@ def find_peaks_2D_one_axis(
 
     Returns
     -------
-    NDArray
+    coordinates : NDArray
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
     """
@@ -806,13 +849,29 @@ def find_peaks_2D_one_axis(
 
 def find_maximum_rectangular_roi(data):
     """
-    The data argument should be a boolean area or an array of 1/0 where
-    True/1 indicates pixels that meet the criteria for a selected
-    region of interest.
+    Find the largest rectangular region of valid pixels in a mask.
 
-    This function will try to find the maximum size of a rectangular
-    region of interest that fits within those accepted pixels at
-    each pixel location.
+    The input should be a boolean array, or an array of 1 and 0 values,
+    where True or 1 marks pixels that belong to the candidate region of
+    interest.
+
+    Parameters
+    ----------
+    data : ndarray
+        Two-dimensional boolean or binary array describing valid pixels.
+
+    Returns
+    -------
+    row_bounds : tuple
+        Row bounds of the maximum rectangular region as (min_row, max_row).
+    col_bounds : tuple
+        Column bounds of the maximum rectangular region as (min_col, max_col).
+    height : ndarray
+        Height map used internally for the rectangle search.
+    width : ndarray
+        Width map used internally for the rectangle search.
+    area : ndarray
+        Area map used internally for the rectangle search.
     """
 
     data = data.astype(int)

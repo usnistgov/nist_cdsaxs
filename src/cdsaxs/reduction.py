@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from cdsaxs.data.reduced_slice import ReducedData1DSlice
-from cdsaxs.data.dataset import (
+from .data.reduced_slice import ReducedData1DSlice
+from .data.dataset import (
     ReducedDataset,
     ReducedSlices
 )
-import cdsaxs.plotting.plotting as plotting
+from .plotting import plotting
 
 
 def slice_reduced_dataset(
@@ -30,6 +30,7 @@ def slice_reduced_dataset(
     Parameters
     ----------
     dataset : ReducedDataset
+        Reduced dataset containing one-dimensional reduced patterns to slice.
     q_values : list
         List of the slice locations along the specified q_axis.
     q_widths : float | list
@@ -57,7 +58,11 @@ def slice_reduced_dataset(
 
     Returns
     -------
-    ReducedSlices
+    reduced_slices : ReducedSlices
+        Collection of extracted one-dimensional slices.
+    fig : matplotlib.figure.Figure | None
+        Figure showing the selected slice regions when show_plot is True;
+        otherwise None.
     """
 
     if not isinstance(q_widths, list):

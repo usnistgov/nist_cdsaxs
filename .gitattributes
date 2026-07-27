@@ -1,3 +1,6 @@
 # .gitattributes
 
 examples/* linguist-vendored
+
+# Vendor all notebooks in the repo so Linguist ignores them
+*.ipynb linguist-vendored

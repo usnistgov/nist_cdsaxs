@@ -36,7 +36,7 @@ def _detector_phi_corr(
 
     Returns
     -------
-    float
+    det_corr_rad : float
         Angle of rotation of the detector about the sample
         counterclockwise about the positive y axis at the sample
         position.
@@ -95,7 +95,7 @@ def center_px_beam_to_detector(
 
     Returns
     -------
-    tuple
+    center_px_detector : tuple
         Beam center position in detector coordinate space.
     """
 
@@ -166,7 +166,7 @@ def center_px_detector_to_beam(
 
     Returns
     -------
-    tuple
+    center_px_beam : tuple
         Beam center position in beam coordinate space.
     """
 
@@ -228,7 +228,7 @@ def _detector_px_to_gamma_rad(
 
     Returns
     -------
-    NDArray
+    gamma : NDArray
         Horizontal scattering angle component, gamma, for each pixel.
     """
     # for each pixel calculate distance in x direction from the pixel
@@ -293,14 +293,9 @@ def _detector_px_gamma_to_delta_rad(
 
     Returns
     -------
-    float
-        Scattering vector q_b in the beam coordinate space.
-    float
-        The y-component of the scattering vector, q_by.
-    float
-        The x-component of the scattering vector, q_bx.
-    float
-        The z-component of the scattering vector, q_bz.
+    delta : NDArray
+        Vertical scattering angle component, delta, in radians for each
+        detector pixel.
     """
     det_phi_corr = _detector_phi_corr(
         detector_phi_deg=detector_phi_deg,
@@ -326,7 +321,19 @@ def _detector_px_gamma_to_delta_rad(
 
 def qyx_to_qr(qy, qx):
     """
-    Calculates the radial q component from the x and y components.
+    Calculate the in-plane radial q component from qy and qx.
+
+    Parameters
+    ----------
+    qy : float | array-like
+        q component along the y direction.
+    qx : float | array-like
+        q component along the x direction.
+
+    Returns
+    -------
+    qr : float | NDArray
+        Radial component $q_r = \sqrt{q_y^2 + q_x^2}$.
     """
     qy = np.array(qy)
     qx = np.array(qx)
@@ -400,14 +407,19 @@ def detector_px_to_qbyxz(
 
     Returns
     -------
-    float
-        Scattering vector q_b in the beam coordinate space.
-    float
-        The y-component of the scattering vector, q_by.
-    float
-        The x-component of the scattering vector, q_bx.
-    float
-        The z-component of the scattering vector, q_bz.
+    qb : NDArray
+        Magnitude of the scattering vector in beam coordinates for each
+        detector pixel.
+    qby : NDArray
+        y-component of the scattering vector in beam coordinates.
+    qbx : NDArray
+        x-component of the scattering vector in beam coordinates.
+    qbz : NDArray
+        z-component of the scattering vector in beam coordinates.
+    center_px_beam : tuple
+        Beam center position in beam coordinate space.
+    center_px_detector : tuple
+        Beam center position in detector coordinate space.
     """
 
     # we will need the beam center position in both beam and detector
@@ -517,13 +529,13 @@ def calculate_q_beam(gamma_deg, delta_deg, wavelength_nm):
 
     Returns
     -------
-    float
+    qb : float
         Scattering vector q_b in the beam coordinate space.
-    float
+    qby : float
         The y-component of the scattering vector, q_by.
-    float
+    qbx : float
         The x-component of the scattering vector, q_bx.
-    float
+    qbz : float
         The z-component of the scattering vector, q_bz.
     """
     # inverse Angstroms
@@ -562,7 +574,7 @@ def active_rotation_Rx(omega_deg):
 
     Returns
     -------
-    NDArray, 3 x 3
+    Rx : NDArray, 3 x 3
         Active rotation matrix, Rx.
     """
     omega_rad = np.deg2rad(omega_deg)
@@ -589,7 +601,7 @@ def active_rotation_Ry(phi_deg):
 
     Returns
     -------
-    NDArray, 3 x 3
+    Ry : NDArray, 3 x 3
         Active rotation matrix, Ry.
     """
     phi_rad = np.deg2rad(phi_deg)
@@ -616,7 +628,7 @@ def active_rotation_Rz(chi_deg):
 
     Returns
     -------
-    NDArray, 3 x 3
+    Rz : NDArray, 3 x 3
         Active rotation matrix, Rz.
     """
     chi_rad = np.deg2rad(chi_deg)
@@ -643,7 +655,7 @@ def passive_rotation_Qx(omega_deg):
 
     Returns
     -------
-    NDArray, 3 x 3
+    Qx : NDArray, 3 x 3
         Active rotation matrix, Qx.
     """
     omega_rad = np.deg2rad(omega_deg)
@@ -670,7 +682,7 @@ def passive_rotation_Qy(phi_deg):
 
     Returns
     -------
-    NDArray, 3 x 3
+    Qy : NDArray, 3 x 3
         Passive rotation matrix, Qy.
     """
     phi_rad = np.deg2rad(phi_deg)
@@ -697,7 +709,7 @@ def passive_rotation_Qz(chi_deg):
 
     Returns
     -------
-    NDArray, 3 x 3
+    Qz : NDArray, 3 x 3
         Passive rotation matrix, Qz.
     """
     chi_rad = np.deg2rad(chi_deg)
@@ -714,7 +726,19 @@ def passive_rotation_Qz(chi_deg):
 
 def get_passive_matrix(axis: str, angle_deg: float):
     """
-    Returns the passive matrix for the selected axis and rotation angle.
+    Return the passive rotation matrix for a selected axis and rotation angle.
+
+    Parameters
+    ----------
+    axis : str
+        Rotation axis. Must be 'x', 'y', or 'z'.
+    angle_deg : float
+        Rotation angle in degrees.
+
+    Returns
+    -------
+    Q : NDArray
+        Passive rotation matrix for the requested axis.
     """
     if axis.lower() == 'x':
         Q = passive_rotation_Qx(omega_deg=angle_deg)
@@ -732,7 +756,19 @@ def get_passive_matrix(axis: str, angle_deg: float):
 
 def get_active_matrix(axis: str, angle_deg: float):
     """
-    Returns the active matrix for the selected axis and rotation angle.
+    Return the active rotation matrix for a selected axis and angle.
+
+    Parameters
+    ----------
+    axis : str
+        Rotation axis. Must be 'x', 'y', or 'z'.
+    angle_deg : float
+        Rotation angle in degrees.
+
+    Returns
+    -------
+    R : NDArray
+        Active rotation matrix for the requested axis.
     """
     if axis.lower() == 'x':
         R = active_rotation_Rx(omega_deg=angle_deg)
@@ -787,7 +823,7 @@ def passive_intrinsic_rotation_matrix(
 
     Returns
     -------
-    NDArray, 3 x 3
+    Q : NDArray, 3 x 3
         Passive rotation matrix for the series of intrinsic rotations
         specified.
     """
@@ -850,7 +886,7 @@ def passive_extrinsic_rotation_matrix(
 
     Returns
     -------
-    NDArray, 3 x 3
+    Q : NDArray, 3 x 3
         Passive rotation matrix for the series of extrinsic rotations
         specified.
     """

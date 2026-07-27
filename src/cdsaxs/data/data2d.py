@@ -6,19 +6,19 @@ import numpy as np
 from numpy.typing import NDArray
 from matplotlib.figure import Figure
 
-import cdsaxs.calculators as calculators
-from cdsaxs.data.data_image import DataImage
-from cdsaxs.data.metadata import (
+from .. import calculators
+from .data_image import DataImage
+from .metadata import (
     METADATA_KEYWORDS,
     check_metadata,
     correct_metadata_dtype,
     ACCEPTED_Q_AXES
 )
-from cdsaxs.data.reduced_data1d import ReducedData1D
-import cdsaxs.plotting.plotting as plotting
-import cdsaxs.diffraction as diffraction
-import cdsaxs.tools as tools
-from cdsaxs.tools import (
+from .reduced_data1d import ReducedData1D
+from ..plotting import plotting
+from .. import diffraction
+from .. import tools
+from ..tools import (
     find_peaks_2D,
     find_peaks_2D_one_axis,
     line_fit,
@@ -43,7 +43,9 @@ ACCEPTED_Q_KEYWORDS = ACCEPTED_Q_AXES
 def combine_data2d(*data2d: Data2D, name=None):
     """
     Combine two or more instances of Data2D into a single instance
-    of Data2D. This operation is not sensitive to any data
+    of Data2D. 
+    
+    NOTE: This operation is not sensitive to any data
     transformations or orientation changes that have been performed and
     so the user should carefully consider when to perform this operation.
 
@@ -67,8 +69,13 @@ def combine_data2d(*data2d: Data2D, name=None):
     Parameters
     ----------
     *data2d : Data2D
-        Any number of Data2D instances can be passed to this
-        function and summed together.
+        Any number of Data2D instances to combine.
+
+    Returns
+    -------
+    new_data : Data2D
+        New Data2D instance containing the combined image, mask,
+        metadata, and user parameters.
     """
 
     # initialize information from the first 2d data instance
@@ -183,11 +190,11 @@ class Data2D(DataImage):
             **kwargs
     ):
         """
-        This class contains 2D scattering images with coordinates of
-        y vs x defined in the detector coordinate frame with positive y
+        This class stores 2D scattering images with coordinates defined
+        as y vs x in the detector coordinate frame, with positive y
         in the upward vertical direction and positive x in the left
-        horizontal direction. The z axis is then defined as normal
-        incidence to follow the right-hand rule.
+        horizontal direction. The z axis is defined as the surface normal
+        to follow the right-hand rule.
 
         In many instances the detector coordinates will align with the lab
         frame, where the z axis aligns with the beam path and the detector
@@ -205,12 +212,12 @@ class Data2D(DataImage):
         about the positive y-axis in sample coordinate space by
         'sample_phi_deg' + 'sample_phi_offset' degrees from normal
         incidence. If chi and omega rotations are present, this class
-        assumes that the series of rotation is extrinsic in the order
-        of omega (rotationa about x-axis), chi (rotation about z-axis),
+        assumes that the rotation sequence is extrinsic in the order
+        of omega (rotation about the x-axis), chi (rotation about the z-axis),
         and phi (rotation about y-axis).
 
         If the sample undergoes a different series of rotation, this
-        can be changed using _set_sample_rotation method, but we caution
+        can be changed using the _set_sample_rotation method, but we caution
         the user to only use this with a full understanding of its
         implications on the conversion from detector/beam-based
         coordinate system q to the sample coordinate system q.
@@ -229,9 +236,9 @@ class Data2D(DataImage):
             by passing 'name' metadata. This name is used as a key in the
             dictionaries storing the data objects within the dataset class.
         mask : NDArray
-            Two-dimensional boolean array of same dimensions as image
-            that are True at pixel values that should be masked out
-            for all operations.
+            Two-dimensional boolean array with the same shape as image.
+            True values mark pixels that should be masked in all
+            operations.
             All pixels that are nan, inf, or -inf will be masked by
             default.
         hide_q_warnings : bool, optional
@@ -243,7 +250,7 @@ class Data2D(DataImage):
         ----------------
         **kwargs
             Relevant scattering metadata to the image acquisition can
-            be passed as additional keyword argument. Any keywords
+            be passed as additional keyword arguments. Any keywords
             recognized as metadata by the cdsaxs code will be saved in
             the metadata attribute. The remaining information will be
             stored in the user_params dictionary.
@@ -332,7 +339,7 @@ class Data2D(DataImage):
             'intrinsic'.
             An 'intrinsic' rotation is performed on the
             coordinate system after the previous rotation is performed.
-            An 'extrinsic' rotation is perfromed on the original
+            An 'extrinsic' rotation is performed on the original
             coordinate system prior to any rotations.
         first_axis : str
             Axis about which the first rotation is performed.
@@ -417,8 +424,8 @@ class Data2D(DataImage):
         Parameters
         ----------
         metadata : dict
-            Key : value pairs of accepted metadata (key) and their
-            values. See class docstring for list of accepted keywords.
+            Key-value pairs of accepted metadata and their values. See
+            the class docstring for the list of accepted keywords.
         overwrite : bool
             If set to True, any metadata provided to this method will
             overwrite the existing value in the instance if it already
@@ -468,8 +475,8 @@ class Data2D(DataImage):
         Parameters
         ----------
         params : dict
-            Key : value pairs of user-specified parameters for this
-            data instance.
+            Key-value pairs of user-specified parameters for this data
+            instance.
         overwrite : bool
             If set to True, any parameters provided to this method will
             overwrite the existing value in this instance if it already
@@ -484,7 +491,7 @@ class Data2D(DataImage):
 
     def _reset_q_attributes(self):
         """
-        Reset all q_attributes to None.
+        Reset all q attributes to None.
         """
         q_attributes = ['qby_1d', 'qbx_1d',
                         'qb', 'qby', 'qbx', 'qbz',
@@ -502,7 +509,7 @@ class Data2D(DataImage):
         ----------
         suppress_errors : bool, optional
             If set to True, this method will try to calculate the
-            q vectors if the required metadata is availabe, but it
+            q vectors if the required metadata is available, but it
             will not raise an error if the parameters are not available.
             Default value is False.
         """
@@ -1038,11 +1045,6 @@ class Data2D(DataImage):
             Specifies the constant value used to fill pixels outside the
             image boundaries after rotation. Only applies when resampling_mode
             is set to 'constant'.
-        log_scale : bool, optional
-            Rotate the log-scale of your image. This could help resolve
-            some artifacts caused by certain rotation sampling algorithms
-            but you will lose any pixels that are negative (turned to nan).
-            Default value is False.
         use_pillow : bool, optional
             If set to True, the algorithm will use the PILLOW package
             image rotation function instead of sklearn.transform.rotate.
@@ -1093,6 +1095,17 @@ class Data2D(DataImage):
         A positive angle will appear as if the detector image had
         been rotated clockwise as this is a counterclockwise rotation
         about the positive z-axis.
+
+        Parameters
+        ----------
+        qsy0_angle : float
+            Angle in degrees of the line formed by peaks along qsy in
+            the detector image.
+
+        Returns
+        -------
+        float
+            Sample rotation angle omega in degrees.
         """
 
         phi = np.deg2rad(
@@ -1113,6 +1126,10 @@ class Data2D(DataImage):
         return np.rad2deg(omega_rad)
 
     def flip_horizontally(self):
+        """
+        Flip the scattering image horizontally and update the beam
+        center metadata and q values.
+        """
         super().flip_horizontally()
         center_px = self.metadata['center_px']
         self.metadata['center_px'] = (
@@ -1123,6 +1140,10 @@ class Data2D(DataImage):
         self.calculate_q(suppress_errors=True)
 
     def flip_vertically(self):
+        """
+        Flip the scattering image vertically and update the beam
+        center metadata and q values.
+        """
         super().flip_vertically()
         center_px = self.metadata['center_px']
         self.metadata['center_px'] = (
@@ -1349,6 +1370,15 @@ class Data2D(DataImage):
                 qsy
                 qsx
                 qsz
+
+        Returns
+        -------
+        tuple[int, int]
+            Half open range along axis 0 of the rectangular region of
+            interest.
+        tuple[int, int]
+            Half open range along axis 1 of the rectangular region of
+            interest.
         """
         invalid_kwargs = [x for x in ranges.keys()
                           if x not in ACCEPTED_Q_KEYWORDS]
@@ -1642,15 +1672,9 @@ class Data2D(DataImage):
             If no axis is provided, the function will assume the data
             should be integrated over the shorter box dimension.
         show_plot : bool, optional
-            If set to False, the scattering image overlaid with the
+            If set to True, the scattering image overlaid with the
             integration box boundaries will be shown in a first figure
             and the one-dimensional data will be shown in a second figure.
-            Default value is True.
-        log_scale : bool, optional
-            If set to True, the plots will show the scattering intensity
-            on a log scale. If set to False, intensity will be displayed
-            on a linear scale. This only applies to the plots and does
-            not affect the data operation.
             Default value is True.
         subtract_background_offset: int, list[int], optional
             If set to a number of pixels greater than or equal to the
@@ -1663,12 +1687,9 @@ class Data2D(DataImage):
             boxes will be used in the subtraction.
             Note that the integration mode for these boxes will align
             with the selected mode for this integration function.
-        interactive_plot : bool, optional
-            If set to True, the plots returned will be interactive plots
-            built via matplotlib. If set to False, the plots returned will be
-            static matplotlib figures.
-            TODO: currently this is disabled and only True is accepted.
-            Default value is True.
+        plotting_kwargs : dict, optional
+            Keyword arguments passed to the matplotlib plotting helper
+            used to generate the integration figure.
 
         Parameters for Box Refinement
         -----------------------------
@@ -1736,6 +1757,9 @@ class Data2D(DataImage):
         -------
         ReducedData1D
             One-dimensional I vs. q data extracted from the integration.
+        Figure | None
+            Matplotlib figure generated for the integration when
+            show_plot is True, otherwise None.
 
         """
 
@@ -1903,6 +1927,18 @@ class Data2D(DataImage):
         range_qdx_px : (min, max), optional
             Set the box pixel range along the horizontal axis of the
             detector (qdx). This is a half open range [min, max).
+        center_qdy : (keyword, value), optional
+            Center the horizontal positioning of the box at another
+            value other than qdy=0.
+            This assumes that qby and qsy align with the horizontal
+            image axis.
+            The keyword should be 'qby' or 'qsy'.
+        center_qdx : (keyword, value), optional
+            Center the vertical positioning of the box at another
+            value other than qdx=0.
+            This assumes that qbx and qsx align with the vertical
+            image axis.
+            The keyword should be 'qbx' or 'qsx'.
         shift_box_qdy_px : int, optional
             Number of pixels to shift the box by in the positive qdy
             direction. A negative value will shift the box in the
@@ -1931,6 +1967,9 @@ class Data2D(DataImage):
             Define the box size around the peaks in which to peform the
             Gaussian refinement.
             Default value is 7. Minimum value is 4.
+        plotting_kwargs : dict, optional
+            Keyword arguments passed to the matplotlib plotting helper
+            used to generate the peak-finding figure.
 
         Other Parameters
         ----------------
@@ -1962,6 +2001,9 @@ class Data2D(DataImage):
             will be returned for n number of peaks found. If the
             scattering vector has not yet been calculated, this will be
             None.
+        Figure | None
+            Matplotlib figure generated for the peak-finding result
+            when show_plot is True, otherwise None.
         """
         limits_qdy_px, limits_qdx_px = self.get_box_dims(
             width_qdy_px=width_qdy_px,
@@ -2203,6 +2245,9 @@ class Data2D(DataImage):
             will be returned for n number of peaks found. If the
             scattering vector has not yet been calculated, this will be
             None.
+        Figure | None
+            Matplotlib figure generated for the peak-finding result
+            when show_plot is True, otherwise None.
         """
 
         limits_qdy_px, limits_qdx_px = self.get_box_dims(
@@ -2400,10 +2445,13 @@ class Data2D(DataImage):
             If no beam_center_guess is provided, this method will use
             the existing beam_center_px which will result in an error
             if it is not close enough to the actual center.
-         exclude_q : tuple[float, float], optional
-             Exclude an inclusive region of q from the calculation. 
-             This is generally used to exclude the immediate region 
-             around the beamstop.
+        exclude_q : tuple[float, float], optional
+            Exclude an inclusive region of q from the calculation.
+            This is generally used to exclude the immediate region
+            around the beamstop.
+        ignore_peaks : list[int], optional
+            Peak indices to ignore after peak finding when estimating
+            the beam center.
              
         Parameters for Box Refinement
         -----------------------------
@@ -2470,6 +2518,9 @@ class Data2D(DataImage):
         -------
         tuple[float, float]
             Beam center coordinates in units of pixels, [px_dy, px_dx].
+        Figure | None
+            Matplotlib figure generated for the beam-center result
+            when show_plot is True, otherwise None.
         """
 
         if beam_center_guess is not None:
@@ -2641,10 +2692,13 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
-         exclude_q : tuple[float, float], optional
-             Exclude an inclusive region of q from the calculation. 
-             This is generally used to exclude the immediate region 
-             around the beamstop.
+        exclude_q : tuple[float, float], optional
+            Exclude an inclusive region of q from the calculation.
+            This is generally used to exclude the immediate region
+            around the beamstop.
+        ignore_orders : list[int], optional
+            Peak orders to ignore when estimating the sample detector
+            distance.
 
         Parameters for Box Refinement
         -----------------------------
@@ -2715,6 +2769,9 @@ class Data2D(DataImage):
         float
             Standard deviation of the average sample detector distance
             returned in units of cm.
+        Figure | None
+            Matplotlib figure generated for the SDD result when
+            show_plot is True, otherwise None.
         """
 
         box_dims = self.get_box_dims(
@@ -2839,10 +2896,10 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
-         exclude_q : tuple[float, float], optional
-             Exclude an inclusive region of q from the calculation. 
-             This is generally used to exclude the immediate region 
-             around the beamstop.
+        exclude_q : tuple[float, float], optional
+            Exclude an inclusive region of q from the calculation.
+            This is generally used to exclude the immediate region
+            around the beamstop.
 
         Parameters for Box Refinement
         -----------------------------
@@ -2989,6 +3046,7 @@ class Data2D(DataImage):
         shift_box_qdx_px=0,
         show_plot=True,
         zoom_plot=True,
+        exclude_q=None,
         **kwargs
     ):
         """
@@ -3018,6 +3076,10 @@ class Data2D(DataImage):
             extracted from the integration and vertical lines at each
             peak position. The determiend beam center will be shown
             with dashed red lines.
+        exclude_q : tuple[float, float], optional
+             Exclude an inclusive region of q from the calculation. 
+             This is generally used to exclude the immediate region 
+             around the beamstop.
             
         Parameters for Box Refinement
         -----------------------------
@@ -3115,6 +3177,7 @@ class Data2D(DataImage):
             range_qdy_px=limits_qdy_px,
             range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
+            exclude_q=exclude_q,
             show_plot=False,
             **kwargs
         )
