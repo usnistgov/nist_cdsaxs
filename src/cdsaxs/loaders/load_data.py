@@ -109,6 +109,59 @@ def filter_filenames(
     return filenames
 
 
+def _crop_loaded_image(image, crop_region):
+    if crop_region is None:
+        return image
+
+    if image.ndim != 2:
+        raise ValueError(
+            "crop_region can only be applied to 2D image arrays."
+        )
+
+    if not isinstance(crop_region, (tuple, list)) or len(crop_region) != 2:
+        raise ValueError(
+            "crop_region must be provided as ((row_start, row_stop), "
+            "(col_start, col_stop))."
+        )
+
+    slices = []
+    for axis_name, axis_region in zip(("rows", "columns"), crop_region):
+        if (
+            not isinstance(axis_region, (tuple, list))
+            or len(axis_region) != 2
+        ):
+            raise ValueError(
+                "crop_region must define start and stop bounds for both "
+                f"{axis_name}."
+            )
+
+        start, stop = axis_region
+        for bound_name, bound in zip(("start", "stop"), (start, stop)):
+            if bound is not None and not isinstance(bound, int):
+                raise ValueError(
+                    "crop_region bounds must be integers or None. "
+                    f"Received {bound_name}={bound!r} for {axis_name}."
+                )
+
+        slices.append(slice(start, stop))
+
+    return image[tuple(slices)]
+
+
+def _shift_center_px_for_crop(metadata, crop_region):
+    if crop_region is None or 'center_px' not in metadata:
+        return metadata
+
+    row_start = crop_region[0][0] if crop_region[0][0] is not None else 0
+    col_start = crop_region[1][0] if crop_region[1][0] is not None else 0
+    center_row, center_col = metadata['center_px']
+    metadata['center_px'] = (
+        center_row - row_start,
+        center_col - col_start,
+    )
+    return metadata
+
+
 def LoadData(
     filepath,
     metadata=None,
@@ -118,6 +171,7 @@ def LoadData(
     filetype=None,
     detector_type=None,
     beamline=None,
+    crop_region=None,
 ):
     """
     Create an instance of Data2D from a single data file.
@@ -151,6 +205,14 @@ def LoadData(
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+    crop_region : tuple[tuple[int | None, int | None],
+        tuple[int | None, int | None]], optional
+        Crop the raw image during loading using numpy row/column ordering:
+        ``((row_start, row_stop), (col_start, col_stop))``. For example,
+        bounds follow standard numpy slicing semantics where start is
+        included and stop is excluded. For example,
+        keeping the bottom 100 rows of a 200 x 400 image would use
+        ``((100, None), (None, None))``.
 
     Returns
     -------
@@ -277,24 +339,27 @@ def LoadData(
         )
 
     if filetype.lower() not in ['smi_h5', 'smi-h5']:
+        image = _crop_loaded_image(image, crop_region)
+        metadata = _shift_center_px_for_crop(metadata, crop_region)
         metadata['data_directory'] = os.path.dirname(data_filepath)
         metadata['filename'] = os.path.basename(data_filepath)
 
-    if name_pattern is not None and name is None:
-        name = loader_tools.generate_data_name_from_pattern(
-            name_pattern, metadata, user_params)
-        if name is not None:
-            metadata['name'] = name
+    if filetype.lower() not in ['smi_h5', 'smi-h5']:
+        if name_pattern is not None and name is None:
+            name = loader_tools.generate_data_name_from_pattern(
+                name_pattern, metadata, user_params)
+            if name is not None:
+                metadata['name'] = name
 
         return Data2D(
             image, **metadata, **user_params)
-    
 
     else:
         data2d_list = []
         for image, data_filepath, metadata_add in image_stack:
+            image = _crop_loaded_image(image, crop_region)
             temp_metadata = dict(metadata)
-            
+
             for key, value in metadata_add.items():
                 if key in temp_metadata.keys():
                     warnings.warn(
@@ -306,6 +371,11 @@ def LoadData(
                 else:
                     temp_metadata[key] = value
 
+            temp_metadata = _shift_center_px_for_crop(
+                temp_metadata,
+                crop_region,
+            )
+
             temp_metadata['data_directory'] = os.path.dirname(data_filepath)
             temp_metadata['filename'] = os.path.basename(data_filepath)
 
@@ -313,9 +383,9 @@ def LoadData(
                 new_name = loader_tools.generate_data_name_from_pattern(
                     name, temp_metadata, user_params)
                 temp_metadata['name'] = new_name
-            
+
             data2d_list.append(Data2D(image, **temp_metadata, **user_params))
-        
+
         return data2d_list
 
 
@@ -329,9 +399,10 @@ def LoadDataset(
     metadata=None,
     user_params=None,
     verbose=True,
-    filetype=None, 
+    filetype=None,
     detector_type=None,
     beamline=None,
+    crop_region=None,
 ):
     """
     General data loader to create a dataset from a CD-SAXS angle scan
@@ -415,6 +486,12 @@ def LoadDataset(
         header (or other location in the file depending on the type).
         Currently, the accepted detector types are:
             'Pilatus'
+    crop_region : tuple[tuple[int | None, int | None],
+        tuple[int | None, int | None]], optional
+        Crop each raw image during loading using numpy row/column
+        ordering: ``((row_start, row_stop), (col_start, col_stop))``.
+        Bounds follow standard numpy slicing semantics where start is
+        included and stop is excluded.
 
     Returns
     -------
@@ -494,6 +571,7 @@ def LoadDataset(
                 detector_type=detector_type,
                 beamline=beamline,
                 name_pattern=data_name_pattern,
+                crop_region=crop_region,
             )
             if isinstance(data, list):
                 for d in data:
@@ -520,7 +598,8 @@ def LoadDataset_MetadataCSV(
     verbose=True,
     filetype=None,
     detector_type=None,
-    data_name_pattern=None
+    data_name_pattern=None,
+    crop_region=None,
 ):
     """
     General data loader to create a dataset from a CD-SAXS angle scan
@@ -583,6 +662,12 @@ def LoadDataset_MetadataCSV(
         The data name would be for a sample at a phi rotation angle
         of 20 degrees:
             "Sample 4, Angle: 20 deg"
+    crop_region : tuple[tuple[int | None, int | None],
+        tuple[int | None, int | None]], optional
+        Crop each raw image during loading using numpy row/column
+        ordering: ``((row_start, row_stop), (col_start, col_stop))``.
+        Bounds follow standard numpy slicing semantics where start is
+        included and stop is excluded.
 
     Returns
     -------
@@ -627,6 +712,7 @@ def LoadDataset_MetadataCSV(
                 filetype=filetype,
                 detector_type=detector_type,
                 name_pattern=data_name_pattern,
+                crop_region=crop_region,
             )
 
             dataset.add_data(data)

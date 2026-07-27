@@ -145,6 +145,30 @@ class TestLoadData(unittest.TestCase):
                                 metadata={'name': 'Test Load Data Name'})
         self.assertEqual(data.name, "new name")
 
+    def test_crop_region(self):
+        crop_region = ((100, None), (None, None))
+        data = load_data.LoadData(
+            filepath=self.filepath,
+            detector_type='Pilatus',
+            metadata={'center_px': (150, 25)},
+            crop_region=crop_region,
+        )
+        image, _, _ = load_data.read_pilatus(self.filepath)
+        image[image < 0] = np.nan
+
+        np.testing.assert_array_almost_equal(
+            data.image,
+            image[100:, :],
+        )
+        self.assertTupleEqual(data.metadata['center_px'], (50, 25))
+
+    def test_crop_region_invalid(self):
+        with self.assertRaises(ValueError):
+            load_data.LoadData(
+                filepath=self.filepath,
+                crop_region=(100, None),
+            )
+
 
 class TestLoadDataset(unittest.TestCase):
 
@@ -164,6 +188,35 @@ class TestLoadDataset(unittest.TestCase):
 
     def test_dataset_name(self):
         self.assertEqual(self.dataset.name, "test dataset")
+
+    def test_crop_region(self):
+        crop_region = ((100, None), (None, None))
+        dataset = load_data.LoadDataset(
+            "cropped dataset",
+            self.data_directory,
+            filenames=[
+                "W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_"
+                "id857176_combined.tif",
+            ],
+            metadata={'center_px': (200, 200)},
+            crop_region=crop_region,
+            filetype='tif',
+            verbose=False,
+        )
+        data = next(iter(dataset.datas.values()))
+        image, _, _ = load_data.read_tiff(
+            os.path.join(
+                self.data_directory,
+                "W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_"
+                "id857176_combined.tif",
+            )
+        )
+
+        np.testing.assert_array_almost_equal(
+            data.image,
+            image[100:, :],
+        )
+        self.assertTupleEqual(data.metadata['center_px'], (100, 200))
 
     def test_datas_keys(self):
         keys = [
