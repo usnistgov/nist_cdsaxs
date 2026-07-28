@@ -17,6 +17,7 @@ from .detectors import read_pilatus
 from .filetypes import (
     read_tiff,
     read_nist_bin,
+    read_nist_edf,
     read_smi_h5
 )
 
@@ -139,6 +140,7 @@ def LoadData(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'nist-edf'
             'smi-h5'
     detector_type : str
         Specify the type of detector used to collect the image. This is
@@ -162,6 +164,10 @@ def LoadData(
             filetype = 'tiff'
         elif extension == 'bin':
             filetype = 'nist-bin'
+        elif extension == 'edf':
+            filetype = 'nist-edf'
+        elif extension == 'h5':
+            filetype == 'smi-h5'
         else:
             raise ValueError(
                 "Did not recognize the filtype extension:"
@@ -210,6 +216,20 @@ def LoadData(
         # handle negative values between detector panels in the images as nan
         image[image < 0] = np.nan
 
+    elif filetype.lower() in ['nist-edf', 'nist_edf']:
+        image, data_filepath, metadata_add = read_nist_edf(filepath=filepath)
+        for key, value in metadata_add.items():
+            if key in metadata.keys():
+                warnings.warn(
+                    f"Metadata for {key} was provided by the user and"
+                    "also extracted from the data files. I will not"
+                    "overwrite the information provided by the user"
+                    "but please make sure this is correct."
+                )
+            else:
+                metadata[key] = value
+        # handle negative values between detector panels in the images as nan
+        image[image < 0] = np.nan
     elif filetype.lower() in ['smi_h5', 'smi-h5']:
         image_stack = read_smi_h5(filepath=filepath)
         # handle negative values between detector panels in the images as nan
@@ -230,13 +250,12 @@ def LoadData(
 
         return Data2D(
             image, **metadata, **user_params)
-    
 
     else:
         data2d_list = []
         for image, data_filepath, metadata_add in image_stack:
             temp_metadata = dict(metadata)
-            
+
             for key, value in metadata_add.items():
                 if key in temp_metadata.keys():
                     warnings.warn(
@@ -255,9 +274,9 @@ def LoadData(
                 new_name = loader_tools.generate_data_name_from_pattern(
                     name, temp_metadata, user_params)
                 temp_metadata['name'] = new_name
-            
+
             data2d_list.append(Data2D(image, **temp_metadata, **user_params))
-        
+
         return data2d_list
 
 
@@ -349,6 +368,7 @@ def LoadDataset(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'nist-edf'
             'smi-h5'
     detector_type : str
         Specify the type of detector used to collect the image. This is
@@ -498,6 +518,7 @@ def LoadDataset_MetadataCSV(
         Currently, the accepted filetypes are:
             'tiff' or 'tif'
             'nist-bin'
+            'nist-edf'
     detector_type : str, optional
         Specify the type of detector used to collect the image. This is
         helpful if you know there is metadata stored in the file's

@@ -2,6 +2,7 @@ from datetime import datetime, date
 from zoneinfo import ZoneInfo
 import os
 
+import fabio as fabio
 import h5py
 import numpy as np
 from PIL import Image
@@ -95,6 +96,48 @@ def read_nist_bin(filepath):
     return image, filepath, metadata
 
 
+def read_nist_edf(filepath):
+    """
+    Load an image and metadata from the Xenocs Xeuss Pro instrument
+    at NIST that stores data in edf files.
+    """
+
+    filepath = loader_tools.clean_filepath(filepath=filepath)
+
+    # read image and header from the file
+    with fabio.open(filepath) as file:
+        image = file.data
+        header = file.header
+
+    # extact required information and insert into clean dictionary
+    metadata = {}
+    metadata['wavelength_nm'] = float(header['WaveLength']) * 1e9  # m to Ang
+    metadata['exposure_time_s'] = float(header['ExposureTime'])
+    metadata['pixel_size_um'] = float(header['PSize_1']) * 1e6  # m to um
+    metadata['sample_phi_deg'] = float(header['CD_Phi'])
+    metadata['sample_chi_deg'] = float(header['CD_Ry'])
+    metadata['sample_omega_deg'] = float(header['CD_Rx'])
+    metadata['center_px'] = (float(header["Center_2"]), float(header["Center_1"]))
+    metadata['sdd_cm'] = float(header["SampleDistance"]) * 1e2  # m to cm
+    try:
+        metadata['sample_reference'] = header["sample_reference"]
+    except:
+        pass
+    try:
+        metadata['sample_name'] = header['sample_name']
+    except:
+        pass
+    try:
+        metadata['sample_comment'] = header['sample_comment']
+    except:
+        pass
+    metadata['date'] = header["Date"]
+    metadata['sample_stage_x'] = float(header["x"])
+    metadata['sample_stage_y'] = float(header["z"])
+
+    return image, filepath, metadata
+
+    
 def read_smi_h5(filepath):
     """
     Load an image and metadata from an H5 file from the SMI beamline
@@ -104,6 +147,18 @@ def read_smi_h5(filepath):
     Parameters
     ----------
     filepath : str, path
+        Path to the bin file to be loaded.
+        The paired info file should be in the same directory and have
+        the same filename (apart from the different extension).
+
+    Returns
+    -------
+    NDArray
+        Two-dimensional numpy array that contains the image data.
+    str
+        Formatted filepath used to load the data.
+    dict
+        Dictionary with metadata keyword: value pairs.
         Path to the H5 file to be loaded.
 
     Returns
@@ -114,7 +169,7 @@ def read_smi_h5(filepath):
     """
 
     filepath = loader_tools.clean_filepath(filepath=filepath)
-
+    
     # load the entire scan
     scan = h5py.File(filepath, 'r')
 
