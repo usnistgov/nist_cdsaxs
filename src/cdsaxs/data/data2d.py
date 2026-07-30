@@ -2431,6 +2431,7 @@ class Data2D(DataImage):
             exclude_q=None,
             show_plot=True,
             zoom_plot=True,
+            refinement_size=7,
             ignore_peaks=[],
             **kwargs):
         """
@@ -2567,6 +2568,7 @@ class Data2D(DataImage):
             peak_axis=peak_axis,
             exclude_q=exclude_q,
             show_plot=False,
+            refinement_size=refinement_size,
             **kwargs
         )
 
@@ -2667,6 +2669,7 @@ class Data2D(DataImage):
             exclude_q=None,
             zoom_plot=True,
             ignore_orders=[],
+            refinement_size=7,
             **kwargs
     ):
         """
@@ -2815,6 +2818,7 @@ class Data2D(DataImage):
             peak_axis=peak_axis,
             exclude_q=exclude_q,
             show_plot=False,
+            refinement_size=refinement_size,
             **kwargs
         )
         # sort the peaks by index along peak_axis
