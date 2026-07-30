@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 from tqdm import tqdm
 
+from ..tools import bin_image
 from ..data.data2d import Data2D
 from ..data.dataset import Dataset
 from ..data.metadata import (
@@ -162,6 +163,49 @@ def _shift_center_px_for_crop(metadata, crop_region):
     return metadata
 
 
+def _bin_loaded_image(image, bin_size):
+    if bin_size is None:
+        return image
+
+    if isinstance(bin_size, bool) or not isinstance(bin_size, int) or bin_size < 1:
+        raise ValueError("bin_size must be a positive integer.")
+
+    if image.ndim != 2:
+        raise ValueError(
+            "bin_size can only be applied to 2D image arrays."
+        )
+
+    if bin_size == 1:
+        return image
+
+    binned_image, _ = bin_image(image, bin_size=bin_size)
+    return binned_image
+
+
+def _scale_metadata_for_bin_size(metadata, bin_size):
+    if bin_size is None:
+        return metadata
+
+    if 'center_px' in metadata:
+        center_row, center_col = metadata['center_px']
+        metadata['center_px'] = (
+            center_row / bin_size,
+            center_col / bin_size,
+        )
+
+    if 'center_px_detector' in metadata:
+        center_row, center_col = metadata['center_px_detector']
+        metadata['center_px_detector'] = (
+            center_row / bin_size,
+            center_col / bin_size,
+        )
+
+    if 'pixel_size_um' in metadata:
+        metadata['pixel_size_um'] = metadata['pixel_size_um'] * bin_size
+
+    return metadata
+
+
 def LoadData(
     filepath,
     metadata=None,
@@ -172,6 +216,7 @@ def LoadData(
     detector_type=None,
     beamline=None,
     crop_region=None,
+    bin_size=None,
     keep_raw_image=True,
 ):
     """
@@ -214,6 +259,11 @@ def LoadData(
         included and stop is excluded. For example,
         keeping the bottom 100 rows of a 200 x 400 image would use
         ``((100, None), (None, None))``.
+    bin_size : int, optional
+        Bin the image after any requested crop using square
+        ``bin_size x bin_size`` blocks summed with ``bin_image``.
+        If provided, pixel-based metadata such as ``center_px`` and
+        ``pixel_size_um`` are updated to match the binned image.
     keep_raw_image : bool, optional
         If True, retain a copy of the original image so reset_image()
         can restore the initial state. If False, the raw image is not
@@ -347,6 +397,8 @@ def LoadData(
     if filetype.lower() not in ['smi_h5', 'smi-h5']:
         image = _crop_loaded_image(image, crop_region)
         metadata = _shift_center_px_for_crop(metadata, crop_region)
+        image = _bin_loaded_image(image, bin_size)
+        metadata = _scale_metadata_for_bin_size(metadata, bin_size)
         metadata['data_directory'] = os.path.dirname(data_filepath)
         metadata['filename'] = os.path.basename(data_filepath)
 
@@ -387,6 +439,11 @@ def LoadData(
                 temp_metadata,
                 crop_region,
             )
+            image = _bin_loaded_image(image, bin_size)
+            temp_metadata = _scale_metadata_for_bin_size(
+                temp_metadata,
+                bin_size,
+            )
 
             temp_metadata['data_directory'] = os.path.dirname(data_filepath)
             temp_metadata['filename'] = os.path.basename(data_filepath)
@@ -425,6 +482,7 @@ def LoadDataset(
     detector_type=None,
     beamline=None,
     crop_region=None,
+    bin_size=None,
     keep_raw_image=True,
 ):
     """
@@ -515,6 +573,9 @@ def LoadDataset(
         ordering: ``((row_start, row_stop), (col_start, col_stop))``.
         Bounds follow standard numpy slicing semantics where start is
         included and stop is excluded.
+    bin_size : int, optional
+        Bin each image after any requested crop using square
+        ``bin_size x bin_size`` blocks summed with ``bin_image``.
     keep_raw_image : bool, optional
         If True, retain a copy of each original image so reset_image()
         can restore the initial state. If False, the raw image is not
@@ -600,6 +661,7 @@ def LoadDataset(
                 beamline=beamline,
                 name_pattern=data_name_pattern,
                 crop_region=crop_region,
+                bin_size=bin_size,
                 keep_raw_image=keep_raw_image,
             )
             if isinstance(data, list):
@@ -629,6 +691,7 @@ def LoadDataset_MetadataCSV(
     detector_type=None,
     data_name_pattern=None,
     crop_region=None,
+    bin_size=None,
     keep_raw_image=True,
 ):
     """
@@ -698,6 +761,9 @@ def LoadDataset_MetadataCSV(
         ordering: ``((row_start, row_stop), (col_start, col_stop))``.
         Bounds follow standard numpy slicing semantics where start is
         included and stop is excluded.
+    bin_size : int, optional
+        Bin each image after any requested crop using square
+        ``bin_size x bin_size`` blocks summed with ``bin_image``.
     keep_raw_image : bool, optional
         If True, retain a copy of each original image so reset_image()
         can restore the initial state. If False, the raw image is not
@@ -748,6 +814,7 @@ def LoadDataset_MetadataCSV(
                 detector_type=detector_type,
                 name_pattern=data_name_pattern,
                 crop_region=crop_region,
+                bin_size=bin_size,
                 keep_raw_image=keep_raw_image,
             )
 

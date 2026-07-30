@@ -5,6 +5,7 @@ import numpy as np
 
 import cdsaxs.loaders.load_data as load_data
 import cdsaxs.calculators as calculators
+from cdsaxs.tools import bin_image
 
 
 class TestFilterFilenames(unittest.TestCase):
@@ -169,6 +170,48 @@ class TestLoadData(unittest.TestCase):
                 crop_region=(100, None),
             )
 
+    def test_bin_size(self):
+        data = load_data.LoadData(
+            filepath=self.filepath,
+            detector_type='Pilatus',
+            bin_size=2,
+        )
+        image, _, _ = load_data.read_pilatus(self.filepath)
+        image[image < 0] = np.nan
+        expected_image, _ = bin_image(image, bin_size=2)
+
+        np.testing.assert_array_almost_equal(data.image, expected_image)
+
+    def test_bin_size_after_crop(self):
+        crop_region = ((100, 300), (50, 250))
+        data = load_data.LoadData(
+            filepath=self.filepath,
+            detector_type='Pilatus',
+            metadata={'center_px': (150, 125), 'pixel_size_um': 172},
+            crop_region=crop_region,
+            bin_size=2,
+        )
+        image, _, _ = load_data.read_pilatus(self.filepath)
+        image[image < 0] = np.nan
+        expected_image, _ = bin_image(image[100:300, 50:250], bin_size=2)
+
+        np.testing.assert_array_almost_equal(data.image, expected_image)
+        self.assertTupleEqual(data.metadata['center_px'], (25.0, 37.5))
+        self.assertEqual(data.metadata['pixel_size_um'], 344)
+
+    def test_bin_size_invalid(self):
+        with self.assertRaises(ValueError):
+            load_data.LoadData(
+                filepath=self.filepath,
+                bin_size=0,
+            )
+
+        with self.assertRaises(ValueError):
+            load_data.LoadData(
+                filepath=self.filepath,
+                bin_size=True,
+            )
+
     def test_keep_raw_image_false(self):
         data = load_data.LoadData(
             filepath=self.filepath,
@@ -225,6 +268,34 @@ class TestLoadDataset(unittest.TestCase):
             image[100:, :],
         )
         self.assertTupleEqual(data.metadata['center_px'], (100, 200))
+
+    def test_bin_size_after_crop(self):
+        dataset = load_data.LoadDataset(
+            "binned dataset",
+            self.data_directory,
+            filenames=[
+                "W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_"
+                "id857176_combined.tif",
+            ],
+            metadata={'center_px': (200, 200), 'pixel_size_um': 100},
+            crop_region=((100, 300), (50, 250)),
+            bin_size=2,
+            filetype='tif',
+            verbose=False,
+        )
+        data = next(iter(dataset.datas.values()))
+        image, _, _ = load_data.read_tiff(
+            os.path.join(
+                self.data_directory,
+                "W204_F2measure1_5.2m_16.1keV_num55_-05deg_bpm0.415_"
+                "id857176_combined.tif",
+            )
+        )
+        expected_image, _ = bin_image(image[100:300, 50:250], bin_size=2)
+
+        np.testing.assert_array_almost_equal(data.image, expected_image)
+        self.assertTupleEqual(data.metadata['center_px'], (50.0, 75.0))
+        self.assertEqual(data.metadata['pixel_size_um'], 200)
 
     def test_keep_raw_image_false(self):
         dataset = load_data.LoadDataset(
