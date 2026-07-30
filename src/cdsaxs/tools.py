@@ -931,3 +931,63 @@ def find_maximum_rectangular_roi(data):
 
     return (min0, max0), (min1, max1) #, height, width, area
 
+
+def bin_image(data, bin_size=2, mask=None):
+    """
+    Bin a 2D image by summing non-overlapping square blocks.
+
+    Parameters
+    ----------
+    data : ndarray
+        Two-dimensional image to bin. If either dimension is not divisible by
+        `bin_size`, rows at the bottom and columns at the right edge are
+        trimmed before binning.
+    bin_size : int, default=2
+        Width and height of each square bin in pixels.
+    mask : ndarray of bool, optional
+        Boolean mask with the same shape as `data`. Masked pixels are set to
+        `nan` before binning. A binned mask is returned in which a bin is
+        `True` if any pixel in that bin was masked.
+
+    Returns
+    -------
+    binned : ndarray
+        Binned image formed by summing each `bin_size x bin_size` block.
+        Because the sum uses NumPy's standard behavior, any `nan` value within
+        a block causes the corresponding binned value to be `nan`.
+    binned_mask : ndarray of bool or None
+        Binned mask with the same shape as `binned`, or None if `mask` was not
+        provided.
+
+    Raises
+    ------
+    ValueError
+        Raised if `mask` is provided and does not have the same shape as
+        `data`.
+    """
+    if mask is not None and mask.shape != data.shape:
+        raise ValueError("mask must have the same shape as data")
+
+    trimmed_rows = data.shape[0] - (data.shape[0] % bin_size)
+    trimmed_cols = data.shape[1] - (data.shape[1] % bin_size)
+    data = data[:trimmed_rows, :trimmed_cols]
+
+    row_bins = trimmed_rows // bin_size
+    col_bins = trimmed_cols // bin_size
+
+    if mask is not None:
+        mask = mask[:trimmed_rows, :trimmed_cols]
+        data = data.copy()
+        data[mask] = np.nan
+
+    reshaped = data.reshape(row_bins, bin_size, col_bins, bin_size)
+    binned = reshaped.sum(axis=(1, 3))
+
+    if mask is not None:
+        binned_mask = mask.reshape(
+            row_bins, bin_size, col_bins, bin_size
+        ).any(axis=(1, 3))
+    else:
+        binned_mask = None
+
+    return binned, binned_mask

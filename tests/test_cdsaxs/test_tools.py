@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from cdsaxs.tools import find_gaussian_peakloc, line_fit
+from cdsaxs.tools import bin_image, find_gaussian_peakloc, line_fit
 from cdsaxs.tools import gaussian_refine_peak_2D
 from cdsaxs.tools import find_peaks_2D, find_peaks_1D
 from cdsaxs.tools import find_peaks_2D_one_axis
@@ -10,6 +10,98 @@ from cdsaxs.tools import rotate_image
 
 
 class TestTools(unittest.TestCase):
+
+    def test_bin_image_mask_shape_mismatch(self):
+
+        data = np.ones((4, 4))
+        mask = np.zeros((3, 4), dtype=bool)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "mask must have the same shape as data",
+        ):
+            bin_image(data, mask=mask)
+
+    def test_bin_image_mask_does_not_modify_input(self):
+
+        data = np.arange(16, dtype=float).reshape(4, 4)
+        original = data.copy()
+        mask = np.zeros((4, 4), dtype=bool)
+        mask[1, 1] = True
+
+        binned, binned_mask = bin_image(data, bin_size=2, mask=mask)
+
+        np.testing.assert_array_equal(data, original)
+        self.assertTrue(np.isnan(binned[0, 0]))
+        np.testing.assert_array_equal(
+            binned_mask,
+            np.array([[True, False], [False, False]]),
+        )
+
+    def test_bin_image_without_mask_returns_expected_sums(self):
+
+        data = np.arange(1, 17, dtype=float).reshape(4, 4)
+
+        binned, binned_mask = bin_image(data, bin_size=2)
+
+        np.testing.assert_array_equal(
+            binned,
+            np.array([[14.0, 22.0], [46.0, 54.0]]),
+        )
+        self.assertIsNone(binned_mask)
+
+    def test_bin_image_trims_edges_before_binning(self):
+
+        data = np.arange(1, 31, dtype=float).reshape(5, 6)
+
+        binned, binned_mask = bin_image(data, bin_size=4)
+
+        np.testing.assert_array_equal(
+            binned,
+            np.array([[184.0]]),
+        )
+        self.assertIsNone(binned_mask)
+
+    def test_bin_image_masked_bins_nan_and_mask(self):
+
+        data = np.arange(1, 17, dtype=float).reshape(4, 4)
+        mask = np.zeros((4, 4), dtype=bool)
+        mask[0, 0] = True
+        mask[2, 3] = True
+
+        binned, binned_mask = bin_image(data, bin_size=2, mask=mask)
+
+        expected = np.array([[np.nan, 22.0], [46.0, np.nan]])
+        np.testing.assert_array_equal(np.isnan(binned), np.isnan(expected))
+        np.testing.assert_array_equal(
+            binned_mask,
+            np.array([[True, False], [False, True]]),
+        )
+        self.assertEqual(binned[0, 1], 22.0)
+        self.assertEqual(binned[1, 0], 46.0)
+
+    def test_bin_image_all_false_mask_matches_unmasked_result(self):
+
+        data = np.arange(1, 17, dtype=float).reshape(4, 4)
+        mask = np.zeros((4, 4), dtype=bool)
+
+        binned_unmasked, _ = bin_image(data, bin_size=2)
+        binned_masked, binned_mask = bin_image(data, bin_size=2, mask=mask)
+
+        np.testing.assert_array_equal(binned_masked, binned_unmasked)
+        np.testing.assert_array_equal(
+            binned_mask,
+            np.zeros((2, 2), dtype=bool),
+        )
+
+    def test_bin_image_full_image_bin_size_returns_single_sum(self):
+
+        data = np.arange(1, 17, dtype=float).reshape(4, 4)
+
+        binned, binned_mask = bin_image(data, bin_size=4)
+
+        np.testing.assert_array_equal(binned, np.array([[136.0]]))
+        self.assertIsNone(binned_mask)
 
     def test_find_gaussian_peakloc(self):
 
