@@ -374,6 +374,35 @@ class Dataset():
             data = self.datas[key]
             data.apply_substrate_absorption_correction()
 
+    def apply_polarization_correction(self, polarization, keys=None):
+        """
+        Parameters
+        ----------
+        polarization : str
+            Specify whether the system is p-polarized or s-polarized.
+            Accepted strings are "p" and "s".
+        """
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        if polarization.lower() not in ["p", "s"]:
+            raise ValueError(
+                "Did not recognize polarization; use 'p' or 's'."
+            )
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_polarization_correction(polarization=polarization)
+    
+    def apply_lorentz_correction(self, keys=None):
+
+        if keys is None:
+            keys = list(self.datas.keys())
+
+        for key in keys:
+            data = self.datas[key]
+            data.apply_lorentz_correction()
+
     def reset_all_data_intensity(self, keys=None):
         """
         Reset all normalization, scaling, adding and subtracting.

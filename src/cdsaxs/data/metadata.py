@@ -17,7 +17,7 @@ METADATA_KEYWORDS = [
     "sample_size_mm", "beam_center_mm", "beam_fwhm_mm",
     "substrate_thickness_um", "substrate_attenuation_coeff_um-1",
     "footprint_factor", "sample_size_factor",
-    "substrate_absorption_factor",
+    "substrate_absorption_factor", "lorentz_factor", "polarization_factor",
     "detector_phi_deg", "detector_phi0_deg", "detector_phi_scale",
     "detector_y_mm", "detector_y0_mm"
 
