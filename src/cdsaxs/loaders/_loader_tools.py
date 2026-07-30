@@ -178,8 +178,12 @@ def generate_data_name_from_pattern(data_name_pattern,
             key = new_name[start+1:stop]
             if key in metadata.keys():
                 value = metadata[key]
+                if isinstance(value, float):
+                    value = round(value, 2)
             elif key in user_params.keys():
                 value = user_params[key]
+                if isinstance(value, float):
+                    value = round(value, 2)
             else:
                 value = key
                 metadata_not_found.append(key)

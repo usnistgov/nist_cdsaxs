@@ -246,7 +246,9 @@ def LoadData(
         metadata['filename'] = os.path.basename(data_filepath)
 
         if name is not None:
-            metadata['name'] = name
+            new_name = loader_tools.generate_data_name_from_pattern(
+                name, metadata, user_params)
+            metadata['name'] = new_name
 
         return Data2D(
             image, **metadata, **user_params)
