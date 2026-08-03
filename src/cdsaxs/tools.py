@@ -13,6 +13,344 @@ from skimage import transform
 from .calculators import gaussian
 
 
+def _peak_q_from_geometry(
+        peak_positions,
+        beam_center_px,
+        sdd_cm,
+        pixel_size_um,
+        wavelength_nm):
+    """Calculate q magnitudes for peak positions from detector geometry."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+
+    radial_distance_cm = np.linalg.norm(
+        peak_positions - beam_center_px,
+        axis=1,
+    ) * pixel_size_um * 1e-4
+    theta = np.arctan2(radial_distance_cm, sdd_cm)
+    q = 4 * np.pi * np.sin(theta / 2) / wavelength_nm
+
+    return q
+
+
+def _fit_diffraction_direction(peak_positions):
+    """Estimate the diffraction-line direction from the peak cloud."""
+    centered_positions = np.asarray(peak_positions, dtype=float)
+    centered_positions = centered_positions - np.mean(centered_positions, axis=0)
+    _, _, vh = np.linalg.svd(centered_positions, full_matrices=False)
+    direction = vh[0]
+    if direction[1] < 0:
+        direction = -direction
+    return direction / np.linalg.norm(direction)
+
+
+def _score_sdd_candidate(
+        peak_positions,
+        beam_center_px,
+        sdd_cm,
+        pixel_size_um,
+        wavelength_nm,
+        pitch_nm,
+        diffraction_direction):
+    """Score how well a geometry candidate matches the signed q lattice."""
+    q = _peak_q_from_geometry(
+        peak_positions=peak_positions,
+        beam_center_px=beam_center_px,
+        sdd_cm=sdd_cm,
+        pixel_size_um=pixel_size_um,
+        wavelength_nm=wavelength_nm,
+    )
+    signed_distance_px = np.dot(
+        np.asarray(peak_positions, dtype=float) - beam_center_px,
+        diffraction_direction,
+    )
+    q_signed = np.sign(signed_distance_px) * q
+    q_spacing = 2 * np.pi / pitch_nm
+    order_float = q_signed / q_spacing
+    order_int = np.rint(order_float)
+    order_int = np.where(order_int == 0, 1, order_int)
+    q_model = q_spacing * order_int
+    residual = q_signed - q_model
+
+    return float(np.mean(residual**2)), order_int.astype(int), q_signed
+
+
+def _build_search_values(center_value, half_width, points, lower_bound=None,
+                         upper_bound=None):
+    """Create a bounded linear search grid around a center value."""
+    start = center_value - half_width
+    stop = center_value + half_width
+    if lower_bound is not None:
+        start = max(start, lower_bound)
+    if upper_bound is not None:
+        stop = min(stop, upper_bound)
+    if points <= 1 or np.isclose(start, stop):
+        return np.array([(start + stop) / 2])
+    return np.linspace(start, stop, int(points))
+
+
+def estimate_sample_detector_distance(
+        peak_positions,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um,
+        beam_center_guess_px=None,
+        beam_center_search_radius_px=None,
+        sdd_search_range_cm=(1.0, 1000.0),
+        coarse_grid_points=31,
+    fine_grid_points=31,
+    return_details=False):
+    """
+    Estimate sample-to-detector distance from diffraction peak positions.
+
+    Parameters
+    ----------
+    peak_positions : ndarray
+        Peak coordinates with shape (n, 2) where each row is
+        [row_position, column_position].
+    pitch_nm : float
+        Sample pitch in nanometers.
+    wavelength_nm : float
+        X-ray wavelength in nanometers.
+    pixel_size_um : float
+        Detector pixel size in microns.
+    beam_center_guess_px : tuple | list | ndarray, optional
+        Initial guess for the beam center as [row, column] in pixels.
+        If omitted, the mean of the peak positions is used.
+    beam_center_search_radius_px : float | tuple, optional
+        Search half-width in pixels around the beam center guess.
+        If a scalar is provided, the same radius is used for row and
+        column. If omitted, the search radius is based on the peak span.
+    sdd_search_range_cm : tuple, optional
+        Inclusive search range for sample-to-detector distance in cm as
+        (minimum, maximum).
+    coarse_grid_points : int, optional
+        Number of grid points per dimension for the coarse search.
+    fine_grid_points : int, optional
+        Number of grid points per dimension for the fine search.
+    return_details : bool, optional
+        If set to True, also return a dictionary with the fitted beam
+        center, assigned diffraction orders, fitted q values, and fit
+        score.
+
+    Returns
+    -------
+    sdd_cm : float
+        Estimated sample-to-detector distance in cm.
+    uncertainty_cm : float
+        Estimated uncertainty in sample-to-detector distance in cm.
+    details : dict, optional
+        Returned only when return_details is True. Contains
+        ``beam_center_px``, ``orders``, ``q_values_nm_inverse``, and
+        ``score``.
+
+    Examples
+    --------
+    >>> sdd_cm, uncertainty_cm = estimate_sample_detector_distance(
+    ...     peak_positions=peaks,
+    ...     pitch_nm=80.0,
+    ...     wavelength_nm=0.1,
+    ...     pixel_size_um=75.0,
+    ... )
+    >>> sdd_cm, uncertainty_cm, details = estimate_sample_detector_distance(
+    ...     peak_positions=peaks,
+    ...     pitch_nm=80.0,
+    ...     wavelength_nm=0.1,
+    ...     pixel_size_um=75.0,
+    ...     return_details=True,
+    ... )
+    >>> details["beam_center_px"]
+    """
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    if peak_positions.ndim != 2 or peak_positions.shape[1] != 2:
+        raise ValueError(
+            "peak_positions must be a 2D array with shape (n_peaks, 2)."
+        )
+    if peak_positions.shape[0] < 2:
+        raise ValueError("At least two peak positions are required.")
+    if pitch_nm <= 0 or wavelength_nm <= 0 or pixel_size_um <= 0:
+        raise ValueError(
+            "pitch_nm, wavelength_nm, and pixel_size_um must be positive."
+        )
+
+    sdd_min_cm, sdd_max_cm = map(float, sdd_search_range_cm)
+    if sdd_min_cm <= 0 or sdd_max_cm <= sdd_min_cm:
+        raise ValueError(
+            "sdd_search_range_cm must contain positive increasing values."
+        )
+
+    if beam_center_guess_px is None:
+        beam_center_guess_px = np.mean(peak_positions, axis=0)
+    else:
+        beam_center_guess_px = np.asarray(beam_center_guess_px, dtype=float)
+        if beam_center_guess_px.shape != (2,):
+            raise ValueError(
+                "beam_center_guess_px must contain [row, column]."
+            )
+
+    peak_span = np.ptp(peak_positions, axis=0)
+    default_radius = max(float(np.max(peak_span)) / 2, 2.0)
+    if beam_center_search_radius_px is None:
+        beam_center_search_radius_px = (default_radius, default_radius)
+    elif np.isscalar(beam_center_search_radius_px):
+        beam_center_search_radius_px = (
+            float(beam_center_search_radius_px),
+            float(beam_center_search_radius_px),
+        )
+    else:
+        beam_center_search_radius_px = tuple(beam_center_search_radius_px)
+        if len(beam_center_search_radius_px) != 2:
+            raise ValueError(
+                "beam_center_search_radius_px must be a scalar or length 2."
+            )
+
+    row_bounds = (
+        float(np.min(peak_positions[:, 0]) - peak_span[0]),
+        float(np.max(peak_positions[:, 0]) + peak_span[0]),
+    )
+    col_bounds = (
+        float(np.min(peak_positions[:, 1]) - peak_span[1]),
+        float(np.max(peak_positions[:, 1]) + peak_span[1]),
+    )
+    diffraction_direction = _fit_diffraction_direction(peak_positions)
+
+    best = None
+    search_specs = [
+        (
+            coarse_grid_points,
+            beam_center_search_radius_px,
+            (sdd_min_cm, sdd_max_cm),
+        ),
+        (
+            fine_grid_points,
+            (
+                max(beam_center_search_radius_px[0] / 4, 0.5),
+                max(beam_center_search_radius_px[1] / 4, 0.5),
+            ),
+            None,
+        ),
+    ]
+
+    for grid_points, center_radius, sdd_bounds in search_specs:
+        if best is None:
+            center_seed = beam_center_guess_px
+            sdd_seed = (sdd_min_cm + sdd_max_cm) / 2
+            sdd_half_width = (sdd_max_cm - sdd_min_cm) / 2
+        else:
+            center_seed = best["beam_center_px"]
+            sdd_seed = best["sdd_cm"]
+            sdd_half_width = max(best["sdd_half_width_cm"] / 4, 0.25)
+
+        if sdd_bounds is None:
+            sdd_bounds = (
+                max(sdd_min_cm, sdd_seed - sdd_half_width),
+                min(sdd_max_cm, sdd_seed + sdd_half_width),
+            )
+
+        row_values = _build_search_values(
+            center_value=center_seed[0],
+            half_width=center_radius[0],
+            points=grid_points,
+            lower_bound=row_bounds[0],
+            upper_bound=row_bounds[1],
+        )
+        col_values = _build_search_values(
+            center_value=center_seed[1],
+            half_width=center_radius[1],
+            points=grid_points,
+            lower_bound=col_bounds[0],
+            upper_bound=col_bounds[1],
+        )
+        sdd_values = np.linspace(
+            sdd_bounds[0],
+            sdd_bounds[1],
+            int(grid_points),
+        )
+
+        for row_center in row_values:
+            for col_center in col_values:
+                beam_center_px = np.array(
+                    [row_center, col_center],
+                    dtype=float,
+                )
+                for sdd_cm in sdd_values:
+                    score, orders, q = _score_sdd_candidate(
+                        peak_positions=peak_positions,
+                        beam_center_px=beam_center_px,
+                        sdd_cm=sdd_cm,
+                        pixel_size_um=pixel_size_um,
+                        wavelength_nm=wavelength_nm,
+                        pitch_nm=pitch_nm,
+                        diffraction_direction=diffraction_direction,
+                    )
+                    if best is None or score < best["score"]:
+                        best = {
+                            "score": score,
+                            "beam_center_px": beam_center_px,
+                            "sdd_cm": float(sdd_cm),
+                            "orders": orders,
+                            "q": q,
+                            "diffraction_direction": diffraction_direction,
+                            "sdd_half_width_cm": max(
+                                (sdd_bounds[1] - sdd_bounds[0]) / 2,
+                                0.25,
+                            ),
+                        }
+
+    sdd_probe_half_width = max(best["sdd_half_width_cm"] / 4, 0.25)
+    sdd_probe_values = _build_search_values(
+        center_value=best["sdd_cm"],
+        half_width=sdd_probe_half_width,
+        points=max(fine_grid_points, 11),
+        lower_bound=sdd_min_cm,
+        upper_bound=sdd_max_cm,
+    )
+    sdd_scores = []
+    for sdd_cm in sdd_probe_values:
+        score, _, _ = _score_sdd_candidate(
+            peak_positions=peak_positions,
+            beam_center_px=best["beam_center_px"],
+            sdd_cm=sdd_cm,
+            pixel_size_um=pixel_size_um,
+            wavelength_nm=wavelength_nm,
+            pitch_nm=pitch_nm,
+            diffraction_direction=diffraction_direction,
+        )
+        sdd_scores.append(score)
+    sdd_scores = np.asarray(sdd_scores)
+    min_score = float(np.min(sdd_scores))
+    threshold = min_score + max(min_score * 0.1, 1e-12)
+    within_threshold = sdd_probe_values[sdd_scores <= threshold]
+    if within_threshold.size >= 2:
+        uncertainty_cm = float(
+            (within_threshold[-1] - within_threshold[0]) / 2
+        )
+    else:
+        step_size = (
+            np.min(np.diff(sdd_probe_values)) / 2
+            if sdd_probe_values.size > 1 else 0.25
+        )
+        uncertainty_cm = float(
+            max(
+                step_size,
+                0.01,
+            )
+        )
+
+    if not return_details:
+        return best["sdd_cm"], uncertainty_cm
+
+    details = {
+        "beam_center_px": tuple(best["beam_center_px"]),
+        "orders": best["orders"].copy(),
+        "q_values_nm_inverse": best["q"].copy(),
+        "score": best["score"],
+        "diffraction_direction": best["diffraction_direction"].copy(),
+    }
+
+    return best["sdd_cm"], uncertainty_cm, details
+
+
 def default_mask(data):
 
     """

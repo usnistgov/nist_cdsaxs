@@ -6,10 +6,35 @@ from cdsaxs.tools import find_gaussian_peakloc, line_fit
 from cdsaxs.tools import gaussian_refine_peak_2D
 from cdsaxs.tools import find_peaks_2D, find_peaks_1D
 from cdsaxs.tools import find_peaks_2D_one_axis
+from cdsaxs.tools import estimate_sample_detector_distance
 from cdsaxs.tools import rotate_image
 
 
 class TestTools(unittest.TestCase):
+
+    @staticmethod
+    def _generate_rotated_peak_positions(
+            beam_center_px,
+            sdd_cm,
+            pitch_nm,
+            wavelength_nm,
+            pixel_size_um,
+            orders,
+            angle_deg):
+        q_spacing = 2 * np.pi / pitch_nm
+        angle_rad = np.deg2rad(angle_deg)
+        direction = np.array([np.sin(angle_rad), np.cos(angle_rad)])
+        peak_positions = []
+        for order in orders:
+            q = q_spacing * order
+            theta = 2 * np.arcsin(q * wavelength_nm / (4 * np.pi))
+            radial_distance_cm = sdd_cm * np.tan(theta)
+            radial_distance_px = radial_distance_cm * 1e4 / pixel_size_um
+            peak_positions.append(
+                np.asarray(beam_center_px, dtype=float)
+                + radial_distance_px * direction
+            )
+        return np.asarray(peak_positions)
 
     def test_find_gaussian_peakloc(self):
 
@@ -274,3 +299,67 @@ class TestTools(unittest.TestCase):
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=3)
+
+    def test_estimate_sample_detector_distance_rotated_axis(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        peak_positions = self._generate_rotated_peak_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            orders=[-3, -2, -1, 1, 2, 3],
+            angle_deg=33.0,
+        )
+
+        sdd_fit_cm, uncertainty_cm, details = estimate_sample_detector_distance(
+            peak_positions=peak_positions,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            beam_center_guess_px=(101.0, 90.0),
+            beam_center_search_radius_px=20.0,
+            sdd_search_range_cm=(150.0, 260.0),
+            coarse_grid_points=21,
+            fine_grid_points=21,
+            return_details=True,
+        )
+
+        self.assertAlmostEqual(sdd_fit_cm, sdd_cm, delta=3.0)
+        self.assertGreater(uncertainty_cm, 0)
+        self.assertEqual(details["orders"].tolist(), [-3, -2, -1, 1, 2, 3])
+        q_spacing = 2 * np.pi / pitch_nm
+        np.testing.assert_allclose(
+            details["q_values_nm_inverse"],
+            q_spacing * np.array([-3, -2, -1, 1, 2, 3]),
+            atol=5e-4,
+        )
+        self.assertAlmostEqual(
+            details["beam_center_px"][0],
+            beam_center_px[0],
+            delta=2.0,
+        )
+        self.assertAlmostEqual(
+            details["beam_center_px"][1],
+            beam_center_px[1],
+            delta=2.0,
+        )
+        self.assertAlmostEqual(
+            np.linalg.norm(details["diffraction_direction"]),
+            1.0,
+            places=6,
+        )
+        self.assertGreaterEqual(details["score"], 0)
+
+    def test_estimate_sample_detector_distance_input_validation(self):
+        with self.assertRaises(ValueError):
+            estimate_sample_detector_distance(
+                peak_positions=np.array([1.0, 2.0]),
+                pitch_nm=80.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+            )
