@@ -7,6 +7,9 @@ from cdsaxs.tools import gaussian_refine_peak_2D
 from cdsaxs.tools import find_peaks_2D, find_peaks_1D
 from cdsaxs.tools import find_peaks_2D_one_axis
 from cdsaxs.tools import estimate_sample_detector_distance
+from cdsaxs.tools import estimate_sample_detector_distance_from_rings
+from cdsaxs.tools import estimate_sample_detector_distance_from_ring_sectors
+from cdsaxs.tools import _score_sdd_ring_candidate
 from cdsaxs.tools import rotate_image
 
 
@@ -35,6 +38,84 @@ class TestTools(unittest.TestCase):
                 + radial_distance_px * direction
             )
         return np.asarray(peak_positions)
+
+    @staticmethod
+    def _generate_peak_image(shape, peak_positions, sigma_px=1.2,
+                             amplitude=100.0, background=1.0):
+        row_grid, col_grid = np.indices(shape, dtype=float)
+        image = np.full(shape, background, dtype=float)
+        for row_peak, col_peak in peak_positions:
+            exponent = (
+                ((row_grid - row_peak) ** 2) / (2 * sigma_px ** 2)
+                + ((col_grid - col_peak) ** 2) / (2 * sigma_px ** 2)
+            )
+            image += amplitude * np.exp(-exponent)
+        return image
+
+    @staticmethod
+    def _generate_ring_sample_positions(
+            beam_center_px,
+            sdd_cm,
+            pitch_nm,
+            wavelength_nm,
+            pixel_size_um,
+            ring_indices,
+            angles_deg):
+        q_spacing = 2 * np.pi / pitch_nm
+        peak_positions = []
+        for ring_index in ring_indices:
+            q = q_spacing * ring_index
+            theta = 2 * np.arcsin(q * wavelength_nm / (4 * np.pi))
+            radial_distance_cm = sdd_cm * np.tan(theta)
+            radial_distance_px = radial_distance_cm * 1e4 / pixel_size_um
+            for angle_deg in angles_deg:
+                angle_rad = np.deg2rad(angle_deg)
+                direction = np.array([
+                    np.sin(angle_rad),
+                    np.cos(angle_rad),
+                ])
+                peak_positions.append(
+                    np.asarray(beam_center_px, dtype=float)
+                    + radial_distance_px * direction
+                )
+        return np.asarray(peak_positions)
+
+    @staticmethod
+    def _generate_ring_arc_image(
+            shape,
+            beam_center_px,
+            peak_positions,
+            radial_sigma_px=1.2,
+            tangential_sigma_px=6.0,
+            amplitude=100.0,
+            background=1.0):
+        row_grid, col_grid = np.indices(shape, dtype=float)
+        image = np.full(shape, background, dtype=float)
+        beam_center_px = np.asarray(beam_center_px, dtype=float)
+
+        for row_peak, col_peak in peak_positions:
+            peak_position = np.asarray([row_peak, col_peak], dtype=float)
+            radial_vector = peak_position - beam_center_px
+            radial_norm = np.linalg.norm(radial_vector)
+            radial_unit = radial_vector / radial_norm
+            tangential_unit = np.array([-radial_unit[1], radial_unit[0]])
+
+            delta_row = row_grid - row_peak
+            delta_col = col_grid - col_peak
+            radial_offset = (
+                delta_row * radial_unit[0] + delta_col * radial_unit[1]
+            )
+            tangential_offset = (
+                delta_row * tangential_unit[0]
+                + delta_col * tangential_unit[1]
+            )
+            exponent = (
+                (radial_offset ** 2) / (2 * radial_sigma_px ** 2)
+                + (tangential_offset ** 2) / (2 * tangential_sigma_px ** 2)
+            )
+            image += amplitude * np.exp(-exponent)
+
+        return image
 
     def test_find_gaussian_peakloc(self):
 
@@ -315,8 +396,10 @@ class TestTools(unittest.TestCase):
             orders=[-3, -2, -1, 1, 2, 3],
             angle_deg=33.0,
         )
+        image = self._generate_peak_image((220, 220), peak_positions)
 
         sdd_fit_cm, uncertainty_cm, details = estimate_sample_detector_distance(
+            image=image,
             peak_positions=peak_positions,
             pitch_nm=pitch_nm,
             wavelength_nm=wavelength_nm,
@@ -354,12 +437,446 @@ class TestTools(unittest.TestCase):
             places=6,
         )
         self.assertGreaterEqual(details["score"], 0)
+        self.assertEqual(details["peak_position_uncertainty_px"].shape, (6,))
+        self.assertTrue(np.all(details["peak_position_uncertainty_px"] > 0))
+
+    def test_estimate_sample_detector_distance_refine_with_orders(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        peak_positions = self._generate_rotated_peak_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            orders=[-3, -2, -1, 1, 2, 3],
+            angle_deg=33.0,
+        )
+        image = self._generate_peak_image((220, 220), peak_positions)
+
+        sdd_fit_cm, uncertainty_cm, details = estimate_sample_detector_distance(
+            image=image,
+            peak_positions=peak_positions,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            beam_center_guess_px=(101.0, 90.0),
+            beam_center_search_radius_px=20.0,
+            sdd_search_range_cm=(150.0, 260.0),
+            coarse_grid_points=21,
+            fine_grid_points=21,
+            return_details=True,
+        )
+
+        self.assertAlmostEqual(sdd_fit_cm, sdd_cm, delta=1.0)
+        self.assertTrue(np.isfinite(uncertainty_cm))
+        self.assertAlmostEqual(
+            uncertainty_cm,
+            details["standard_uncertainty_cm"],
+            places=12,
+        )
+        self.assertAlmostEqual(details["grid_sdd_cm"], sdd_cm, delta=3.0)
+        self.assertGreater(details["grid_uncertainty_cm"], 0)
+
+    def test_estimate_sample_detector_distance_resolution_weighting(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        peak_positions = self._generate_rotated_peak_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            orders=[-3, -2, -1, 1, 2, 3],
+            angle_deg=33.0,
+        )
+        image = self._generate_peak_image((220, 220), peak_positions)
+
+        _, uncertainty_cm, details = estimate_sample_detector_distance(
+            image=image,
+            peak_positions=peak_positions,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            beam_center_guess_px=(101.0, 90.0),
+            beam_center_search_radius_px=20.0,
+            sdd_search_range_cm=(150.0, 260.0),
+            coarse_grid_points=21,
+            fine_grid_points=21,
+            return_details=True,
+        )
+
+        self.assertTrue(np.isfinite(uncertainty_cm))
+        self.assertAlmostEqual(
+            uncertainty_cm,
+            details["standard_uncertainty_cm"],
+            places=12,
+        )
+        self.assertEqual(details["fitted_peak_positions_px"].shape, (6, 2))
+        self.assertTrue(np.all(details["peak_position_uncertainty_px"] > 0))
 
     def test_estimate_sample_detector_distance_input_validation(self):
         with self.assertRaises(ValueError):
             estimate_sample_detector_distance(
+                image=np.ones((10, 10)),
                 peak_positions=np.array([1.0, 2.0]),
                 pitch_nm=80.0,
                 wavelength_nm=0.1,
                 pixel_size_um=75.0,
+            )
+
+    def test_estimate_sample_detector_distance_from_rings(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        peak_positions = self._generate_ring_sample_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            ring_indices=[1, 2, 3],
+            angles_deg=[15.0, 75.0, 135.0, 255.0],
+        )
+        image = self._generate_peak_image((220, 220), peak_positions)
+
+        sdd_fit_cm, uncertainty_cm, details = (
+            estimate_sample_detector_distance_from_rings(
+                image=image,
+                peak_positions=peak_positions,
+                pitch_nm=pitch_nm,
+                wavelength_nm=wavelength_nm,
+                pixel_size_um=pixel_size_um,
+                beam_center_guess_px=(100.0, 90.0),
+                beam_center_search_radius_px=20.0,
+                sdd_search_range_cm=(150.0, 260.0),
+                coarse_grid_points=21,
+                fine_grid_points=21,
+                return_details=True,
+            )
+        )
+
+        self.assertAlmostEqual(sdd_fit_cm, sdd_cm, delta=3.0)
+        self.assertGreater(uncertainty_cm, 0)
+        self.assertTrue(np.isfinite(uncertainty_cm))
+        self.assertAlmostEqual(
+            details["beam_center_px"][0],
+            beam_center_px[0],
+            delta=2.0,
+        )
+        self.assertAlmostEqual(
+            details["beam_center_px"][1],
+            beam_center_px[1],
+            delta=2.0,
+        )
+        self.assertEqual(details["ring_indices"].shape, (12,))
+        self.assertTrue(np.all(details["ring_indices"] >= 1))
+        self.assertNotIn("orders", details)
+        self.assertEqual(details["radial_distances_px"].shape, (12,))
+        self.assertEqual(details["peak_position_uncertainty_px"].shape, (12,))
+        self.assertTrue(np.all(details["peak_position_uncertainty_px"] > 0))
+        self.assertAlmostEqual(
+            uncertainty_cm,
+            details["standard_uncertainty_cm"],
+            places=12,
+        )
+
+    def test_estimate_sample_detector_distance_from_rings_repeated_ring(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        peak_positions = self._generate_ring_sample_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            ring_indices=[1, 1, 2, 2, 3, 3],
+            angles_deg=[0.0, 90.0],
+        )
+        image = self._generate_peak_image((220, 220), peak_positions)
+
+        _, uncertainty_cm, details = estimate_sample_detector_distance_from_rings(
+            image=image,
+            peak_positions=peak_positions,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            beam_center_guess_px=(100.0, 90.0),
+            beam_center_search_radius_px=20.0,
+            sdd_search_range_cm=(150.0, 260.0),
+            coarse_grid_points=21,
+            fine_grid_points=21,
+            minimum_ring_uncertainty_px=0.25,
+            return_details=True,
+        )
+
+        self.assertTrue(np.isfinite(uncertainty_cm))
+        self.assertEqual(details["aggregated_ring_indices"].shape, (3,))
+        self.assertTrue(
+            np.all(details["aggregated_peak_position_uncertainty_px"] >= 0.25)
+        )
+
+    def test_score_sdd_ring_candidate_excludes_sparse_outliers(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        peak_positions = self._generate_ring_sample_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            ring_indices=[1, 2, 3],
+            angles_deg=[15.0, 75.0, 135.0, 255.0],
+        )
+        q_spacing = 2 * np.pi / pitch_nm
+        outer_q_1 = 4.0 * q_spacing
+        outer_q_2 = 5.0 * q_spacing
+
+        def q_to_position(q_value, angle_deg):
+            theta = 2 * np.arcsin(q_value * wavelength_nm / (4 * np.pi))
+            radial_distance_cm = sdd_cm * np.tan(theta)
+            radial_distance_px = radial_distance_cm * 1e4 / pixel_size_um
+            angle_rad = np.deg2rad(angle_deg)
+            direction = np.array([np.sin(angle_rad), np.cos(angle_rad)])
+            return beam_center_px + radial_distance_px * direction
+
+        outlier_positions = np.asarray([
+            q_to_position(outer_q_1, 40.0),
+            q_to_position(outer_q_2, 210.0),
+        ])
+        peak_positions = np.vstack([peak_positions, outlier_positions])
+        score, ring_indices, _, supported_mask = _score_sdd_ring_candidate(
+            peak_positions=peak_positions,
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pixel_size_um=pixel_size_um,
+            wavelength_nm=wavelength_nm,
+            pitch_nm=pitch_nm,
+        )
+
+        self.assertGreaterEqual(score, 0.0)
+        self.assertEqual(ring_indices.shape, (14,))
+        self.assertEqual(supported_mask.shape, (14,))
+        self.assertEqual(np.count_nonzero(~supported_mask), 2)
+        self.assertEqual(np.count_nonzero(ring_indices == 1), 4)
+        self.assertEqual(np.count_nonzero(ring_indices == 2), 4)
+        self.assertEqual(np.count_nonzero(ring_indices == 3), 4)
+        self.assertEqual(np.count_nonzero(ring_indices == 4), 1)
+        self.assertEqual(np.count_nonzero(ring_indices == 5), 1)
+
+    def test_estimate_sample_detector_distance_from_rings_arc_segments(self):
+        beam_center_px = np.array([110.0, 110.0])
+        sdd_cm = 12.5
+        pitch_nm = 80.0
+        wavelength_nm = 0.154
+        pixel_size_um = 75.0
+        ring_indices = np.array([1, 2, 3])
+        angles_deg = [-35.0, -10.0, 20.0]
+
+        peak_positions = self._generate_ring_sample_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            ring_indices=ring_indices,
+            angles_deg=angles_deg,
+        )
+        image = self._generate_ring_arc_image(
+            shape=(240, 240),
+            beam_center_px=beam_center_px,
+            peak_positions=peak_positions,
+        )
+
+        estimated_sdd_cm, _, details = estimate_sample_detector_distance_from_rings(
+            image=image,
+            peak_positions=peak_positions,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            beam_center_guess_px=beam_center_px,
+            beam_center_search_radius_px=0.0,
+            return_details=True,
+        )
+
+        self.assertAlmostEqual(estimated_sdd_cm, sdd_cm, delta=0.3)
+        self.assertTrue(np.all(np.isfinite(details["peak_position_uncertainty_px"])))
+        self.assertTrue(np.all(details["peak_position_uncertainty_px"] > 0))
+        self.assertTrue(np.all(details["radial_fit_success"]))
+
+    def test_estimate_sample_detector_distance_from_ring_sectors(self):
+        beam_center_px = np.array([110.0, 110.0])
+        sdd_cm = 12.5
+        pitch_nm = 80.0
+        wavelength_nm = 0.154
+        pixel_size_um = 75.0
+        ring_indices = [1, 2, 3]
+        angles_deg = np.arange(0.0, 360.0, 10.0)
+
+        peak_positions = self._generate_ring_sample_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            ring_indices=ring_indices,
+            angles_deg=angles_deg,
+        )
+        image = self._generate_ring_arc_image(
+            shape=(240, 240),
+            beam_center_px=beam_center_px,
+            peak_positions=peak_positions,
+            radial_sigma_px=1.0,
+            tangential_sigma_px=8.0,
+        )
+
+        estimated_sdd_cm, uncertainty_cm, details = (
+            estimate_sample_detector_distance_from_ring_sectors(
+                image=image,
+                beam_center_guess_px=(108.0, 112.0),
+                sdd_guess_cm=13.0,
+                pitch_nm=pitch_nm,
+                wavelength_nm=wavelength_nm,
+                pixel_size_um=pixel_size_um,
+                ring_indices=ring_indices,
+                sector_step_deg=10.0,
+                sector_width_deg=10.0,
+                radial_window_px=6.0,
+                beam_center_search_radius_px=4.0,
+                sdd_search_half_width_cm=2.0,
+                coarse_grid_points=9,
+                fine_grid_points=9,
+                return_details=True,
+            )
+        )
+
+        self.assertAlmostEqual(estimated_sdd_cm, sdd_cm, delta=0.6)
+        self.assertTrue(np.isfinite(uncertainty_cm))
+        self.assertAlmostEqual(
+            details["beam_center_px"][0],
+            beam_center_px[0],
+            delta=2.0,
+        )
+        self.assertAlmostEqual(
+            details["beam_center_px"][1],
+            beam_center_px[1],
+            delta=2.0,
+        )
+        self.assertGreater(details["fitted_peak_positions_px"].shape[0], 10)
+        self.assertEqual(
+            details["fitted_peak_positions_px"].shape[0],
+            details["ring_indices"].shape[0],
+        )
+        self.assertEqual(
+            details["fitted_peak_positions_px"].shape[0],
+            details["sector_angles_deg"].shape[0],
+        )
+        self.assertTrue(np.all(details["peak_position_uncertainty_px"] > 0))
+        self.assertTrue(np.all(np.isin(details["ring_indices"], ring_indices)))
+
+    def test_estimate_sample_detector_distance_from_ring_sectors_validation(self):
+        with self.assertRaises(ValueError):
+            estimate_sample_detector_distance_from_ring_sectors(
+                image=np.ones((10, 10)),
+                beam_center_guess_px=(5.0,),
+                sdd_guess_cm=10.0,
+                pitch_nm=80.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+            )
+
+        with self.assertRaises(ValueError):
+            estimate_sample_detector_distance_from_ring_sectors(
+                image=np.ones((10, 10)),
+                beam_center_guess_px=(5.0, 5.0),
+                sdd_guess_cm=10.0,
+                pitch_nm=80.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+                sector_step_deg=0.0,
+            )
+
+    def test_estimate_sample_detector_distance_from_rings_excludes_beamstop_points(self):
+        beam_center_px = np.array([103.4, 87.2])
+        sdd_cm = 215.0
+        pitch_nm = 80.0
+        wavelength_nm = 0.1
+        pixel_size_um = 75.0
+        ring_positions = self._generate_ring_sample_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            ring_indices=[1, 2, 3],
+            angles_deg=[15.0, 75.0, 135.0, 255.0],
+        )
+        beamstop_points = np.array([
+            beam_center_px + np.array([2.0, 1.0]),
+            beam_center_px + np.array([-1.5, -2.0]),
+        ])
+        peak_positions = np.vstack([beamstop_points, ring_positions])
+        image = self._generate_peak_image((220, 220), peak_positions)
+
+        estimated_sdd_cm, _, details = estimate_sample_detector_distance_from_rings(
+            image=image,
+            peak_positions=peak_positions,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            beam_center_guess_px=beam_center_px,
+            exclude_within_beamstop_radius_px=5.0,
+            beam_center_search_radius_px=20.0,
+            sdd_search_range_cm=(150.0, 260.0),
+            coarse_grid_points=21,
+            fine_grid_points=21,
+            return_details=True,
+        )
+
+        self.assertAlmostEqual(estimated_sdd_cm, sdd_cm, delta=3.0)
+        self.assertEqual(details["ring_indices"].shape, (12,))
+        self.assertEqual(details["peak_position_uncertainty_px"].shape, (12,))
+
+    def test_estimate_sample_detector_distance_from_rings_input_validation(self):
+        with self.assertRaises(ValueError):
+            estimate_sample_detector_distance_from_rings(
+                image=np.ones((10, 10)),
+                peak_positions=np.array([1.0, 2.0]),
+                pitch_nm=80.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+            )
+
+        with self.assertRaises(ValueError):
+            estimate_sample_detector_distance_from_rings(
+                image=np.ones((10, 10)),
+                peak_positions=np.array([[1.0, 2.0], [3.0, 4.0]]),
+                pitch_nm=80.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+                minimum_ring_uncertainty_px=0.0,
+            )
+
+        with self.assertRaises(ValueError):
+            estimate_sample_detector_distance_from_rings(
+                image=np.ones((10, 10)),
+                peak_positions=np.array([[1.0, 2.0], [3.0, 4.0]]),
+                pitch_nm=80.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+                exclude_within_beamstop_radius_px=-1.0,
             )

@@ -3,6 +3,7 @@ import unittest
 
 from cdsaxs.calculators import wavelength_to_energy
 from cdsaxs.data.data2d import Data2D
+from cdsaxs.tools import find_peaks_2D
 
 
 class TestCombineData2D(unittest.TestCase):
@@ -908,6 +909,46 @@ class TestData2D(unittest.TestCase):
     # def test_find_peaks2D(self):
     #     # TODO: implement peaks2D test
     #     pass
+
+    def test_find_peaks2D_gaussian_refinement_optional(self):
+        row_grid, col_grid = np.indices((21, 21), dtype=float)
+        image = np.exp(
+            -(
+                ((row_grid - 10.4) ** 2) / (2 * 1.2 ** 2)
+                + ((col_grid - 8.6) ** 2) / (2 * 1.5 ** 2)
+            )
+        )
+        data = Data2D(image=image, hide_q_warnings=True)
+
+        peaks_refined, _, _ = data.find_peaks2D(
+            range_qdy_px=(0, data.image.shape[0]),
+            range_qdx_px=(0, data.image.shape[1]),
+            log_scale=False,
+            gaussian_refinement=True,
+            show_plot=False,
+            num_peaks=1,
+        )
+        peaks_unrefined, _, _ = data.find_peaks2D(
+            range_qdy_px=(0, data.image.shape[0]),
+            range_qdx_px=(0, data.image.shape[1]),
+            log_scale=False,
+            gaussian_refinement=False,
+            show_plot=False,
+            num_peaks=1,
+        )
+
+        expected_unrefined = find_peaks_2D(
+            data.image,
+            log_scale=False,
+            refinement_size=None,
+            mask=data.mask,
+            num_peaks=1,
+        )
+
+        np.testing.assert_array_equal(peaks_unrefined, expected_unrefined)
+        np.testing.assert_array_equal(peaks_unrefined, np.array([[10, 9]]))
+        self.assertGreater(abs(peaks_refined[0, 0] - peaks_unrefined[0, 0]), 0.1)
+        self.assertGreater(abs(peaks_refined[0, 1] - peaks_unrefined[0, 1]), 0.1)
 
     # def test_find_peaks2D_one_axis(self):
     #     # TODO: implement peaks2D one axis test

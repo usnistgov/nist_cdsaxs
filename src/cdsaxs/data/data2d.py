@@ -1898,6 +1898,7 @@ class Data2D(DataImage):
             exclude_qdy=None,
             exclude_qdx=None,
             log_scale=True,
+            gaussian_refinement=True,
             refinement_size=7,
             show_plot=True,
             zoom_plot=True,
@@ -1963,6 +1964,11 @@ class Data2D(DataImage):
             will be sent to the peak finding algorithm with its original
             values.
             Default value is True.
+        gaussian_refinement : bool, optional
+            If set to True, refine each detected peak with a local Gaussian
+            fit. If set to False, return the pixel coordinates from
+            peak_local_max() without refinement.
+            Default value is True.
         refinement_size : int
             Define the box size around the peaks in which to peform the
             Gaussian refinement.
@@ -2019,18 +2025,23 @@ class Data2D(DataImage):
         min0, max0 = limits_qdy_px
         min1, max1 = limits_qdx_px
 
+        peak_kwargs = {
+            'log_scale': log_scale,
+            'refinement_size': refinement_size if gaussian_refinement else None,
+            'mask': self.mask[min0:max0, min1:max1],
+            **kwargs,
+        }
+
         peaks = find_peaks_2D(
             self.image[min0:max0, min1:max1],
-            log_scale=log_scale,
-            refinement_size=refinement_size,
-            mask=self.mask[min0:max0, min1:max1],
-            **kwargs)
+            **peak_kwargs)
 
         if len(peaks.shape) < 2:
             peaks = np.empty((0, 2))
         peaks[:, 0] = peaks[:, 0] + min0
         peaks[:, 1] = peaks[:, 1] + min1
 
+        peaks_q = None
         if self.qby_1d is not None and self.qbx_1d is not None:
             peaks_q = np.ones_like(peaks).astype(np.float64)
 

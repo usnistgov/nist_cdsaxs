@@ -2,6 +2,8 @@
 import inspect
 import warnings
 
+import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 import numpy as np
 from PIL import Image
 from scipy.optimize import curve_fit
@@ -9,6 +11,7 @@ from scipy.signal import find_peaks
 from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 from skimage import transform
+from tqdm import tqdm
 
 from .calculators import gaussian
 
@@ -75,6 +78,612 @@ def _score_sdd_candidate(
     return float(np.mean(residual**2)), order_int.astype(int), q_signed
 
 
+def _score_sdd_ring_candidate(
+        peak_positions,
+        beam_center_px,
+        sdd_cm,
+        pixel_size_um,
+        wavelength_nm,
+        pitch_nm):
+    """Score how well a geometry candidate matches radial diffraction rings."""
+    q = _peak_q_from_geometry(
+        peak_positions=peak_positions,
+        beam_center_px=beam_center_px,
+        sdd_cm=sdd_cm,
+        pixel_size_um=pixel_size_um,
+        wavelength_nm=wavelength_nm,
+    )
+    q_spacing = 2 * np.pi / pitch_nm
+    ring_index_float = q / q_spacing
+    ring_indices = np.rint(ring_index_float)
+    ring_indices = np.where(ring_indices < 1, 1, ring_indices)
+    unique_ring_indices, ring_counts = np.unique(
+        ring_indices.astype(int),
+        return_counts=True,
+    )
+    supported_ring_indices = unique_ring_indices[ring_counts >= 2]
+    if supported_ring_indices.size > 0:
+        supported_mask = np.isin(ring_indices, supported_ring_indices)
+    else:
+        supported_mask = np.ones(ring_indices.shape, dtype=bool)
+    q_model = q_spacing * ring_indices
+    residual = q[supported_mask] - q_model[supported_mask]
+    unsupported_fraction = 1.0 - np.mean(supported_mask.astype(float))
+    score = float(np.mean(residual**2)) + (q_spacing ** 2) * unsupported_fraction
+
+    return (
+        score,
+        ring_indices.astype(int),
+        q,
+        supported_mask.astype(bool),
+    )
+
+
+def _estimate_ring_point_radial_uncertainty(
+        peak_positions,
+        beam_center_px,
+        ring_indices,
+        minimum_uncertainty_px=0.5):
+    """Estimate radial uncertainty from within-ring radial spread."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    ring_indices = np.asarray(ring_indices, dtype=int)
+    radial_distances_px = np.linalg.norm(peak_positions - beam_center_px, axis=1)
+    radial_uncertainty_px = np.full(
+        radial_distances_px.shape,
+        float(minimum_uncertainty_px),
+        dtype=float,
+    )
+
+    for ring_index in np.unique(ring_indices):
+        ring_mask = ring_indices == ring_index
+        ring_radii = radial_distances_px[ring_mask]
+        if ring_radii.size >= 2:
+            ring_sigma = float(np.std(ring_radii, ddof=1))
+            radial_uncertainty_px[ring_mask] = max(
+                ring_sigma,
+                float(minimum_uncertainty_px),
+            )
+
+    return radial_distances_px, radial_uncertainty_px
+
+
+def _gaussian_2d_model(coordinates, row0, col0, sigma_row, sigma_col,
+                       amplitude, offset):
+    """Evaluate an axis-aligned 2D Gaussian on flattened coordinates."""
+    row, col = coordinates
+    exponent = (
+        ((row - row0) ** 2) / (2 * sigma_row ** 2)
+        + ((col - col0) ** 2) / (2 * sigma_col ** 2)
+    )
+    return amplitude * np.exp(-exponent) + offset
+
+
+def _estimate_peak_covariances_from_image(
+        image,
+        peak_positions,
+        refinement_size=9):
+    """Estimate per-peak center covariance matrices from local 2D fits."""
+    image = np.asarray(image, dtype=float)
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    covariances = []
+    fitted_positions = []
+    refinement_size = max(int(refinement_size), 5)
+
+    for row_peak, col_peak in peak_positions:
+        row_center = int(np.round(row_peak))
+        col_center = int(np.round(col_peak))
+        row_min = max(0, row_center - refinement_size // 2)
+        row_max = min(image.shape[0], row_min + refinement_size)
+        row_min = max(0, row_max - refinement_size)
+        col_min = max(0, col_center - refinement_size // 2)
+        col_max = min(image.shape[1], col_min + refinement_size)
+        col_min = max(0, col_max - refinement_size)
+
+        image_window = image[row_min:row_max, col_min:col_max]
+        row_grid, col_grid = np.indices(image_window.shape, dtype=float)
+        row_grid += row_min
+        col_grid += col_min
+
+        offset = float(np.nanmin(image_window))
+        amplitude = float(np.nanmax(image_window) - offset)
+        if not np.isfinite(amplitude) or amplitude <= 0:
+            amplitude = 1.0
+        p0 = [
+            float(row_peak),
+            float(col_peak),
+            max(refinement_size / 4, 1.0),
+            max(refinement_size / 4, 1.0),
+            amplitude,
+            offset,
+        ]
+        lower_bounds = [
+            row_min,
+            col_min,
+            0.25,
+            0.25,
+            0.0,
+            -np.inf,
+        ]
+        upper_bounds = [
+            max(row_max - 1, row_min),
+            max(col_max - 1, col_min),
+            max(refinement_size, 1.0),
+            max(refinement_size, 1.0),
+            np.inf,
+            np.inf,
+        ]
+
+        try:
+            popt, pcov = curve_fit(
+                _gaussian_2d_model,
+                (row_grid.ravel(), col_grid.ravel()),
+                image_window.ravel(),
+                p0=p0,
+                bounds=(lower_bounds, upper_bounds),
+                maxfev=10000,
+            )
+            fitted_positions.append(popt[:2])
+            covariances.append(np.asarray(pcov[:2, :2], dtype=float))
+        except (RuntimeError, ValueError):
+            fitted_positions.append([row_peak, col_peak])
+            covariances.append(np.eye(2, dtype=float) * 0.25)
+
+    return np.asarray(fitted_positions, dtype=float), covariances
+
+
+def _project_peak_covariances_to_radial_uncertainty(
+        peak_positions,
+        beam_center_px,
+        peak_covariances):
+    """Project 2D peak covariance matrices onto radial directions."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    sigma_r_px = []
+
+    for peak_position, covariance in zip(peak_positions, peak_covariances):
+        radial_vector = peak_position - beam_center_px
+        radial_norm = np.linalg.norm(radial_vector)
+        if radial_norm <= 0:
+            sigma_r_px.append(float(np.sqrt(np.max(np.diag(covariance)))))
+            continue
+        radial_unit = radial_vector / radial_norm
+        variance_r = float(radial_unit @ covariance @ radial_unit)
+        sigma_r_px.append(float(np.sqrt(max(variance_r, 1e-12))))
+
+    return np.asarray(sigma_r_px, dtype=float)
+
+
+def _estimate_peak_radial_uncertainty_from_image(
+        image,
+        peak_positions,
+        beam_center_px,
+        refinement_size=9):
+    """Estimate fitted peak positions and radial uncertainties."""
+    fitted_peak_positions, peak_covariances = (
+        _estimate_peak_covariances_from_image(
+            image=image,
+            peak_positions=peak_positions,
+            refinement_size=refinement_size,
+        )
+    )
+    peak_position_uncertainty_px = (
+        _project_peak_covariances_to_radial_uncertainty(
+            peak_positions=fitted_peak_positions,
+            beam_center_px=beam_center_px,
+            peak_covariances=peak_covariances,
+        )
+    )
+
+    return (
+        fitted_peak_positions,
+        peak_position_uncertainty_px,
+        peak_covariances,
+    )
+
+
+def _radial_gaussian_model(radius, radius0, sigma_r, amplitude, offset):
+    """Evaluate a 1D Gaussian in detector radius."""
+    return amplitude * np.exp(
+        -((radius - radius0) ** 2) / (2 * sigma_r ** 2)
+    ) + offset
+
+
+def _estimate_ring_peak_radial_uncertainty_from_image(
+        image,
+        peak_positions,
+        beam_center_px,
+        refinement_size=9,
+        minimum_uncertainty_px=0.5):
+    """Refine arc-like ring samples by fitting a local radial profile."""
+    image = np.asarray(image, dtype=float)
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    refinement_size = max(int(refinement_size), 5)
+
+    fitted_peak_positions = []
+    radial_uncertainties_px = []
+    fit_success = []
+
+    for row_peak, col_peak in peak_positions:
+        seed_position = np.asarray([row_peak, col_peak], dtype=float)
+        radial_vector = seed_position - beam_center_px
+        radial_norm = np.linalg.norm(radial_vector)
+        if radial_norm <= 0:
+            fitted_peak_positions.append(seed_position)
+            radial_uncertainties_px.append(float(minimum_uncertainty_px))
+            fit_success.append(False)
+            continue
+
+        radial_unit = radial_vector / radial_norm
+
+        row_center = int(np.round(row_peak))
+        col_center = int(np.round(col_peak))
+        row_min = max(0, row_center - refinement_size // 2)
+        row_max = min(image.shape[0], row_min + refinement_size)
+        row_min = max(0, row_max - refinement_size)
+        col_min = max(0, col_center - refinement_size // 2)
+        col_max = min(image.shape[1], col_min + refinement_size)
+        col_min = max(0, col_max - refinement_size)
+
+        image_window = image[row_min:row_max, col_min:col_max]
+        row_grid, col_grid = np.indices(image_window.shape, dtype=float)
+        row_grid += row_min
+        col_grid += col_min
+
+        window_positions = np.column_stack((row_grid.ravel(), col_grid.ravel()))
+        window_values = image_window.ravel()
+        finite_mask = np.isfinite(window_values)
+        if not np.any(finite_mask):
+            fitted_peak_positions.append(seed_position)
+            radial_uncertainties_px.append(float(minimum_uncertainty_px))
+            fit_success.append(False)
+            continue
+
+        window_positions = window_positions[finite_mask]
+        window_values = window_values[finite_mask]
+        radial_offsets = np.dot(
+            window_positions - beam_center_px,
+            radial_unit,
+        )
+
+        offset = float(np.nanmin(window_values))
+        amplitude = float(np.nanmax(window_values) - offset)
+        if not np.isfinite(amplitude) or amplitude <= 0:
+            fitted_peak_positions.append(seed_position)
+            radial_uncertainties_px.append(float(minimum_uncertainty_px))
+            fit_success.append(False)
+            continue
+
+        sigma_guess = max(refinement_size / 4, 1.0)
+        try:
+            popt, pcov = curve_fit(
+                _radial_gaussian_model,
+                radial_offsets,
+                window_values,
+                p0=[float(radial_norm), sigma_guess, amplitude, offset],
+                bounds=(
+                    [
+                        max(radial_norm - refinement_size, 0.0),
+                        0.25,
+                        0.0,
+                        -np.inf,
+                    ],
+                    [
+                        radial_norm + refinement_size,
+                        max(refinement_size, 1.0),
+                        np.inf,
+                        np.inf,
+                    ],
+                ),
+                maxfev=10000,
+            )
+            refined_radius = float(popt[0])
+            if pcov.size == 0 or not np.isfinite(pcov[0, 0]):
+                sigma_r_px = float(minimum_uncertainty_px)
+            else:
+                sigma_r_px = float(
+                    max(np.sqrt(max(pcov[0, 0], 0.0)), minimum_uncertainty_px)
+                )
+            fitted_peak_positions.append(
+                beam_center_px + radial_unit * refined_radius
+            )
+            radial_uncertainties_px.append(sigma_r_px)
+            fit_success.append(True)
+        except (RuntimeError, ValueError):
+            fitted_peak_positions.append(seed_position)
+            radial_uncertainties_px.append(float(minimum_uncertainty_px))
+            fit_success.append(False)
+
+    return (
+        np.asarray(fitted_peak_positions, dtype=float),
+        np.asarray(radial_uncertainties_px, dtype=float),
+        np.asarray(fit_success, dtype=bool),
+    )
+
+
+def _aggregate_ring_observations(
+        peak_positions,
+        beam_center_px,
+        ring_indices,
+        peak_position_uncertainty_px,
+        minimum_uncertainty_px=0.5):
+    """Aggregate repeated ring samples into one effective observation."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    ring_indices = np.asarray(ring_indices, dtype=int)
+    peak_position_uncertainty_px = np.asarray(
+        peak_position_uncertainty_px,
+        dtype=float,
+    )
+
+    radial_distances_px = np.linalg.norm(
+        peak_positions - beam_center_px,
+        axis=1,
+    )
+    aggregated_peak_positions = []
+    aggregated_ring_indices = []
+    aggregated_radial_uncertainty_px = []
+    aggregated_radial_distances_px = []
+
+    for ring_index in np.unique(ring_indices):
+        ring_mask = ring_indices == ring_index
+        ring_positions = peak_positions[ring_mask]
+        ring_radii = radial_distances_px[ring_mask]
+        ring_sigma = np.maximum(
+            peak_position_uncertainty_px[ring_mask],
+            float(minimum_uncertainty_px),
+        )
+        ring_weights = 1.0 / np.maximum(ring_sigma**2, 1e-12)
+
+        weighted_radius = float(
+            np.sum(ring_weights * ring_radii) / np.sum(ring_weights)
+        )
+        weighted_position = np.sum(
+            ring_positions * ring_weights[:, np.newaxis],
+            axis=0,
+        ) / np.sum(ring_weights)
+
+        if ring_radii.size >= 2:
+            scatter_px = float(np.std(ring_radii, ddof=1))
+            standard_error_px = float(np.sqrt(1.0 / np.sum(ring_weights)))
+            effective_uncertainty_px = max(
+                standard_error_px,
+                scatter_px / np.sqrt(ring_radii.size),
+                float(minimum_uncertainty_px),
+            )
+        else:
+            effective_uncertainty_px = max(
+                float(ring_sigma[0]),
+                float(minimum_uncertainty_px),
+            )
+
+        radial_vector = weighted_position - beam_center_px
+        radial_norm = np.linalg.norm(radial_vector)
+        if radial_norm > 0:
+            weighted_position = (
+                beam_center_px + radial_vector / radial_norm * weighted_radius
+            )
+
+        aggregated_peak_positions.append(weighted_position)
+        aggregated_ring_indices.append(int(ring_index))
+        aggregated_radial_uncertainty_px.append(effective_uncertainty_px)
+        aggregated_radial_distances_px.append(weighted_radius)
+
+    return {
+        "radial_distances_px": radial_distances_px,
+        "aggregated_peak_positions": np.asarray(
+            aggregated_peak_positions,
+            dtype=float,
+        ),
+        "aggregated_ring_indices": np.asarray(
+            aggregated_ring_indices,
+            dtype=int,
+        ),
+        "aggregated_radial_uncertainty_px": np.asarray(
+            aggregated_radial_uncertainty_px,
+            dtype=float,
+        ),
+        "aggregated_radial_distances_px": np.asarray(
+            aggregated_radial_distances_px,
+            dtype=float,
+        ),
+    }
+
+
+def _refine_sdd_from_ring_observations(
+        peak_positions,
+        beam_center_px,
+        ring_indices,
+        wavelength_nm,
+        pixel_size_um,
+        pitch_nm,
+        sdd_initial_cm,
+        peak_position_uncertainty_px,
+        minimum_uncertainty_px=0.5):
+    """Refine SDD from ring observations aggregated by ring index."""
+    aggregated = _aggregate_ring_observations(
+        peak_positions=peak_positions,
+        beam_center_px=beam_center_px,
+        ring_indices=ring_indices,
+        peak_position_uncertainty_px=peak_position_uncertainty_px,
+        minimum_uncertainty_px=minimum_uncertainty_px,
+    )
+    refined_sdd_cm, standard_uncertainty_cm = _refine_sdd_with_fixed_orders(
+        peak_positions=aggregated["aggregated_peak_positions"],
+        beam_center_px=beam_center_px,
+        orders=aggregated["aggregated_ring_indices"],
+        wavelength_nm=wavelength_nm,
+        pixel_size_um=pixel_size_um,
+        pitch_nm=pitch_nm,
+        sdd_initial_cm=sdd_initial_cm,
+        peak_position_uncertainty_px=(
+            aggregated["aggregated_radial_uncertainty_px"]
+        ),
+    )
+
+    return refined_sdd_cm, standard_uncertainty_cm, aggregated
+
+
+def _refine_sdd_with_fixed_orders(
+        peak_positions,
+        beam_center_px,
+        orders,
+        wavelength_nm,
+        pixel_size_um,
+        pitch_nm,
+    sdd_initial_cm,
+    peak_position_uncertainty_px):
+    """Refine SDD for fixed beam center and diffraction orders."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    orders = np.asarray(orders, dtype=float)
+
+    radial_distance_cm = np.linalg.norm(
+        peak_positions - beam_center_px,
+        axis=1,
+    ) * pixel_size_um * 1e-4
+    q_spacing = 2 * np.pi / pitch_nm
+    q_target = np.abs(orders) * q_spacing
+
+    sigma_r = np.asarray(peak_position_uncertainty_px, dtype=float)
+    sigma_r = sigma_r * pixel_size_um * 1e-4
+    theta_initial = np.arctan2(radial_distance_cm, float(sdd_initial_cm))
+    dq_dr = (
+        (2 * np.pi / wavelength_nm)
+        * np.cos(theta_initial / 2)
+        * float(sdd_initial_cm)
+        / (radial_distance_cm**2 + float(sdd_initial_cm)**2)
+    )
+    sigma_q = np.maximum(np.abs(dq_dr) * sigma_r, 1e-12)
+
+    def q_model(radial_distance, sdd_cm):
+        theta = np.arctan2(radial_distance, sdd_cm)
+        return 4 * np.pi * np.sin(theta / 2) / wavelength_nm
+
+    popt, pcov = curve_fit(
+        q_model,
+        radial_distance_cm,
+        q_target,
+        p0=[float(sdd_initial_cm)],
+        bounds=(0, np.inf),
+        sigma=sigma_q,
+        absolute_sigma=True,
+    )
+    sdd_refined_cm = float(popt[0])
+    if pcov.size == 0 or not np.isfinite(pcov[0, 0]):
+        standard_uncertainty_cm = np.nan
+    else:
+        standard_uncertainty_cm = float(np.sqrt(pcov[0, 0]))
+
+    return sdd_refined_cm, standard_uncertainty_cm
+
+
+def _refine_beam_center_and_sdd_with_fixed_orders(
+        peak_positions,
+        beam_center_initial_px,
+        orders,
+        wavelength_nm,
+        pixel_size_um,
+        pitch_nm,
+        sdd_initial_cm,
+        peak_position_uncertainty_px,
+        beam_center_bounds_px=None,
+        sdd_bounds_cm=None):
+    """Refine beam center and SDD for fixed diffraction orders."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_initial_px = np.asarray(beam_center_initial_px, dtype=float)
+    orders = np.asarray(orders, dtype=float)
+    sigma_r_px = np.asarray(peak_position_uncertainty_px, dtype=float)
+
+    if peak_positions.ndim != 2 or peak_positions.shape[1] != 2:
+        raise ValueError(
+            "peak_positions must be a 2D array with shape (n_peaks, 2)."
+        )
+    if beam_center_initial_px.shape != (2,):
+        raise ValueError(
+            "beam_center_initial_px must contain [row, column]."
+        )
+    if peak_positions.shape[0] != orders.shape[0]:
+        raise ValueError(
+            "peak_positions and orders must contain the same number of "
+            "observations."
+        )
+    if sigma_r_px.shape[0] != peak_positions.shape[0]:
+        raise ValueError(
+            "peak_position_uncertainty_px must match peak_positions."
+        )
+
+    q_spacing = 2 * np.pi / pitch_nm
+    q_target = np.abs(orders) * q_spacing
+    sigma_r_cm = np.maximum(sigma_r_px, 1e-12) * pixel_size_um * 1e-4
+
+    def q_model(coordinates, row_center, col_center, sdd_cm):
+        beam_center_px = np.array([row_center, col_center], dtype=float)
+        radial_distance_cm = np.linalg.norm(
+            coordinates - beam_center_px,
+            axis=1,
+        ) * pixel_size_um * 1e-4
+        theta = np.arctan2(radial_distance_cm, sdd_cm)
+        return 4 * np.pi * np.sin(theta / 2) / wavelength_nm
+
+    radial_distance_initial_cm = np.linalg.norm(
+        peak_positions - beam_center_initial_px,
+        axis=1,
+    ) * pixel_size_um * 1e-4
+    theta_initial = np.arctan2(radial_distance_initial_cm, float(sdd_initial_cm))
+    dq_dr = (
+        (2 * np.pi / wavelength_nm)
+        * np.cos(theta_initial / 2)
+        * float(sdd_initial_cm)
+        / (radial_distance_initial_cm**2 + float(sdd_initial_cm)**2)
+    )
+    sigma_q = np.maximum(np.abs(dq_dr) * sigma_r_cm, 1e-12)
+
+    if beam_center_bounds_px is None:
+        lower_bounds = [-np.inf, -np.inf]
+        upper_bounds = [np.inf, np.inf]
+    else:
+        lower_bounds = [
+            float(beam_center_bounds_px[0][0]),
+            float(beam_center_bounds_px[1][0]),
+        ]
+        upper_bounds = [
+            float(beam_center_bounds_px[0][1]),
+            float(beam_center_bounds_px[1][1]),
+        ]
+    if sdd_bounds_cm is None:
+        sdd_lower_cm, sdd_upper_cm = 0.0, np.inf
+    else:
+        sdd_lower_cm = float(sdd_bounds_cm[0])
+        sdd_upper_cm = float(sdd_bounds_cm[1])
+
+    popt, pcov = curve_fit(
+        q_model,
+        peak_positions,
+        q_target,
+        p0=[
+            float(beam_center_initial_px[0]),
+            float(beam_center_initial_px[1]),
+            float(sdd_initial_cm),
+        ],
+        bounds=(
+            lower_bounds + [sdd_lower_cm],
+            upper_bounds + [sdd_upper_cm],
+        ),
+        sigma=sigma_q,
+        absolute_sigma=True,
+    )
+    refined_beam_center_px = np.asarray(popt[:2], dtype=float)
+    refined_sdd_cm = float(popt[2])
+    if pcov.size == 0 or not np.all(np.isfinite(np.diag(pcov))):
+        parameter_uncertainty = np.full(3, np.nan, dtype=float)
+    else:
+        parameter_uncertainty = np.sqrt(np.diag(pcov))
+
+    return refined_beam_center_px, refined_sdd_cm, parameter_uncertainty
+
+
 def _build_search_values(center_value, half_width, points, lower_bound=None,
                          upper_bound=None):
     """Create a bounded linear search grid around a center value."""
@@ -89,7 +698,468 @@ def _build_search_values(center_value, half_width, points, lower_bound=None,
     return np.linspace(start, stop, int(points))
 
 
+def _ring_radius_px_from_geometry(
+        ring_index,
+        sdd_cm,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um):
+    """Predict detector radius in pixels for a diffraction ring index."""
+    q_spacing = 2 * np.pi / pitch_nm
+    q_value = float(ring_index) * q_spacing
+    argument = q_value * wavelength_nm / (4 * np.pi)
+    if argument <= 0 or argument >= 1:
+        return np.nan
+    theta = 2 * np.arcsin(argument)
+    radial_distance_cm = float(sdd_cm) * np.tan(theta)
+    return radial_distance_cm * 1e4 / float(pixel_size_um)
+
+
+def _detector_polar_coordinates(image_shape, beam_center_px):
+    """Return detector radius and azimuth arrays for a beam center."""
+    row_grid, col_grid = np.indices(image_shape, dtype=float)
+    delta_row = row_grid - float(beam_center_px[0])
+    delta_col = col_grid - float(beam_center_px[1])
+    radius_px = np.sqrt(delta_row**2 + delta_col**2)
+    azimuth_deg = np.rad2deg(np.arctan2(delta_row, delta_col))
+    azimuth_deg = np.mod(azimuth_deg, 360.0)
+    return radius_px, azimuth_deg
+
+
+def _extract_sector_radial_profile(
+        image,
+        beam_center_px,
+        sector_center_deg,
+        sector_width_deg,
+        radial_bin_size_px=1.0,
+        exclude_within_radius_px=None):
+    """Average image intensity radially within an azimuthal sector."""
+    image = np.asarray(image, dtype=float)
+    radius_px, azimuth_deg = _detector_polar_coordinates(
+        image.shape,
+        beam_center_px,
+    )
+    angle_delta = ((azimuth_deg - sector_center_deg + 180.0) % 360.0) - 180.0
+    sector_mask = np.abs(angle_delta) <= (float(sector_width_deg) / 2.0)
+    if exclude_within_radius_px is not None:
+        sector_mask &= radius_px >= float(exclude_within_radius_px)
+
+    finite_mask = np.isfinite(image)
+    sector_mask &= finite_mask
+    if not np.any(sector_mask):
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    radii = radius_px[sector_mask]
+    intensities = image[sector_mask]
+    radial_bin_size_px = max(float(radial_bin_size_px), 0.25)
+    radial_bins = np.floor(radii / radial_bin_size_px).astype(int)
+    if radial_bins.size == 0:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    radial_sum = np.bincount(radial_bins, weights=intensities)
+    radial_count = np.bincount(radial_bins)
+    valid_bins = radial_count > 0
+    radial_centers_px = (
+        np.nonzero(valid_bins)[0].astype(float) + 0.5
+    ) * radial_bin_size_px
+    radial_profile = radial_sum[valid_bins] / radial_count[valid_bins]
+    return radial_centers_px, radial_profile
+
+
+def _fit_sector_ring_radius(
+        radial_centers_px,
+        radial_profile,
+        expected_radius_px,
+        radial_window_px,
+        minimum_uncertainty_px=0.5):
+    """Fit a 1D Gaussian to a sector radial profile near an expected ring."""
+    radial_centers_px = np.asarray(radial_centers_px, dtype=float)
+    radial_profile = np.asarray(radial_profile, dtype=float)
+    if radial_centers_px.size < 4 or radial_profile.size < 4:
+        return None
+
+    fit_mask = np.abs(radial_centers_px - float(expected_radius_px)) <= float(
+        radial_window_px
+    )
+    fit_mask &= np.isfinite(radial_profile)
+    if np.count_nonzero(fit_mask) < 4:
+        return None
+
+    x_fit = radial_centers_px[fit_mask]
+    y_fit = radial_profile[fit_mask]
+    if np.nanmax(y_fit) <= np.nanmin(y_fit):
+        return None
+
+    sigma_guess = max(float(radial_window_px) / 3.0, 1.0)
+    p0 = [
+        float(expected_radius_px),
+        sigma_guess,
+        float(np.nanmax(y_fit) - np.nanmin(y_fit)),
+        float(np.nanmin(y_fit)),
+    ]
+    try:
+        popt, pcov = curve_fit(
+            gaussian,
+            x_fit,
+            y_fit,
+            p0=p0,
+            bounds=(
+                [x_fit.min(), 0.25, 0.0, -np.inf],
+                [
+                    x_fit.max(),
+                    max(float(radial_window_px), 1.0),
+                    np.inf,
+                    np.inf,
+                ],
+            ),
+        )
+    except (RuntimeError, ValueError):
+        return None
+
+    fitted_radius_px = float(popt[0])
+    if not np.isfinite(fitted_radius_px):
+        return None
+    if pcov.size == 0 or not np.isfinite(pcov[0, 0]):
+        radius_uncertainty_px = float(minimum_uncertainty_px)
+    else:
+        radius_uncertainty_px = float(
+            max(np.sqrt(pcov[0, 0]), float(minimum_uncertainty_px))
+        )
+
+    return {
+        "radius_px": fitted_radius_px,
+        "radius_uncertainty_px": radius_uncertainty_px,
+        "fit_parameters": np.asarray(popt, dtype=float),
+    }
+
+
+def _plot_ring_sector_fit_diagnostics(
+        image,
+        beam_center_px,
+        ring_indices,
+        sector_angles_deg,
+        fitted_peak_positions_px,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um,
+        sdd_cm,
+        radial_window_px,
+        title=None):
+    """Plot sector-fit search windows and fitted ring positions."""
+    image = np.asarray(image, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    ring_indices = np.asarray(ring_indices, dtype=int)
+    sector_angles_deg = np.asarray(sector_angles_deg, dtype=float)
+    fitted_peak_positions_px = np.asarray(fitted_peak_positions_px, dtype=float)
+
+    finite_positive = image[np.isfinite(image) & (image > 0)]
+    if finite_positive.size == 0:
+        plotting_image = np.where(np.isfinite(image), image, 1.0)
+        plotting_image = np.maximum(plotting_image, 1.0)
+        norm = None
+    else:
+        plotting_image = np.where(np.isfinite(image), image, np.nan)
+        plotting_image = np.maximum(plotting_image, np.min(finite_positive))
+        norm = LogNorm(
+            vmin=float(np.min(finite_positive)),
+            vmax=float(np.max(finite_positive)),
+        )
+
+    fig, ax = plt.subplots()
+    image_artist = ax.imshow(
+        plotting_image,
+        origin='upper',
+        cmap='viridis',
+        norm=norm,
+    )
+    fig.colorbar(image_artist, ax=ax, label='Intensity (log scale)')
+
+    unique_ring_indices = np.unique(ring_indices)
+    unique_sector_angles_deg = np.unique(sector_angles_deg)
+    for ring_index in unique_ring_indices:
+        expected_radius_px = _ring_radius_px_from_geometry(
+            ring_index=ring_index,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+        )
+        if not np.isfinite(expected_radius_px):
+            continue
+        inner_radius_px = max(expected_radius_px - float(radial_window_px), 0.0)
+        outer_radius_px = expected_radius_px + float(radial_window_px)
+        for radius_px, linestyle in (
+                (inner_radius_px, '--'),
+                (outer_radius_px, '--')):
+            ring_patch = plt.Circle(
+                (beam_center_px[1], beam_center_px[0]),
+                radius_px,
+                fill=False,
+                color='white',
+                linewidth=0.8,
+                linestyle=linestyle,
+                alpha=0.5,
+            )
+            ax.add_patch(ring_patch)
+
+    for sector_angle_deg in unique_sector_angles_deg:
+        angle_rad = np.deg2rad(sector_angle_deg)
+        direction = np.array([
+            np.sin(angle_rad),
+            np.cos(angle_rad),
+        ])
+        max_radius_px = np.max([
+            np.linalg.norm([beam_center_px[0], beam_center_px[1]]),
+            np.linalg.norm([
+                beam_center_px[0],
+                image.shape[1] - beam_center_px[1],
+            ]),
+            np.linalg.norm([
+                image.shape[0] - beam_center_px[0],
+                beam_center_px[1],
+            ]),
+            np.linalg.norm([
+                image.shape[0] - beam_center_px[0],
+                image.shape[1] - beam_center_px[1],
+            ]),
+        ])
+        endpoint = beam_center_px + max_radius_px * direction
+        ax.plot(
+            [beam_center_px[1], endpoint[1]],
+            [beam_center_px[0], endpoint[0]],
+            color='white',
+            linewidth=0.4,
+            alpha=0.15,
+        )
+
+    ax.scatter(
+        fitted_peak_positions_px[:, 1],
+        fitted_peak_positions_px[:, 0],
+        s=18,
+        c='red',
+        marker='o',
+        label='Fitted sector peak radii',
+    )
+    ax.scatter(
+        [beam_center_px[1]],
+        [beam_center_px[0]],
+        s=60,
+        c='cyan',
+        marker='x',
+        linewidths=2.0,
+        label='Beam center',
+    )
+    ax.set_xlabel('Column (px)')
+    ax.set_ylabel('Row (px)')
+    ax.set_title(title or 'Ring sector fit diagnostics')
+    ax.legend(loc='upper right')
+    fig.tight_layout()
+
+    return fig
+
+
+def _collect_ring_sector_observations(
+        image,
+        beam_center_px,
+        sdd_cm,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um,
+        sector_step_deg=10.0,
+        sector_width_deg=10.0,
+        ring_indices=None,
+        radial_window_px=8.0,
+        radial_bin_size_px=1.0,
+        exclude_within_beamstop_radius_px=None,
+        minimum_ring_uncertainty_px=0.5,
+        progress_bar=None):
+    """Collect ring observations from sector radial averages."""
+    image = np.asarray(image, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    if ring_indices is None:
+        max_radius_px = np.max([
+            np.linalg.norm([beam_center_px[0], beam_center_px[1]]),
+            np.linalg.norm([
+                beam_center_px[0],
+                image.shape[1] - beam_center_px[1],
+            ]),
+            np.linalg.norm([
+                image.shape[0] - beam_center_px[0],
+                beam_center_px[1],
+            ]),
+            np.linalg.norm([
+                image.shape[0] - beam_center_px[0],
+                image.shape[1] - beam_center_px[1],
+            ]),
+        ])
+        inferred_ring_indices = []
+        ring_index = 1
+        while True:
+            radius_px = _ring_radius_px_from_geometry(
+                ring_index=ring_index,
+                sdd_cm=sdd_cm,
+                pitch_nm=pitch_nm,
+                wavelength_nm=wavelength_nm,
+                pixel_size_um=pixel_size_um,
+            )
+            if not np.isfinite(radius_px) or radius_px > max_radius_px:
+                break
+            inferred_ring_indices.append(ring_index)
+            ring_index += 1
+        ring_indices = inferred_ring_indices
+
+    sector_angles_deg = np.arange(0.0, 360.0, float(sector_step_deg))
+    fitted_positions = []
+    fitted_ring_indices = []
+    fitted_uncertainties_px = []
+    fitted_sector_angles_deg = []
+    fitted_radii_px = []
+
+    for sector_angle_deg in sector_angles_deg:
+        if progress_bar is not None:
+            progress_bar.set_postfix_str(
+                f"angle={sector_angle_deg:.1f} deg",
+                refresh=False,
+            )
+        radial_centers_px, radial_profile = _extract_sector_radial_profile(
+            image=image,
+            beam_center_px=beam_center_px,
+            sector_center_deg=sector_angle_deg,
+            sector_width_deg=sector_width_deg,
+            radial_bin_size_px=radial_bin_size_px,
+            exclude_within_radius_px=exclude_within_beamstop_radius_px,
+        )
+        if progress_bar is not None:
+            progress_bar.update(1)
+        if radial_centers_px.size < 4:
+            continue
+
+        for ring_index in ring_indices:
+            expected_radius_px = _ring_radius_px_from_geometry(
+                ring_index=ring_index,
+                sdd_cm=sdd_cm,
+                pitch_nm=pitch_nm,
+                wavelength_nm=wavelength_nm,
+                pixel_size_um=pixel_size_um,
+            )
+            if not np.isfinite(expected_radius_px):
+                continue
+            fit_result = _fit_sector_ring_radius(
+                radial_centers_px=radial_centers_px,
+                radial_profile=radial_profile,
+                expected_radius_px=expected_radius_px,
+                radial_window_px=radial_window_px,
+                minimum_uncertainty_px=minimum_ring_uncertainty_px,
+            )
+            if fit_result is None:
+                continue
+
+            angle_rad = np.deg2rad(sector_angle_deg)
+            direction = np.array([
+                np.sin(angle_rad),
+                np.cos(angle_rad),
+            ])
+            fitted_position = (
+                beam_center_px + fit_result["radius_px"] * direction
+            )
+            fitted_positions.append(fitted_position)
+            fitted_ring_indices.append(int(ring_index))
+            fitted_uncertainties_px.append(fit_result["radius_uncertainty_px"])
+            fitted_sector_angles_deg.append(float(sector_angle_deg))
+            fitted_radii_px.append(fit_result["radius_px"])
+
+    if not fitted_positions:
+        return {
+            "peak_positions": np.empty((0, 2), dtype=float),
+            "ring_indices": np.empty((0,), dtype=int),
+            "peak_position_uncertainty_px": np.empty((0,), dtype=float),
+            "sector_angles_deg": np.empty((0,), dtype=float),
+            "radii_px": np.empty((0,), dtype=float),
+        }
+
+    return {
+        "peak_positions": np.asarray(fitted_positions, dtype=float),
+        "ring_indices": np.asarray(fitted_ring_indices, dtype=int),
+        "peak_position_uncertainty_px": np.asarray(
+            fitted_uncertainties_px,
+            dtype=float,
+        ),
+        "sector_angles_deg": np.asarray(fitted_sector_angles_deg, dtype=float),
+        "radii_px": np.asarray(fitted_radii_px, dtype=float),
+    }
+
+
+def _score_ring_sector_candidate(
+        image,
+        beam_center_px,
+        sdd_cm,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um,
+        sector_step_deg=10.0,
+        sector_width_deg=10.0,
+        ring_indices=None,
+        radial_window_px=8.0,
+        radial_bin_size_px=1.0,
+        exclude_within_beamstop_radius_px=None,
+        minimum_ring_uncertainty_px=0.5,
+        progress_bar=None):
+    """Score a beam-center/SDD candidate using sector-fitted ring radii."""
+    observations = _collect_ring_sector_observations(
+        image=image,
+        beam_center_px=beam_center_px,
+        sdd_cm=sdd_cm,
+        pitch_nm=pitch_nm,
+        wavelength_nm=wavelength_nm,
+        pixel_size_um=pixel_size_um,
+        sector_step_deg=sector_step_deg,
+        sector_width_deg=sector_width_deg,
+        ring_indices=ring_indices,
+        radial_window_px=radial_window_px,
+        radial_bin_size_px=radial_bin_size_px,
+        exclude_within_beamstop_radius_px=exclude_within_beamstop_radius_px,
+        minimum_ring_uncertainty_px=minimum_ring_uncertainty_px,
+        progress_bar=progress_bar,
+    )
+    if observations["peak_positions"].shape[0] < 2:
+        return np.inf, observations
+
+    observed_radii_px = np.linalg.norm(
+        observations["peak_positions"]
+        - np.asarray(beam_center_px, dtype=float),
+        axis=1,
+    )
+    expected_radii_px = np.asarray([
+        _ring_radius_px_from_geometry(
+            ring_index=ring_index,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+        )
+        for ring_index in observations["ring_indices"]
+    ], dtype=float)
+    sigma_px = np.maximum(
+        observations["peak_position_uncertainty_px"],
+        float(minimum_ring_uncertainty_px),
+    )
+    residual = (observed_radii_px - expected_radii_px) / sigma_px
+    score = float(np.mean(residual**2))
+
+    expected_total = max(
+        len(np.arange(0.0, 360.0, float(sector_step_deg)))
+        * max(len(ring_indices or []), 1),
+        1,
+    )
+    missing_fraction = 1.0 - (
+        observations["peak_positions"].shape[0] / expected_total
+    )
+    score += missing_fraction
+    return score, observations
+
+
 def estimate_sample_detector_distance(
+    image,
         peak_positions,
         pitch_nm,
         wavelength_nm,
@@ -98,13 +1168,16 @@ def estimate_sample_detector_distance(
         beam_center_search_radius_px=None,
         sdd_search_range_cm=(1.0, 1000.0),
         coarse_grid_points=31,
-    fine_grid_points=31,
-    return_details=False):
+        fine_grid_points=31,
+        return_details=False):
     """
     Estimate sample-to-detector distance from diffraction peak positions.
 
     Parameters
     ----------
+    image : ndarray
+        Source detector image used to estimate local peak-position
+        uncertainties from 2D Gaussian fits around the provided peaks.
     peak_positions : ndarray
         Peak coordinates with shape (n, 2) where each row is
         [row_position, column_position].
@@ -138,21 +1211,27 @@ def estimate_sample_detector_distance(
     sdd_cm : float
         Estimated sample-to-detector distance in cm.
     uncertainty_cm : float
-        Estimated uncertainty in sample-to-detector distance in cm.
+        Estimated standard uncertainty in sample-to-detector distance in
+        cm from a post-order nonlinear refit using image-based radial
+        peak-position uncertainties.
     details : dict, optional
         Returned only when return_details is True. Contains
-        ``beam_center_px``, ``orders``, ``q_values_nm_inverse``, and
-        ``score``.
+        ``beam_center_px``, ``orders``, ``q_values_nm_inverse``,
+        ``score``, ``grid_sdd_cm``, ``grid_uncertainty_cm``,
+        ``standard_uncertainty_cm``, ``peak_position_uncertainty_px``,
+        and ``fitted_peak_positions_px``.
 
     Examples
     --------
     >>> sdd_cm, uncertainty_cm = estimate_sample_detector_distance(
+    ...     image=image,
     ...     peak_positions=peaks,
     ...     pitch_nm=80.0,
     ...     wavelength_nm=0.1,
     ...     pixel_size_um=75.0,
     ... )
     >>> sdd_cm, uncertainty_cm, details = estimate_sample_detector_distance(
+    ...     image=image,
     ...     peak_positions=peaks,
     ...     pitch_nm=80.0,
     ...     wavelength_nm=0.1,
@@ -161,6 +1240,10 @@ def estimate_sample_detector_distance(
     ... )
     >>> details["beam_center_px"]
     """
+    image = np.asarray(image, dtype=float)
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array.")
+
     peak_positions = np.asarray(peak_positions, dtype=float)
     if peak_positions.ndim != 2 or peak_positions.shape[1] != 2:
         raise ValueError(
@@ -322,7 +1405,7 @@ def estimate_sample_detector_distance(
     threshold = min_score + max(min_score * 0.1, 1e-12)
     within_threshold = sdd_probe_values[sdd_scores <= threshold]
     if within_threshold.size >= 2:
-        uncertainty_cm = float(
+        grid_uncertainty_cm = float(
             (within_threshold[-1] - within_threshold[0]) / 2
         )
     else:
@@ -330,15 +1413,34 @@ def estimate_sample_detector_distance(
             np.min(np.diff(sdd_probe_values)) / 2
             if sdd_probe_values.size > 1 else 0.25
         )
-        uncertainty_cm = float(
+        grid_uncertainty_cm = float(
             max(
                 step_size,
                 0.01,
             )
         )
 
+    fitted_peak_positions, peak_position_uncertainty_px, _ = (
+        _estimate_peak_radial_uncertainty_from_image(
+            image=image,
+            peak_positions=peak_positions,
+            beam_center_px=best["beam_center_px"],
+        )
+    )
+    refined_sdd_cm, standard_uncertainty_cm = _refine_sdd_with_fixed_orders(
+        peak_positions=fitted_peak_positions,
+        beam_center_px=best["beam_center_px"],
+        orders=best["orders"],
+        wavelength_nm=wavelength_nm,
+        pixel_size_um=pixel_size_um,
+        pitch_nm=pitch_nm,
+        sdd_initial_cm=best["sdd_cm"],
+        peak_position_uncertainty_px=peak_position_uncertainty_px,
+    )
+    uncertainty_cm = standard_uncertainty_cm
+
     if not return_details:
-        return best["sdd_cm"], uncertainty_cm
+        return refined_sdd_cm, uncertainty_cm
 
     details = {
         "beam_center_px": tuple(best["beam_center_px"]),
@@ -346,9 +1448,569 @@ def estimate_sample_detector_distance(
         "q_values_nm_inverse": best["q"].copy(),
         "score": best["score"],
         "diffraction_direction": best["diffraction_direction"].copy(),
+        "grid_sdd_cm": best["sdd_cm"],
+        "grid_uncertainty_cm": grid_uncertainty_cm,
+        "standard_uncertainty_cm": standard_uncertainty_cm,
+        "peak_position_uncertainty_px": peak_position_uncertainty_px.copy(),
+        "fitted_peak_positions_px": fitted_peak_positions.copy(),
     }
 
-    return best["sdd_cm"], uncertainty_cm, details
+    return refined_sdd_cm, uncertainty_cm, details
+
+
+def estimate_sample_detector_distance_from_rings(
+    image,
+        peak_positions,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um,
+        beam_center_guess_px=None,
+        exclude_within_beamstop_radius_px=None,
+        beam_center_search_radius_px=None,
+        sdd_search_range_cm=(1.0, 1000.0),
+        coarse_grid_points=31,
+        fine_grid_points=31,
+        minimum_ring_uncertainty_px=0.5,
+        return_details=False):
+    """
+    Estimate sample-to-detector distance from points sampled on rings.
+
+    Parameters
+    ----------
+    image : ndarray
+        Source detector image used to estimate local peak-position
+        uncertainties from 2D Gaussian fits around the supplied ring
+        samples.
+    peak_positions : ndarray
+        Ring sample coordinates with shape (n, 2) where each row is
+        [row_position, column_position].
+    pitch_nm : float
+        Sample pitch in nanometers.
+    wavelength_nm : float
+        X-ray wavelength in nanometers.
+    pixel_size_um : float
+        Detector pixel size in microns.
+    beam_center_guess_px : tuple | list | ndarray, optional
+        Initial guess for the beam center as [row, column] in pixels.
+        If omitted, the mean of the supplied positions is used.
+    exclude_within_beamstop_radius_px : float, optional
+        Exclude supplied ring points whose distance from the beam center
+        guess is smaller than this radius in pixels. This can be used to
+        ignore points obscured by the beamstop. If omitted, no exclusion
+        is applied.
+    beam_center_search_radius_px : float | tuple, optional
+        Search half-width in pixels around the beam center guess.
+        If a scalar is provided, the same radius is used for row and
+        column. If omitted, the search radius is based on the point span.
+    sdd_search_range_cm : tuple, optional
+        Inclusive search range for sample-to-detector distance in cm as
+        (minimum, maximum).
+    coarse_grid_points : int, optional
+        Number of grid points per dimension for the coarse search.
+    fine_grid_points : int, optional
+        Number of grid points per dimension for the fine search.
+    minimum_ring_uncertainty_px : float, optional
+        Lower bound for the radial uncertainty assigned to each supplied
+        ring point.
+    return_details : bool, optional
+        If set to True, also return a dictionary with the fitted beam
+        center, assigned ring indices, fitted q values, and fit score.
+
+    Returns
+    -------
+    sdd_cm : float
+        Estimated sample-to-detector distance in cm.
+    uncertainty_cm : float
+        Estimated standard uncertainty in sample-to-detector distance in
+        cm from a post-index nonlinear refit using image-based radial
+        peak-position uncertainties aggregated by ring index.
+    details : dict, optional
+        Returned only when return_details is True. Contains
+        beam_center_px, ring_indices, q_values_nm_inverse, score,
+        radial_distances_px, peak_position_uncertainty_px,
+        fitted_peak_positions_px, aggregated_ring_indices,
+        aggregated_radial_distances_px,
+        aggregated_peak_position_uncertainty_px, grid_sdd_cm,
+        grid_uncertainty_cm, and standard_uncertainty_cm.
+    """
+    image = np.asarray(image, dtype=float)
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array.")
+
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    if peak_positions.ndim != 2 or peak_positions.shape[1] != 2:
+        raise ValueError(
+            "peak_positions must be a 2D array with shape (n_peaks, 2)."
+        )
+    if peak_positions.shape[0] < 2:
+        raise ValueError("At least two peak positions are required.")
+    if pitch_nm <= 0 or wavelength_nm <= 0 or pixel_size_um <= 0:
+        raise ValueError(
+            "pitch_nm, wavelength_nm, and pixel_size_um must be positive."
+        )
+    if minimum_ring_uncertainty_px <= 0:
+        raise ValueError("minimum_ring_uncertainty_px must be positive.")
+    if exclude_within_beamstop_radius_px is not None:
+        exclude_within_beamstop_radius_px = float(
+            exclude_within_beamstop_radius_px
+        )
+        if exclude_within_beamstop_radius_px < 0:
+            raise ValueError(
+                "exclude_within_beamstop_radius_px must be non-negative."
+            )
+
+    sdd_min_cm, sdd_max_cm = map(float, sdd_search_range_cm)
+    if sdd_min_cm <= 0 or sdd_max_cm <= sdd_min_cm:
+        raise ValueError(
+            "sdd_search_range_cm must contain positive increasing values."
+        )
+
+    if beam_center_guess_px is None:
+        beam_center_guess_px = np.mean(peak_positions, axis=0)
+    else:
+        beam_center_guess_px = np.asarray(beam_center_guess_px, dtype=float)
+        if beam_center_guess_px.shape != (2,):
+            raise ValueError(
+                "beam_center_guess_px must contain [row, column]."
+            )
+
+    if exclude_within_beamstop_radius_px is not None:
+        radial_distance_from_guess_px = np.linalg.norm(
+            peak_positions - beam_center_guess_px,
+            axis=1,
+        )
+        keep_mask = (
+            radial_distance_from_guess_px >= exclude_within_beamstop_radius_px
+        )
+        peak_positions = peak_positions[keep_mask]
+        if peak_positions.shape[0] < 2:
+            raise ValueError(
+                "At least two peak positions must remain after "
+                "beamstop exclusion."
+            )
+
+    peak_span = np.ptp(peak_positions, axis=0)
+    default_radius = max(float(np.max(peak_span)) / 2, 2.0)
+    if beam_center_search_radius_px is None:
+        beam_center_search_radius_px = (default_radius, default_radius)
+    elif np.isscalar(beam_center_search_radius_px):
+        beam_center_search_radius_px = (
+            float(beam_center_search_radius_px),
+            float(beam_center_search_radius_px),
+        )
+    else:
+        beam_center_search_radius_px = tuple(beam_center_search_radius_px)
+        if len(beam_center_search_radius_px) != 2:
+            raise ValueError(
+                "beam_center_search_radius_px must be a scalar or length 2."
+            )
+
+    row_bounds = (
+        float(np.min(peak_positions[:, 0]) - peak_span[0]),
+        float(np.max(peak_positions[:, 0]) + peak_span[0]),
+    )
+    col_bounds = (
+        float(np.min(peak_positions[:, 1]) - peak_span[1]),
+        float(np.max(peak_positions[:, 1]) + peak_span[1]),
+    )
+
+    best = None
+    search_specs = [
+        (
+            coarse_grid_points,
+            beam_center_search_radius_px,
+            (sdd_min_cm, sdd_max_cm),
+        ),
+        (
+            fine_grid_points,
+            (
+                max(beam_center_search_radius_px[0] / 4, 0.5),
+                max(beam_center_search_radius_px[1] / 4, 0.5),
+            ),
+            None,
+        ),
+    ]
+
+    for grid_points, center_radius, sdd_bounds in search_specs:
+        if best is None:
+            center_seed = beam_center_guess_px
+            sdd_seed = (sdd_min_cm + sdd_max_cm) / 2
+            sdd_half_width = (sdd_max_cm - sdd_min_cm) / 2
+        else:
+            center_seed = best["beam_center_px"]
+            sdd_seed = best["sdd_cm"]
+            sdd_half_width = max(best["sdd_half_width_cm"] / 4, 0.25)
+
+        if sdd_bounds is None:
+            sdd_bounds = (
+                max(sdd_min_cm, sdd_seed - sdd_half_width),
+                min(sdd_max_cm, sdd_seed + sdd_half_width),
+            )
+
+        row_values = _build_search_values(
+            center_value=center_seed[0],
+            half_width=center_radius[0],
+            points=grid_points,
+            lower_bound=row_bounds[0],
+            upper_bound=row_bounds[1],
+        )
+        col_values = _build_search_values(
+            center_value=center_seed[1],
+            half_width=center_radius[1],
+            points=grid_points,
+            lower_bound=col_bounds[0],
+            upper_bound=col_bounds[1],
+        )
+        sdd_values = np.linspace(
+            sdd_bounds[0],
+            sdd_bounds[1],
+            int(grid_points),
+        )
+
+        for row_center in row_values:
+            for col_center in col_values:
+                beam_center_px = np.array(
+                    [row_center, col_center],
+                    dtype=float,
+                )
+                for sdd_cm in sdd_values:
+                    score, ring_indices, q, supported_mask = (
+                        _score_sdd_ring_candidate(
+                            peak_positions=peak_positions,
+                            beam_center_px=beam_center_px,
+                            sdd_cm=sdd_cm,
+                            pixel_size_um=pixel_size_um,
+                            wavelength_nm=wavelength_nm,
+                            pitch_nm=pitch_nm,
+                        )
+                    )
+                    if best is None or score < best["score"]:
+                        best = {
+                            "score": score,
+                            "beam_center_px": beam_center_px,
+                            "sdd_cm": float(sdd_cm),
+                            "ring_indices": ring_indices,
+                            "q": q,
+                            "supported_mask": supported_mask,
+                            "sdd_half_width_cm": max(
+                                (sdd_bounds[1] - sdd_bounds[0]) / 2,
+                                0.25,
+                            ),
+                        }
+
+    sdd_probe_half_width = max(best["sdd_half_width_cm"] / 4, 0.25)
+    sdd_probe_values = _build_search_values(
+        center_value=best["sdd_cm"],
+        half_width=sdd_probe_half_width,
+        points=max(fine_grid_points, 11),
+        lower_bound=sdd_min_cm,
+        upper_bound=sdd_max_cm,
+    )
+    sdd_scores = []
+    for sdd_cm in sdd_probe_values:
+        score, _, _, _ = _score_sdd_ring_candidate(
+            peak_positions=peak_positions,
+            beam_center_px=best["beam_center_px"],
+            sdd_cm=sdd_cm,
+            pixel_size_um=pixel_size_um,
+            wavelength_nm=wavelength_nm,
+            pitch_nm=pitch_nm,
+        )
+        sdd_scores.append(score)
+    sdd_scores = np.asarray(sdd_scores)
+    min_score = float(np.min(sdd_scores))
+    threshold = min_score + max(min_score * 0.1, 1e-12)
+    within_threshold = sdd_probe_values[sdd_scores <= threshold]
+    if within_threshold.size >= 2:
+        grid_uncertainty_cm = float(
+            (within_threshold[-1] - within_threshold[0]) / 2
+        )
+    else:
+        step_size = (
+            np.min(np.diff(sdd_probe_values)) / 2
+            if sdd_probe_values.size > 1 else 0.25
+        )
+        grid_uncertainty_cm = float(max(step_size, 0.01))
+
+    fitted_peak_positions, peak_position_uncertainty_px, radial_fit_success = (
+        _estimate_ring_peak_radial_uncertainty_from_image(
+            image=image,
+            peak_positions=peak_positions[best["supported_mask"]],
+            beam_center_px=best["beam_center_px"],
+            minimum_uncertainty_px=minimum_ring_uncertainty_px,
+        )
+    )
+    refined_sdd_cm, standard_uncertainty_cm, aggregated_ring_observations = (
+        _refine_sdd_from_ring_observations(
+            peak_positions=fitted_peak_positions,
+            beam_center_px=best["beam_center_px"],
+            ring_indices=best["ring_indices"][best["supported_mask"]],
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            pitch_nm=pitch_nm,
+            sdd_initial_cm=best["sdd_cm"],
+            peak_position_uncertainty_px=peak_position_uncertainty_px,
+            minimum_uncertainty_px=minimum_ring_uncertainty_px,
+        )
+    )
+    radial_distances_px = aggregated_ring_observations["radial_distances_px"]
+    uncertainty_cm = standard_uncertainty_cm
+
+    if not return_details:
+        return refined_sdd_cm, uncertainty_cm
+
+    details = {
+        "beam_center_px": tuple(best["beam_center_px"]),
+        "ring_indices": best["ring_indices"].copy(),
+        "supported_ring_mask": best["supported_mask"].copy(),
+        "q_values_nm_inverse": best["q"].copy(),
+        "score": best["score"],
+        "radial_distances_px": radial_distances_px.copy(),
+        "grid_sdd_cm": best["sdd_cm"],
+        "grid_uncertainty_cm": grid_uncertainty_cm,
+        "standard_uncertainty_cm": standard_uncertainty_cm,
+        "peak_position_uncertainty_px": peak_position_uncertainty_px.copy(),
+        "fitted_peak_positions_px": fitted_peak_positions.copy(),
+        "radial_fit_success": radial_fit_success.copy(),
+        "aggregated_ring_indices": (
+            aggregated_ring_observations["aggregated_ring_indices"].copy()
+        ),
+        "aggregated_radial_distances_px": (
+            aggregated_ring_observations[
+                "aggregated_radial_distances_px"
+            ].copy()
+        ),
+        "aggregated_peak_position_uncertainty_px": (
+            aggregated_ring_observations[
+                "aggregated_radial_uncertainty_px"
+            ].copy()
+        ),
+    }
+
+    return refined_sdd_cm, uncertainty_cm, details
+
+
+def estimate_sample_detector_distance_from_ring_sectors(
+        image,
+        beam_center_guess_px,
+        sdd_guess_cm,
+        pitch_nm,
+        wavelength_nm,
+        pixel_size_um,
+        ring_indices=None,
+        sector_step_deg=10.0,
+        sector_width_deg=10.0,
+        radial_window_px=8.0,
+        radial_bin_size_px=1.0,
+        exclude_within_beamstop_radius_px=None,
+        beam_center_search_radius_px=5.0,
+        sdd_search_half_width_cm=None,
+        sdd_search_range_cm=None,
+        coarse_grid_points=11,
+        fine_grid_points=11,
+        minimum_ring_uncertainty_px=0.5,
+        show_progress=False,
+        show_diagnostic_plot=False,
+        return_details=False):
+    """Estimate beam center and SDD from sector radial averages of rings.
+
+    Parameters
+    ----------
+    show_progress : bool, optional
+        If True, display a tqdm progress bar while sector angles are
+        processed for each beam-center/SDD candidate. The current angle
+        is shown in the progress bar postfix.
+    show_diagnostic_plot : bool, optional
+        If True, create a matplotlib figure showing the log-scale image,
+        ring search windows, fitted sector peak locations, and beam
+        center.
+    """
+    image = np.asarray(image, dtype=float)
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array.")
+    if pitch_nm <= 0 or wavelength_nm <= 0 or pixel_size_um <= 0:
+        raise ValueError(
+            "pitch_nm, wavelength_nm, and pixel_size_um must be positive."
+        )
+    beam_center_guess_px = np.asarray(beam_center_guess_px, dtype=float)
+    if beam_center_guess_px.shape != (2,):
+        raise ValueError("beam_center_guess_px must contain [row, column].")
+    sdd_guess_cm = float(sdd_guess_cm)
+    if sdd_guess_cm <= 0:
+        raise ValueError("sdd_guess_cm must be positive.")
+    if sector_step_deg <= 0 or sector_width_deg <= 0:
+        raise ValueError(
+            "sector_step_deg and sector_width_deg must be positive."
+        )
+    if radial_window_px <= 0 or radial_bin_size_px <= 0:
+        raise ValueError(
+            "radial_window_px and radial_bin_size_px must be positive."
+        )
+    if minimum_ring_uncertainty_px <= 0:
+        raise ValueError("minimum_ring_uncertainty_px must be positive.")
+    if exclude_within_beamstop_radius_px is not None:
+        exclude_within_beamstop_radius_px = float(
+            exclude_within_beamstop_radius_px
+        )
+        if exclude_within_beamstop_radius_px < 0:
+            raise ValueError(
+                "exclude_within_beamstop_radius_px must be non-negative."
+            )
+
+    if np.isscalar(beam_center_search_radius_px):
+        beam_center_search_radius_px = (
+            float(beam_center_search_radius_px),
+            float(beam_center_search_radius_px),
+        )
+    else:
+        beam_center_search_radius_px = tuple(beam_center_search_radius_px)
+        if len(beam_center_search_radius_px) != 2:
+            raise ValueError(
+                "beam_center_search_radius_px must be a scalar or length 2."
+            )
+
+    if sdd_search_range_cm is None:
+        if sdd_search_half_width_cm is None:
+            sdd_search_half_width_cm = max(0.1 * sdd_guess_cm, 1.0)
+        sdd_search_range_cm = (
+            max(sdd_guess_cm - float(sdd_search_half_width_cm), 0.1),
+            sdd_guess_cm + float(sdd_search_half_width_cm),
+        )
+    sdd_min_cm, sdd_max_cm = map(float, sdd_search_range_cm)
+    if sdd_min_cm <= 0 or sdd_max_cm <= sdd_min_cm:
+        raise ValueError(
+            "sdd_search_range_cm must contain positive increasing values."
+        )
+
+    progress_bar = None
+    if show_progress:
+        progress_bar = tqdm(
+            total=len(np.arange(0.0, 360.0, float(sector_step_deg))),
+            desc="Sector fit from initial guess",
+            leave=False,
+        )
+    try:
+        observations = _collect_ring_sector_observations(
+            image=image,
+            beam_center_px=beam_center_guess_px,
+            sdd_cm=sdd_guess_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            sector_step_deg=sector_step_deg,
+            sector_width_deg=sector_width_deg,
+            ring_indices=ring_indices,
+            radial_window_px=radial_window_px,
+            radial_bin_size_px=radial_bin_size_px,
+            exclude_within_beamstop_radius_px=exclude_within_beamstop_radius_px,
+            minimum_ring_uncertainty_px=minimum_ring_uncertainty_px,
+            progress_bar=progress_bar,
+        )
+    finally:
+        if progress_bar is not None:
+            progress_bar.close()
+
+    if observations["peak_positions"].shape[0] < 2:
+        raise RuntimeError(
+            "Could not identify enough sector ring observations to refine SDD."
+        )
+
+    row_bounds = (
+        max(0.0, beam_center_guess_px[0] - beam_center_search_radius_px[0]),
+        min(float(image.shape[0] - 1),
+            beam_center_guess_px[0] + beam_center_search_radius_px[0]),
+    )
+    col_bounds = (
+        max(0.0, beam_center_guess_px[1] - beam_center_search_radius_px[1]),
+        min(float(image.shape[1] - 1),
+            beam_center_guess_px[1] + beam_center_search_radius_px[1]),
+    )
+    refined_beam_center_px, refined_sdd_cm, parameter_uncertainty = (
+        _refine_beam_center_and_sdd_with_fixed_orders(
+            peak_positions=observations["peak_positions"],
+            beam_center_initial_px=beam_center_guess_px,
+            orders=observations["ring_indices"],
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            pitch_nm=pitch_nm,
+            sdd_initial_cm=sdd_guess_cm,
+            peak_position_uncertainty_px=(
+                observations["peak_position_uncertainty_px"]
+            ),
+            beam_center_bounds_px=(row_bounds, col_bounds),
+            sdd_bounds_cm=(sdd_min_cm, sdd_max_cm),
+        )
+    )
+
+    refined_sdd_cm, standard_uncertainty_cm, aggregated_ring_observations = (
+        _refine_sdd_from_ring_observations(
+            peak_positions=observations["peak_positions"],
+            beam_center_px=refined_beam_center_px,
+            ring_indices=observations["ring_indices"],
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            pitch_nm=pitch_nm,
+            sdd_initial_cm=refined_sdd_cm,
+            peak_position_uncertainty_px=(
+                observations["peak_position_uncertainty_px"]
+            ),
+            minimum_uncertainty_px=minimum_ring_uncertainty_px,
+        )
+    )
+    uncertainty_cm = standard_uncertainty_cm
+    diagnostic_figure = None
+    if show_diagnostic_plot:
+        diagnostic_figure = _plot_ring_sector_fit_diagnostics(
+            image=image,
+            beam_center_px=refined_beam_center_px,
+            ring_indices=observations["ring_indices"],
+            sector_angles_deg=observations["sector_angles_deg"],
+            fitted_peak_positions_px=observations["peak_positions"],
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            sdd_cm=refined_sdd_cm,
+            radial_window_px=radial_window_px,
+            title='Ring sector fit diagnostics',
+        )
+
+    if not return_details:
+        return refined_sdd_cm, uncertainty_cm
+
+    details = {
+        "beam_center_px": tuple(refined_beam_center_px),
+        "grid_sdd_cm": sdd_guess_cm,
+        "standard_uncertainty_cm": standard_uncertainty_cm,
+        "score": np.nan,
+        "ring_indices": observations["ring_indices"].copy(),
+        "sector_angles_deg": observations["sector_angles_deg"].copy(),
+        "fitted_peak_positions_px": (
+            observations["peak_positions"].copy()
+        ),
+        "peak_position_uncertainty_px": (
+            observations["peak_position_uncertainty_px"].copy()
+        ),
+        "fitted_radii_px": observations["radii_px"].copy(),
+        "beam_center_standard_uncertainty_px": parameter_uncertainty[:2].copy(),
+        "sdd_standard_uncertainty_cm": float(parameter_uncertainty[2]),
+        "aggregated_ring_indices": (
+            aggregated_ring_observations["aggregated_ring_indices"].copy()
+        ),
+        "aggregated_radial_distances_px": (
+            aggregated_ring_observations[
+                "aggregated_radial_distances_px"
+            ].copy()
+        ),
+        "aggregated_peak_position_uncertainty_px": (
+            aggregated_ring_observations[
+                "aggregated_radial_uncertainty_px"
+            ].copy()
+        ),
+    }
+    if diagnostic_figure is not None:
+        details["diagnostic_figure"] = diagnostic_figure
+
+    return refined_sdd_cm, uncertainty_cm, details
 
 
 def default_mask(data):
@@ -903,10 +2565,11 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
         will be sent to the peak finding algorithm with its original
         values.
         Default value is True.
-    refinement_size : int
+    refinement_size : int | None
         Define the box size around the peaks in which to peform the
-        Gaussian refinement.
-        Default value is 7. Minimum value is 4.
+        Gaussian refinement. If set to None, the pixel coordinates from
+        peak_local_max() are returned without Gaussian refinement.
+        Default value is 7. Minimum value is 4 when refinement is used.
     mask : NDArray
         Two-dimensional boolean array of pixels to mask during the
         peak finding operation.
@@ -960,6 +2623,9 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
         image_fed,
         **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
     coordinates_px = coordinates_px.tolist()
+
+    if refinement_size is None:
+        return np.array(coordinates_px)
 
     coordinates = []
 
