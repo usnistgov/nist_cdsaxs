@@ -78,6 +78,37 @@ def _score_sdd_candidate(
     return float(np.mean(residual**2)), order_int.astype(int), q_signed
 
 
+def _score_pitch_candidate(
+        peak_positions,
+        beam_center_px,
+        sdd_cm,
+        pixel_size_um,
+        wavelength_nm,
+        pitch_nm,
+        diffraction_direction):
+    """Score how well a fixed-SDD geometry candidate matches a q lattice."""
+    q = _peak_q_from_geometry(
+        peak_positions=peak_positions,
+        beam_center_px=beam_center_px,
+        sdd_cm=sdd_cm,
+        pixel_size_um=pixel_size_um,
+        wavelength_nm=wavelength_nm,
+    )
+    signed_distance_px = np.dot(
+        np.asarray(peak_positions, dtype=float) - beam_center_px,
+        diffraction_direction,
+    )
+    q_signed = np.sign(signed_distance_px) * q
+    q_spacing = 2 * np.pi / pitch_nm
+    order_float = q_signed / q_spacing
+    order_int = np.rint(order_float)
+    order_int = np.where(order_int == 0, 1, order_int)
+    q_model = q_spacing * order_int
+    residual = q_signed - q_model
+
+    return float(np.mean(residual**2)), order_int.astype(int), q_signed
+
+
 def _score_sdd_ring_candidate(
         peak_positions,
         beam_center_px,
@@ -577,6 +608,64 @@ def _refine_sdd_with_fixed_orders(
         standard_uncertainty_cm = float(np.sqrt(pcov[0, 0]))
 
     return sdd_refined_cm, standard_uncertainty_cm
+
+
+def _refine_pitch_with_fixed_orders(
+        peak_positions,
+        beam_center_px,
+        orders,
+        wavelength_nm,
+        pixel_size_um,
+        sdd_cm,
+        pitch_initial_nm,
+        peak_position_uncertainty_px):
+    """Refine pitch for fixed beam center, SDD, and diffraction orders."""
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    beam_center_px = np.asarray(beam_center_px, dtype=float)
+    orders = np.asarray(orders, dtype=float)
+
+    radial_distance_cm = np.linalg.norm(
+        peak_positions - beam_center_px,
+        axis=1,
+    ) * pixel_size_um * 1e-4
+    q_observed = _peak_q_from_geometry(
+        peak_positions=peak_positions,
+        beam_center_px=beam_center_px,
+        sdd_cm=sdd_cm,
+        pixel_size_um=pixel_size_um,
+        wavelength_nm=wavelength_nm,
+    )
+
+    sigma_r = np.asarray(peak_position_uncertainty_px, dtype=float)
+    sigma_r = sigma_r * pixel_size_um * 1e-4
+    theta = np.arctan2(radial_distance_cm, float(sdd_cm))
+    dq_dr = (
+        (2 * np.pi / wavelength_nm)
+        * np.cos(theta / 2)
+        * float(sdd_cm)
+        / (radial_distance_cm**2 + float(sdd_cm)**2)
+    )
+    sigma_q = np.maximum(np.abs(dq_dr) * sigma_r, 1e-12)
+
+    def q_model(_, pitch_nm):
+        return np.abs(orders) * (2 * np.pi / pitch_nm)
+
+    popt, pcov = curve_fit(
+        q_model,
+        radial_distance_cm,
+        q_observed,
+        p0=[float(pitch_initial_nm)],
+        bounds=(0, np.inf),
+        sigma=sigma_q,
+        absolute_sigma=True,
+    )
+    pitch_refined_nm = float(popt[0])
+    if pcov.size == 0 or not np.isfinite(pcov[0, 0]):
+        standard_uncertainty_nm = np.nan
+    else:
+        standard_uncertainty_nm = float(np.sqrt(pcov[0, 0]))
+
+    return pitch_refined_nm, standard_uncertainty_nm
 
 
 def _refine_beam_center_and_sdd_with_fixed_orders(
@@ -1456,6 +1545,293 @@ def estimate_sample_detector_distance(
     }
 
     return refined_sdd_cm, uncertainty_cm, details
+
+
+def estimate_pitch_from_peaks(
+    image,
+        peak_positions,
+        sdd_cm,
+        wavelength_nm,
+        pixel_size_um,
+        pitch_guess_nm,
+        beam_center_guess_px=None,
+        beam_center_search_radius_px=None,
+        pitch_search_range_nm=None,
+        coarse_grid_points=31,
+        fine_grid_points=31,
+        return_details=False):
+    """
+    Estimate sample pitch from diffraction peak positions and known SDD.
+
+    Parameters
+    ----------
+    image : ndarray
+        Source detector image used to estimate local peak-position
+        uncertainties from 2D Gaussian fits around the provided peaks.
+    peak_positions : ndarray
+        Peak coordinates with shape (n, 2) where each row is
+        [row_position, column_position].
+    sdd_cm : float
+        Known sample-to-detector distance in cm.
+    wavelength_nm : float
+        X-ray wavelength in nanometers.
+    pixel_size_um : float
+        Detector pixel size in microns.
+    pitch_guess_nm : float
+        Initial guess for the sample pitch in nanometers.
+    beam_center_guess_px : tuple | list | ndarray, optional
+        Initial guess for the beam center as [row, column] in pixels.
+        If omitted, the mean of the peak positions is used.
+    beam_center_search_radius_px : float | tuple, optional
+        Search half-width in pixels around the beam center guess.
+        If a scalar is provided, the same radius is used for row and
+        column. If omitted, the search radius is based on the peak span.
+    pitch_search_range_nm : tuple, optional
+        Inclusive search range for pitch in nm as (minimum, maximum).
+        If omitted, a range centered on pitch_guess_nm is used.
+    coarse_grid_points : int, optional
+        Number of grid points per dimension for the coarse search.
+    fine_grid_points : int, optional
+        Number of grid points per dimension for the fine search.
+    return_details : bool, optional
+        If set to True, also return a dictionary with the fitted beam
+        center, assigned diffraction orders, fitted q values, and fit
+        score.
+
+    Returns
+    -------
+    pitch_nm : float
+        Estimated sample pitch in nm.
+    uncertainty_nm : float
+        Estimated standard uncertainty in sample pitch in nm from a
+        post-order nonlinear refit using image-based radial peak-position
+        uncertainties.
+    details : dict, optional
+        Returned only when return_details is True. Contains
+        ``beam_center_px``, ``orders``, ``q_values_nm_inverse``,
+        ``score``, ``grid_pitch_nm``, ``grid_uncertainty_nm``,
+        ``standard_uncertainty_nm``, ``peak_position_uncertainty_px``,
+        and ``fitted_peak_positions_px``.
+    """
+    image = np.asarray(image, dtype=float)
+    if image.ndim != 2:
+        raise ValueError("image must be a 2D array.")
+
+    peak_positions = np.asarray(peak_positions, dtype=float)
+    if peak_positions.ndim != 2 or peak_positions.shape[1] != 2:
+        raise ValueError(
+            "peak_positions must be a 2D array with shape (n_peaks, 2)."
+        )
+    if peak_positions.shape[0] < 2:
+        raise ValueError("At least two peak positions are required.")
+    if sdd_cm <= 0 or wavelength_nm <= 0 or pixel_size_um <= 0:
+        raise ValueError(
+            "sdd_cm, wavelength_nm, and pixel_size_um must be positive."
+        )
+    if pitch_guess_nm <= 0:
+        raise ValueError("pitch_guess_nm must be positive.")
+
+    if pitch_search_range_nm is None:
+        pitch_half_width_nm = max(float(pitch_guess_nm) * 0.5, 1.0)
+        pitch_min_nm = max(float(pitch_guess_nm) - pitch_half_width_nm, 1e-6)
+        pitch_max_nm = float(pitch_guess_nm) + pitch_half_width_nm
+    else:
+        pitch_min_nm, pitch_max_nm = map(float, pitch_search_range_nm)
+        if pitch_min_nm <= 0 or pitch_max_nm <= pitch_min_nm:
+            raise ValueError(
+                "pitch_search_range_nm must contain positive increasing "
+                "values."
+            )
+
+    if beam_center_guess_px is None:
+        beam_center_guess_px = np.mean(peak_positions, axis=0)
+    else:
+        beam_center_guess_px = np.asarray(beam_center_guess_px, dtype=float)
+        if beam_center_guess_px.shape != (2,):
+            raise ValueError(
+                "beam_center_guess_px must contain [row, column]."
+            )
+
+    peak_span = np.ptp(peak_positions, axis=0)
+    default_radius = max(float(np.max(peak_span)) / 2, 2.0)
+    if beam_center_search_radius_px is None:
+        beam_center_search_radius_px = (default_radius, default_radius)
+    elif np.isscalar(beam_center_search_radius_px):
+        beam_center_search_radius_px = (
+            float(beam_center_search_radius_px),
+            float(beam_center_search_radius_px),
+        )
+    else:
+        beam_center_search_radius_px = tuple(beam_center_search_radius_px)
+        if len(beam_center_search_radius_px) != 2:
+            raise ValueError(
+                "beam_center_search_radius_px must be a scalar or length 2."
+            )
+
+    row_bounds = (
+        float(np.min(peak_positions[:, 0]) - peak_span[0]),
+        float(np.max(peak_positions[:, 0]) + peak_span[0]),
+    )
+    col_bounds = (
+        float(np.min(peak_positions[:, 1]) - peak_span[1]),
+        float(np.max(peak_positions[:, 1]) + peak_span[1]),
+    )
+    diffraction_direction = _fit_diffraction_direction(peak_positions)
+
+    best = None
+    search_specs = [
+        (
+            coarse_grid_points,
+            beam_center_search_radius_px,
+            (pitch_min_nm, pitch_max_nm),
+        ),
+        (
+            fine_grid_points,
+            (
+                max(beam_center_search_radius_px[0] / 4, 0.5),
+                max(beam_center_search_radius_px[1] / 4, 0.5),
+            ),
+            None,
+        ),
+    ]
+
+    for grid_points, center_radius, pitch_bounds in search_specs:
+        if best is None:
+            center_seed = beam_center_guess_px
+            pitch_seed = (pitch_min_nm + pitch_max_nm) / 2
+            pitch_half_width_nm = (pitch_max_nm - pitch_min_nm) / 2
+        else:
+            center_seed = best["beam_center_px"]
+            pitch_seed = best["pitch_nm"]
+            pitch_half_width_nm = max(best["pitch_half_width_nm"] / 4, 0.25)
+
+        if pitch_bounds is None:
+            pitch_bounds = (
+                max(pitch_min_nm, pitch_seed - pitch_half_width_nm),
+                min(pitch_max_nm, pitch_seed + pitch_half_width_nm),
+            )
+
+        row_values = _build_search_values(
+            center_value=center_seed[0],
+            half_width=center_radius[0],
+            points=grid_points,
+            lower_bound=row_bounds[0],
+            upper_bound=row_bounds[1],
+        )
+        col_values = _build_search_values(
+            center_value=center_seed[1],
+            half_width=center_radius[1],
+            points=grid_points,
+            lower_bound=col_bounds[0],
+            upper_bound=col_bounds[1],
+        )
+        pitch_values = np.linspace(
+            pitch_bounds[0],
+            pitch_bounds[1],
+            int(grid_points),
+        )
+
+        for row_center in row_values:
+            for col_center in col_values:
+                beam_center_px = np.array(
+                    [row_center, col_center],
+                    dtype=float,
+                )
+                for pitch_nm in pitch_values:
+                    score, orders, q = _score_pitch_candidate(
+                        peak_positions=peak_positions,
+                        beam_center_px=beam_center_px,
+                        sdd_cm=sdd_cm,
+                        pixel_size_um=pixel_size_um,
+                        wavelength_nm=wavelength_nm,
+                        pitch_nm=pitch_nm,
+                        diffraction_direction=diffraction_direction,
+                    )
+                    if best is None or score < best["score"]:
+                        best = {
+                            "score": score,
+                            "beam_center_px": beam_center_px,
+                            "pitch_nm": float(pitch_nm),
+                            "orders": orders,
+                            "q": q,
+                            "diffraction_direction": diffraction_direction,
+                            "pitch_half_width_nm": max(
+                                (pitch_bounds[1] - pitch_bounds[0]) / 2,
+                                0.25,
+                            ),
+                        }
+
+    pitch_probe_half_width_nm = max(best["pitch_half_width_nm"] / 4, 0.25)
+    pitch_probe_values = _build_search_values(
+        center_value=best["pitch_nm"],
+        half_width=pitch_probe_half_width_nm,
+        points=max(fine_grid_points, 11),
+        lower_bound=pitch_min_nm,
+        upper_bound=pitch_max_nm,
+    )
+    pitch_scores = []
+    for pitch_nm in pitch_probe_values:
+        score, _, _ = _score_pitch_candidate(
+            peak_positions=peak_positions,
+            beam_center_px=best["beam_center_px"],
+            sdd_cm=sdd_cm,
+            pixel_size_um=pixel_size_um,
+            wavelength_nm=wavelength_nm,
+            pitch_nm=pitch_nm,
+            diffraction_direction=diffraction_direction,
+        )
+        pitch_scores.append(score)
+    pitch_scores = np.asarray(pitch_scores)
+    min_score = float(np.min(pitch_scores))
+    threshold = min_score + max(min_score * 0.1, 1e-12)
+    within_threshold = pitch_probe_values[pitch_scores <= threshold]
+    if within_threshold.size >= 2:
+        grid_uncertainty_nm = float(
+            (within_threshold[-1] - within_threshold[0]) / 2
+        )
+    else:
+        step_size = (
+            np.min(np.diff(pitch_probe_values)) / 2
+            if pitch_probe_values.size > 1 else 0.25
+        )
+        grid_uncertainty_nm = float(max(step_size, 0.01))
+
+    fitted_peak_positions, peak_position_uncertainty_px, _ = (
+        _estimate_peak_radial_uncertainty_from_image(
+            image=image,
+            peak_positions=peak_positions,
+            beam_center_px=best["beam_center_px"],
+        )
+    )
+    refined_pitch_nm, standard_uncertainty_nm = _refine_pitch_with_fixed_orders(
+        peak_positions=fitted_peak_positions,
+        beam_center_px=best["beam_center_px"],
+        orders=best["orders"],
+        wavelength_nm=wavelength_nm,
+        pixel_size_um=pixel_size_um,
+        sdd_cm=sdd_cm,
+        pitch_initial_nm=best["pitch_nm"],
+        peak_position_uncertainty_px=peak_position_uncertainty_px,
+    )
+    uncertainty_nm = standard_uncertainty_nm
+
+    if not return_details:
+        return refined_pitch_nm, uncertainty_nm
+
+    details = {
+        "beam_center_px": tuple(best["beam_center_px"]),
+        "orders": best["orders"].copy(),
+        "q_values_nm_inverse": best["q"].copy(),
+        "score": best["score"],
+        "diffraction_direction": best["diffraction_direction"].copy(),
+        "grid_pitch_nm": best["pitch_nm"],
+        "grid_uncertainty_nm": grid_uncertainty_nm,
+        "standard_uncertainty_nm": standard_uncertainty_nm,
+        "peak_position_uncertainty_px": peak_position_uncertainty_px.copy(),
+        "fitted_peak_positions_px": fitted_peak_positions.copy(),
+    }
+
+    return refined_pitch_nm, uncertainty_nm, details
 
 
 def estimate_sample_detector_distance_from_rings(
@@ -2934,4 +3310,132 @@ def find_maximum_rectangular_roi(data):
     max1 = min1 + test_area.shape[1]
 
     return (min0, max0), (min1, max1), height, width, area
+
+
+def find_pitch(
+        normal_pitch_nm,
+        wavelength_nm,
+        sdd_cm,
+        normal_sdd_cm,
+        sdd_cm_error=None):
+    theta_rad = 2*np.arcsin(wavelength_nm/(2*normal_pitch_nm))
+    distance = sdd_cm*np.tan(theta_rad)
+    new_theta_rad = np.arctan(distance/normal_sdd_cm)
+    new_d = wavelength_nm/(2*np.sin(new_theta_rad/2))
+
+    if sdd_cm_error is None:
+        return new_d
+
+    ddistance_dsdd = np.tan(theta_rad)
+    dnew_theta_ddistance = (
+        1 / normal_sdd_cm
+    ) / (1 + (distance/normal_sdd_cm)**2)
+    dnew_d_dnew_theta = (
+        -wavelength_nm
+        * np.cos(new_theta_rad/2)
+        / (4 * np.sin(new_theta_rad/2)**2)
+    )
+    dnew_d_dsdd = dnew_d_dnew_theta * dnew_theta_ddistance * ddistance_dsdd
+    propagated_error = np.abs(dnew_d_dsdd) * sdd_cm_error
+
+    return new_d, propagated_error
+
+
+def apparent_peak_shift_from_rotation(
+        q1_nm_inverse,
+        rotation_angle_deg,
+        wavelength_nm,
+        original_sdd_cm):
+    """
+    Calculate the apparent diffraction peak shift from sample rotation.
+
+    The apparent peak location in reciprocal space follows
+    ``q2 = q1 / cos(rotation_angle)`` where ``q1`` is the actual peak
+    location and ``q2`` is the apparent peak location inferred when the
+    true sample-to-detector distance is known but the sample rotation is
+    ignored. The same rotated detector radius can also be interpreted as
+    an apparent sample-to-detector distance when the true pitch is known
+    but the sample rotation is ignored.
+
+    Parameters
+    ----------
+    q1_nm_inverse : float
+        Actual diffraction peak location in inverse nanometers.
+    rotation_angle_deg : float or array-like
+        Sample rotation angle or angles in degrees.
+    wavelength_nm : float
+        X-ray wavelength in nanometers.
+    original_sdd_cm : float
+        Original sample-to-detector distance in centimeters.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the actual and apparent q values, the
+        original and apparent pitches, the original and apparent
+        sample-to-detector distances, and the SDD shift in centimeters.
+        Array-valued outputs are returned when ``rotation_angle_deg`` is
+        array-like.
+    """
+    q1_nm_inverse = float(q1_nm_inverse)
+    rotation_angle_deg = np.asarray(rotation_angle_deg, dtype=float)
+    wavelength_nm = float(wavelength_nm)
+    original_sdd_cm = float(original_sdd_cm)
+    scalar_input = rotation_angle_deg.ndim == 0
+
+    if q1_nm_inverse <= 0:
+        raise ValueError("q1_nm_inverse must be positive.")
+    if wavelength_nm <= 0:
+        raise ValueError("wavelength_nm must be positive.")
+    if original_sdd_cm <= 0:
+        raise ValueError("original_sdd_cm must be positive.")
+    if not np.all(np.isfinite(rotation_angle_deg)):
+        raise ValueError("rotation_angle_deg must be finite.")
+
+    rotation_angle_rad = np.deg2rad(rotation_angle_deg)
+    cosine = np.cos(rotation_angle_rad)
+    if np.any(np.isclose(cosine, 0.0)):
+        raise ValueError(
+            "rotation_angle_deg produces an undefined apparent peak."
+        )
+
+    q2_nm_inverse = q1_nm_inverse / cosine
+    if np.any(q2_nm_inverse <= 0):
+        raise ValueError(
+            "rotation_angle_deg produces a non-positive apparent peak."
+        )
+
+    q1_argument = q1_nm_inverse * wavelength_nm / (4 * np.pi)
+    q2_argument = q2_nm_inverse * wavelength_nm / (4 * np.pi)
+    if abs(q1_argument) > 1 or np.any(np.abs(q2_argument) > 1):
+        raise ValueError(
+            "q and wavelength combination is outside the scattering "
+            "geometry domain."
+        )
+
+    theta1_rad = 2 * np.arcsin(q1_argument)
+    theta2_rad = 2 * np.arcsin(q2_argument)
+    rotated_detector_radius_cm = original_sdd_cm * np.tan(theta2_rad)
+    apparent_sdd_cm = rotated_detector_radius_cm / np.tan(theta1_rad)
+    original_pitch_nm = 2 * np.pi / q1_nm_inverse
+    apparent_pitch_nm = 2 * np.pi / q2_nm_inverse
+
+    if scalar_input:
+        rotation_angle_deg = float(rotation_angle_deg)
+        q2_nm_inverse = float(q2_nm_inverse)
+        rotated_detector_radius_cm = float(rotated_detector_radius_cm)
+        apparent_sdd_cm = float(apparent_sdd_cm)
+        apparent_pitch_nm = float(apparent_pitch_nm)
+
+    return {
+        "actual_q_nm_inverse": q1_nm_inverse,
+        "apparent_q_nm_inverse": q2_nm_inverse,
+        "original_pitch_nm": original_pitch_nm,
+        "apparent_pitch_nm": apparent_pitch_nm,
+        "rotation_angle_deg": rotation_angle_deg,
+        "original_sdd_cm": original_sdd_cm,
+        "rotated_detector_radius_cm": rotated_detector_radius_cm,
+        "apparent_sdd_cm": apparent_sdd_cm,
+        "apparent_sdd_shift_cm": apparent_sdd_cm - original_sdd_cm,
+    }
 

@@ -9,6 +9,9 @@ from cdsaxs.tools import find_peaks_2D_one_axis
 from cdsaxs.tools import estimate_sample_detector_distance
 from cdsaxs.tools import estimate_sample_detector_distance_from_rings
 from cdsaxs.tools import estimate_sample_detector_distance_from_ring_sectors
+from cdsaxs.tools import estimate_pitch_from_peaks
+from cdsaxs.tools import find_pitch
+from cdsaxs.tools import apparent_peak_shift_from_rotation
 from cdsaxs.tools import _score_sdd_ring_candidate
 from cdsaxs.tools import rotate_image
 
@@ -150,6 +153,138 @@ class TestTools(unittest.TestCase):
         self.assertAlmostEqual(angle, 67.3801350520)
         self.assertAlmostEqual(slope, 2.4)
         self.assertAlmostEqual(intercept, 12.6)
+
+    def test_apparent_peak_shift_from_rotation(self):
+        q1_nm_inverse = 0.2
+        rotation_angle_deg = 30.0
+        wavelength_nm = 0.1
+        original_sdd_cm = 100.0
+
+        result = apparent_peak_shift_from_rotation(
+            q1_nm_inverse=q1_nm_inverse,
+            rotation_angle_deg=rotation_angle_deg,
+            wavelength_nm=wavelength_nm,
+            original_sdd_cm=original_sdd_cm,
+        )
+
+        expected_q2 = q1_nm_inverse / np.cos(np.deg2rad(rotation_angle_deg))
+        expected_original_pitch_nm = 2 * np.pi / q1_nm_inverse
+        expected_apparent_pitch_nm = 2 * np.pi / expected_q2
+        theta1 = 2 * np.arcsin(q1_nm_inverse * wavelength_nm / (4 * np.pi))
+        theta2 = 2 * np.arcsin(expected_q2 * wavelength_nm / (4 * np.pi))
+        expected_rotated_detector_radius_cm = (
+            original_sdd_cm * np.tan(theta2)
+        )
+        expected_apparent_sdd_cm = (
+            expected_rotated_detector_radius_cm / np.tan(theta1)
+        )
+
+        self.assertAlmostEqual(
+            result["actual_q_nm_inverse"],
+            q1_nm_inverse,
+        )
+        self.assertAlmostEqual(
+            result["apparent_q_nm_inverse"],
+            expected_q2,
+        )
+        self.assertAlmostEqual(
+            result["original_pitch_nm"],
+            expected_original_pitch_nm,
+        )
+        self.assertAlmostEqual(
+            result["apparent_pitch_nm"],
+            expected_apparent_pitch_nm,
+        )
+        self.assertAlmostEqual(
+            result["rotated_detector_radius_cm"],
+            expected_rotated_detector_radius_cm,
+        )
+        self.assertAlmostEqual(
+            result["apparent_sdd_cm"],
+            expected_apparent_sdd_cm,
+        )
+        self.assertGreater(
+            result["apparent_q_nm_inverse"],
+            result["actual_q_nm_inverse"],
+        )
+        self.assertLess(
+            result["apparent_pitch_nm"],
+            result["original_pitch_nm"],
+        )
+        self.assertGreater(
+            result["apparent_sdd_cm"],
+            original_sdd_cm,
+        )
+
+    def test_apparent_peak_shift_from_rotation_zero_angle(self):
+        result = apparent_peak_shift_from_rotation(
+            q1_nm_inverse=0.2,
+            rotation_angle_deg=0.0,
+            wavelength_nm=0.1,
+            original_sdd_cm=100.0,
+        )
+        theta = 2 * np.arcsin(0.2 * 0.1 / (4 * np.pi))
+        expected_radius_cm = 100.0 * np.tan(theta)
+
+        self.assertAlmostEqual(
+            result["apparent_q_nm_inverse"],
+            result["actual_q_nm_inverse"],
+        )
+        self.assertAlmostEqual(
+            result["apparent_pitch_nm"],
+            result["original_pitch_nm"],
+        )
+        self.assertAlmostEqual(
+            result["apparent_sdd_cm"],
+            result["original_sdd_cm"],
+        )
+        self.assertAlmostEqual(
+            result["rotated_detector_radius_cm"],
+            expected_radius_cm,
+        )
+        self.assertAlmostEqual(result["apparent_sdd_shift_cm"], 0.0)
+
+    def test_apparent_peak_shift_from_rotation_angle_array(self):
+        rotation_angles_deg = np.array([0.0, 15.0, 30.0])
+        result = apparent_peak_shift_from_rotation(
+            q1_nm_inverse=0.2,
+            rotation_angle_deg=rotation_angles_deg,
+            wavelength_nm=0.1,
+            original_sdd_cm=100.0,
+        )
+
+        expected_q2 = 0.2 / np.cos(np.deg2rad(rotation_angles_deg))
+        expected_pitch = 2 * np.pi / expected_q2
+        theta2 = 2 * np.arcsin(expected_q2 * 0.1 / (4 * np.pi))
+        expected_radius = 100.0 * np.tan(theta2)
+
+        np.testing.assert_allclose(
+            result["rotation_angle_deg"],
+            rotation_angles_deg,
+        )
+        np.testing.assert_allclose(
+            result["apparent_q_nm_inverse"],
+            expected_q2,
+        )
+        np.testing.assert_allclose(
+            result["apparent_pitch_nm"],
+            expected_pitch,
+        )
+        np.testing.assert_allclose(
+            result["rotated_detector_radius_cm"],
+            expected_radius,
+        )
+        self.assertEqual(result["actual_q_nm_inverse"], 0.2)
+        self.assertEqual(result["original_pitch_nm"], 2 * np.pi / 0.2)
+
+    def test_apparent_peak_shift_from_rotation_invalid_angle(self):
+        with self.assertRaises(ValueError):
+            apparent_peak_shift_from_rotation(
+                q1_nm_inverse=0.2,
+                rotation_angle_deg=90.0,
+                wavelength_nm=0.1,
+                original_sdd_cm=100.0,
+            )
 
     def test_gaussian_refine_peak_2D(self):
 
@@ -327,6 +462,85 @@ class TestTools(unittest.TestCase):
 
         for x, y in zip(test_coordinates, peak_coordinates):
             self.assertAlmostEqual(x, y, places=3)
+
+    def test_estimate_pitch_from_peaks(self):
+        beam_center_px = np.array([96.4, 104.8])
+        sdd_cm = 215.0
+        pitch_nm = 82.0
+        wavelength_nm = 0.1023
+        pixel_size_um = 75.0
+        orders = np.array([-3, -2, -1, 1, 2, 3])
+        peak_positions = self._generate_rotated_peak_positions(
+            beam_center_px=beam_center_px,
+            sdd_cm=sdd_cm,
+            pitch_nm=pitch_nm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            orders=orders,
+            angle_deg=28.0,
+        )
+        image = self._generate_peak_image(
+            shape=(220, 220),
+            peak_positions=peak_positions,
+            sigma_px=1.3,
+            amplitude=150.0,
+            background=2.0,
+        )
+
+        estimated_pitch_nm, uncertainty_nm, details = estimate_pitch_from_peaks(
+            image=image,
+            peak_positions=peak_positions,
+            sdd_cm=sdd_cm,
+            wavelength_nm=wavelength_nm,
+            pixel_size_um=pixel_size_um,
+            pitch_guess_nm=78.0,
+            beam_center_guess_px=beam_center_px + np.array([1.5, -1.0]),
+            pitch_search_range_nm=(70.0, 90.0),
+            coarse_grid_points=17,
+            fine_grid_points=17,
+            return_details=True,
+        )
+
+        self.assertAlmostEqual(estimated_pitch_nm, pitch_nm, places=1)
+        self.assertGreaterEqual(uncertainty_nm, 0.0)
+        self.assertEqual(details["orders"].shape, orders.shape)
+        self.assertEqual(
+            details["fitted_peak_positions_px"].shape,
+            peak_positions.shape,
+        )
+        self.assertEqual(
+            details["peak_position_uncertainty_px"].shape,
+            (peak_positions.shape[0],),
+        )
+        self.assertTrue(np.all(np.isfinite(details["beam_center_px"])))
+        self.assertLess(
+            np.linalg.norm(np.asarray(details["beam_center_px"]) - beam_center_px),
+            3.0,
+        )
+
+    def test_estimate_pitch_from_peaks_validation(self):
+        image = np.ones((10, 10), dtype=float)
+        peak_positions = np.array([[2.0, 3.0]])
+
+        with self.assertRaises(ValueError):
+            estimate_pitch_from_peaks(
+                image=image,
+                peak_positions=peak_positions,
+                sdd_cm=100.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+                pitch_guess_nm=80.0,
+            )
+
+        with self.assertRaises(ValueError):
+            estimate_pitch_from_peaks(
+                image=image,
+                peak_positions=np.array([[2.0, 3.0], [4.0, 5.0]]),
+                sdd_cm=0.0,
+                wavelength_nm=0.1,
+                pixel_size_um=75.0,
+                pitch_guess_nm=80.0,
+            )
 
     def test_find_peaks_2D_one_axis(self):
         image = np.array(
@@ -880,3 +1094,38 @@ class TestTools(unittest.TestCase):
                 pixel_size_um=75.0,
                 exclude_within_beamstop_radius_px=-1.0,
             )
+
+    def test_find_pitch_propagates_sdd_error(self):
+        normal_pitch_nm = 80.0
+        wavelength_nm = 0.1
+        sdd_cm = 200.0
+        normal_sdd_cm = 180.0
+        sdd_cm_error = 1.5
+
+        new_pitch_nm, propagated_error_nm = find_pitch(
+            normal_pitch_nm=normal_pitch_nm,
+            wavelength_nm=wavelength_nm,
+            sdd_cm=sdd_cm,
+            normal_sdd_cm=normal_sdd_cm,
+            sdd_cm_error=sdd_cm_error,
+        )
+
+        self.assertGreater(propagated_error_nm, 0.0)
+
+        delta_sdd_cm = 1e-4
+        pitch_plus = find_pitch(
+            normal_pitch_nm=normal_pitch_nm,
+            wavelength_nm=wavelength_nm,
+            sdd_cm=sdd_cm + delta_sdd_cm,
+            normal_sdd_cm=normal_sdd_cm,
+        )
+        pitch_minus = find_pitch(
+            normal_pitch_nm=normal_pitch_nm,
+            wavelength_nm=wavelength_nm,
+            sdd_cm=sdd_cm - delta_sdd_cm,
+            normal_sdd_cm=normal_sdd_cm,
+        )
+        derivative_sdd = (pitch_plus - pitch_minus) / (2 * delta_sdd_cm)
+
+        expected_error_nm = np.abs(derivative_sdd) * sdd_cm_error
+        self.assertAlmostEqual(propagated_error_nm, expected_error_nm, places=6)
