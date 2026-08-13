@@ -77,13 +77,27 @@ class TestCombineData2D(unittest.TestCase):
 
         self.assertEqual(combined.name, 'combined-data')
 
-    def test_combine_data2d_keeps_first_metadata_when_exposure_missing(self):
+    def test_combine_data2d_warns_and_removes_exposure_when_later_data_missing(self):
         data1 = self._make_data('first', image=np.ones((3, 3)), exposure_time_s=3)
         data2 = self._make_data('second', image=np.full((3, 3), 2.0))
 
-        combined = combine_data2d(data1, data2)
+        with self.assertWarnsRegex(
+                UserWarning,
+                'does not have an exposure_time_s metadata value'):
+            combined = combine_data2d(data1, data2)
 
-        self.assertEqual(combined.metadata['exposure_time_s'], 3)
+        self.assertNotIn('exposure_time_s', combined.metadata)
+
+    def test_combine_data2d_warns_and_removes_exposure_when_first_data_missing(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)))
+        data2 = self._make_data('second', image=np.full((3, 3), 2.0), exposure_time_s=5)
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                'does not have an exposure_time_s metadata value'):
+            combined = combine_data2d(data1, data2)
+
+        self.assertNotIn('exposure_time_s', combined.metadata)
 
     def test_combine_data2d_raises_for_mismatched_image_shapes(self):
         data1 = self._make_data('first', image=np.ones((3, 3)))

@@ -103,8 +103,16 @@ def combine_data2d(*data2d: Data2D, name=None):
                 "All Data2D masks must have the same shape to be combined. "
                 f"Expected {first_data.mask.shape}, got {data.mask.shape}."
             )
-        if 'exposure_time_s' in data.metadata.keys():
-            metadata['exposure_time_s'] += data.metadata['exposure_time_s']
+        if 'exposure_time_s' in metadata.keys() and 'exposure_time_s' in data.metadata.keys():
+            metadata['exposure_time_s'] = np.sum([metadata['exposure_time_s'], data.metadata['exposure_time_s']])
+        else:
+            warnings.warn(
+                f"One or more Data2D instances do not have an exposure_time_s "
+                "metadata value. The combined exposure time has been removed "
+                "from the metadata."
+            )
+            metadata.pop('exposure_time_s', None)
+
         mask += data.mask
         # Sum the two images elementwise while propagating nans.
         image = np.sum(np.stack([image, data.image]), axis=0)
