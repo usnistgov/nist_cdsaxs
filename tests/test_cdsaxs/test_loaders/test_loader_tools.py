@@ -71,6 +71,24 @@ class TestFilterFilenamesByFiletype(unittest.TestCase):
                 filenames_bin
             )
 
+    def test_nist_dash_bin(self):
+
+        filenames_bin = [
+            'six.bin',
+        ]
+
+        # make sure that the function is not case sensitive in any way
+        filetypes = map("".join, itertools.product(*zip(
+            'nist-bin'.upper(),
+            'nist-bin'.lower()
+        )))
+        for filetype in filetypes:
+            self.assertListEqual(
+                loader_tools.filter_filenames_by_filetype(
+                    self.filenames, filetype),
+                filenames_bin
+            )
+
     def test_none_filetype_returns_all_filenames(self):
         self.assertListEqual(
             loader_tools.filter_filenames_by_filetype(self.filenames, None),

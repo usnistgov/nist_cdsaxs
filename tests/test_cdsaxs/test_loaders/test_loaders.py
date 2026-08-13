@@ -179,6 +179,16 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(data.metadata['pixel_size_um'], 172)
         self.assertFalse(np.any(data.image < 0))
 
+    def test_load_nist_bin_alias_with_underscore_extracts_metadata(self):
+        data = load_data.LoadData(filepath=self.nist_filepath, filetype='nist_bin')
+
+        self.assertEqual(data.metadata['filename'], os.path.basename(self.nist_filepath))
+        self.assertEqual(data.metadata['data_directory'], os.path.dirname(self.nist_filepath))
+        self.assertEqual(data.metadata['wavelength_nm'], 0.13404)
+        self.assertEqual(data.metadata['exposure_time_s'], 600)
+        self.assertEqual(data.metadata['pixel_size_um'], 172)
+        self.assertFalse(np.any(data.image < 0))
+
     def test_unknown_extension_without_filetype_raises_value_error(self):
         with self.assertRaisesRegex(ValueError, 'Did not recognize the filtype extension'):
             load_data.LoadData(filepath='C:/tmp/example.unknown')
@@ -364,9 +374,9 @@ class TestLoadData(unittest.TestCase):
         middle_data = datas[30]
         last_data = datas[-1]
 
-        self.assertEqual(first_data.name, 'phi--2.1-bpm-1.8')
-        self.assertEqual(middle_data.name, 'phi--2.7-bpm-2.4000000000000004')
-        self.assertEqual(last_data.name, 'phi--3.3-bpm-3.0')
+        self.assertEqual(first_data.name, 'phi--3.3-bpm-3.0')
+        self.assertEqual(middle_data.name, 'phi--2.68-bpm-2.38')
+        self.assertEqual(last_data.name, 'phi--3.28-bpm-2.9800000000000004')
 
         self.assertEqual(first_data.metadata['filename'], os.path.basename(h5_filepath))
         self.assertEqual(first_data.metadata['data_directory'], os.path.dirname(h5_filepath))
@@ -377,12 +387,12 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(last_data.image[0, 0], 89.0)
         self.assertEqual(last_data.image[-1, -1], 84.0)
 
-        self.assertEqual(first_data.user_params['bpm'], 1.8)
-        self.assertEqual(first_data.metadata['sample_phi_deg'], -2.1)
-        self.assertEqual(middle_data.user_params['bpm'], 2.4000000000000004)
-        self.assertEqual(middle_data.metadata['sample_phi_deg'], -2.7)
-        self.assertEqual(last_data.user_params['bpm'], 3.0)
-        self.assertEqual(last_data.metadata['sample_phi_deg'], -3.3)
+        self.assertEqual(first_data.user_params['bpm'], 3.0)
+        self.assertEqual(first_data.metadata['sample_phi_deg'], -3.3)
+        self.assertEqual(middle_data.user_params['bpm'], 2.38)
+        self.assertEqual(middle_data.metadata['sample_phi_deg'], -2.68)
+        self.assertEqual(last_data.user_params['bpm'], 2.9800000000000004)
+        self.assertEqual(last_data.metadata['sample_phi_deg'], -3.28)
 
 
 class TestLoadDataset(unittest.TestCase):
