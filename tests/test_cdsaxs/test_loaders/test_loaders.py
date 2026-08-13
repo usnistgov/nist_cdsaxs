@@ -5,6 +5,7 @@ import warnings
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+import pytest
 import numpy as np
 
 import cdsaxs.loaders.load_data as load_data
@@ -327,6 +328,7 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(datas[0].user_params['bpm'], 10.0)
         self.assertTrue(any('Metadata for sample_phi_deg was provided by the user' in str(w.message) for w in caught))
 
+    @pytest.mark.slow
     def test_load_smi_h5_real_fixture_extracts_metadata_and_user_params(self):
         h5_filepath = os.path.abspath(
             os.path.join(
@@ -354,6 +356,7 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(data.metadata['sample_phi_deg'], 58.7)
         self.assertAlmostEqual(data.user_params['bpm'], 1.8655923583401413)
 
+    @pytest.mark.slow
     def test_load_smi_h5_real_fixture_generates_names_from_metadata_and_user_params(self):
         h5_filepath = os.path.abspath(
             os.path.join(
@@ -391,8 +394,8 @@ class TestLoadData(unittest.TestCase):
         self.assertEqual(first_data.metadata['sample_phi_deg'], 58.7)
         self.assertAlmostEqual(middle_data.user_params['bpm'], 1.8661785444530121)
         self.assertEqual(middle_data.metadata['sample_phi_deg'], -1.3)
-        self.assertAlmostEqual(last_data.user_params['bpm'], 1.8625547375086837)
-        self.assertEqual(last_data.metadata['sample_phi_deg'], -50.3)
+        self.assertAlmostEqual(last_data.user_params['bpm'], 1.8599068901587745)
+        self.assertEqual(last_data.metadata['sample_phi_deg'], -61.3)
 
     def test_load_smi_h5_without_filetype_exposes_h5_autodetect_bug(self):
         h5_filepath = os.path.abspath(

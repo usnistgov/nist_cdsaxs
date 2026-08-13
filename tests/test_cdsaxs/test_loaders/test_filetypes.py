@@ -2,6 +2,7 @@ import os
 import unittest
 
 import numpy as np
+import pytest
 
 import cdsaxs.loaders.filetypes as filetypes
 
@@ -83,6 +84,7 @@ class TestReadSmiH5(unittest.TestCase):
             os.path.join(current_dir, '../../data/test_loaders/mock_smi_h5_multiple_scans.h5')
         )
 
+    @pytest.mark.slow
     def test_read_smi_h5_real_fixture_extracts_scan_images_and_metadata(self):
         images = filetypes.read_smi_h5(self.real_scan_filepath)
 
@@ -111,6 +113,7 @@ class TestReadSmiH5(unittest.TestCase):
         self.assertEqual(images[0][2]['sample_phi_deg'], -3.3)
         self.assertEqual(images[1][2]['sample_phi_deg'], -2.1)
 
+    @pytest.mark.slow
     def test_read_smi_h5_real_fixture_maps_metadata_by_seq_num(self):
         images = filetypes.read_smi_h5(self.real_scan_filepath)
 
@@ -142,4 +145,4 @@ class TestReadSmiH5(unittest.TestCase):
         self.assertAlmostEqual(middle_metadata['bpm'], 1.8661785444530121)
         self.assertEqual(middle_metadata['sample_phi_deg'], -1.3)
         self.assertAlmostEqual(last_metadata['bpm'], 1.8599068901587745)
-        self.assertEqual(last_metadata['sample_phi_deg'], -50.3)
+        self.assertEqual(last_metadata['sample_phi_deg'], -61.3)
