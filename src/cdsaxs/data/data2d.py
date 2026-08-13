@@ -106,8 +106,8 @@ def combine_data2d(*data2d: Data2D, name=None):
         if 'exposure_time_s' in data.metadata.keys():
             metadata['exposure_time_s'] += data.metadata['exposure_time_s']
         mask += data.mask
-        # Sum the two images elementwise while treating NaNs as missing data.
-        image = np.nansum(np.stack([image, data.image]), axis=0)
+        # Sum the two images elementwise while propagating nans.
+        image = np.sum(np.stack([image, data.image]), axis=0)
 
     new_data = Data2D(
         image=image,
