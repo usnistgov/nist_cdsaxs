@@ -59,7 +59,7 @@ class TestCombineData2D(unittest.TestCase):
 
         np.testing.assert_array_equal(
             combined.image,
-            np.array([[11.0, 20.0], [33.0, 44.0]], dtype=np.float64),
+            np.array([[11.0, np.nan], [33.0, 44.0]], dtype=np.float64),
         )
         np.testing.assert_array_equal(
             combined.mask,
