@@ -184,7 +184,6 @@ def read_smi_h5(filepath):
     metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
 
     seq_num = scan['primary']['seq_num'][:]  
-    seq_start = int(seq_num[0])
 
     images = []
     for i in range(num_images):
