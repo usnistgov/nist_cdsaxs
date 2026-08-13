@@ -100,13 +100,13 @@ class TestReadSmiH5(unittest.TestCase):
         self.assertEqual(metadata['bpm'], 1.8)
         self.assertEqual(metadata['sample_phi_deg'], -2.1)
 
-    def test_read_smi_h5_uses_seq_num_offset_from_fixture(self):
+    def test_read_smi_h5_uses_one_based_seq_num_lookup(self):
         images = filetypes.read_smi_h5(self.multiple_scan_filepath)
 
-        self.assertEqual(images[0][2]['bpm'], 1.8)
-        self.assertEqual(images[1][2]['bpm'], 1.82)
-        self.assertEqual(images[0][2]['sample_phi_deg'], -2.1)
-        self.assertEqual(images[1][2]['sample_phi_deg'], -2.12)
+        self.assertEqual(images[0][2]['bpm'], 3.0)
+        self.assertEqual(images[1][2]['bpm'], 1.8)
+        self.assertEqual(images[0][2]['sample_phi_deg'], -3.3)
+        self.assertEqual(images[1][2]['sample_phi_deg'], -2.1)
 
     def test_read_smi_h5_multiple_scans_real_fixture(self):
         images = filetypes.read_smi_h5(self.multiple_scan_filepath)
@@ -133,10 +133,10 @@ class TestReadSmiH5(unittest.TestCase):
         self.assertEqual(first_metadata['sdd_cm'], 0.16)
         self.assertEqual(first_metadata['exposure_time_s'], 1.5)
         self.assertEqual(first_metadata['pixel_size_um'], 172)
-        self.assertEqual(first_metadata['bpm'], 1.8)
-        self.assertEqual(first_metadata['sample_phi_deg'], -2.1)
+        self.assertEqual(first_metadata['bpm'], 3.0)
+        self.assertEqual(first_metadata['sample_phi_deg'], -3.3)
 
-        self.assertEqual(middle_metadata['bpm'], 2.4000000000000004)
-        self.assertEqual(middle_metadata['sample_phi_deg'], -2.7)
-        self.assertEqual(last_metadata['bpm'], 3.0)
-        self.assertEqual(last_metadata['sample_phi_deg'], -3.3)
+        self.assertEqual(middle_metadata['bpm'], 2.38)
+        self.assertEqual(middle_metadata['sample_phi_deg'], -2.68)
+        self.assertEqual(last_metadata['bpm'], 2.9800000000000004)
+        self.assertEqual(last_metadata['sample_phi_deg'], -3.28)
