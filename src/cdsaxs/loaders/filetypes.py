@@ -12,6 +12,8 @@ import tifffile
 from . import _loader_tools as loader_tools
 
 
+SMI_H5_PHI_FLIP_DATE = date(2026, 7, 8)  # this date is when the H5 scan file format flipped the sign of the phi rotation to align to right-handed rule
+
 def read_tiff(filepath):
     """
     Load an image and header from a tiff file.
@@ -185,8 +187,7 @@ def read_smi_h5(filepath):
     timestamp = datetime.fromtimestamp(
         timestamp, tz=ZoneInfo("America/New_York"))
     check_day = timestamp.date()
-    phi_fix_day = date(2026, 7, 8)
-    if check_day < phi_fix_day:
+    if check_day < SMI_H5_PHI_FLIP_DATE:
         phi_scale = -1.0
 
     metadata = {}
