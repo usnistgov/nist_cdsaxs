@@ -1,3 +1,5 @@
+from datetime import datetime, date
+from zoneinfo import ZoneInfo
 import os
 
 import fabio as fabio
@@ -9,6 +11,8 @@ import tifffile
 
 from . import _loader_tools as loader_tools
 
+
+SMI_H5_PHI_FLIP_DATE = date(2026, 7, 8)  # this date is when the H5 scan file format flipped the sign of the phi rotation to align to right-handed rule
 
 def read_tiff(filepath):
     """
@@ -170,11 +174,22 @@ def read_smi_h5(filepath):
     
     # load the entire scan
     scan = h5py.File(filepath, 'r')
-    
+
     # extract image stack and number of images in the scan
     image_stack = scan['raw_images']['pil2M_image'][:]
     num_images = image_stack.shape[0]
-    
+
+    # scale phi by +1 or -1 depending on when the h5 file was exported
+    # Eliot fixed the rotation direction to follow right-hand rule on
+    # July 8, 2026; before this date, scale phi by -1
+    phi_scale = 1.0
+    timestamp = scan['baseline']['time'][0]
+    timestamp = datetime.fromtimestamp(
+        timestamp, tz=ZoneInfo("America/New_York"))
+    check_day = timestamp.date()
+    if check_day < SMI_H5_PHI_FLIP_DATE:
+        phi_scale = -1.0
+
     metadata = {}
     metadata['energy_ev'] = scan['baseline']['energy_energy'][0]
     metadata['sdd_cm'] = scan['baseline']['pil2M_motor_z'][0]/10
@@ -182,15 +197,17 @@ def read_smi_h5(filepath):
     metadata['pixel_size_um'] = 172  # pilatus2m
     metadata['bpm'] = scan['primary']['xbpm3_sumX'][:]
     metadata['sample_phi_deg'] = scan['primary']['stage_phi'][:]
+    metadata['epoch_time'] = scan['primary']['time']
 
-    seq_num = scan['primary']['seq_num'][:]  
+    seq_num = scan['primary']['seq_num'][:]
 
     images = []
     for i in range(num_images):
         temp_metadata = dict(metadata)
         metadata_index = np.where(seq_num == i+1)[0]
         temp_metadata['bpm'] = metadata['bpm'][metadata_index][0]
-        temp_metadata['sample_phi_deg'] = np.round(-1*metadata['sample_phi_deg'][metadata_index],2)[0]
+        temp_metadata['sample_phi_deg'] = np.round(phi_scale*metadata['sample_phi_deg'][metadata_index], 2)[0]
+        temp_metadata['epoch_time'] = metadata['epoch_time'][metadata_index][0]
         images.append(
             (image_stack[i].astype(np.float64), filepath, temp_metadata)
         )
