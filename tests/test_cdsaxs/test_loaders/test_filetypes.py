@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -34,6 +35,25 @@ class TestReadTiff(unittest.TestCase):
         filepath = self.return_read[1]
 
         self.assertEqual(filepath, self.filepath)
+
+    def test_header_is_returned_as_dict(self):
+        header = self.return_read[2]
+
+        self.assertIsInstance(header, dict)
+        self.assertGreater(len(header), 0)
+
+    def test_fallback_to_tifffile_when_pil_open_fails(self):
+        with patch(
+            "cdsaxs.loaders.filetypes.Image.open",
+            side_effect=OSError("PIL failed to open TIFF"),
+        ):
+            image, filepath, header = filetypes.read_tiff(self.filepath)
+
+        np.testing.assert_array_equal(image, self.image)
+        self.assertEqual(image.dtype, np.float64)
+        self.assertEqual(filepath, self.filepath)
+        self.assertIsInstance(header, dict)
+        self.assertGreater(len(header), 0)
 
 
 class TestReadNistBin(unittest.TestCase):
@@ -77,11 +97,16 @@ class TestReadSmiH5(unittest.TestCase):
         self.real_scan_filepath = os.path.abspath(
             os.path.join(
                 current_dir,
-                '../../data/test_loaders/1129050_CW_H11_measure1_sdd_cm_0.00_energy_ev_16100_exposure_time_s_0.20_num_1_result.h5'
+                '../../data/test_loaders/'
+                '1129050_CW_H11_measure1_sdd_cm_0.00_energy_ev_16100_'
+                'exposure_time_s_0.20_num_1_result.h5'
             )
         )
         self.multiple_scan_filepath = os.path.abspath(
-            os.path.join(current_dir, '../../data/test_loaders/mock_smi_h5_multiple_scans.h5')
+            os.path.join(
+                current_dir,
+                '../../data/test_loaders/mock_smi_h5_multiple_scans.h5',
+            )
         )
 
     @pytest.mark.slow
@@ -112,6 +137,35 @@ class TestReadSmiH5(unittest.TestCase):
         self.assertEqual(images[1][2]['bpm'], 1.8)
         self.assertEqual(images[0][2]['sample_phi_deg'], -3.3)
         self.assertEqual(images[1][2]['sample_phi_deg'], -2.1)
+
+    def test_read_smi_h5_raises_index_error_when_seq_num_has_no_match(self):
+        fake_scan = {
+            'raw_images': {
+                'pil2M_image': np.array([
+                    [[1, 2], [3, 4]],
+                    [[5, 6], [7, 8]],
+                ])
+            },
+            'baseline': {
+                'energy_energy': np.array([16100.0]),
+                'pil2M_motor_z': np.array([5000.0]),
+            },
+            'config': {
+                'pil2M_cam_acquire_time': np.array([0.2]),
+            },
+            'primary': {
+                'xbpm3_sumX': np.array([3.0, 1.8]),
+                'stage_phi': np.array([3.3, 2.1]),
+                'seq_num': np.array([1, 3]),
+            },
+        }
+
+        with patch(
+            'cdsaxs.loaders.filetypes.h5py.File',
+            return_value=fake_scan,
+        ):
+            with self.assertRaises(IndexError):
+                filetypes.read_smi_h5('fake_scan.h5')
 
     @pytest.mark.slow
     def test_read_smi_h5_real_fixture_maps_metadata_by_seq_num(self):
