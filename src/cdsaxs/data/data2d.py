@@ -968,7 +968,19 @@ class Data2D(DataImage):
             self.metadata['center_px'][0], self.metadata['center_px'][1])
 
         # do the rotation
-        k = int(np.round(steps, 0))
+        if (
+            isinstance(steps, (float, np.floating))
+            and not float(steps).is_integer()
+        ):
+            warnings.warn(
+                "rotate_image_ccw only accepts integer quarter turns.",
+                UserWarning,
+            )
+            raise ValueError(
+                "rotate_image_ccw only accepts integer quarter turns."
+            )
+
+        k = int(steps)
         while k < 0:
             k += 4
         super().rotate_image_ccw(steps=k)

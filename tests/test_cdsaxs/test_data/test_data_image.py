@@ -36,17 +36,54 @@ class TestDataImage(unittest.TestCase):
         mask[3, 2] = True
         np.testing.assert_array_equal(self.data2d.mask, mask)
 
+    def test_mask_points_raises_for_shape_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "Mask does not match shape"):
+            self.data2d.mask_points(np.zeros((2, 2), dtype=bool))
+
     def test_overwrite_mask(self):
         mask = self.image == 99999
         self.data2d._overwrite_mask(mask)
 
         np.testing.assert_array_equal(self.data2d.mask, mask)
 
+    def test_overwrite_mask_broadcasts_broadcastable_mask(self):
+        mask = np.array([True, False, True, False], dtype=bool)
+
+        self.data2d._overwrite_mask(mask)
+
+        expected_mask = np.tile(mask, (self.data2d.image.shape[0], 1))
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
+
     def test_reset_mask(self):
         mask = np.isnan(self.image)
         self.data2d.reset_mask()
 
         np.testing.assert_array_equal(self.data2d.mask, mask)
+
+    def test_reset_mask_uses_raw_image_when_requested(self):
+        self.data2d.image[0, 0] = np.nan
+        self.data2d.reset_mask(use_raw_image=True)
+
+        expected_mask = np.isnan(self.data2d._raw_image)
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
+
+    def test_reset_mask_uses_current_image_invalid_values_by_default(self):
+        self.data2d.image[0, 1] = np.inf
+        self.data2d.image[1, 1] = -np.inf
+
+        self.data2d.reset_mask()
+
+        expected_mask = np.array(
+            [[False, True, False, False],
+             [False, True, False, False],
+             [False, False, False, False],
+             [False, False, True, False],
+             [False, False, False, False],
+             [False, False, False, False],
+             [False, False, False, False]],
+            dtype=bool,
+        )
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
 
     def test_data2d_rotate_ccw90(self):
         """test 90 degree rotation counter-clockwise"""
@@ -59,10 +96,21 @@ class TestDataImage(unittest.TestCase):
 
         self.data2d.rotate_image_ccw(1)
 
+        expected_mask = np.rot90(self.custom_mask + np.isnan(self.image), k=1)
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
             err_msg="The counter-clockwise 90 degree rotation resulted in the "
             "wrong image.")
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
+
+    def test_data2d_rotate_ccw_zero_leaves_image_and_mask_unchanged(self):
+        expected_image = np.copy(self.data2d.image)
+        expected_mask = np.copy(self.data2d.mask)
+
+        self.data2d.rotate_image_ccw(0)
+
+        np.testing.assert_array_equal(self.data2d.image, expected_image)
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
 
     def test_data2d_rotate_ccw180(self):
         """test 180 degree rotation counter-clockwise"""
@@ -159,12 +207,47 @@ class TestDataImage(unittest.TestCase):
              [44386., 64811.,  4701., 60019., 18439., 10592., 15954.]]
         ).astype(np.float64)
 
-        self.data2d.rotate_image_ccw(-630/90)
+        self.data2d.rotate_image_ccw(-7)
 
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
             err_msg="The clockwise 630 degree rotation resulted in the"
             " wrong image.")
+
+    def test_data2d_rotate_ccw_warns_and_rejects_fractional_steps(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+            "rotate_image_ccw only accepts integer quarter turns.",
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "rotate_image_ccw only accepts integer quarter turns.",
+            ):
+                self.data2d.rotate_image_ccw(1.5)
+
+    def test_data2d_rotate_ccw_accepts_integer_valued_float(self):
+        expected_image = np.array(
+            [[20338., 77210., 46325., 65941., 91001., 41683., 61517.],
+             [48676., 45711., 61100.,   np.nan, 99999., 10893., 35295.],
+             [20215., 49702.,  9052., 70069., 82922., 19847.,  3109.],
+             [44386., 64811.,  4701., 60019., 18439., 10592., 15954.]]
+        ).astype(np.float64)
+
+        self.data2d.rotate_image_ccw(1.0)
+
+        np.testing.assert_array_equal(self.data2d.image, expected_image)
+
+    def test_data2d_rotate_ccw_accepts_negative_integer_valued_float(self):
+        expected_image = np.array(
+            [[15954., 10592., 18439., 60019.,  4701., 64811., 44386.],
+             [ 3109., 19847., 82922., 70069.,  9052., 49702., 20215.],
+             [35295., 10893., 99999.,   np.nan, 61100., 45711., 48676.],
+             [61517., 41683., 91001., 65941., 46325., 77210., 20338.]]
+        ).astype(np.float64)
+
+        self.data2d.rotate_image_ccw(-1.0)
+
+        np.testing.assert_array_equal(self.data2d.image, expected_image)
 
     def test_rotate_image_uses_skimage_helper_and_resets_mask(self):
         rotated_image = np.full(self.data2d.image.shape, 5.0)
@@ -256,6 +339,47 @@ class TestDataImage(unittest.TestCase):
         )
         np.testing.assert_array_equal(data.mask, np.isnan(data.image))
 
+    def test_masked_image_replaces_masked_points_with_nan(self):
+        expected_masked_image = np.copy(self.image)
+        expected_masked_image[self.custom_mask + np.isnan(self.image)] = np.nan
+
+        np.testing.assert_array_equal(self.data2d._masked_image, expected_masked_image)
+
+    def test_default_mask_includes_inf_and_negative_inf(self):
+        image = np.array(
+            [[1.0, np.inf],
+             [-np.inf, 4.0]],
+            dtype=np.float64,
+        )
+        data = DataImage(image=image)
+
+        np.testing.assert_array_equal(
+            data.mask,
+            np.array([[False, True], [True, False]]),
+        )
+
+    def test_reset_mask_rebuilds_inf_and_negative_inf_mask_from_raw_image(self):
+        image = np.array(
+            [[1.0, np.inf],
+             [-np.inf, 4.0]],
+            dtype=np.float64,
+        )
+        data = DataImage(image=image, mask=np.array([[True, False], [False, False]]))
+
+        data.image = np.array(
+            [[10.0, 11.0],
+             [12.0, 13.0]],
+            dtype=np.float64,
+        )
+        data.mask = np.zeros_like(data.mask, dtype=bool)
+
+        data.reset_mask(use_raw_image=True)
+
+        np.testing.assert_array_equal(
+            data.mask,
+            np.array([[False, True], [True, False]]),
+        )
+
     def test_flip_horizontally(self):
         expected_image = np.array(
             [[20338., 48676., 20215., 44386.],
@@ -269,10 +393,12 @@ class TestDataImage(unittest.TestCase):
 
         self.data2d.flip_horizontally()
 
+        expected_mask = np.flip(self.custom_mask + np.isnan(self.image), axis=1)
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
             err_msg="The horizontal flip resulted in the wrong image."
         )
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
 
     def test_flip_vertically(self):
         expected_image = np.array(
@@ -287,10 +413,12 @@ class TestDataImage(unittest.TestCase):
 
         self.data2d.flip_vertically()
 
+        expected_mask = np.flip(self.custom_mask + np.isnan(self.image), axis=0)
         np.testing.assert_array_equal(
             self.data2d.image, expected_image,
             err_msg="The vertical flip resulted in the wrong image."
         )
+        np.testing.assert_array_equal(self.data2d.mask, expected_mask)
 
     def test_data2d_reset_image(self):
         """test the reset_image"""
@@ -310,6 +438,8 @@ class TestDataImage(unittest.TestCase):
         self.data2d.reset_image()
         np.testing.assert_array_equal(
             self.data2d.image, self.image)
+        np.testing.assert_array_equal(self.data2d.mask, np.isnan(self.image))
+        self.assertEqual(self.data2d._data_transformations, [])
 
     def test_add_to_data_value(self):
         value = 2
@@ -326,6 +456,13 @@ class TestDataImage(unittest.TestCase):
         np.testing.assert_array_equal(self.data2d.image, new_image)
         self.assertTupleEqual(self.data2d._data_transformations[-1],
                               ("add", value))
+
+    def test_add_to_data_array_raises_for_shape_mismatch(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Size of the provided array does notmatch the size of the image data.",
+        ):
+            self.data2d.add_to_data(np.ones((2, 2), dtype=float))
 
     def test_add_to_data_array(self):
         value = 2
@@ -360,6 +497,13 @@ class TestDataImage(unittest.TestCase):
         self.assertTupleEqual(self.data2d._data_transformations[-1],
                               ("subtract", value))
 
+    def test_subtract_from_data_array_raises_for_shape_mismatch(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Size of the provided array does notmatch the size of the image data.",
+        ):
+            self.data2d.subtract_from_data(np.ones((2, 2), dtype=float))
+
     def test_subtract_from_data_array(self):
         value = 2
         value = np.ones_like(self.data2d.image, dtype=float)*value
@@ -392,6 +536,13 @@ class TestDataImage(unittest.TestCase):
         np.testing.assert_array_equal(self.data2d.image, new_image)
         self.assertTupleEqual(self.data2d._data_transformations[-1],
                               ("scale", value))
+
+    def test_scale_data_array_raises_for_shape_mismatch(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Size of the provided array does notmatch the size of the image data.",
+        ):
+            self.data2d.scale_data(np.ones((2, 2), dtype=float))
 
     def test_scale_data_array(self):
         value = 2
@@ -426,6 +577,13 @@ class TestDataImage(unittest.TestCase):
         self.assertTupleEqual(self.data2d._data_transformations[-1],
                               ("normalize", value))
 
+    def test_normalize_data_array_raises_for_shape_mismatch(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Size of the provided array does notmatch the size of the image data.",
+        ):
+            self.data2d.normalize_data(np.ones((2, 2), dtype=float))
+
     def test_normalize_data_array(self):
         value = 2
         value = np.ones_like(self.data2d.image, dtype=float)*value
@@ -450,6 +608,19 @@ class TestDataImage(unittest.TestCase):
         self.data2d.scale_data(1.3)
         self.data2d.reset_intensity()
         np.testing.assert_array_almost_equal(self.data2d.image, self.image)
+        self.assertEqual(self.data2d._data_transformations, [])
+
+    def test_reset_intensity_with_array_valued_transforms(self):
+        scale = np.full_like(self.data2d.image, 2.0)
+        offset = np.full_like(self.data2d.image, 3.0)
+
+        self.data2d.scale_data(scale)
+        self.data2d.add_to_data(offset)
+
+        self.data2d.reset_intensity()
+
+        np.testing.assert_array_almost_equal(self.data2d.image, self.image)
+        self.assertEqual(self.data2d._data_transformations, [])
 
     def test_data2d_sum_box_axis0(self):
         intensity, image_box, mask = self.data2d.sum_box(
@@ -582,9 +753,135 @@ class TestDataImage(unittest.TestCase):
              [False, False]])
         np.testing.assert_array_equal(mask, mask_expected)
 
+    def test_slice_box_sum_axis_tuple_returns_unmasked_scalar_value(self):
+        data = DataImage(
+            image=np.array(
+                [[1.0, 2.0],
+                 [3.0, 4.0]],
+                dtype=np.float64,
+            )
+        )
+
+        intensity, image_box, mask = data.slice_box(
+            limits_axis0=[0, 2],
+            limits_axis1=[0, 2],
+            axis=(0, 1),
+            mode='sum',
+        )
+
+        np.testing.assert_array_equal(intensity, np.array([10.0]))
+        np.testing.assert_array_equal(image_box, data.image)
+        np.testing.assert_array_equal(mask, np.zeros_like(data.image, dtype=bool))
+
+    def test_slice_box_mean_axis_tuple_returns_unmasked_scalar_value(self):
+        data = DataImage(
+            image=np.array(
+                [[1.0, 2.0],
+                 [3.0, 4.0]],
+                dtype=np.float64,
+            )
+        )
+
+        intensity, image_box, mask = data.slice_box(
+            limits_axis0=[0, 2],
+            limits_axis1=[0, 2],
+            axis=(0, 1),
+            mode='mean',
+        )
+
+        np.testing.assert_array_equal(intensity, np.array(2.5))
+        np.testing.assert_array_equal(image_box, data.image)
+        np.testing.assert_array_equal(mask, np.zeros_like(data.image, dtype=bool))
+
+    def test_sum_box_axis_tuple_returns_single_value(self):
+        intensity, image_box, mask = self.data2d.sum_box(
+            limits_axis0=[3, 6],
+            limits_axis1=[2, 4],
+            axis=(0, 1),
+        )
+
+        np.testing.assert_array_equal(intensity, np.array([np.nan]))
+        self.assertEqual(image_box.shape, (3, 2))
+        self.assertEqual(mask.shape, (3, 2))
+
+    def test_mean_box_axis_tuple_returns_single_value(self):
+        intensity, image_box, mask = self.data2d.mean_box(
+            limits_axis0=[3, 6],
+            limits_axis1=[2, 4],
+            axis=(0, 1),
+        )
+
+        np.testing.assert_array_equal(intensity, np.array(np.nan))
+        self.assertEqual(image_box.shape, (3, 2))
+        self.assertEqual(mask.shape, (3, 2))
+
+    def test_sum_box_axis_tuple_returns_unmasked_scalar_value(self):
+        data = DataImage(
+            image=np.array(
+                [[1.0, 2.0],
+                 [3.0, 4.0]],
+                dtype=np.float64,
+            )
+        )
+
+        intensity, image_box, mask = data.sum_box(
+            limits_axis0=[0, 2],
+            limits_axis1=[0, 2],
+            axis=(0, 1),
+        )
+
+        np.testing.assert_array_equal(intensity, np.array([10.0]))
+        np.testing.assert_array_equal(image_box, data.image)
+        np.testing.assert_array_equal(mask, np.zeros_like(data.image, dtype=bool))
+
+    def test_mean_box_axis_tuple_returns_unmasked_scalar_value(self):
+        data = DataImage(
+            image=np.array(
+                [[1.0, 2.0],
+                 [3.0, 4.0]],
+                dtype=np.float64,
+            )
+        )
+
+        intensity, image_box, mask = data.mean_box(
+            limits_axis0=[0, 2],
+            limits_axis1=[0, 2],
+            axis=(0, 1),
+        )
+
+        np.testing.assert_array_equal(intensity, np.array(2.5))
+        np.testing.assert_array_equal(image_box, data.image)
+        np.testing.assert_array_equal(mask, np.zeros_like(data.image, dtype=bool))
+
+    def test_slice_box_invalid_mode_raises(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Did not recognize slice mode median",
+        ):
+            self.data2d.slice_box(
+                limits_axis0=[3, 6],
+                limits_axis1=[2, 4],
+                axis=0,
+                mode='median',
+            )
+
     def test_rotate_image(self):
         """
         TODO: implement a test for the image rotation
         This method uses the Pillow package's rotate_image function.
         """
         pass
+
+    def test_reset_image_restores_raw_image_after_rotate_image(self):
+        rotated_image = np.full(self.data2d.image.shape, 17.0)
+        rotated_image[2, 1] = np.nan
+
+        with patch("cdsaxs.data.data_image.rotate_image",
+                   return_value=rotated_image):
+            self.data2d.rotate_image(33.0)
+
+        self.data2d.reset_image()
+
+        np.testing.assert_array_equal(self.data2d.image, self.image)
+        np.testing.assert_array_equal(self.data2d.mask, np.isnan(self.image))
+        self.assertEqual(self.data2d._data_transformations, [])
