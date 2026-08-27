@@ -83,7 +83,7 @@ class TestCombineData2D(unittest.TestCase):
 
         with self.assertWarnsRegex(
                 UserWarning,
-                'does not have an exposure_time_s metadata value'):
+                'do not have an exposure_time_s metadata value'):
             combined = combine_data2d(data1, data2)
 
         self.assertNotIn('exposure_time_s', combined.metadata)
@@ -94,10 +94,56 @@ class TestCombineData2D(unittest.TestCase):
 
         with self.assertWarnsRegex(
                 UserWarning,
-                'does not have an exposure_time_s metadata value'):
+                'do not have an exposure_time_s metadata value'):
             combined = combine_data2d(data1, data2)
 
         self.assertNotIn('exposure_time_s', combined.metadata)
+
+    def test_combine_data2d_warns_once_and_removes_exposure_with_three_inputs(self):
+        data1 = self._make_data('first', image=np.ones((2, 2)), exposure_time_s=2)
+        data2 = self._make_data('second', image=np.full((2, 2), 3.0), exposure_time_s=5)
+        data3 = self._make_data('third', image=np.full((2, 2), 7.0))
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                'do not have an exposure_time_s metadata value'):
+            combined = combine_data2d(data1, data2, data3)
+
+        np.testing.assert_array_equal(
+            combined.image,
+            np.array([[11.0, 11.0], [11.0, 11.0]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            combined.mask,
+            np.zeros((2, 2), dtype=bool),
+        )
+        self.assertNotIn('exposure_time_s', combined.metadata)
+        self.assertEqual(combined.user_params, data1.user_params)
+        self.assertEqual(combined.name, 'first')
+
+    def test_combine_data2d_masks_invalid_values_without_explicit_masks(self):
+        data1 = self._make_data(
+            'first',
+            image=[[1.0, np.nan], [np.inf, 4.0]],
+            exposure_time_s=1,
+        )
+        data2 = self._make_data(
+            'second',
+            image=[[10.0, 20.0], [30.0, -np.inf]],
+            exposure_time_s=2,
+        )
+
+        combined = combine_data2d(data1, data2)
+
+        np.testing.assert_array_equal(
+            combined.mask,
+            np.array([[False, True], [True, True]], dtype=bool),
+        )
+        np.testing.assert_array_equal(
+            combined.image,
+            np.array([[11.0, np.nan], [np.inf, -np.inf]], dtype=np.float64),
+        )
+        self.assertEqual(combined.metadata['exposure_time_s'], 3)
 
     def test_combine_data2d_raises_for_mismatched_image_shapes(self):
         data1 = self._make_data('first', image=np.ones((3, 3)))
@@ -905,6 +951,56 @@ class TestData2D(unittest.TestCase):
         self.dataqdyqdx.apply_substrate_absorption_correction()
         new_image = self.image * self.dataqdyqdx.metadata["substrate_absorption_factor"]
         np.testing.assert_array_equal(self.dataqdyqdx.image, new_image)
+
+    def test_correction_methods_raise_when_required_metadata_missing(self):
+        base_metadata = dict(self.metadata)
+        base_metadata.pop('energy_ev', None)
+
+        footprint_data = Data2D(
+            image=self.image,
+            name='footprint missing metadata',
+            mask=self.custom_mask,
+            hide_q_warnings=True,
+            **base_metadata,
+        )
+        footprint_data.metadata.pop('sample_phi_deg')
+        with self.assertRaisesRegex(
+                ValueError,
+                'The following metadata is missing for:'):
+            footprint_data.apply_footprint_correction()
+
+        sample_size_data = Data2D(
+            image=self.image,
+            name='sample size missing metadata',
+            mask=self.custom_mask,
+            hide_q_warnings=True,
+            **base_metadata,
+        )
+        sample_size_data.update_metadata({
+            'beam_center_mm': 0.001,
+            'beam_fwhm_mm': 0.25,
+            'sample_phi_deg': 20,
+        })
+        with self.assertRaisesRegex(
+                ValueError,
+                'sample_size_mm'):
+            sample_size_data.apply_sample_size_correction()
+
+        substrate_data = Data2D(
+            image=self.image,
+            name='substrate missing metadata',
+            mask=self.custom_mask,
+            hide_q_warnings=True,
+            **base_metadata,
+        )
+        substrate_data.update_metadata({
+            'substrate_thickness_um': 100,
+            'sample_phi_deg': -40,
+        })
+        with self.assertRaisesRegex(
+                ValueError,
+                'substrate_attenuation_coeff_um-1'):
+            substrate_data.apply_substrate_absorption_correction()
 
     def test_get_box_dims_size(self):
         size_qdy_px = 3

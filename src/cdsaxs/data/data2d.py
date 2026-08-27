@@ -2631,7 +2631,7 @@ class Data2D(DataImage):
                 center_qdy = float(center)
                 if np.isnan(slope):
                     # this means the peaks form perfectly vertical line
-                    center_qdx = float(np.nanmean(peaks)[:, 1])
+                    center_qdx = float(np.nanmean(peaks[:, 1]))
                 else:
                     center_qdx = (center_qdy-intercept)/slope
 
