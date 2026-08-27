@@ -151,9 +151,9 @@ def generate_data_name_from_pattern(data_name_pattern,
     ----------
     data_name_pattern : str | None
         Naming pattern containing placeholders in braces.
-    metadata : dict, optional
+    metadata : dict, optional | None
         Metadata values available for placeholder substitution.
-    user_params : dict, optional
+    user_params : dict, optional | None
         User-defined values available for placeholder substitution.
 
     Returns
