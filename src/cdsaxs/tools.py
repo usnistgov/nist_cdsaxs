@@ -2,6 +2,7 @@
 import inspect
 import warnings
 
+import csv
 import numpy as np
 from PIL import Image
 from scipy.optimize import curve_fit
@@ -931,3 +932,95 @@ def find_maximum_rectangular_roi(data):
 
     return (min0, max0), (min1, max1), height, width, area
 
+
+def export_metadata(dataset, timestamp):
+    """
+    Export the metadata of a dataset
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset containing the metadata to export.
+
+    timestamp: str
+        Timestamp for the export directory.
+
+    Returns
+    -------
+    None
+    """
+    try:
+        with open(f"./export/{timestamp}/metadata_{timestamp}.csv", mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+
+            # get keys
+            keyslist = []
+            for keys in dataset.datas.keys():
+                keyslist.append(keys)
+            keyslist.sort(key=lambda x: float(x))  # Sort keys numerically
+
+            headers = ["Key"] + keyslist
+            writer.writerow(headers)
+
+            writer.writerow(["Metadata:"])
+
+            # write metadata rows
+            for key in dataset.datas[keyslist[0]].metadata.keys():
+                row = [key]
+
+                for k in keyslist:
+                    row.append(dataset.datas[k].metadata.get(key))
+                writer.writerow(row)
+
+            writer.writerow(["User Parameters:"])
+
+            # write user param rows
+            for key in dataset.datas[keyslist[0]].user_params.keys():
+                row = [key]
+
+                for k in keyslist:
+                    row.append(dataset.datas[k].user_params.get(key))
+                writer.writerow(row)
+
+        print(f"Metadata exported to ./export/{timestamp}/metadata_{timestamp}.csv successfully.")
+    except Exception as e:
+        print(f"Error writing CSV: {e}")
+
+
+def export_data_transformations(dataset, timestamp):
+    """
+    Export the data transformations of a dataset
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset containing the data transformations to export.
+
+    timestamp: str
+        Timestamp for the export directory.
+
+    Returns
+    -------
+    None
+    """
+    try:
+        with open(f"./export/{timestamp}/data_transformations_{timestamp}.csv", mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+
+            writer.writerow(["Transformation Type:", "Value", "Key"])
+
+            # get keys
+            keyslist = []
+            for key in dataset.datas.keys():
+                writer.writerow([key])
+
+                for transform_tuple in dataset.datas[key].data_transformations:
+
+                    list_of_transforms = []
+                    for transform in transform_tuple:
+                        list_of_transforms.append(transform)
+                    writer.writerow(list_of_transforms)
+
+        print(f"Data transformations exported to ./export/{timestamp}/data_transformations_{timestamp}.csv successfully.")
+    except Exception as e:
+        print(f"Error writing CSV: {e}")
