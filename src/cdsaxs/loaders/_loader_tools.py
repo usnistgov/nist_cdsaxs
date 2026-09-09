@@ -151,9 +151,9 @@ def generate_data_name_from_pattern(data_name_pattern,
     ----------
     data_name_pattern : str | None
         Naming pattern containing placeholders in braces.
-    metadata : dict, optional
+    metadata : dict, optional | None
         Metadata values available for placeholder substitution.
-    user_params : dict, optional
+    user_params : dict, optional | None
         User-defined values available for placeholder substitution.
 
     Returns
@@ -170,24 +170,15 @@ def generate_data_name_from_pattern(data_name_pattern,
         user_params = {}
 
     if data_name_pattern is not None:
-        new_name = data_name_pattern
-        metadata_not_found = []
-        while '{' in new_name and '}' in new_name:
-            start = new_name.find('{')
-            stop = new_name.find('}')
-            key = new_name[start+1:stop]
+        def replace_placeholder(match):
+            key = match.group(1)
             if key in metadata.keys():
-                value = metadata[key]
-            elif key in user_params.keys():
-                value = user_params[key]
-            else:
-                value = key
-                metadata_not_found.append(key)
-            old_str = "{"+key+"}"
-            new_str = str(value)
-            new_name = new_name.replace(old_str, new_str)
-        for key in metadata_not_found:
-            new_name = new_name.replace(key, "{"+key+"}")
+                return str(metadata[key])
+            if key in user_params.keys():
+                return str(user_params[key])
+            return match.group(0)
+
+        new_name = re.sub(r'{(.+?)}', replace_placeholder, data_name_pattern)
     elif 'filename' in metadata.keys():
         new_name = metadata['filename']
     else:

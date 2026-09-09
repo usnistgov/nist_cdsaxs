@@ -96,21 +96,12 @@ def plot_image(
         Figure containing the plotted image.
     """
 
-    # determine colorbar range
-    # if log_scale make sure that vmin is 0.1 at a minimum
-    if vmin is None:
-        vmin = np.max(
-            [np.nanmin(image[image > 0]), 0.1]
-            ) if log_scale else 0
-    if vmax is None:
-        vmax = np.nanmax(image)
-
     # set masked points to nan in the image to be plotted
     plotting_image = np.array(image)
+    if mask is None:
+        mask = np.zeros_like(plotting_image).astype(bool)
     plotting_image[mask] = np.nan
 
-    if mask is None:
-        mask = np.ones_like(plotting_image).astype(bool)
     # mask out other pixels that are either infinity or nan and
     # somehow did not get included in the standard mask
     mask_inf = ((np.isinf(plotting_image)
@@ -144,6 +135,25 @@ def plot_image(
                                   ~np.isnan(plotting_image))
         plotting_image[mask_less_than_equal_0] = np.nan
         mask_image[mask_less_than_equal_0] = 0.5
+
+    # determine colorbar range from the actual plotted data so LogNorm
+    # remains valid after masking invalid and nonpositive pixels.
+    finite_plotting_values = plotting_image[np.isfinite(plotting_image)]
+    if vmin is None:
+        if log_scale:
+            if finite_plotting_values.size == 0:
+                vmin = 0.1
+            else:
+                vmin = np.max([np.nanmin(finite_plotting_values), 0.1])
+        else:
+            vmin = 0
+    if vmax is None:
+        if finite_plotting_values.size == 0:
+            vmax = vmin * 10 if log_scale else vmin + 1
+        else:
+            vmax = np.nanmax(finite_plotting_values)
+    if log_scale and vmax <= vmin:
+        vmax = vmin * 10
 
     # plotting data
     fig = plt.figure(fig)
@@ -700,7 +710,7 @@ def plot_qslice(
     # plot the 1D slice from the integration with or without background
     fig_slice = plot_data1d(
         qslice,
-        log_scale=log_scale,
+        log_scale_y=log_scale,
         label="QSlice I(q)",
         zorder=1000,
         color=color_slice,
@@ -1622,8 +1632,12 @@ def plot_reduced_dataset(
             cmap=cmap,
             norm=norm,
             **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
-    cbar_ticks = np.power(10, np.arange(
-        np.ceil(np.log10(vmin)), np.floor(np.log10(vmax))+1, 1))
+    if log_scale:
+        cbar_ticks = np.power(10, np.arange(
+            np.ceil(np.log10(vmin)), np.floor(np.log10(vmax)) + 1, 1
+        ))
+    else:
+        cbar_ticks = np.linspace(vmin, vmax, 6)
     colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)
     colorbar.set_label('Intensity')
 
@@ -1743,7 +1757,12 @@ def plot_reduced_slices(
                 keep.append(False)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
-    sort_axis = [getattr(data, integrated_axis) for data in filtered_slices]
+    sort_axis = []
+    for data in filtered_slices:
+        axis_value = getattr(data, integrated_axis)
+        if np.size(axis_value) == 1:
+            axis_value = np.asarray(axis_value).reshape(-1)[0]
+        sort_axis.append(axis_value)
     sort_by_slice_axis = np.argsort(sort_axis)
     # filtered_slices = filtered_slices[sort_by_slice_axis]
 
@@ -1753,10 +1772,15 @@ def plot_reduced_slices(
     # for i, data in enumerate(filtered_slices):
         q = np.copy(getattr(data, q_axis))
         Iq = np.copy(data.Iq)
+        label = getattr(data, integrated_axis)
+        # Reduced slice metadata may store scalar q values as length-1 arrays;
+        # flatten them so legend labels read as 0.2 instead of [0.2].
+        if np.size(label) == 1:
+            label = np.asarray(label).reshape(-1)[0]
         sort_q = np.argsort(q)
         ax.errorbar(q[sort_q],
                     Iq[sort_q]*10**(i*-1*offset_order) + offset_value*i,
-                    label=getattr(data, integrated_axis),
+                    label=label,
                     fmt='o-', **kwargs)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1),

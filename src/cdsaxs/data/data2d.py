@@ -43,8 +43,8 @@ ACCEPTED_Q_KEYWORDS = ACCEPTED_Q_AXES
 def combine_data2d(*data2d: Data2D, name=None):
     """
     Combine two or more instances of Data2D into a single instance
-    of Data2D. 
-    
+    of Data2D.
+
     NOTE: This operation is not sensitive to any data
     transformations or orientation changes that have been performed and
     so the user should carefully consider when to perform this operation.
@@ -80,18 +80,42 @@ def combine_data2d(*data2d: Data2D, name=None):
 
     # initialize information from the first 2d data instance
     first_data = data2d[0]
-    metadata = first_data.metadata
-    user_params = first_data.user_params
-    mask = first_data.mask
-    image = first_data.image
+    metadata = dict(first_data.metadata)
+    user_params = dict(first_data.user_params)
+    mask = np.array(first_data.mask, copy=True)
+    image = np.array(first_data.image, copy=True)
     if name is None:
         name = first_data.name
 
+    # Data2D derives energy from wavelength and vice versa, so avoid
+    # passing both back into the constructor when cloning metadata.
+    if 'wavelength_nm' in metadata and 'energy_ev' in metadata:
+        del metadata['energy_ev']
+
     for data in data2d[1:]:
-        if 'exposure_time_s' in data.metadata.keys():
-            metadata['exposure_time_s'] += data.metadata['exposure_time_s']
+        if data.image.shape != first_data.image.shape:
+            raise ValueError(
+                "All Data2D images must have the same shape to be combined. "
+                f"Expected {first_data.image.shape}, got {data.image.shape}."
+            )
+        if data.mask.shape != first_data.mask.shape:
+            raise ValueError(
+                "All Data2D masks must have the same shape to be combined. "
+                f"Expected {first_data.mask.shape}, got {data.mask.shape}."
+            )
+        if 'exposure_time_s' in metadata.keys() and 'exposure_time_s' in data.metadata.keys():
+            metadata['exposure_time_s'] = np.sum([metadata['exposure_time_s'], data.metadata['exposure_time_s']])
+        else:
+            warnings.warn(
+                f"One or more Data2D instances do not have an exposure_time_s "
+                "metadata value. The combined exposure time has been removed "
+                "from the metadata."
+            )
+            metadata.pop('exposure_time_s', None)
+
         mask += data.mask
-        image = np.nansum(image, data.image)
+        # Sum the two images elementwise while propagating nans.
+        image = np.sum(np.stack([image, data.image]), axis=0)
 
     new_data = Data2D(
         image=image,
@@ -944,7 +968,19 @@ class Data2D(DataImage):
             self.metadata['center_px'][0], self.metadata['center_px'][1])
 
         # do the rotation
-        k = int(np.round(steps, 0))
+        if (
+            isinstance(steps, (float, np.floating))
+            and not float(steps).is_integer()
+        ):
+            warnings.warn(
+                "rotate_image_ccw only accepts integer quarter turns.",
+                UserWarning,
+            )
+            raise ValueError(
+                "rotate_image_ccw only accepts integer quarter turns."
+            )
+
+        k = int(steps)
         while k < 0:
             k += 4
         super().rotate_image_ccw(steps=k)
@@ -1950,12 +1986,12 @@ class Data2D(DataImage):
             negative qdx direction.
             Default value is 0.
      exclude_qdy : tuple[float, float], optional
-         Exclude an inclusive region of q from the calculation. 
-         This is generally used to exclude the immediate region 
+         Exclude an inclusive region of q from the calculation.
+         This is generally used to exclude the immediate region
          around the beamstop.
      exclude_qdx : tuple[float, float], optional
-         Exclude an inclusive region of q from the calculation. 
-         This is generally used to exclude the immediate region 
+         Exclude an inclusive region of q from the calculation.
+         This is generally used to exclude the immediate region
          around the beamstop.
         log_scale : bool, optional
             If set to True, the image will be passed to the peak finding
@@ -2119,10 +2155,10 @@ class Data2D(DataImage):
         otherwise specified.
 
         Parameters
-        ----------            
+        ----------
          exclude_q : tuple[float, float], optional
-             Exclude an inclusive region of q along the peak axis from 
-             the calculation. This is generally used to exclude the immediate 
+             Exclude an inclusive region of q along the peak axis from
+             the calculation. This is generally used to exclude the immediate
              region around the beamstop.
         peak_axis : int, optional
             The axis along which the peaks are found. If axis 0 (qdy) is
@@ -2159,7 +2195,7 @@ class Data2D(DataImage):
         the user to consider which keyword arguments to select as not
         all should be used simultaneously. Please see documentation
         for the data2d.get_box_dims() method for more details.
-            
+
         width_qdy_px : int, optional
             Set the box width along the vertical axis of the
             detector (qdy). It will be centered at the beam center
@@ -2199,7 +2235,7 @@ class Data2D(DataImage):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
-            
+
         Other Parameters
         ----------------
         **kwargs
@@ -2415,6 +2451,7 @@ class Data2D(DataImage):
             exclude_q=None,
             show_plot=True,
             zoom_plot=True,
+            refinement_size=7,
             ignore_peaks=[],
             **kwargs):
         """
@@ -2452,7 +2489,7 @@ class Data2D(DataImage):
         ignore_peaks : list[int], optional
             Peak indices to ignore after peak finding when estimating
             the beam center.
-             
+
         Parameters for Box Refinement
         -----------------------------
         The following keyword arguments are specific to defining the
@@ -2460,7 +2497,7 @@ class Data2D(DataImage):
         the user to consider which keyword arguments to select as not
         all should be used simultaneously. Please see documentation
         for the data2d.get_box_dims() method for more details.
-            
+
         width_qdy_px : int, optional
             Set the box width along the vertical axis of the
             detector (qdy). It will be centered at the beam center
@@ -2551,6 +2588,7 @@ class Data2D(DataImage):
             peak_axis=peak_axis,
             exclude_q=exclude_q,
             show_plot=False,
+            refinement_size=refinement_size,
             **kwargs
         )
 
@@ -2593,7 +2631,7 @@ class Data2D(DataImage):
                 center_qdy = float(center)
                 if np.isnan(slope):
                     # this means the peaks form perfectly vertical line
-                    center_qdx = float(np.nanmean(peaks)[:, 1])
+                    center_qdx = float(np.nanmean(peaks[:, 1]))
                 else:
                     center_qdx = (center_qdy-intercept)/slope
 
@@ -2651,6 +2689,7 @@ class Data2D(DataImage):
             exclude_q=None,
             zoom_plot=True,
             ignore_orders=[],
+            refinement_size=7,
             **kwargs
     ):
         """
@@ -2707,7 +2746,7 @@ class Data2D(DataImage):
         the user to consider which keyword arguments to select as not
         all should be used simultaneously. Please see documentation
         for the data2d.get_box_dims() method for more details.
-            
+
         width_qdy_px : int, optional
             Set the box width along the vertical axis of the
             detector (qdy). It will be centered at the beam center
@@ -2799,6 +2838,7 @@ class Data2D(DataImage):
             peak_axis=peak_axis,
             exclude_q=exclude_q,
             show_plot=False,
+            refinement_size=refinement_size,
             **kwargs
         )
         # sort the peaks by index along peak_axis
@@ -2908,7 +2948,7 @@ class Data2D(DataImage):
         the user to consider which keyword arguments to select as not
         all should be used simultaneously. Please see documentation
         for the data2d.get_box_dims() method for more details.
-            
+
         width_qdy_px : int, optional
             Set the box width along the vertical axis of the
             detector (qdy). It will be centered at the beam center
@@ -3077,10 +3117,10 @@ class Data2D(DataImage):
             peak position. The determiend beam center will be shown
             with dashed red lines.
         exclude_q : tuple[float, float], optional
-             Exclude an inclusive region of q from the calculation. 
-             This is generally used to exclude the immediate region 
+             Exclude an inclusive region of q from the calculation.
+             This is generally used to exclude the immediate region
              around the beamstop.
-            
+
         Parameters for Box Refinement
         -----------------------------
         The following keyword arguments are specific to defining the
@@ -3088,7 +3128,7 @@ class Data2D(DataImage):
         the user to consider which keyword arguments to select as not
         all should be used simultaneously. Please see documentation
         for the data2d.get_box_dims() method for more details.
-            
+
         width_qdy_px : int, optional
             Set the box width along the vertical axis of the
             detector (qdy). It will be centered at the beam center
@@ -3128,7 +3168,7 @@ class Data2D(DataImage):
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
-            
+
         Other Parameters
         ----------------
         **kwargs

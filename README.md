@@ -10,6 +10,14 @@ be exported and used directly with the
 [`nist_cdsaxs_analysis`](https://github.com/usnistgov/nist_cdsaxs_analysis)
 repository.
 
+## Software Status
+This code is currently under development. We will provide a link to the 
+latest version of the code once Version 1 has been made available. 
+
+Unless otherwise stated here, the code will be regularly maintained by the developers 
+to address any functionality bugs and security issues, including required loader 
+updates to reflect changes in data structures exported by the beamlines.
+
 ## Installation
 
 The package follows a standard Python layout (`src/` with `pyproject.toml`). You can install it with pip.
@@ -33,7 +41,7 @@ pip install -e .[dev]
 >
 > The `-e` (editable) install lets you modify the source and use the changes without re-installing.
 
-## Create and Activate Environment
+### Create and Activate Environment
 1. Install Python with the conda package manager on your machine if it is not already installed. One open source option is [Miniforge](https://github.com/conda-forge/miniforge).
 2. Open a terminal (e.g., GitBash, Command Prompt on Windows, Terminal on Mac) and navigate to the root folder of the project using the `cd` command.
 3. Create a Python environment; replace 'cdsaxs_dev' with another environment name if you wish:
@@ -212,10 +220,9 @@ You can communicate with the `nist_cdsaxs` owners via e-mail:
 Daniel Sunday daniel.sunday@nist.gov  
 Joseph Kline r.kline@nist.gov  
 
-[National Institute of Standards and Technology](http://www.nist.gov)   
-[Material Measurement Laboratory](https://www.nist.gov/mml)   
-[Materials Science and Engineering Division](https://www.nist.gov/mml/materials-science-and-engineering-division)   
-[Polymers Processing Group](https://www.nist.gov/mml/materials-science-and-engineering-division/polymers-processing-group)   
+## Issue Reporting
+We encourage users to submit issues regarding feature requests or bug fixes 
+directly using [GitHub issues](https://github.com/usnistgov/nist_cdsaxs/issues) on our repository.
 
 ## Contributors
 Dean M. DeLongchamp, [@delongchamp](https://github.com/delongchamp)  
@@ -230,7 +237,11 @@ _Contributors are listed in alphabetical order by last name._
 
 
 ## Related Material
-[Metrology for Nanolithography Project](https://www.nist.gov/programs-projects/metrology-nanolithography)
+* [Metrology for Nanolithography Project](https://www.nist.gov/programs-projects/metrology-nanolithography)
+* [National Institute of Standards and Technology](http://www.nist.gov)   
+* [Material Measurement Laboratory](https://www.nist.gov/mml)   
+* [Materials Science and Engineering Division](https://www.nist.gov/mml/materials-science-and-engineering-division)   
+* [Polymers Processing Group](https://www.nist.gov/mml/materials-science-and-engineering-division/polymers-processing-group) 
 
 ## Disclaimers
 

@@ -91,6 +91,7 @@ class ReducedData1DSlice(Data1D):
             q=q, Iq=Iq, q_axis=q_axis, dIq=dIq, mask=mask, **kwargs
         )
 
-        self.slice_axis = integrated_axis
+        self.integrated_axis = integrated_axis
+        self.slice_axis = q_axis
         self.offset_axis = offset_axis
         self.slice_width = slice_width

@@ -42,7 +42,7 @@ class Dataset():
         self.datas={}
         if datas is not None:
             self.add_data(datas)
-            
+
         self.name = name
 
     def add_data(self, datas: Data2D | list[Data2D]):
@@ -152,7 +152,7 @@ class Dataset():
             int | float : Data must equal this value exactly.
             str : Data must equal this exactly.
             If multiple criteria for the same metadata must be met,
-            a list of any of these values can be used. 
+            a list of any of these values can be used.
             list[tuple] : Data must fall within one of the ranges
                 provided.
             list[int | float] : Data must equal one of the values in the
@@ -195,6 +195,8 @@ class Dataset():
                     f"Didn't recognize filter for {key} of {value}."
                 )
 
+        return keys
+
     def update_all_user_params(
             self, params: dict, overwrite: bool = True,
             keys: list = None):
@@ -227,8 +229,8 @@ class Dataset():
             self, normalize_by, keys=None):
         """
         Normalize all data by the selected metadata or user parameters.
-        This will not reset any previous normalization. 
-        
+        This will not reset any previous normalization.
+
         If a new series or normalizations is desired, please
         run reset normalization first or change reset_first to True.
 
@@ -412,7 +414,7 @@ class Dataset():
     def flip_all_data_horizontally(self, keys=None):
         """
         Flip images horizontally.
-        
+
         Parameters
         ----------
         keys : list
@@ -524,7 +526,7 @@ class Dataset():
         for key in keys:
             data = self.datas[key]
             if key in angles.keys():
-                rotation_angle = np.deg2rad(angles[key])
+                rotation_angle = angles[key]
             else:
                 phi = np.deg2rad(data.metadata['sample_phi_deg']
                                 + data.metadata['sample_phi_offset_deg'])
@@ -771,10 +773,10 @@ class ReducedDataset():
             filter_by_metadata={},
             interpolated_data=False,
             use_legacy_interpolation=False,
-            grid_size = 1000,
-            method = "cubic",
-            distance_factor = 5,
-            verbose = False,
+            grid_size=1000,
+            method="cubic",
+            distance_factor=5,
+            verbose=False,
             **kwargs
     ):
         """
@@ -808,7 +810,7 @@ class ReducedDataset():
             Options: "cubic", "nearest", "linear". For use with the scipy
             griddata interpolation method.
         distance_factor : float
-            Sets the distance factor for masking interpolation that is 
+            Sets the distance factor for masking interpolation that is
             too far from a real point. For use with the scipy
             griddata interpolation method.
         verbose : bool
@@ -943,18 +945,14 @@ class ReducedSlices():
             self,
             filepath,
             filter_by_q={},
-            q_axis='qsz',
-            integrated_axis='qsx',
-            offset_axis='qsy',
             export_qr=False,
-            decimals=5):
+            decimals=7):
         """
         Outputs the slected reduced slices set currently stored in the
-        dataset to a csv file.
+        dataset to a csv file. All qsx, qsy, qsz, and masked Iq will be
+        exported. The user can also choose to export qsr.
+        TODO: allow user to select the specific axes for export
 
-        NOTE: currently only a q_slice_axis of 'qsx' is accepted or
-        formatted appropriately in the output file.
-        TODO: generalize this in the future.
 
         Parameters
         ----------
@@ -963,25 +961,6 @@ class ReducedSlices():
         filter_by_q : dict
             Dictionary of q component and range (min, max) to filter
             the slices by.
-<<<<<<< validate_for_version1
-        q_axis : str
-            Currently only 'qsz' is accepted.
-        integrated_axis : str
-            Currently only 'qsx' is accepted.
-        offset_axis : str
-            Currently only 'qsy' is accepted.
-=======
-        TODO: Add more options for exporting axis. Currently hardcoded.
-        q_axis : str
-            Currently only 'qsz' is accepted.
-            Default is 'qsz'.
-        integrated_axis : str
-            Currently only 'qsx' is accepted.
-            Default is 'qsx'.
-        offset_axis : str
-            Currently only 'qsy' is accepted.
-            Default is 'qsy'.
->>>>>>> main
         export_qr : bool
             If set to True, qsr will also be exported in the file.
         decimals : int
@@ -1006,43 +985,45 @@ class ReducedSlices():
                     keep.append(False)
             filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
+        # figure out the max length to pad ends of slices with empty values
+        # for the csv export (needs a table, not arrays of different lengths)
         length = 0
         for r_slice in filtered_slices:
-            length = np.max((length, len(getattr(r_slice, q_axis))))
+            length = np.max((length, len(getattr(r_slice, 'qsz'))))
 
         datas = []
 
         for r_slice in filtered_slices:
-            q = getattr(r_slice, q_axis)
+            qz = getattr(r_slice, 'qsz')
             Iq = getattr(r_slice, '_masked_Iq')
-            q_int = getattr(r_slice, integrated_axis)
-            q_offset = getattr(r_slice, offset_axis)
+            qx = getattr(r_slice, 'qsx')
+            qy = getattr(r_slice, 'qsy')
 
             # sort by q
-            sorted_indexes = np.argsort(q)
-            q = q[sorted_indexes]
-            q_offset = q_offset[sorted_indexes]
+            sorted_indexes = np.argsort(qz)
+            qz = qz[sorted_indexes]
             Iq = Iq[sorted_indexes]
+            qy = qy[sorted_indexes]
+            qx = np.tile(np.asarray(qx), np.size(qz))  # qx is single value
 
+            # only export the data that is non NAN and above 0 as the
+            # analysis code does not accept intensity values of 0
             select = (~np.isnan(Iq)) & (Iq > 0)
-            num_points = len(q[select])
 
-            # Create columns for qx,qy,qr(if header axis == qsr is specified)
-
-            new_qx = np.hstack(                 #integration axis
+            new_qx = np.hstack(
                 ([r'$q_x (\AA^{-1})$'],
-                    [str(np.round(q_int, decimals))]*num_points,
-                    [""]*(length-len(q[select])))
+                    np.round(qx, decimals).astype(str)[select],
+                    [""]*(length-len(qx[select])))
             )
-            new_qy = np.hstack(                 #offset axis
+            new_qy = np.hstack(
                 ([r'$q_y (\AA^{-1})$'],
-                    np.round(q_offset, decimals).astype(str)[select],
-                    [""]*(length-len(q_offset[select])))
+                    np.round(qy, decimals).astype(str)[select],
+                    [""]*(length-len(qy[select])))
             )
-            new_qz = np.hstack(                 #q axis that data are plotted along
+            new_qz = np.hstack(
                 ([r'$q_z (\AA^{-1})$'],
-                    np.round(q, decimals=decimals).astype(str)[select],
-                    [""]*(length-len(q[select])))
+                    np.round(qz, decimals=decimals).astype(str)[select],
+                    [""]*(length-len(qz[select])))
             )
 
             datas.append(new_qx)

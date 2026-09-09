@@ -1,13 +1,164 @@
 import numpy as np
 import unittest
+from unittest.mock import patch
 
 from cdsaxs.calculators import wavelength_to_energy
-from cdsaxs.data.data2d import Data2D
+from cdsaxs.data.data2d import Data2D, combine_data2d
 
 
 class TestCombineData2D(unittest.TestCase):
-    # TODO: implement a test for combining two instances of Data2D
-    pass
+    def _make_metadata(self, exposure_time_s=None):
+        metadata = {
+            'center_px': (1, 1),
+            'wavelength_nm': 0.07,
+            'pixel_size_um': 172,
+            'sdd_cm': 542,
+            'sample_phi_deg': 0,
+            'sample_phi_offset_deg': 0,
+            'sample_chi_deg': 0,
+            'sample_chi_offset_deg': 0,
+            'sample_omega_deg': 0,
+            'sample_omega_offset_deg': 0,
+            'detector_phi_deg': 0,
+            'detector_phi0_deg': 0,
+            'detector_phi_scale': 1,
+            'detector_y_mm': 0,
+            'detector_y0_mm': 0,
+        }
+        if exposure_time_s is not None:
+            metadata['exposure_time_s'] = exposure_time_s
+        return metadata
+
+    def _make_data(self, name, image, mask=None, exposure_time_s=None, **user_params):
+        return Data2D(
+            image=np.array(image, dtype=np.float64),
+            name=name,
+            mask=np.array(mask, dtype=bool) if mask is not None else None,
+            hide_q_warnings=True,
+            **self._make_metadata(exposure_time_s=exposure_time_s),
+            **user_params,
+        )
+
+    def test_combine_data2d_sums_images_unions_masks_and_exposure_time(self):
+        data1 = self._make_data(
+            'first',
+            image=[[1.0, np.nan], [3.0, 4.0]],
+            mask=[[False, True], [False, False]],
+            exposure_time_s=2,
+            sample_id='A',
+        )
+        data2 = self._make_data(
+            'second',
+            image=[[10.0, 20.0], [30.0, 40.0]],
+            mask=[[False, False], [True, False]],
+            exposure_time_s=5,
+            sample_id='B',
+        )
+
+        combined = combine_data2d(data1, data2)
+
+        np.testing.assert_array_equal(
+            combined.image,
+            np.array([[11.0, np.nan], [33.0, 44.0]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            combined.mask,
+            np.array([[False, True], [True, False]], dtype=bool),
+        )
+        self.assertEqual(combined.metadata['exposure_time_s'], 7)
+        self.assertEqual(combined.user_params['sample_id'], 'A')
+        self.assertEqual(combined.name, 'first')
+
+    def test_combine_data2d_uses_explicit_name_override(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)), exposure_time_s=1)
+        data2 = self._make_data('second', image=np.full((3, 3), 2.0), exposure_time_s=2)
+
+        combined = combine_data2d(data1, data2, name='combined-data')
+
+        self.assertEqual(combined.name, 'combined-data')
+
+    def test_combine_data2d_warns_and_removes_exposure_when_later_data_missing(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)), exposure_time_s=3)
+        data2 = self._make_data('second', image=np.full((3, 3), 2.0))
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                'do not have an exposure_time_s metadata value'):
+            combined = combine_data2d(data1, data2)
+
+        self.assertNotIn('exposure_time_s', combined.metadata)
+
+    def test_combine_data2d_warns_and_removes_exposure_when_first_data_missing(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)))
+        data2 = self._make_data('second', image=np.full((3, 3), 2.0), exposure_time_s=5)
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                'do not have an exposure_time_s metadata value'):
+            combined = combine_data2d(data1, data2)
+
+        self.assertNotIn('exposure_time_s', combined.metadata)
+
+    def test_combine_data2d_warns_once_and_removes_exposure_with_three_inputs(self):
+        data1 = self._make_data('first', image=np.ones((2, 2)), exposure_time_s=2)
+        data2 = self._make_data('second', image=np.full((2, 2), 3.0), exposure_time_s=5)
+        data3 = self._make_data('third', image=np.full((2, 2), 7.0))
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                'do not have an exposure_time_s metadata value'):
+            combined = combine_data2d(data1, data2, data3)
+
+        np.testing.assert_array_equal(
+            combined.image,
+            np.array([[11.0, 11.0], [11.0, 11.0]], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            combined.mask,
+            np.zeros((2, 2), dtype=bool),
+        )
+        self.assertNotIn('exposure_time_s', combined.metadata)
+        self.assertEqual(combined.user_params, data1.user_params)
+        self.assertEqual(combined.name, 'first')
+
+    def test_combine_data2d_masks_invalid_values_without_explicit_masks(self):
+        data1 = self._make_data(
+            'first',
+            image=[[1.0, np.nan], [np.inf, 4.0]],
+            exposure_time_s=1,
+        )
+        data2 = self._make_data(
+            'second',
+            image=[[10.0, 20.0], [30.0, -np.inf]],
+            exposure_time_s=2,
+        )
+
+        combined = combine_data2d(data1, data2)
+
+        np.testing.assert_array_equal(
+            combined.mask,
+            np.array([[False, True], [True, True]], dtype=bool),
+        )
+        np.testing.assert_array_equal(
+            combined.image,
+            np.array([[11.0, np.nan], [np.inf, -np.inf]], dtype=np.float64),
+        )
+        self.assertEqual(combined.metadata['exposure_time_s'], 3)
+
+    def test_combine_data2d_raises_for_mismatched_image_shapes(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)))
+        data2 = self._make_data('second', image=np.ones((2, 3)))
+
+        with self.assertRaisesRegex(ValueError, 'All Data2D images must have the same shape'):
+            combine_data2d(data1, data2)
+
+    def test_combine_data2d_raises_for_mismatched_mask_shapes(self):
+        data1 = self._make_data('first', image=np.ones((3, 3)))
+        data2 = self._make_data('second', image=np.ones((3, 3)))
+        data2.mask = np.zeros((2, 3), dtype=bool)
+
+        with self.assertRaisesRegex(ValueError, 'All Data2D masks must have the same shape'):
+            combine_data2d(data1, data2)
 
 
 class TestData2D(unittest.TestCase):
@@ -801,6 +952,56 @@ class TestData2D(unittest.TestCase):
         new_image = self.image * self.dataqdyqdx.metadata["substrate_absorption_factor"]
         np.testing.assert_array_equal(self.dataqdyqdx.image, new_image)
 
+    def test_correction_methods_raise_when_required_metadata_missing(self):
+        base_metadata = dict(self.metadata)
+        base_metadata.pop('energy_ev', None)
+
+        footprint_data = Data2D(
+            image=self.image,
+            name='footprint missing metadata',
+            mask=self.custom_mask,
+            hide_q_warnings=True,
+            **base_metadata,
+        )
+        footprint_data.metadata.pop('sample_phi_deg')
+        with self.assertRaisesRegex(
+                ValueError,
+                'The following metadata is missing for:'):
+            footprint_data.apply_footprint_correction()
+
+        sample_size_data = Data2D(
+            image=self.image,
+            name='sample size missing metadata',
+            mask=self.custom_mask,
+            hide_q_warnings=True,
+            **base_metadata,
+        )
+        sample_size_data.update_metadata({
+            'beam_center_mm': 0.001,
+            'beam_fwhm_mm': 0.25,
+            'sample_phi_deg': 20,
+        })
+        with self.assertRaisesRegex(
+                ValueError,
+                'sample_size_mm'):
+            sample_size_data.apply_sample_size_correction()
+
+        substrate_data = Data2D(
+            image=self.image,
+            name='substrate missing metadata',
+            mask=self.custom_mask,
+            hide_q_warnings=True,
+            **base_metadata,
+        )
+        substrate_data.update_metadata({
+            'substrate_thickness_um': 100,
+            'sample_phi_deg': -40,
+        })
+        with self.assertRaisesRegex(
+                ValueError,
+                'substrate_attenuation_coeff_um-1'):
+            substrate_data.apply_substrate_absorption_correction()
+
     def test_get_box_dims_size(self):
         size_qdy_px = 3
         size_qdx_px = 2
@@ -905,22 +1106,378 @@ class TestData2D(unittest.TestCase):
         ])
         np.testing.assert_array_almost_equal(qslice.background_Iq, background_i_avg)
 
-    # def test_find_peaks2D(self):
-    #     # TODO: implement peaks2D test
-    #     pass
+    def test_find_peaks2d_forwards_roi_filters_q_and_plots(self):
+        helper_peaks = np.array([[0.5, 1.0], [2.0, 2.5]], dtype=float)
 
-    # def test_find_peaks2D_one_axis(self):
-    #     # TODO: implement peaks2D one axis test
-    #     pass
+        with patch("cdsaxs.data.data2d.find_peaks_2D",
+                   return_value=helper_peaks.copy()) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d",
+                      return_value="figure") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D(
+                range_qdy_px=(1, 5),
+                range_qdx_px=(1, 4),
+                exclude_qdy=(0.0006, 0.0011),
+                exclude_qdx=[(0.0002, 0.0004)],
+                log_scale=False,
+                refinement_size=9,
+                show_plot=True,
+                zoom_plot=False,
+                plotting_kwargs={"cmap": "magma"},
+                min_distance=3,
+            )
 
-    # def test_find_beam_center(self):
-    #     # TODO: implement find center test
-    #     pass
+        expected_roi = self.image[1:5, 1:4]
+        expected_mask = self.dataqdyqdx.mask[1:5, 1:4]
+        np.testing.assert_array_equal(mock_find.call_args.args[0], expected_roi)
+        np.testing.assert_array_equal(mock_find.call_args.kwargs["mask"], expected_mask)
+        self.assertFalse(mock_find.call_args.kwargs["log_scale"])
+        self.assertEqual(mock_find.call_args.kwargs["refinement_size"], 9)
+        self.assertEqual(mock_find.call_args.kwargs["min_distance"], 3)
 
-    # def test_find_sdd(self):
-    #     # TODO: implement find sdd test
-    #     pass
+        np.testing.assert_allclose(peaks, np.array([[3.0, 3.5]]))
+        np.testing.assert_allclose(peaks_q, np.array([[0.000284846566, -0.000284846566]]))
+        self.assertEqual(fig, "figure")
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            limits_axis0=(1, 5),
+            limits_axis1=(1, 4),
+            zoom_plot=False,
+            cmap="magma",
+        )
 
-    # def test_find_detector_rotation_correction(self):
-    #     # TODO: implement find detector rotation correction test
-    #     pass
+    def test_find_peaks2d_returns_none_figure_without_plot(self):
+        helper_peaks = np.array([[1.0, 0.0]], dtype=float)
+
+        with patch("cdsaxs.data.data2d.find_peaks_2D",
+                   return_value=helper_peaks.copy()) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D(
+                range_qdy_px=(0, 3),
+                range_qdx_px=(0, 2),
+                show_plot=False,
+            )
+
+        np.testing.assert_allclose(peaks, np.array([[1.0, 0.0]]))
+        np.testing.assert_allclose(peaks_q, np.array([[0.000854539698, 0.000569693132]]))
+        self.assertIsNone(fig)
+        mock_find.assert_called_once()
+        mock_plot.assert_not_called()
+
+    def test_find_peaks2d_one_axis_defaults_peak_axis_and_filters_q(self):
+        helper_peaks = np.array([[0.5, 1.0], [2.0, 2.5]], dtype=float)
+
+        with patch("cdsaxs.data.data2d.find_peaks_2D_one_axis",
+                   return_value=helper_peaks.copy()) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d",
+                      return_value="axis-figure") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D_one_axis(
+                range_qdy_px=(1, 6),
+                range_qdx_px=(1, 3),
+                exclude_q=(0.0006, 0.0011),
+                integration_mode="mean",
+                log_scale=False,
+                refinement_size=5,
+                algorithm="scipy",
+                zoom_plot=False,
+                show_plot=True,
+                distance=4,
+            )
+
+        expected_roi = self.image[1:6, 1:3]
+        expected_mask = self.dataqdyqdx.mask[1:6, 1:3]
+        np.testing.assert_array_equal(mock_find.call_args.args[0], expected_roi)
+        np.testing.assert_array_equal(mock_find.call_args.kwargs["mask"], expected_mask)
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 0)
+        self.assertEqual(mock_find.call_args.kwargs["integration_mode"], "mean")
+        self.assertFalse(mock_find.call_args.kwargs["log_scale"])
+        self.assertEqual(mock_find.call_args.kwargs["refinement_size"], 5)
+        self.assertEqual(mock_find.call_args.kwargs["algorithm"], "scipy")
+        self.assertEqual(mock_find.call_args.kwargs["distance"], 4)
+
+        np.testing.assert_allclose(peaks, np.array([[3.0, 3.5]]))
+        np.testing.assert_allclose(peaks_q, np.array([[0.000284846566, -0.000284846566]]))
+        self.assertEqual(fig, "axis-figure")
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            limits_axis0=(1, 6),
+            limits_axis1=(1, 3),
+            zoom_plot=False,
+            distance=4,
+        )
+
+    def test_find_peaks2d_one_axis_remaps_peak_axis_and_handles_empty_peaks(self):
+        with patch("cdsaxs.data.data2d.find_peaks_2D_one_axis",
+                   return_value=np.array([], dtype=float)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d") as mock_plot:
+            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D_one_axis(
+                range_qdy_px=(0, 4),
+                range_qdx_px=(0, 4),
+                peak_axis="qdx",
+                show_plot=False,
+            )
+
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        self.assertEqual(peaks.shape, (0, 2))
+        self.assertEqual(peaks_q.shape, (0, 2))
+        self.assertIsNone(fig)
+        mock_plot.assert_not_called()
+
+    def test_find_beam_center_from_peaks_returns_center_without_update(self):
+        original_center = self.dataqdyqdx.metadata["center_px"]
+        peaks = np.array([[4.0, 3.0], [4.0, 1.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.line_fit",
+                      return_value=(0.0, 0.0, 4.0)) as mock_line_fit, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig") as mock_plot:
+            center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertEqual(center, (4.0, 2.0))
+        self.assertEqual(fig, "beam-fig")
+        self.assertEqual(self.dataqdyqdx.metadata["center_px"], original_center)
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        mock_line_fit.assert_called_once()
+        mock_plot.assert_called_once()
+        self.assertIs(mock_plot.call_args.args[0], self.dataqdyqdx)
+        np.testing.assert_array_equal(
+            mock_plot.call_args.kwargs["peaks"],
+            np.array([[4.0, 1.0], [4.0, 3.0]]),
+        )
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis0"], (2, 6))
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis1"], (0, 4))
+        self.assertFalse(mock_plot.call_args.kwargs["zoom_plot"])
+        self.assertEqual(mock_plot.call_args.kwargs["show_beam_center"], (4.0, 2.0))
+
+    def test_find_beam_center_from_peaks_updates_metadata_and_honors_guess(self):
+        peaks = np.array([[4.0, 3.0], [4.0, 1.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.line_fit",
+                      return_value=(0.0, 0.0, 4.0)), \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig") as mock_plot:
+            center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                beam_center_guess=(4.0, 2.2),
+                update=True,
+                show_plot=True,
+            )
+
+        self.assertEqual(center, (4.0, 2.0))
+        self.assertEqual(fig, "beam-fig")
+        self.assertEqual(self.dataqdyqdx.metadata["center_px"], (4.0, 2.0))
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        self.assertTrue(mock_plot.call_args.kwargs["show_beam_center"])
+
+    def test_find_beam_center_from_peaks_raises_for_asymmetric_or_missing_peaks(self):
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.array([[4.0, 3.0]], dtype=float), None, None)), \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig") as mock_plot:
+            with self.assertRaisesRegex(ValueError, "not symmetric"):
+                self.dataqdyqdx.find_beam_center_from_peaks(
+                    range_qdy_px=(2, 6),
+                    range_qdx_px=(0, 4),
+                    show_plot=True,
+                )
+
+        self.assertFalse(mock_plot.call_args.kwargs["show_beam_center"])
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.empty((0, 2)), None, None)), \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
+                      return_value="beam-fig"):
+            with self.assertRaisesRegex(ValueError, "No peaks detected"):
+                self.dataqdyqdx.find_beam_center_from_peaks(
+                    range_qdy_px=(2, 6),
+                    range_qdx_px=(0, 4),
+                    show_plot=True,
+                )
+
+    def test_find_beam_center_from_peaks_ignores_selected_peaks(self):
+        peaks = np.array([[4.0, 0.5], [4.0, 1.0], [4.0, 3.0], [4.0, 3.5]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)), \
+                patch("cdsaxs.data.data2d.line_fit",
+                      return_value=(0.0, 0.0, 4.0)):
+            center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                ignore_peaks=[0, 3],
+                show_plot=False,
+            )
+
+        self.assertEqual(center, (4.0, 2.0))
+        self.assertIsNone(fig)
+
+    def test_find_sdd_from_reference_peaks_returns_and_updates(self):
+        peaks = np.array([[4.0, 1.0], [4.0, 3.0]], dtype=float)
+        peaks_q = np.array([[0.0, 0.0], [0.0, 0.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, peaks_q, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_sdd",
+                      return_value="sdd-fig") as mock_plot:
+            average_sdd, std_sdd, fig = self.dataqdyqdx.find_sdd_from_reference_peaks(
+                pitch_nm=100,
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                update=True,
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertEqual((average_sdd, std_sdd), (24.57, 0.0))
+        self.assertEqual(self.dataqdyqdx.metadata["sdd_cm"], 24.57)
+        self.assertEqual(fig, "sdd-fig")
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        mock_plot.assert_called_once()
+        self.assertIs(mock_plot.call_args.args[0], self.dataqdyqdx)
+        np.testing.assert_array_equal(
+            mock_plot.call_args.kwargs["peaks"],
+            np.array([[4.0, 1.0], [4.0, 3.0]]),
+        )
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis0"], (2, 6))
+        self.assertEqual(mock_plot.call_args.kwargs["limits_axis1"], (0, 4))
+        self.assertFalse(mock_plot.call_args.kwargs["zoom_plot"])
+        self.assertEqual(mock_plot.call_args.kwargs["sdd_cm"], (24.57, 0.0))
+
+    def test_find_sdd_from_reference_peaks_respects_peak_orders_and_ignore_orders(self):
+        peaks = np.array([[4.0, 0.0], [4.0, 1.0], [4.0, 3.0]], dtype=float)
+        peaks_q = np.zeros_like(peaks)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, peaks_q, None)):
+            average_sdd, std_sdd, fig = self.dataqdyqdx.find_sdd_from_reference_peaks(
+                pitch_nm=100,
+                range_qdy_px=(2, 6),
+                range_qdx_px=(0, 4),
+                peak_orders=np.array([-2, -1, 1]),
+                ignore_orders=[-2],
+                show_plot=False,
+            )
+
+        self.assertEqual((average_sdd, std_sdd), (0.0, 24.57))
+        self.assertIsNone(fig)
+
+    def test_calculate_omega_returns_expected_angle(self):
+        self.dataqdyqdx.update_metadata(
+            {
+                "sample_phi_deg": 30,
+                "sample_phi_offset_deg": 0,
+                "sample_chi_deg": 10,
+                "sample_chi_offset_deg": 0,
+            },
+            overwrite=True,
+            hide_q_warnings=True,
+        )
+
+        omega = self.dataqdyqdx.calculate_omega(5)
+
+        self.assertAlmostEqual(omega, 7.3194743104)
+
+    def test_find_chi_from_peaks_returns_real_angle_and_warns_on_insufficient_peaks(self):
+        peaks = np.array([[2.0, 1.0], [5.0, 2.0]], dtype=float)
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_detector_rotation_correction",
+                      return_value="chi-fig") as mock_plot:
+            angle, fig = self.dataqdyqdx.find_chi_from_peaks(
+                range_qdy_px=(0, 7),
+                range_qdx_px=(0, 4),
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertAlmostEqual(angle, 63.4349488229)
+        self.assertEqual(fig, "chi-fig")
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        plotted_line = mock_plot.call_args.kwargs["line"]
+        self.assertAlmostEqual(plotted_line[0], -63.4349488229)
+        self.assertAlmostEqual(plotted_line[1], -2.0)
+        self.assertAlmostEqual(plotted_line[2], 0.0)
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            line=mock_plot.call_args.kwargs["line"],
+            limits_axis0=(0, 7),
+            limits_axis1=(0, 4),
+            zoom_plot=False,
+        )
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None)):
+            with self.assertWarnsRegex(UserWarning, "Insuffient peaks"):
+                angle, fig = self.dataqdyqdx.find_chi_from_peaks(
+                    range_qdy_px=(0, 7),
+                    range_qdx_px=(0, 4),
+                    show_plot=False,
+                )
+
+        self.assertTrue(np.isnan(angle))
+        self.assertIsNone(fig)
+
+    def test_find_omega_from_peaks_uses_real_angle_math_and_warns_on_insufficient_peaks(self):
+        peaks = np.array([[2.0, 1.0], [5.0, 2.0]], dtype=float)
+        self.dataqdyqdx.update_metadata(
+            {
+                "sample_phi_deg": 30,
+                "sample_phi_offset_deg": 0,
+                "sample_chi_deg": 10,
+                "sample_chi_offset_deg": 0,
+            },
+            overwrite=True,
+            hide_q_warnings=True,
+        )
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(peaks, None, None)) as mock_find, \
+                patch("cdsaxs.data.data2d.plotting.plot_data2d_find_detector_rotation_correction",
+                      return_value="omega-fig") as mock_plot:
+            omega, fig = self.dataqdyqdx.find_omega_from_peaks(
+                range_qdy_px=(0, 7),
+                range_qdx_px=(0, 4),
+                show_plot=True,
+                zoom_plot=False,
+            )
+
+        self.assertAlmostEqual(omega, -74.6322033805)
+        self.assertEqual(fig, "omega-fig")
+        self.assertEqual(mock_find.call_args.kwargs["peak_axis"], 1)
+        plotted_line = mock_plot.call_args.kwargs["line"]
+        self.assertAlmostEqual(plotted_line[0], -63.4349488229)
+        self.assertAlmostEqual(plotted_line[1], -2.0)
+        self.assertAlmostEqual(plotted_line[2], 0.0)
+        mock_plot.assert_called_once_with(
+            self.dataqdyqdx,
+            peaks=peaks,
+            line=mock_plot.call_args.kwargs["line"],
+            limits_axis0=(0, 7),
+            limits_axis1=(0, 4),
+            zoom_plot=False,
+        )
+
+        with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
+                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None)):
+            with self.assertWarnsRegex(UserWarning, "Insuffient peaks"):
+                omega, fig = self.dataqdyqdx.find_omega_from_peaks(
+                    range_qdy_px=(0, 7),
+                    range_qdx_px=(0, 4),
+                    show_plot=False,
+                )
+
+        self.assertTrue(np.isnan(omega))
+        self.assertIsNone(fig)

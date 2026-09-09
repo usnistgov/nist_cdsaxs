@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -218,7 +220,19 @@ class DataImage():
             will be performed in the clockwise direction.
         """
 
-        k = int(np.round(steps, 0))
+        if (
+            isinstance(steps, (float, np.floating))
+            and not float(steps).is_integer()
+        ):
+            warnings.warn(
+                "rotate_image_ccw only accepts integer quarter turns.",
+                UserWarning,
+            )
+            raise ValueError(
+                "rotate_image_ccw only accepts integer quarter turns."
+            )
+
+        k = int(steps)
 
         # determine counterclockwise steps to achieve same rotation
         while k < 0:
@@ -469,7 +483,13 @@ class DataImage():
             axis=axis,
             where=~mask_box
         )
-        mean_intensity[mask_box.any(axis=axis)] = np.nan
+        mean_intensity = np.asarray(mean_intensity)
+        masked_values = mask_box.any(axis=axis)
+        if mean_intensity.ndim == 0:
+            if masked_values:
+                mean_intensity = np.array(np.nan)
+        else:
+            mean_intensity[masked_values] = np.nan
 
         return mean_intensity, image_box, mask_box
 
