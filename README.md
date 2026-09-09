@@ -11,8 +11,7 @@ be exported and used directly with the
 repository.
 
 ## Software Status
-This code is currently under development. We will provide a link to the 
-latest version of the code once Version 1 has been made available. 
+Latest version can be found here: ['Release list'](https://github.com/usnistgov/nist_cdsaxs/releases)
 
 Unless otherwise stated here, the code will be regularly maintained by the developers 
 to address any functionality bugs and security issues, including required loader 
