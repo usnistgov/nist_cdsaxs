@@ -255,28 +255,40 @@ def LoadData(
         data2d_list = []
         for image, data_filepath, metadata_add in image_stack:
             temp_metadata = dict(metadata)
-
+            temp_user_params = dict(user_params)
+            
             for key, value in metadata_add.items():
-                if key in temp_metadata.keys():
-                    warnings.warn(
-                        f"Metadata for {key} was provided by the user and"
-                        "also extracted from the data files. I will not"
-                        "overwrite the information provided by the user"
-                        "but please make sure this is correct."
-                    )
+                if key in METADATA_KEYWORDS:
+                    if key in temp_metadata.keys():
+                        warnings.warn(
+                            f"Metadata for {key} was provided by the user and"
+                            "also extracted from the data files. I will not"
+                            "overwrite the information provided by the user"
+                            "but please make sure this is correct."
+                        )
+                    else:
+                        temp_metadata[key] = value
                 else:
-                    temp_metadata[key] = value
+                    if key in temp_user_params.keys():
+                        warnings.warn(
+                            f"User parameter for {key} was provided by the user and"
+                            "also extracted from the data files. I will not"
+                            "overwrite the information provided by the user"
+                            "but please make sure this is correct."
+                        )
+                    else:
+                        temp_user_params[key] = value
 
             temp_metadata['data_directory'] = os.path.dirname(data_filepath)
             temp_metadata['filename'] = os.path.basename(data_filepath)
 
             if name is not None:
                 new_name = loader_tools.generate_data_name_from_pattern(
-                    name, temp_metadata, user_params)
+                    name, temp_metadata, temp_user_params)
                 temp_metadata['name'] = new_name
-
-            data2d_list.append(Data2D(image, **temp_metadata, **user_params))
-
+            
+            data2d_list.append(Data2D(image, **temp_metadata, **temp_user_params))
+        
         return data2d_list
 
 

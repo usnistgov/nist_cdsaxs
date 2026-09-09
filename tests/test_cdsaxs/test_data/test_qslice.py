@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+from unittest.mock import patch
 
 from cdsaxs.data.reduced_data1d import ReducedData1D
 
@@ -232,7 +233,8 @@ class TestIntegratedQSlice(unittest.TestCase):
             )
 
     def test_integrated_q_slice_mirror(self):
+        with patch("cdsaxs.data.reduced_data1d.Data1D.abs_q") as mock_abs_q:
+            result = self.qslice.mirror_q(q_axis="qsx", resort=False)
 
-        # this function just uses the Data1D abs_q method which
-        # is tested under test_data1d
-        pass
+        self.assertIsNone(result)
+        mock_abs_q.assert_called_once_with(q_axis="qsx", resort=False)

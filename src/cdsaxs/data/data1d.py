@@ -214,7 +214,7 @@ class Data1D():
 
         if mode not in ['linear', 'log_q', 'log_Iq', 'log']:
             raise ValueError(
-                f"Interpoaltion mode {mode} is not recognized. Please use"
+                f"Interpolation mode {mode} is not recognized. Please use"
                 "either 'linear', 'log', 'log_q', or 'log_Iq'."
             )
 

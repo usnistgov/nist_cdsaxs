@@ -1,5 +1,6 @@
 import numpy as np
 import unittest
+from unittest.mock import patch
 
 import cdsaxs.diffraction as diffraction
 
@@ -2073,3 +2074,72 @@ class TestDetectorPxToQ(unittest.TestCase):
         )
 
         np.testing.assert_almost_equal(actual[0], actual[2])
+
+    def test_detector_px_to_q_forwards_to_helpers_and_repackages_outputs(self):
+        qb = np.array([[1.0, 2.0]], dtype=float)
+        qby = np.array([[3.0, 4.0]], dtype=float)
+        qbx = np.array([[5.0, 6.0]], dtype=float)
+        qbz = np.array([[7.0, 8.0]], dtype=float)
+        qs = np.array([[9.0, 10.0]], dtype=float)
+        qsy = np.array([[11.0, 12.0]], dtype=float)
+        qsx = np.array([[13.0, 14.0]], dtype=float)
+        qsz = np.array([[15.0, 16.0]], dtype=float)
+
+        with patch(
+            'cdsaxs.diffraction.detector_px_to_qbyxz',
+            return_value=(qb, qby, qbx, qbz, np.array([[0.0]]), np.array([[0.0]])),
+        ) as detector_mock:
+            with patch(
+                'cdsaxs.diffraction.calculate_q_beam_to_sample',
+                return_value=(qs, qsy, qsx, qsz),
+            ) as sample_mock:
+                actual = diffraction.detector_px_to_q(
+                    center_px=(100, 200),
+                    detector_shape_px=(8, 6),
+                    pixel_size_um=172,
+                    wavelength_nm=0.077,
+                    sdd_cm=520,
+                    sample_phi_deg=5,
+                    sample_chi_deg=1,
+                    sample_omega_deg=2,
+                    center_coordinate_space='detector',
+                    sample_rotation='intrinsic',
+                    sample_rotation_first_axis='z',
+                    sample_rotation_second_axis='x',
+                    sample_rotation_third_axis='y',
+                    detector_phi_deg=3,
+                    detector_y_mm=4,
+                    detector_phi0_deg=5,
+                    detector_y0_mm=6,
+                    detector_phi_scale=0.5,
+                )
+
+        detector_mock.assert_called_once_with(
+            center_px=(100, 200),
+            detector_shape_px=(8, 6),
+            pixel_size_um=172,
+            wavelength_nm=0.077,
+            sdd_cm=520,
+            center_coordinate_space='detector',
+            detector_phi_deg=3,
+            detector_y_mm=4,
+            detector_phi0_deg=5,
+            detector_y0_mm=6,
+            detector_phi_scale=0.5,
+        )
+        sample_mock.assert_called_once_with(
+            qby=qby,
+            qbx=qbx,
+            qbz=qbz,
+            sample_phi_deg=5,
+            sample_chi_deg=1,
+            sample_omega_deg=2,
+            rotation='intrinsic',
+            first_axis='z',
+            second_axis='x',
+            third_axis='y',
+        )
+        self.assertIs(actual[0], qb)
+        self.assertEqual(actual[1], (qby, qbx, qbz))
+        self.assertIs(actual[2], qs)
+        self.assertEqual(actual[3], (qsy, qsx, qsz))
