@@ -2,7 +2,6 @@
 import inspect
 import warnings
 
-import os
 import csv
 import numpy as np
 from PIL import Image
@@ -11,6 +10,7 @@ from scipy.signal import find_peaks
 from skimage.feature import peak_local_max
 from sklearn.linear_model import LinearRegression
 from skimage import transform
+
 from .calculators import gaussian
 
 
@@ -932,6 +932,7 @@ def find_maximum_rectangular_roi(data):
 
     return (min0, max0), (min1, max1), height, width, area
 
+
 def export_metadata(dataset, timestamp):
     """
     Export the metadata of a dataset
@@ -940,7 +941,7 @@ def export_metadata(dataset, timestamp):
     ----------
     dataset : Dataset
         Dataset containing the metadata to export.
-    
+
     timestamp: str
         Timestamp for the export directory.
 
@@ -951,7 +952,7 @@ def export_metadata(dataset, timestamp):
     try:
         with open(f"./export/{timestamp}/metadata_{timestamp}.csv", mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            
+
             # get keys
             keyslist = []
             for keys in dataset.datas.keys():
@@ -970,7 +971,7 @@ def export_metadata(dataset, timestamp):
                 for k in keyslist:
                     row.append(dataset.datas[k].metadata.get(key))
                 writer.writerow(row)
-                
+
             writer.writerow(["User Parameters:"])
 
             # write user param rows
@@ -980,10 +981,11 @@ def export_metadata(dataset, timestamp):
                 for k in keyslist:
                     row.append(dataset.datas[k].user_params.get(key))
                 writer.writerow(row)
-            
+
         print(f"Metadata exported to ./export/{timestamp}/metadata_{timestamp}.csv successfully.")
     except Exception as e:
         print(f"Error writing CSV: {e}")
+
 
 def export_data_transformations(dataset, timestamp):
     """
