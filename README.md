@@ -11,7 +11,7 @@ be exported and used directly with the
 repository.
 
 ## Software Status
-Latest version can be found here: ['Release list'](https://github.com/usnistgov/nist_cdsaxs/releases)
+Latest version can be found here: [Release list](https://github.com/usnistgov/nist_cdsaxs/releases)
 
 Unless otherwise stated here, the code will be regularly maintained by the developers 
 to address any functionality bugs and security issues, including required loader 
