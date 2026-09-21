@@ -525,7 +525,6 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
             "'scikit' or 'scipy'."
         )
 
-    # check the threshold_abs
     if algorithm == 'scikit':
         value = kwargs.get("threshold_abs")
         if value is None:
@@ -564,6 +563,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         coordinates_px, _ = find_peaks(
             data_fed,
             **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
+        coordinates_px = coordinates_px.tolist()
 
     coordinates = []
 
@@ -572,10 +572,9 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         warnings.warn(
             "Data does not have enough points for refinement."
             "Using pixel location."
-            )
-        return np.array([x[0] for x in coordinates_px])
+        )
+        return np.array(coordinates_px)
 
-    # remove coordinates that are in any exclusion range
     if exclude_ranges is not None:
         coordinates_filtered = []
         for x in coordinates_px:
@@ -586,6 +585,9 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
             if keep:
                 coordinates_filtered.append(x)
         coordinates_px = coordinates_filtered
+
+    if not refinement:
+        return np.array(coordinates_px)
 
     for x in coordinates_px:
         x_min = max(0, x - int(refinement_size/2))
@@ -882,11 +884,14 @@ def find_peaks_2D_one_axis(
     image_fed[drop_if_any_nan] = np.nan
 
     refinement_size = max(refinement_size, 4)
-    coordinates_peak_axis = find_peaks_1D(image_fed, log_scale=log_scale,
-                                          refinement_size=refinement_size,
-                                          algorithm=algorithm,
-                                          exclude_ranges=exclude_ranges,
-                                          **kwargs)
+    coordinates_peak_axis = find_peaks_1D(
+        image_fed,
+        log_scale=log_scale,
+        refinement_size=refinement_size,
+        algorithm=algorithm,
+        refinement=False,
+        exclude_ranges=exclude_ranges,
+        **kwargs)
     coordinates_peak_axis = np.round(
         np.array(coordinates_peak_axis), 0).astype(int)
 
