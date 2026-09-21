@@ -2884,7 +2884,13 @@ class Data2D(DataImage):
             #     np.flip(np.arange(0, len(low_peaks)))+1,
             #     np.arange(0, len(high_peaks))+1
             # ])
-            peak_orders = np.round(peaks[:, peak_axis]/(2*np.pi/(pitch_nm*10)), 0).astype(int)
+            peak_q = []
+            for peak in peaks[:, peak_axis]:
+                if peak_axis == 0:
+                    peak_q.append(self.qby_1d[peak])
+                else:
+                    peak_q.append(self.qbx_1d[peak])
+            peak_orders = np.round(np.array(peak_q)/(2*np.pi/(pitch_nm*10)), 0).astype(int)
 
         if len(ignore_orders) > 0:
             keep_index = [y for x, y in
