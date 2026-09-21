@@ -383,7 +383,8 @@ def rotate_image_pillow(
 
 
 def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
-                  algorithm='scikit', refinement=True, **kwargs):
+                  algorithm='scikit', refinement=True,
+                  exclude_ranges=None, **kwargs):
     """
     Find peaks across one-dimensional data using scikit-image.feature
     peak_local_max() function. The peak location is then further refined
@@ -413,6 +414,10 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         'scikit' which uses scikit-image.feature peak_local_max() to
         locate the peaks. If set instead to 'scipy', the scipy.signal
         find_peaks() algorithm will be used instead.
+    exclude_ranges: list[tuple]
+            Exclude ranges along the peak axis. Multiple ranges can be
+            provided as list[(min1, max1), (min2, max2)].
+            These values should be provided in pixels.
 
     Other Parameters
     ----------------
@@ -513,6 +518,18 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
             "Using pixel location."
             )
         return np.array([x[0] for x in coordinates_px])
+
+    # remove coordinates that are in any exclusion range
+    if exclude_ranges is not None:
+        coordinates_filtered = []
+        for x in coordinates_px:
+            keep = True
+            for zone in exclude_ranges:
+                if x >= min(zone) and x <= max(zone):
+                    keep = False
+            if keep:
+                coordinates_filtered.append(x)
+        coordinates_px = coordinates_filtered
 
     for x in coordinates_px:
         x_min = max(0, x - int(refinement_size/2))
@@ -668,7 +685,8 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
 
 def find_peaks_2D_one_axis(
         image, peak_axis, integration_mode='sum', log_scale=True,
-        refinement_size=7, mask=None, algorithm='scikit', **kwargs):
+        refinement_size=7, mask=None, algorithm='scikit',
+        exclude_ranges=None, **kwargs):
     """
     Find peaks along one axis of a two-dimensional image using the
     scikit-image.feature peak_local_max() function. The peaks are
@@ -718,6 +736,10 @@ def find_peaks_2D_one_axis(
         'scikit' which uses scikit-image.feature peak_local_max() to
         locate the peaks. If set instead to 'scipy', the scipy.signal
         find_peaks() algorithm will be used instead.
+    exclude_ranges: list[tuple]
+        Exclude ranges along the peak axis. Multiple ranges can be
+        provided as list[(min1, max1), (min2, max2)].
+        Units should be in pixels.
 
     Other Parameters
     ----------------
@@ -779,6 +801,7 @@ def find_peaks_2D_one_axis(
     coordinates_peak_axis = find_peaks_1D(image_fed, log_scale=log_scale,
                                           refinement_size=refinement_size,
                                           algorithm=algorithm,
+                                          exclude_ranges=exclude_ranges,
                                           **kwargs)
     coordinates_peak_axis = np.round(
         np.array(coordinates_peak_axis), 0).astype(int)

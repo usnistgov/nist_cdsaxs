@@ -2303,12 +2303,32 @@ class Data2D(DataImage):
         if peak_axis is None:
             if (max0 - min0) > (max1 - min1):
                 peak_axis = 0
+                check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
             else:
                 peak_axis = 1
+                check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
         elif peak_axis == 'qdx':
             peak_axis = 1
+            check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
         elif peak_axis == 'qdy':
             peak_axis = 0
+            check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
+        elif peak_axis == 1:
+            check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
+        elif peak_axis == 0:
+            check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
+
+        if exclude_q is not None:
+            if isinstance(exclude_q, tuple):
+                exclude_q = [exclude_q]
+            exclude_q = np.array(exclude_q)
+            exclude_px = []
+            for zone in exclude_q:
+                zone_px = np.where((check_exclude >= min(zone))
+                                   & (check_exclude <= max(zone)))[0]
+                exclude_px.append((min(zone_px), max(zone_px)))
+        else:
+            exclude_px = None
 
         peaks = find_peaks_2D_one_axis(
             self.image[min0:max0, min1:max1],
@@ -2318,6 +2338,7 @@ class Data2D(DataImage):
             refinement_size=refinement_size,
             mask=self.mask[min0:max0, min1:max1],
             algorithm=algorithm,
+            exclude_ranges=exclude_px,
             **kwargs)
 
         if len(peaks.shape) < 2:
@@ -2338,14 +2359,16 @@ class Data2D(DataImage):
                 np.arange(0, len(self.qbx_1d)),
                 self.qbx_1d)
 
+            # moved exclusion check to the tools module
             # can only exclude q range along the peak axis
-            if exclude_q is not None:
-                if isinstance(exclude_q, tuple):
-                    exclude_q = [exclude_q]
-                for (ex_min, ex_max) in exclude_q:
-                    keep = (peaks_q[:, peak_axis] < ex_min) | (peaks_q[:, peak_axis] > ex_max)
-                    peaks = peaks[keep, :]
-                    peaks_q = peaks_q[keep, :]
+            # if exclude_q is not None:
+            #     if isinstance(exclude_q, tuple):
+            #         exclude_q = [exclude_q]
+            #     exclude_q = np.array(exclude_q)
+            #     for (ex_min, ex_max) in exclude_q:
+            #         keep = (peaks_q[:, peak_axis] < ex_min) | (peaks_q[:, peak_axis] > ex_max)
+            #         peaks = peaks[keep, :]
+            #         peaks_q = peaks_q[keep, :]
 
         else:
             peaks_q = None
@@ -2357,6 +2380,8 @@ class Data2D(DataImage):
                 limits_axis0=limits_qdy_px,
                 limits_axis1=limits_qdx_px,
                 zoom_plot=zoom_plot,
+                exclude_ranges=exclude_px,
+                exclude_axis=peak_axis,
                 **kwargs
             )
         else:

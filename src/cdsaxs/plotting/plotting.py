@@ -943,6 +943,8 @@ def plot_data2d_find_peaks2d(
         color_nan='red',
         color_peaks='yellow',
         color_integration_box='yellow',
+        exclude_ranges=None,
+        exclude_axis=None,
         **kwargs
 ):
     """
@@ -1705,6 +1707,63 @@ def plot_slice_reduced_dataset(
                     facecolor=slice_color, alpha=0.3, zorder=1000)
         plt.vlines(q, min_y, max_y, color=slice_color,
                    linestyles='dashed', zorder=10000, lw=slice_lw)
+
+    return fig
+
+
+def plot_reduced_slices_2d(
+        reduced_slices,
+        log_scale=True,
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        **kwargs):
+
+    q_xaxis = []
+    q_yaxis = []
+    Iqs = []
+    for data in reduced_slices.data:
+        q_xaxis.extend(data.plotting_data['qsx'])
+        q_yaxis.extend(data.plotting_data['qsz'])
+        Iqs.extend(data.plotting_data['Iq'])
+
+    q_xaxis = np.array(q_xaxis)
+    q_yaxis = np.array(q_yaxis)
+    Iqs = np.array(Iqs)
+
+    if vmin is None:
+        vmin = np.max(
+            [np.nanmin(Iqs), 0.1]
+            ) if log_scale else 0
+    if vmax is None:
+        vmax = np.nanmax(Iqs)
+
+    fig = plt.figure()
+    if log_scale:
+        norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
+    else:
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+
+    data_plot = plt.scatter(
+        q_xaxis,
+        q_yaxis,
+        c=Iqs,
+        cmap=cmap,
+        norm=norm,
+        **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
+    if log_scale:
+        cbar_ticks = np.power(10, np.arange(
+            np.ceil(np.log10(vmin)), np.floor(np.log10(vmax)) + 1, 1
+        ))
+    else:
+        cbar_ticks = np.linspace(vmin, vmax, 6)
+    colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)
+    colorbar.set_label('Intensity')
+
+    plt.xlabel(plotting_tools.generate_formatted_axis_label('qsx'))
+    plt.ylabel(plotting_tools.generate_formatted_axis_label('qsz'))
+
+    # plt.tight_layout()
 
     return fig
 
