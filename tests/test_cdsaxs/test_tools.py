@@ -212,6 +212,49 @@ class TestTools(unittest.TestCase):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=4)
 
+    def test_find_peaks_2D_gaussian_refinement(self):
+        image = np.array(
+            [[0.91913391, 3.        , 0.91913391, 0.        , 0.        ,
+                0.57987207],
+             [3.        , 5.        , 3.        , 0.        , 0.        ,
+                0.57987207],
+             [0.91913391, 3.        , 0.91913391, 0.        , 0.        ,
+                0.57987207],
+             [0.        , 0.        , 0.        , 0.        , 0.        ,
+                0.57987207],
+             [0.        , 0.        , 0.        , 0.        , 0.        ,
+                0.57987207],
+             [0.76574962, 0.66395775, 0.90228066, 2.        , 3.        ,
+                2.        ],
+             [0.51796119, 0.59285603, 0.5356811 , 3.        , 4.        ,
+                3.        ],
+             [0.46730955, 0.62937721, 0.3429157 , 2.        , 3.        ,
+                2.        ],
+             [0.10071061, 0.10071061, 0.10071061, 0.10071061, 0.10071061,
+                0.57987207],
+             [0.10071061, 0.30071061, 0.30071061, 0.30071061, 0.30071061,
+                0.57987207],
+             [0.10071061, 0.30071061, 2.1       , 2.        , 0.30071061,
+                0.57987207],
+             [0.10071061, 0.30071061, 0.30071061, 0.30071061, 0.30071061,
+                0.57987207],
+             [0.10071061, 0.10071061, 0.10071061, 0.10071061, 0.10071061,
+                0.57987207]])
+
+        peak_coordinates = [
+            [1.0, 1.0],
+            [5.9955356927226766, 4.1173757322214435],
+            [10.0, 2.480795490081457],
+        ]
+
+        test_coordinates = find_peaks_2D(
+            image, log_scale=False, refinement_size=5, threshold_abs=1,
+            refinement_method='gaussian')
+
+        for actual, test in zip(peak_coordinates, test_coordinates):
+            for x, y in zip(actual, test):
+                self.assertAlmostEqual(x, y, places=4)
+
     def test_find_peaks_2D_refinement_width_check(self):
         image = np.array(
             [[ 3.        ,  0.91913391,  0.        ,  0.        ],
@@ -322,6 +365,34 @@ class TestTools(unittest.TestCase):
             image, peak_axis=0, log_scale=False,
             refinement_size=8, threshold_abs=1,
             exclude_border=False)
+
+        for actual, test in zip(peak_coordinates, test_coordinates):
+            for x, y in zip(actual, test):
+                self.assertAlmostEqual(x, y, places=3)
+
+    def test_find_peaks_2D_one_axis_gaussian_refinement(self):
+        image = np.array(
+            [[ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [10.        ,  3.        ,  0.        ,  0.        ],
+             [ 3.        ,  0.91913391,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.        ,  0.        ,  0.        ,  0.        ],
+             [ 0.66395775,  0.90228066,  2.        ,  3.        ],
+             [ 0.59285603,  0.5356811 ,  3.        ,  4.        ],
+             [ 0.62937721,  0.3429157 ,  2.        ,  3.        ],
+             [ 0.10071061,  0.10071061,  0.10071061,  0.10071061],
+             [ 0.30071061,  0.30071061,  0.30071061,  0.30071061]])
+
+        peak_coordinates = [
+            [0.999827841102188, 0.0],
+            [5.961187929025904, 2.5404629363356612],
+            [5.961187929025904, 2.5404629363356612],
+        ]
+
+        test_coordinates = find_peaks_2D_one_axis(
+            image, peak_axis=0, log_scale=False,
+            refinement_size=8, threshold_abs=1,
+            exclude_border=False, refinement_method='gaussian')
 
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
