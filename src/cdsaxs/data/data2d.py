@@ -2387,7 +2387,7 @@ class Data2D(DataImage):
         else:
             fig = None
 
-        return peaks, peaks_q, fig
+        return peaks, peaks_q, fig, exclude_px
 
     def plot_data(
         self,
@@ -2607,7 +2607,7 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, _, _ = self.find_peaks2D_one_axis(
+        peaks, _, _, excluded_ranges = self.find_peaks2D_one_axis(
             range_qdy_px=box_dims[0],
             range_qdx_px=box_dims[1],
             peak_axis=peak_axis,
@@ -2671,6 +2671,8 @@ class Data2D(DataImage):
                 limits_axis0=box_dims[0],
                 limits_axis1=box_dims[1],
                 zoom_plot=zoom_plot,
+                excluded_ranges=excluded_ranges,
+                excluded_axis=peak_axis,
                 **kwargs,
                 show_beam_center=False\
                 if symmetric_warning or no_peak_warning else (
@@ -2857,7 +2859,7 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, peaks_q, _ = self.find_peaks2D_one_axis(
+        peaks, peaks_q, _, excluded_ranges = self.find_peaks2D_one_axis(
             range_qdy_px=box_dims[0],
             range_qdx_px=box_dims[1],
             peak_axis=peak_axis,
@@ -2887,10 +2889,10 @@ class Data2D(DataImage):
             peak_q = []
             for peak in peaks[:, peak_axis]:
                 if peak_axis == 0:
-                    peak_q.append(self.qby_1d[peak])
+                    peak_q.append(self.qby_1d[int(peak)])
                 else:
-                    peak_q.append(self.qbx_1d[peak])
-            peak_orders = np.round(np.array(peak_q)/(2*np.pi/(pitch_nm*10)), 0).astype(int)
+                    peak_q.append(self.qbx_1d[int(peak)])
+            peak_orders = np.abs(np.round(np.array(peak_q)/(2*np.pi/(pitch_nm*10)), 0)).astype(int)
 
         if len(ignore_orders) > 0:
             keep_index = [y for x, y in
@@ -2922,6 +2924,8 @@ class Data2D(DataImage):
                 limits_axis1=box_dims[1],
                 zoom_plot=zoom_plot,
                 sdd_cm=(average_sdd, std_sdd),
+                excluded_ranges=excluded_ranges,
+                excluded_axis=peak_axis,
                 **kwargs,
             )
         else:
@@ -3064,7 +3068,7 @@ class Data2D(DataImage):
         peak_axis = kwargs.pop('peak_axis', None)
         if peak_axis is None:
             peak_axis = 1
-        peaks, _, _ = self.find_peaks2D_one_axis(
+        peaks, _, _, _ = self.find_peaks2D_one_axis(
             range_qdy_px=limits_qdy_px,
             range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
@@ -3245,7 +3249,7 @@ class Data2D(DataImage):
         peak_axis = kwargs.pop('peak_axis', None)
         if peak_axis is None:
             peak_axis = 1
-        peaks, _, _ = self.find_peaks2D_one_axis(
+        peaks, _, _, _ = self.find_peaks2D_one_axis(
             range_qdy_px=limits_qdy_px,
             range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,

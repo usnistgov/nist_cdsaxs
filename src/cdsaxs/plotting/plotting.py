@@ -285,6 +285,53 @@ def plot_image_add_roi(
     return fig
 
 
+def plot_image_add_excluded_ranges(
+        fig,
+        zorder=1000,
+        excluded_ranges=None,
+        excluded_axis=None):
+    """
+    Add a region of interest outline onto a scattering image plot.
+
+    Parameters
+    ----------
+    limits_axis0 : list
+        Indices range to specify the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Indices range to specify the ROI along axis 1, [min, max).
+    fig : matplotlib.figure
+        The figure object with an image plot that the ROI should be
+        added to.
+    show_legend : bool
+        If set to True, the legend will be shown.
+    zorder : int
+        Set the layering of different traces in the figure.
+    fmt : str
+        The line format for the region outline.
+        Default is '-'.
+        Use accepted formats for matplotlib.errorbar.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure with the ROI outline added.
+    """
+    fig = plt.figure(fig)
+
+    if excluded_ranges is not None:
+        for (min_q, max_q) in excluded_ranges:
+            if excluded_axis == 1:
+                plt.axvspan(xmin=min_q, xmax=max_q,
+                            facecolor='red', alpha=0.3, zorder=zorder)
+            if excluded_axis == 0:
+                plt.axhspan(xmin=min_q, xmax=max_q,
+                            facecolor='red', alpha=0.3, zorder=zorder)
+
+        plt.tight_layout()
+
+    return fig
+
+
 def plot_errorbar(
         x,
         y,
@@ -943,8 +990,8 @@ def plot_data2d_find_peaks2d(
         color_nan='red',
         color_peaks='yellow',
         color_integration_box='yellow',
-        exclude_ranges=None,
-        exclude_axis=None,
+        excluded_ranges=None,
+        excluded_axis=None,
         **kwargs
 ):
     """
@@ -1027,6 +1074,18 @@ def plot_data2d_find_peaks2d(
         color=color_integration_box,
         zorder=1000
     )
+
+    excluded_ranges = np.array(excluded_ranges)
+    if excluded_axis == 1:
+        excluded_ranges = excluded_ranges + min(limits_axis1)
+    else:
+        excluded_ranges = excluded_ranges + min(limits_axis1)
+    fig = plot_image_add_excluded_ranges(
+            fig=fig,
+            zorder=10000,
+            excluded_ranges=excluded_ranges,
+            excluded_axis=excluded_axis,
+        )
 
     if peaks.shape[0] > 0:
         fig = plot_errorbar(
@@ -1220,6 +1279,8 @@ def plot_data2d_find_beam_center(
         color_integration_box='yellow',
         color_beam_center='yellow',
         show_beam_center=True,
+        excluded_ranges=None,
+        excluded_axis=None,
         **kwargs
 ):
     """
@@ -1303,6 +1364,8 @@ def plot_data2d_find_beam_center(
         color_nan=color_nan,
         color_peaks=color_peaks,
         color_integration_box=color_integration_box,
+        excluded_ranges=excluded_ranges,
+        excluded_axis=excluded_axis,
         **kwargs
     )
 
@@ -1346,6 +1409,8 @@ def plot_data2d_find_sdd(
         color_nan='red',
         color_peaks='yellow',
         color_integration_box='yellow',
+        excluded_ranges=None,
+        excluded_axis=None,
         **kwargs
 ):
     """
@@ -1427,6 +1492,8 @@ def plot_data2d_find_sdd(
         color_peaks=color_peaks,
         color_integration_box=color_integration_box,
         title=title,
+        excluded_ranges=excluded_ranges,
+        excluded_axis=excluded_axis,
         **kwargs
     )
 
