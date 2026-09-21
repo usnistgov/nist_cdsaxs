@@ -98,6 +98,33 @@ def find_gaussian_peakloc(x, y, p0=None):
     return float(peak_x), popt
 
 
+def com_refinement(image):
+    """
+    Does center of mass refinement to determine peak intensity location
+    that doesn't have to fall on even pixel.
+    """
+    image = np.asarray(image, dtype=float)
+
+    if image.ndim != 2:
+        raise ValueError("com_refinement expects a 2D array.")
+
+    mask = default_mask(image)
+    image = np.array(image, copy=True)
+    image[mask] = 0.0
+
+    total_intensity = np.sum(image)
+    if not np.isfinite(total_intensity) or total_intensity <= 0:
+        raise ValueError(
+            "com_refinement requires a positive finite total intensity."
+        )
+
+    row_indices, col_indices = np.indices(image.shape, dtype=float)
+    row_com = np.sum(row_indices * image) / total_intensity
+    col_com = np.sum(col_indices * image) / total_intensity
+
+    return float(row_com), float(col_com)
+
+
 def line_fit(x, y, force_intercept=None):
     """
     Fit a line to x and y data and return angle, slope, and intercept.
@@ -203,6 +230,35 @@ def gaussian_refine_peak_2D(image):
             "Could not fit Gaussian to the peak location along axis 1;"
             "assuming peak is at the pixel with the highest value.")
         b_opt = int(np.nanargmax(np.nansum(image, axis=0)))
+
+    return float(a_opt), float(b_opt)
+
+
+def com_refine_peak_2D(image):
+
+    """
+    Refine a two-dimensional peak position with center-of-mass.
+
+    Parameters
+    ----------
+    image : ndarray
+        Two-dimensional image region containing a single dominant peak.
+
+    Returns
+    -------
+    a_opt : float
+        Refined peak position along axis 0.
+    b_opt : float
+        Refined peak position along axis 1.
+    """
+
+    try:
+        a_opt, b_opt = com_refinement(image)
+    except ValueError:
+        warnings.warn(
+            "Could not refine the 2D peak with center-of-mass;"
+            "assuming peak is at the pixel with the highest value.")
+        a_opt, b_opt = np.unravel_index(np.nanargmax(image), image.shape)
 
     return float(a_opt), float(b_opt)
 
@@ -670,7 +726,7 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
                 x_min -= 1
 
         image_refine = image_fed[y_min:y_max, x_min:x_max]
-        y_opt, x_opt = gaussian_refine_peak_2D(image_refine)
+        y_opt, x_opt = com_refine_peak_2D(image_refine)
         y_opt += y_min
         x_opt += x_min
 
@@ -857,7 +913,7 @@ def find_peaks_2D_one_axis(
                 x_min -= 1
 
         image_refine = image[y_min:y_max, x_min:x_max]
-        y_opt, x_opt = gaussian_refine_peak_2D(image_refine)
+        y_opt, x_opt = com_refine_peak_2D(image_refine)
         y_opt += y_min
         x_opt += x_min
 
