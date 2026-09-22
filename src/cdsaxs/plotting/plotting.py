@@ -285,6 +285,53 @@ def plot_image_add_roi(
     return fig
 
 
+def plot_image_add_excluded_ranges(
+        fig,
+        zorder=1000,
+        excluded_ranges=None,
+        excluded_axis=None):
+    """
+    Add a region of interest outline onto a scattering image plot.
+
+    Parameters
+    ----------
+    limits_axis0 : list
+        Indices range to specify the ROI along axis 0, [min, max).
+    limits_axis1 : list
+        Indices range to specify the ROI along axis 1, [min, max).
+    fig : matplotlib.figure
+        The figure object with an image plot that the ROI should be
+        added to.
+    show_legend : bool
+        If set to True, the legend will be shown.
+    zorder : int
+        Set the layering of different traces in the figure.
+    fmt : str
+        The line format for the region outline.
+        Default is '-'.
+        Use accepted formats for matplotlib.errorbar.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure with the ROI outline added.
+    """
+    fig = plt.figure(fig)
+
+    if excluded_ranges is not None:
+        for (min_q, max_q) in excluded_ranges:
+            if excluded_axis == 1:
+                plt.axvspan(xmin=min_q, xmax=max_q,
+                            facecolor='red', alpha=0.3, zorder=zorder)
+            if excluded_axis == 0:
+                plt.axhspan(xmin=min_q, xmax=max_q,
+                            facecolor='red', alpha=0.3, zorder=zorder)
+
+        plt.tight_layout()
+
+    return fig
+
+
 def plot_errorbar(
         x,
         y,
@@ -943,6 +990,8 @@ def plot_data2d_find_peaks2d(
         color_nan='red',
         color_peaks='yellow',
         color_integration_box='yellow',
+        excluded_ranges=None,
+        excluded_axis=None,
         **kwargs
 ):
     """
@@ -1025,6 +1074,18 @@ def plot_data2d_find_peaks2d(
         color=color_integration_box,
         zorder=1000
     )
+
+    excluded_ranges = np.array(excluded_ranges)
+    if excluded_axis == 1:
+        excluded_ranges = excluded_ranges + min(limits_axis1)
+    else:
+        excluded_ranges = excluded_ranges + min(limits_axis1)
+    fig = plot_image_add_excluded_ranges(
+            fig=fig,
+            zorder=10000,
+            excluded_ranges=excluded_ranges,
+            excluded_axis=excluded_axis,
+        )
 
     if peaks.shape[0] > 0:
         fig = plot_errorbar(
@@ -1218,6 +1279,8 @@ def plot_data2d_find_beam_center(
         color_integration_box='yellow',
         color_beam_center='yellow',
         show_beam_center=True,
+        excluded_ranges=None,
+        excluded_axis=None,
         **kwargs
 ):
     """
@@ -1301,6 +1364,8 @@ def plot_data2d_find_beam_center(
         color_nan=color_nan,
         color_peaks=color_peaks,
         color_integration_box=color_integration_box,
+        excluded_ranges=excluded_ranges,
+        excluded_axis=excluded_axis,
         **kwargs
     )
 
@@ -1344,6 +1409,8 @@ def plot_data2d_find_sdd(
         color_nan='red',
         color_peaks='yellow',
         color_integration_box='yellow',
+        excluded_ranges=None,
+        excluded_axis=None,
         **kwargs
 ):
     """
@@ -1425,6 +1492,8 @@ def plot_data2d_find_sdd(
         color_peaks=color_peaks,
         color_integration_box=color_integration_box,
         title=title,
+        excluded_ranges=excluded_ranges,
+        excluded_axis=excluded_axis,
         **kwargs
     )
 
@@ -1709,6 +1778,63 @@ def plot_slice_reduced_dataset(
     return fig
 
 
+def plot_reduced_slices_2d(
+        reduced_slices,
+        log_scale=True,
+        cmap='viridis',
+        vmin=None,
+        vmax=None,
+        **kwargs):
+
+    q_xaxis = []
+    q_yaxis = []
+    Iqs = []
+    for data in reduced_slices.data:
+        q_xaxis.extend(data.plotting_data['qsx'])
+        q_yaxis.extend(data.plotting_data['qsz'])
+        Iqs.extend(data.plotting_data['Iq'])
+
+    q_xaxis = np.array(q_xaxis)
+    q_yaxis = np.array(q_yaxis)
+    Iqs = np.array(Iqs)
+
+    if vmin is None:
+        vmin = np.max(
+            [np.nanmin(Iqs), 0.1]
+            ) if log_scale else 0
+    if vmax is None:
+        vmax = np.nanmax(Iqs)
+
+    fig = plt.figure()
+    if log_scale:
+        norm = mpl_colors.LogNorm(vmin=vmin, vmax=vmax)
+    else:
+        norm = mpl_colors.Normalize(vmin=vmin, vmax=vmax)
+
+    data_plot = plt.scatter(
+        q_xaxis,
+        q_yaxis,
+        c=Iqs,
+        cmap=cmap,
+        norm=norm,
+        **{x: y for x, y in kwargs.items() if x in SCATTER_KWARGS})
+    if log_scale:
+        cbar_ticks = np.power(10, np.arange(
+            np.ceil(np.log10(vmin)), np.floor(np.log10(vmax)) + 1, 1
+        ))
+    else:
+        cbar_ticks = np.linspace(vmin, vmax, 6)
+    colorbar = plt.colorbar(data_plot, ticks=cbar_ticks)
+    colorbar.set_label('Intensity')
+
+    plt.xlabel(plotting_tools.generate_formatted_axis_label('qsx'))
+    plt.ylabel(plotting_tools.generate_formatted_axis_label('qsz'))
+
+    # plt.tight_layout()
+
+    return fig
+
+
 def plot_reduced_slices(
         reduced_slices,
         q_axis='qsz',
@@ -1750,11 +1876,16 @@ def plot_reduced_slices(
         keep = []
         for data in filtered_slices:
             test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
-                keep.append(True)
+            if isinstance(value, tuple):
+                value = np.array([value])
             else:
-                keep.append(False)
+                value = np.array(value)
+            keep_this = False
+            for zone in value:
+                if np.nanmin(test) >= np.nanmin(zone)\
+                        and np.nanmax(test) <= np.nanmax(zone):
+                    keep_this = True
+            keep.append(keep_this)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
     sort_axis = []

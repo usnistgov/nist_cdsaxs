@@ -2303,12 +2303,32 @@ class Data2D(DataImage):
         if peak_axis is None:
             if (max0 - min0) > (max1 - min1):
                 peak_axis = 0
+                check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
             else:
                 peak_axis = 1
+                check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
         elif peak_axis == 'qdx':
             peak_axis = 1
+            check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
         elif peak_axis == 'qdy':
             peak_axis = 0
+            check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
+        elif peak_axis == 1:
+            check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
+        elif peak_axis == 0:
+            check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
+
+        if exclude_q is not None:
+            if isinstance(exclude_q, tuple):
+                exclude_q = [exclude_q]
+            exclude_q = np.array(exclude_q)
+            exclude_px = []
+            for zone in exclude_q:
+                zone_px = np.where((check_exclude >= min(zone))
+                                   & (check_exclude <= max(zone)))[0]
+                exclude_px.append((min(zone_px), max(zone_px)))
+        else:
+            exclude_px = None
 
         peaks = find_peaks_2D_one_axis(
             self.image[min0:max0, min1:max1],
@@ -2318,6 +2338,7 @@ class Data2D(DataImage):
             refinement_size=refinement_size,
             mask=self.mask[min0:max0, min1:max1],
             algorithm=algorithm,
+            exclude_ranges=exclude_px,
             **kwargs)
 
         if len(peaks.shape) < 2:
@@ -2338,14 +2359,16 @@ class Data2D(DataImage):
                 np.arange(0, len(self.qbx_1d)),
                 self.qbx_1d)
 
+            # moved exclusion check to the tools module
             # can only exclude q range along the peak axis
-            if exclude_q is not None:
-                if isinstance(exclude_q, tuple):
-                    exclude_q = [exclude_q]
-                for (ex_min, ex_max) in exclude_q:
-                    keep = (peaks_q[:, peak_axis] < ex_min) | (peaks_q[:, peak_axis] > ex_max)
-                    peaks = peaks[keep, :]
-                    peaks_q = peaks_q[keep, :]
+            # if exclude_q is not None:
+            #     if isinstance(exclude_q, tuple):
+            #         exclude_q = [exclude_q]
+            #     exclude_q = np.array(exclude_q)
+            #     for (ex_min, ex_max) in exclude_q:
+            #         keep = (peaks_q[:, peak_axis] < ex_min) | (peaks_q[:, peak_axis] > ex_max)
+            #         peaks = peaks[keep, :]
+            #         peaks_q = peaks_q[keep, :]
 
         else:
             peaks_q = None
@@ -2357,12 +2380,14 @@ class Data2D(DataImage):
                 limits_axis0=limits_qdy_px,
                 limits_axis1=limits_qdx_px,
                 zoom_plot=zoom_plot,
+                exclude_ranges=exclude_px,
+                exclude_axis=peak_axis,
                 **kwargs
             )
         else:
             fig = None
 
-        return peaks, peaks_q, fig
+        return peaks, peaks_q, fig, exclude_px
 
     def plot_data(
         self,
@@ -2582,7 +2607,7 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, _, _ = self.find_peaks2D_one_axis(
+        peaks, _, _, excluded_ranges = self.find_peaks2D_one_axis(
             range_qdy_px=box_dims[0],
             range_qdx_px=box_dims[1],
             peak_axis=peak_axis,
@@ -2646,6 +2671,8 @@ class Data2D(DataImage):
                 limits_axis0=box_dims[0],
                 limits_axis1=box_dims[1],
                 zoom_plot=zoom_plot,
+                excluded_ranges=excluded_ranges,
+                excluded_axis=peak_axis,
                 **kwargs,
                 show_beam_center=False\
                 if symmetric_warning or no_peak_warning else (
@@ -2832,7 +2859,7 @@ class Data2D(DataImage):
                 peak_axis = 0
             else:
                 peak_axis = 1
-        peaks, peaks_q, _ = self.find_peaks2D_one_axis(
+        peaks, peaks_q, _, excluded_ranges = self.find_peaks2D_one_axis(
             range_qdy_px=box_dims[0],
             range_qdx_px=box_dims[1],
             peak_axis=peak_axis,
@@ -2855,10 +2882,17 @@ class Data2D(DataImage):
             peak_axis
             ].reshape(-1)
         if peak_orders is None:
-            peak_orders = np.concatenate([
-                np.flip(np.arange(0, len(low_peaks)))+1,
-                np.arange(0, len(high_peaks))+1
-            ])
+            # peak_orders = np.concatenate([
+            #     np.flip(np.arange(0, len(low_peaks)))+1,
+            #     np.arange(0, len(high_peaks))+1
+            # ])
+            peak_q = []
+            for peak in peaks[:, peak_axis]:
+                if peak_axis == 0:
+                    peak_q.append(self.qby_1d[int(peak)])
+                else:
+                    peak_q.append(self.qbx_1d[int(peak)])
+            peak_orders = np.abs(np.round(np.array(peak_q)/(2*np.pi/(pitch_nm*10)), 0)).astype(int)
 
         if len(ignore_orders) > 0:
             keep_index = [y for x, y in
@@ -2890,6 +2924,8 @@ class Data2D(DataImage):
                 limits_axis1=box_dims[1],
                 zoom_plot=zoom_plot,
                 sdd_cm=(average_sdd, std_sdd),
+                excluded_ranges=excluded_ranges,
+                excluded_axis=peak_axis,
                 **kwargs,
             )
         else:
@@ -3032,7 +3068,7 @@ class Data2D(DataImage):
         peak_axis = kwargs.pop('peak_axis', None)
         if peak_axis is None:
             peak_axis = 1
-        peaks, _, _ = self.find_peaks2D_one_axis(
+        peaks, _, _, _ = self.find_peaks2D_one_axis(
             range_qdy_px=limits_qdy_px,
             range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,
@@ -3213,7 +3249,7 @@ class Data2D(DataImage):
         peak_axis = kwargs.pop('peak_axis', None)
         if peak_axis is None:
             peak_axis = 1
-        peaks, _, _ = self.find_peaks2D_one_axis(
+        peaks, _, _, _ = self.find_peaks2D_one_axis(
             range_qdy_px=limits_qdy_px,
             range_qdx_px=limits_qdx_px,
             peak_axis=peak_axis,

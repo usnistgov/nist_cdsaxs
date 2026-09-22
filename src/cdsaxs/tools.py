@@ -98,6 +98,33 @@ def find_gaussian_peakloc(x, y, p0=None):
     return float(peak_x), popt
 
 
+def com_refinement(image):
+    """
+    Does center of mass refinement to determine peak intensity location
+    that doesn't have to fall on even pixel.
+    """
+    image = np.asarray(image, dtype=float)
+
+    if image.ndim != 2:
+        raise ValueError("com_refinement expects a 2D array.")
+
+    mask = default_mask(image)
+    image = np.array(image, copy=True)
+    image[mask] = 0.0
+
+    total_intensity = np.sum(image)
+    if not np.isfinite(total_intensity) or total_intensity <= 0:
+        raise ValueError(
+            "com_refinement requires a positive finite total intensity."
+        )
+
+    row_indices, col_indices = np.indices(image.shape, dtype=float)
+    row_com = np.sum(row_indices * image) / total_intensity
+    col_com = np.sum(col_indices * image) / total_intensity
+
+    return float(row_com), float(col_com)
+
+
 def line_fit(x, y, force_intercept=None):
     """
     Fit a line to x and y data and return angle, slope, and intercept.
@@ -203,6 +230,35 @@ def gaussian_refine_peak_2D(image):
             "Could not fit Gaussian to the peak location along axis 1;"
             "assuming peak is at the pixel with the highest value.")
         b_opt = int(np.nanargmax(np.nansum(image, axis=0)))
+
+    return float(a_opt), float(b_opt)
+
+
+def com_refine_peak_2D(image):
+
+    """
+    Refine a two-dimensional peak position with center-of-mass.
+
+    Parameters
+    ----------
+    image : ndarray
+        Two-dimensional image region containing a single dominant peak.
+
+    Returns
+    -------
+    a_opt : float
+        Refined peak position along axis 0.
+    b_opt : float
+        Refined peak position along axis 1.
+    """
+
+    try:
+        a_opt, b_opt = com_refinement(image)
+    except ValueError:
+        warnings.warn(
+            "Could not refine the 2D peak with center-of-mass;"
+            "assuming peak is at the pixel with the highest value.")
+        a_opt, b_opt = np.unravel_index(np.nanargmax(image), image.shape)
 
     return float(a_opt), float(b_opt)
 
@@ -383,7 +439,8 @@ def rotate_image_pillow(
 
 
 def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
-                  algorithm='scikit', refinement=True, **kwargs):
+                  algorithm='scikit', refinement=True,
+                  exclude_ranges=None, **kwargs):
     """
     Find peaks across one-dimensional data using scikit-image.feature
     peak_local_max() function. The peak location is then further refined
@@ -413,6 +470,10 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         'scikit' which uses scikit-image.feature peak_local_max() to
         locate the peaks. If set instead to 'scipy', the scipy.signal
         find_peaks() algorithm will be used instead.
+    exclude_ranges: list[tuple]
+            Exclude ranges along the peak axis. Multiple ranges can be
+            provided as list[(min1, max1), (min2, max2)].
+            These values should be provided in pixels.
 
     Other Parameters
     ----------------
@@ -464,7 +525,6 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
             "'scikit' or 'scipy'."
         )
 
-    # check the threshold_abs
     if algorithm == 'scikit':
         value = kwargs.get("threshold_abs")
         if value is None:
@@ -503,6 +563,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         coordinates_px, _ = find_peaks(
             data_fed,
             **{x: y for x, y in kwargs.items() if x in accepted_kwargs})
+        coordinates_px = coordinates_px.tolist()
 
     coordinates = []
 
@@ -511,8 +572,22 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
         warnings.warn(
             "Data does not have enough points for refinement."
             "Using pixel location."
-            )
-        return np.array([x[0] for x in coordinates_px])
+        )
+        return np.array(coordinates_px)
+
+    if exclude_ranges is not None:
+        coordinates_filtered = []
+        for x in coordinates_px:
+            keep = True
+            for zone in exclude_ranges:
+                if x >= min(zone) and x <= max(zone):
+                    keep = False
+            if keep:
+                coordinates_filtered.append(x)
+        coordinates_px = coordinates_filtered
+
+    if not refinement:
+        return np.array(coordinates_px)
 
     for x in coordinates_px:
         x_min = max(0, x - int(refinement_size/2))
@@ -547,7 +622,7 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
 
 
 def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
-                  **kwargs):
+                  refinement_method='com', **kwargs):
     """
     Find peaks across a two-dimensional image using scikit-image.feature
     peak_local_max() function and then further refined with local
@@ -572,6 +647,10 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
     mask : NDArray
         Two-dimensional boolean array of pixels to mask during the
         peak finding operation.
+    refinement_method : str, optional
+        Method used to refine each local 2D peak window. Options are
+        'com' for center-of-mass and 'gaussian' for one Gaussian fit per
+        axis. Default value is 'com'.
 
     Other Parameters
     ----------------
@@ -599,6 +678,16 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
     """
+    if refinement_method == 'com':
+        refine_peak = com_refine_peak_2D
+    elif refinement_method == 'gaussian':
+        refine_peak = gaussian_refine_peak_2D
+    else:
+        raise ValueError(
+            f"Refinement method {refinement_method} not recognized. "
+            "Use 'com' or 'gaussian'."
+        )
+
     # check the threshold_abs
     value = kwargs.pop("threshold_abs", 0)
     kwargs["threshold_abs"] = value
@@ -653,7 +742,7 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
                 x_min -= 1
 
         image_refine = image_fed[y_min:y_max, x_min:x_max]
-        y_opt, x_opt = gaussian_refine_peak_2D(image_refine)
+        y_opt, x_opt = refine_peak(image_refine)
         y_opt += y_min
         x_opt += x_min
 
@@ -668,7 +757,8 @@ def find_peaks_2D(image, log_scale=True, refinement_size=7, mask=None,
 
 def find_peaks_2D_one_axis(
         image, peak_axis, integration_mode='sum', log_scale=True,
-        refinement_size=7, mask=None, algorithm='scikit', **kwargs):
+        refinement_size=7, mask=None, algorithm='scikit',
+    exclude_ranges=None, refinement_method='com', **kwargs):
     """
     Find peaks along one axis of a two-dimensional image using the
     scikit-image.feature peak_local_max() function. The peaks are
@@ -718,6 +808,14 @@ def find_peaks_2D_one_axis(
         'scikit' which uses scikit-image.feature peak_local_max() to
         locate the peaks. If set instead to 'scipy', the scipy.signal
         find_peaks() algorithm will be used instead.
+    refinement_method : str, optional
+        Method used to refine each local 2D peak window. Options are
+        'com' for center-of-mass and 'gaussian' for one Gaussian fit per
+        axis. Default value is 'com'.
+    exclude_ranges: list[tuple]
+        Exclude ranges along the peak axis. Multiple ranges can be
+        provided as list[(min1, max1), (min2, max2)].
+        Units should be in pixels.
 
     Other Parameters
     ----------------
@@ -760,6 +858,16 @@ def find_peaks_2D_one_axis(
         An n x 2 array of peak coordinate positions will be returned for
         n number of peaks found.
     """
+    if refinement_method == 'com':
+        refine_peak = com_refine_peak_2D
+    elif refinement_method == 'gaussian':
+        refine_peak = gaussian_refine_peak_2D
+    else:
+        raise ValueError(
+            f"Refinement method {refinement_method} not recognized. "
+            "Use 'com' or 'gaussian'."
+        )
+
     image_fed = np.copy(image)
     if mask is not None:
         image_fed[mask] = np.nan
@@ -776,10 +884,14 @@ def find_peaks_2D_one_axis(
     image_fed[drop_if_any_nan] = np.nan
 
     refinement_size = max(refinement_size, 4)
-    coordinates_peak_axis = find_peaks_1D(image_fed, log_scale=log_scale,
-                                          refinement_size=refinement_size,
-                                          algorithm=algorithm,
-                                          **kwargs)
+    coordinates_peak_axis = find_peaks_1D(
+        image_fed,
+        log_scale=log_scale,
+        refinement_size=refinement_size,
+        algorithm=algorithm,
+        refinement=False,
+        exclude_ranges=exclude_ranges,
+        **kwargs)
     coordinates_peak_axis = np.round(
         np.array(coordinates_peak_axis), 0).astype(int)
 
@@ -834,7 +946,7 @@ def find_peaks_2D_one_axis(
                 x_min -= 1
 
         image_refine = image[y_min:y_max, x_min:x_max]
-        y_opt, x_opt = gaussian_refine_peak_2D(image_refine)
+        y_opt, x_opt = refine_peak(image_refine)
         y_opt += y_min
         x_opt += x_min
 
