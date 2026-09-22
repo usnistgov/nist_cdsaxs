@@ -1876,11 +1876,16 @@ def plot_reduced_slices(
         keep = []
         for data in filtered_slices:
             test = getattr(data, key)
-            if np.nanmin(test) >= np.nanmin(value)\
-                    and np.nanmax(test) <= np.nanmax(value):
-                keep.append(True)
+            if isinstance(value, tuple):
+                value = np.array([value])
             else:
-                keep.append(False)
+                value = np.array(value)
+            keep_this = False
+            for zone in value:
+                if np.nanmin(test) >= np.nanmin(zone)\
+                        and np.nanmax(test) <= np.nanmax(zone):
+                    keep_this = True
+            keep.append(keep_this)
         filtered_slices = [x for x, k in zip(filtered_slices, keep) if k]
 
     sort_axis = []
