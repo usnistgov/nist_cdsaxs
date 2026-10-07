@@ -568,23 +568,23 @@ def find_peaks_1D(data, log_scale=True, refinement_size=7, mask=None,
     coordinates = []
 
     refinement_size = max(refinement_size, 4)
+    if exclude_ranges is not None:
+        coordinates_filtered = []
+        for x in coordinates_px:
+            keep = True
+            for zone in np.asarray(exclude_ranges).reshape(-1, 2):
+                if x >= min(zone) and x <= max(zone):
+                    keep = False
+            if keep:
+                coordinates_filtered.append(x)
+        coordinates_px = coordinates_filtered
+
     if data_fed.shape[0] < 4:
         warnings.warn(
             "Data does not have enough points for refinement."
             "Using pixel location."
         )
         return np.array(coordinates_px)
-
-    if exclude_ranges is not None:
-        coordinates_filtered = []
-        for x in coordinates_px:
-            keep = True
-            for zone in exclude_ranges:
-                if x >= min(zone) and x <= max(zone):
-                    keep = False
-            if keep:
-                coordinates_filtered.append(x)
-        coordinates_px = coordinates_filtered
 
     if not refinement:
         return np.array(coordinates_px)

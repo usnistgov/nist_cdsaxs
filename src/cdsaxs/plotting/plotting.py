@@ -290,31 +290,10 @@ def plot_image_add_excluded_ranges(
         zorder=1000,
         excluded_ranges=None,
         excluded_axis=None):
-    """
-    Add a region of interest outline onto a scattering image plot.
+    """Shade excluded pixel ranges on a scattering image.
 
-    Parameters
-    ----------
-    limits_axis0 : list
-        Indices range to specify the ROI along axis 0, [min, max).
-    limits_axis1 : list
-        Indices range to specify the ROI along axis 1, [min, max).
-    fig : matplotlib.figure
-        The figure object with an image plot that the ROI should be
-        added to.
-    show_legend : bool
-        If set to True, the legend will be shown.
-    zorder : int
-        Set the layering of different traces in the figure.
-    fmt : str
-        The line format for the region outline.
-        Default is '-'.
-        Use accepted formats for matplotlib.errorbar.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-        Figure with the ROI outline added.
+    Ranges use absolute image coordinates. Axis 0 draws horizontal
+    spans and axis 1 draws vertical spans. None leaves the image unchanged.
     """
     fig = plt.figure(fig)
 
@@ -324,7 +303,7 @@ def plot_image_add_excluded_ranges(
                 plt.axvspan(xmin=min_q, xmax=max_q,
                             facecolor='red', alpha=0.3, zorder=zorder)
             if excluded_axis == 0:
-                plt.axhspan(xmin=min_q, xmax=max_q,
+                plt.axhspan(ymin=min_q, ymax=max_q,
                             facecolor='red', alpha=0.3, zorder=zorder)
 
         plt.tight_layout()
@@ -1075,11 +1054,9 @@ def plot_data2d_find_peaks2d(
         zorder=1000
     )
 
-    excluded_ranges = np.array(excluded_ranges)
-    if excluded_axis == 1:
-        excluded_ranges = excluded_ranges + min(limits_axis1)
-    else:
-        excluded_ranges = excluded_ranges + min(limits_axis1)
+    if excluded_ranges is not None:
+        offset = min(limits_axis1) if excluded_axis == 1 else min(limits_axis0)
+        excluded_ranges = np.asarray(excluded_ranges) + offset
     fig = plot_image_add_excluded_ranges(
             fig=fig,
             zorder=10000,
@@ -1876,10 +1853,7 @@ def plot_reduced_slices(
         keep = []
         for data in filtered_slices:
             test = getattr(data, key)
-            if isinstance(value, tuple):
-                value = np.array([value])
-            else:
-                value = np.array(value)
+            value = np.asarray(value).reshape(-1, 2)
             keep_this = False
             for zone in value:
                 if np.nanmin(test) >= np.nanmin(zone)\

@@ -2284,6 +2284,9 @@ class Data2D(DataImage):
         Figure | None
             Matplotlib figure generated for the peak-finding result
             when show_plot is True, otherwise None.
+        list[tuple] | None
+            Excluded pixel ranges relative to the ROI along the peak axis.
+            None when no q exclusions were requested.
         """
 
         limits_qdy_px, limits_qdx_px = self.get_box_dims(
@@ -2301,34 +2304,27 @@ class Data2D(DataImage):
         min1, max1 = limits_qdx_px
 
         if peak_axis is None:
-            if (max0 - min0) > (max1 - min1):
-                peak_axis = 0
-                check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
-            else:
-                peak_axis = 1
-                check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
+            peak_axis = 0 if (max0 - min0) > (max1 - min1) else 1
         elif peak_axis == 'qdx':
             peak_axis = 1
-            check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
         elif peak_axis == 'qdy':
             peak_axis = 0
-            check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
-        elif peak_axis == 1:
-            check_exclude = self.qbx[int((max0-min0)/2), min1:max1]
-        elif peak_axis == 0:
-            check_exclude = self.qby[min0:max0, int((max1-min1)/2)]
+        if peak_axis not in (0, 1):
+            raise ValueError("peak_axis must be 0, 1, 'qdy', or 'qdx'.")
 
+        exclude_px = None
         if exclude_q is not None:
-            if isinstance(exclude_q, tuple):
-                exclude_q = [exclude_q]
-            exclude_q = np.array(exclude_q)
+            if peak_axis == 0:
+                check_exclude = self.qby[min0:max0, (min1 + max1) // 2]
+            else:
+                check_exclude = self.qbx[(min0 + max0) // 2, min1:max1]
             exclude_px = []
-            for zone in exclude_q:
-                zone_px = np.where((check_exclude >= min(zone))
-                                   & (check_exclude <= max(zone)))[0]
-                exclude_px.append((min(zone_px), max(zone_px)))
-        else:
-            exclude_px = None
+            for zone in np.asarray(exclude_q).reshape(-1, 2):
+                zone_px = np.flatnonzero(
+                    (check_exclude >= min(zone))
+                    & (check_exclude <= max(zone)))
+                if zone_px.size:
+                    exclude_px.append((int(zone_px.min()), int(zone_px.max())))
 
         peaks = find_peaks_2D_one_axis(
             self.image[min0:max0, min1:max1],
@@ -2359,17 +2355,6 @@ class Data2D(DataImage):
                 np.arange(0, len(self.qbx_1d)),
                 self.qbx_1d)
 
-            # moved exclusion check to the tools module
-            # can only exclude q range along the peak axis
-            # if exclude_q is not None:
-            #     if isinstance(exclude_q, tuple):
-            #         exclude_q = [exclude_q]
-            #     exclude_q = np.array(exclude_q)
-            #     for (ex_min, ex_max) in exclude_q:
-            #         keep = (peaks_q[:, peak_axis] < ex_min) | (peaks_q[:, peak_axis] > ex_max)
-            #         peaks = peaks[keep, :]
-            #         peaks_q = peaks_q[keep, :]
-
         else:
             peaks_q = None
 
@@ -2380,8 +2365,8 @@ class Data2D(DataImage):
                 limits_axis0=limits_qdy_px,
                 limits_axis1=limits_qdx_px,
                 zoom_plot=zoom_plot,
-                exclude_ranges=exclude_px,
-                exclude_axis=peak_axis,
+                excluded_ranges=exclude_px,
+                excluded_axis=peak_axis,
                 **kwargs
             )
         else:
@@ -2872,27 +2857,19 @@ class Data2D(DataImage):
         peaks = peaks[np.argsort(peaks[:, peak_axis]), :]
         # peaks_q = peaks_q[np.argsort(peaks[:, peak_axis]), :]
 
-        # figure out peak orders unless otherwise provided
-        low_peaks = peaks[
-            peaks[:, peak_axis] < self.metadata['center_px'][peak_axis],
-            peak_axis
-            ].reshape(-1)
-        high_peaks = peaks[
-            peaks[:, peak_axis] > self.metadata['center_px'][peak_axis],
-            peak_axis
-            ].reshape(-1)
+        # Infer orders from the current q calibration, retaining fractional
+        # peak positions and allowing missing orders on either side.
         if peak_orders is None:
-            # peak_orders = np.concatenate([
-            #     np.flip(np.arange(0, len(low_peaks)))+1,
-            #     np.arange(0, len(high_peaks))+1
-            # ])
-            peak_q = []
-            for peak in peaks[:, peak_axis]:
-                if peak_axis == 0:
-                    peak_q.append(self.qby_1d[int(peak)])
-                else:
-                    peak_q.append(self.qbx_1d[int(peak)])
-            peak_orders = np.abs(np.round(np.array(peak_q)/(2*np.pi/(pitch_nm*10)), 0)).astype(int)
+            q_axis = self.qby_1d if peak_axis == 0 else self.qbx_1d
+            peak_q = np.interp(peaks[:, peak_axis], np.arange(len(q_axis)), q_axis)
+            fundamental_q = 2 * np.pi / (pitch_nm * 10)
+            peak_orders = np.abs(np.rint(peak_q / fundamental_q)).astype(int)
+            if np.any(peak_orders == 0):
+                raise ValueError(
+                    "Inferred peak order is zero; exclude the direct beam or "
+                    "check the reference pitch and current SDD calibration.")
+        else:
+            peak_orders = np.asarray(peak_orders)
 
         if len(ignore_orders) > 0:
             keep_index = [y for x, y in

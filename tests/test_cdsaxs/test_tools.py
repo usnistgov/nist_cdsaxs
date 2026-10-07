@@ -208,6 +208,7 @@ class TestTools(unittest.TestCase):
         test_coordinates = find_peaks_2D(image, log_scale=False,
                                          refinement_size=5, threshold_abs=1)
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=4)
@@ -251,6 +252,7 @@ class TestTools(unittest.TestCase):
             image, log_scale=False, refinement_size=5, threshold_abs=1,
             refinement_method='gaussian')
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=4)
@@ -281,6 +283,7 @@ class TestTools(unittest.TestCase):
                                          refinement_size=3, threshold_abs=1,
                                          exclude_border=False)
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=4)
@@ -311,6 +314,7 @@ class TestTools(unittest.TestCase):
                                          refinement_size=8, threshold_abs=1,
                                          exclude_border=False, min_distance=2)
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for x, y in zip(test_coordinates, peak_coordinates):
             self.assertAlmostEqual(x, y, places=3)
 
@@ -339,6 +343,7 @@ class TestTools(unittest.TestCase):
         test_coordinates = find_peaks_1D(data, log_scale=False,
                                          refinement_size=8, algorithm='scipy')
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for x, y in zip(test_coordinates, peak_coordinates):
             self.assertAlmostEqual(x, y, places=3)
 
@@ -358,7 +363,7 @@ class TestTools(unittest.TestCase):
         peak_coordinates = [
             [1.0, 0.2321818618415281],
             [5.547330483238595, 1.8749522787501894],
-            [5.547330483238595, 1.8749522787501894],
+            [6.171521977700635, 2.163603397658605],
         ]
 
         test_coordinates = find_peaks_2D_one_axis(
@@ -366,6 +371,7 @@ class TestTools(unittest.TestCase):
             refinement_size=8, threshold_abs=1,
             exclude_border=False)
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=3)
@@ -385,8 +391,8 @@ class TestTools(unittest.TestCase):
 
         peak_coordinates = [
             [0.999827841102188, 0.0],
-            [5.961190212179682, 2.5404629363356612],
-            [5.961190212179682, 2.5404629363356612],
+            [5.961190212179682, 2.5408348956873916],
+            [5.869244962802563, 3.0],
         ]
 
         test_coordinates = find_peaks_2D_one_axis(
@@ -394,6 +400,7 @@ class TestTools(unittest.TestCase):
             refinement_size=8, threshold_abs=1,
             exclude_border=False, refinement_method='gaussian')
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=3)
@@ -420,6 +427,41 @@ class TestTools(unittest.TestCase):
             image, peak_axis=0, log_scale=False,
             refinement_size=8, algorithm='scipy')
 
+        self.assertEqual(np.shape(test_coordinates), np.shape(peak_coordinates))
         for actual, test in zip(peak_coordinates, test_coordinates):
             for x, y in zip(actual, test):
                 self.assertAlmostEqual(x, y, places=3)
+
+
+    def test_peak_exclusions_apply_to_both_algorithms_and_short_inputs(self):
+        for algorithm in ('scikit', 'scipy'):
+            for data in ([0., 5., 0.], [0., 5., 0., 4., 0., 3., 0.]):
+                with self.subTest(algorithm=algorithm, size=len(data)):
+                    peaks = find_peaks_1D(
+                        np.array(data), algorithm=algorithm, log_scale=False,
+                        refinement=False, exclude_ranges=[(1, 1), (3, 3)])
+                    np.testing.assert_array_equal(peaks, [] if len(data) == 3 else [5])
+
+    def test_one_axis_exclusions_preserve_only_unexcluded_peaks(self):
+        image = np.zeros((15, 15))
+        image[7, [2, 7, 12]] = [5., 4., 3.]
+        for algorithm in ('scikit', 'scipy'):
+            for axis in (0, 1):
+                with self.subTest(algorithm=algorithm, axis=axis):
+                    peaks = find_peaks_2D_one_axis(
+                        image if axis == 1 else image.T, peak_axis=axis,
+                        log_scale=False, algorithm=algorithm, refinement_size=4,
+                        exclude_ranges=[(2, 2), (7, 7)])
+                    np.testing.assert_allclose(peaks, [[7., 12.]] if axis == 1 else [[12., 7.]])
+
+    def test_refinement_method_validation_and_com_fallback(self):
+        for finder in (find_peaks_2D, find_peaks_2D_one_axis):
+            kwargs = {'peak_axis': 0} if finder is find_peaks_2D_one_axis else {}
+            with self.assertRaisesRegex(ValueError, 'Refinement method'):
+                finder(np.ones((4, 4)), refinement_method='unknown', **kwargs)
+        with self.assertWarnsRegex(UserWarning, 'center-of-mass'):
+            self.assertEqual(com_refine_peak_2D(np.zeros((3, 3))), (0., 0.))
+        with self.assertRaisesRegex(ValueError, '2D array'):
+            com_refinement(np.ones(3))
+        image = np.array([[np.inf, 1.], [np.nan, 3.]])
+        np.testing.assert_allclose(com_refinement(image), (0.75, 1.))

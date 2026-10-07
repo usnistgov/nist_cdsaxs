@@ -113,10 +113,8 @@ def read_nist_edf(filepath):
 
     # extact required information and insert into clean dictionary
     metadata = {}
-    try:
-        metadata['wavelength_nm'] = float(header['WaveLength']) * 1e9  # m to Ang
-    except:
-        metadata['wavelength_nm'] = float(header['Wavelength']) * 1e9  # m to Ang
+    wavelength_key = 'WaveLength' if 'WaveLength' in header else 'Wavelength'
+    metadata['wavelength_nm'] = float(header[wavelength_key]) * 1e9  # m to nm
     metadata['exposure_time_s'] = float(header['ExposureTime'])
     metadata['pixel_size_um'] = float(header['PSize_1']) * 1e6  # m to um
     metadata['sample_phi_deg'] = round(-1*float(header['CD_Phi']), 2)  # we don't have as much precision as the motor readout says we do

@@ -1107,7 +1107,7 @@ class TestData2D(unittest.TestCase):
         np.testing.assert_array_almost_equal(qslice.background_Iq, background_i_avg)
 
     def test_find_peaks2d_forwards_roi_filters_q_and_plots(self):
-        helper_peaks = np.array([[0.5, 1.0], [2.0, 2.5]], dtype=float)
+        helper_peaks = np.array([[2.0, 2.5]], dtype=float)
 
         with patch("cdsaxs.data.data2d.find_peaks_2D",
                    return_value=helper_peaks.copy()) as mock_find, \
@@ -1165,13 +1165,13 @@ class TestData2D(unittest.TestCase):
         mock_plot.assert_not_called()
 
     def test_find_peaks2d_one_axis_defaults_peak_axis_and_filters_q(self):
-        helper_peaks = np.array([[0.5, 1.0], [2.0, 2.5]], dtype=float)
+        helper_peaks = np.array([[2.0, 2.5]], dtype=float)
 
         with patch("cdsaxs.data.data2d.find_peaks_2D_one_axis",
                    return_value=helper_peaks.copy()) as mock_find, \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d",
                       return_value="axis-figure") as mock_plot:
-            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D_one_axis(
+            peaks, peaks_q, fig, excluded = self.dataqdyqdx.find_peaks2D_one_axis(
                 range_qdy_px=(1, 6),
                 range_qdx_px=(1, 3),
                 exclude_q=(0.0006, 0.0011),
@@ -1184,6 +1184,8 @@ class TestData2D(unittest.TestCase):
                 distance=4,
             )
 
+        self.assertEqual(excluded, [(0, 0)])
+        self.assertEqual(mock_find.call_args.kwargs["exclude_ranges"], excluded)
         expected_roi = self.image[1:6, 1:3]
         expected_mask = self.dataqdyqdx.mask[1:6, 1:3]
         np.testing.assert_array_equal(mock_find.call_args.args[0], expected_roi)
@@ -1204,6 +1206,8 @@ class TestData2D(unittest.TestCase):
             limits_axis0=(1, 6),
             limits_axis1=(1, 3),
             zoom_plot=False,
+            excluded_ranges=excluded,
+            excluded_axis=0,
             distance=4,
         )
 
@@ -1211,7 +1215,7 @@ class TestData2D(unittest.TestCase):
         with patch("cdsaxs.data.data2d.find_peaks_2D_one_axis",
                    return_value=np.array([], dtype=float)) as mock_find, \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_peaks2d") as mock_plot:
-            peaks, peaks_q, fig = self.dataqdyqdx.find_peaks2D_one_axis(
+            peaks, peaks_q, fig, excluded = self.dataqdyqdx.find_peaks2D_one_axis(
                 range_qdy_px=(0, 4),
                 range_qdx_px=(0, 4),
                 peak_axis="qdx",
@@ -1229,7 +1233,7 @@ class TestData2D(unittest.TestCase):
         peaks = np.array([[4.0, 3.0], [4.0, 1.0]], dtype=float)
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, None, None)) as mock_find, \
+                          return_value=(peaks, None, None, None)) as mock_find, \
                 patch("cdsaxs.data.data2d.line_fit",
                       return_value=(0.0, 0.0, 4.0)) as mock_line_fit, \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
@@ -1261,7 +1265,7 @@ class TestData2D(unittest.TestCase):
         peaks = np.array([[4.0, 3.0], [4.0, 1.0]], dtype=float)
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, None, None)) as mock_find, \
+                          return_value=(peaks, None, None, None)) as mock_find, \
                 patch("cdsaxs.data.data2d.line_fit",
                       return_value=(0.0, 0.0, 4.0)), \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
@@ -1282,7 +1286,7 @@ class TestData2D(unittest.TestCase):
 
     def test_find_beam_center_from_peaks_raises_for_asymmetric_or_missing_peaks(self):
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(np.array([[4.0, 3.0]], dtype=float), None, None)), \
+                          return_value=(np.array([[4.0, 3.0]], dtype=float), None, None, None)), \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
                       return_value="beam-fig") as mock_plot:
             with self.assertRaisesRegex(ValueError, "not symmetric"):
@@ -1295,7 +1299,7 @@ class TestData2D(unittest.TestCase):
         self.assertFalse(mock_plot.call_args.kwargs["show_beam_center"])
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(np.empty((0, 2)), None, None)), \
+                          return_value=(np.empty((0, 2)), None, None, None)), \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_beam_center",
                       return_value="beam-fig"):
             with self.assertRaisesRegex(ValueError, "No peaks detected"):
@@ -1309,7 +1313,7 @@ class TestData2D(unittest.TestCase):
         peaks = np.array([[4.0, 0.5], [4.0, 1.0], [4.0, 3.0], [4.0, 3.5]], dtype=float)
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, None, None)), \
+                          return_value=(peaks, None, None, None)), \
                 patch("cdsaxs.data.data2d.line_fit",
                       return_value=(0.0, 0.0, 4.0)):
             center, fig = self.dataqdyqdx.find_beam_center_from_peaks(
@@ -1323,11 +1327,12 @@ class TestData2D(unittest.TestCase):
         self.assertIsNone(fig)
 
     def test_find_sdd_from_reference_peaks_returns_and_updates(self):
+        self.dataqdyqdx.update_metadata({"sdd_cm": 24.57}, overwrite=True)
         peaks = np.array([[4.0, 1.0], [4.0, 3.0]], dtype=float)
         peaks_q = np.array([[0.0, 0.0], [0.0, 0.0]], dtype=float)
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, peaks_q, None)) as mock_find, \
+                          return_value=(peaks, peaks_q, None, None)) as mock_find, \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_sdd",
                       return_value="sdd-fig") as mock_plot:
             average_sdd, std_sdd, fig = self.dataqdyqdx.find_sdd_from_reference_peaks(
@@ -1359,7 +1364,7 @@ class TestData2D(unittest.TestCase):
         peaks_q = np.zeros_like(peaks)
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, peaks_q, None)):
+                          return_value=(peaks, peaks_q, None, None)):
             average_sdd, std_sdd, fig = self.dataqdyqdx.find_sdd_from_reference_peaks(
                 pitch_nm=100,
                 range_qdy_px=(2, 6),
@@ -1392,7 +1397,7 @@ class TestData2D(unittest.TestCase):
         peaks = np.array([[2.0, 1.0], [5.0, 2.0]], dtype=float)
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, None, None)) as mock_find, \
+                          return_value=(peaks, None, None, None)) as mock_find, \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_detector_rotation_correction",
                       return_value="chi-fig") as mock_plot:
             angle, fig = self.dataqdyqdx.find_chi_from_peaks(
@@ -1419,7 +1424,7 @@ class TestData2D(unittest.TestCase):
         )
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None)):
+                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None, None)):
             with self.assertWarnsRegex(UserWarning, "Insuffient peaks"):
                 angle, fig = self.dataqdyqdx.find_chi_from_peaks(
                     range_qdy_px=(0, 7),
@@ -1444,7 +1449,7 @@ class TestData2D(unittest.TestCase):
         )
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(peaks, None, None)) as mock_find, \
+                          return_value=(peaks, None, None, None)) as mock_find, \
                 patch("cdsaxs.data.data2d.plotting.plot_data2d_find_detector_rotation_correction",
                       return_value="omega-fig") as mock_plot:
             omega, fig = self.dataqdyqdx.find_omega_from_peaks(
@@ -1471,7 +1476,7 @@ class TestData2D(unittest.TestCase):
         )
 
         with patch.object(self.dataqdyqdx, "find_peaks2D_one_axis",
-                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None)):
+                          return_value=(np.array([[2.0, 1.0]], dtype=float), None, None, None)):
             with self.assertWarnsRegex(UserWarning, "Insuffient peaks"):
                 omega, fig = self.dataqdyqdx.find_omega_from_peaks(
                     range_qdy_px=(0, 7),
@@ -1481,3 +1486,55 @@ class TestData2D(unittest.TestCase):
 
         self.assertTrue(np.isnan(omega))
         self.assertIsNone(fig)
+
+
+    def test_exclusions_use_roi_midpoint_and_relative_pixels(self):
+        data = self.dataqdyqdx
+        data.qby = np.arange(data.image.size).reshape(data.image.shape).astype(float)
+        data.qbx = data.qby.copy()
+        for axis, roi, exclusion, expected in (
+                (0, ((2, 6), (2, 4)), (11., 15.), [(0, 1)]),
+                (1, ((2, 6), (1, 4)), (17., 18.), [(0, 1)]),
+                (0, ((2, 6), (2, 4)), (100., 101.), [])):
+            with self.subTest(axis=axis, exclusion=exclusion):
+                with patch('cdsaxs.data.data2d.find_peaks_2D_one_axis',
+                           return_value=np.empty((0, 2))) as finder:
+                    _, _, _, excluded = data.find_peaks2D_one_axis(
+                        range_qdy_px=roi[0], range_qdx_px=roi[1],
+                        peak_axis=axis, exclude_q=exclusion, show_plot=False)
+                self.assertEqual(excluded, expected)
+                self.assertEqual(finder.call_args.kwargs['exclude_ranges'], expected)
+
+    def test_sdd_infers_missing_orders_for_asymmetric_fractional_peaks(self):
+        metadata = dict(self.metadata, center_px=(7, 7))
+        metadata.pop("energy_ev", None)
+        data = Data2D(np.ones((15, 15)), hide_q_warnings=True, **metadata)
+        for axis in (0, 1):
+            q_axis = data.qby_1d if axis == 0 else data.qbx_1d
+            center = data.metadata['center_px'][axis]
+            fundamental = abs(q_axis[center + 1])
+            pitch = 2 * np.pi / (fundamental * 10)
+            peaks = np.tile(data.metadata['center_px'], (2, 1)).astype(float)
+            # Both peaks are on one side, and order two is missing.
+            peaks[:, axis] = [center - 1.1, center - 3.1]
+            with self.subTest(axis=axis):
+                with patch.object(data, 'find_peaks2D_one_axis',
+                                  return_value=(peaks, None, None, None)):
+                    inferred = data.find_sdd_from_reference_peaks(
+                        pitch_nm=pitch, peak_axis=axis, show_plot=False,
+                        range_qdy_px=(0, 15), range_qdx_px=(0, 15))
+                    explicit = data.find_sdd_from_reference_peaks(
+                        pitch_nm=pitch, peak_axis=axis, peak_orders=[3, 1],
+                        show_plot=False,
+                        range_qdy_px=(0, 15), range_qdx_px=(0, 15))
+                self.assertEqual(inferred, explicit)
+                self.assertTrue(np.isfinite(inferred[0]))
+
+    def test_sdd_rejects_inferred_zero_order(self):
+        peaks = np.array([self.dataqdyqdx.metadata['center_px']], dtype=float)
+        with patch.object(self.dataqdyqdx, 'find_peaks2D_one_axis',
+                          return_value=(peaks, None, None, None)):
+            with self.assertRaisesRegex(ValueError, 'order is zero'):
+                self.dataqdyqdx.find_sdd_from_reference_peaks(
+                    pitch_nm=100, show_plot=False,
+                    range_qdy_px=(0, 7), range_qdx_px=(0, 4))
