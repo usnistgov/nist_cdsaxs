@@ -449,7 +449,8 @@ class TestLoadDataset(unittest.TestCase):
             "W204_F2 0.0",
             "W204_F2 5.0",
         ]
-        self.assertListEqual(
+        # Directory enumeration order varies across filesystems.
+        self.assertCountEqual(
             keys,
             list(self.dataset.datas.keys())
         )
