@@ -90,6 +90,11 @@ def slice_reduced_dataset(
         }
         # q_offset = []
         Iq = []
+        plotting_data = {
+            'qsx': [],
+            'qsz': [],
+            'Iq': [],
+        }
         for data in dataset.datas:
             selection = np.where(
                     (getattr(data, integrated_axis) >= qmin) &
@@ -98,13 +103,16 @@ def slice_reduced_dataset(
             if len(selection) > 0\
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
-                for qstr, qlist in q_components.items(): 
+                for qstr, qlist in q_components.items():
                     qlist.append(
                         np.nanmean(getattr(data, qstr)[selection]))
                 if mode == 'sum':
                     Iq.append(np.nansum(data.Iq[selection]))
                 else:
                     Iq.append(np.nanmean(data.Iq[selection]))
+                plotting_data['qsx'].extend(list(data.qsx[selection]))
+                plotting_data['qsz'].extend(list(data.qsz[selection]))
+                plotting_data['Iq'].extend(list(data.Iq[selection]))
 
         reduced_slice = ReducedData1DSlice(
             q=np.array(q_components[q_axis]),
@@ -112,7 +120,8 @@ def slice_reduced_dataset(
             q_axis=q_axis,
             integrated_axis=integrated_axis,
             offset_axis=offset_axis,
-            slice_width=qmax-qmin
+            slice_width=qmax-qmin,
+            plotting_data=plotting_data,
         )
         # TODO: removing rounding to maintain data integrity
         setattr(reduced_slice, integrated_axis,

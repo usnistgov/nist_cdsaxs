@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import matplotlib
 matplotlib.use('Agg')
@@ -345,3 +346,34 @@ class TestPeakPlotting(unittest.TestCase):
         ax = fig.axes[0]
         self.assertEqual(ax.get_xscale(), 'log')
         self.assertEqual(ax.get_yscale(), 'log')
+
+
+    def test_excluded_spans_use_the_correct_axis_and_roi_offset(self):
+        for axis in (0, 1):
+            with self.subTest(axis=axis):
+                fig = plotting.plot_data2d_find_peaks2d(
+                    self.data2d, peaks=np.empty((0, 2)),
+                    limits_axis0=(2, 6), limits_axis1=(0, 4),
+                    excluded_ranges=[(0, 1)], excluded_axis=axis,
+                    zoom_plot=False, log_scale=False)
+                span = fig.axes[0].patches[-1]
+                if axis == 0:
+                    self.assertEqual(span.get_y(), 2)
+                    self.assertEqual(span.get_height(), 1)
+                else:
+                    self.assertEqual(span.get_x(), 0)
+                    self.assertEqual(span.get_width(), 1)
+
+    def test_data2d_one_axis_plot_forwards_exclusions(self):
+        with patch('cdsaxs.data.data2d.find_peaks_2D_one_axis',
+                   return_value=np.empty((0, 2))):
+            for axis in (0, 1):
+                q_values = self.data2d.qby if axis == 0 else self.data2d.qbx
+                with self.subTest(axis=axis):
+                    _, _, fig, excluded = self.data2d.find_peaks2D_one_axis(
+                        range_qdy_px=(2, 6), range_qdx_px=(0, 4),
+                        peak_axis=axis,
+                        exclude_q=(float(np.nanmin(q_values)), float(np.nanmax(q_values))),
+                        show_plot=True, log_scale=False)
+                    self.assertTrue(excluded)
+                    self.assertEqual(len(fig.axes[0].patches), len(excluded))

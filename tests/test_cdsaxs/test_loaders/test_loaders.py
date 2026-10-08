@@ -139,6 +139,21 @@ class TestLoadData(unittest.TestCase):
     def test_user_param(self):
         self.assertEqual(self.data.user_params['test'], 'testvalue')
 
+    def test_edf_names_expand_metadata_and_user_parameters(self):
+        for filetype in ('nist-edf', 'nist_edf'):
+            for name, expected in (
+                    (None, 'sample.edf'),
+                    ('literal', 'literal'),
+                    ('{filename}_{sample_phi_deg}_{group}', 'sample.edf_-12.35_A')):
+                with self.subTest(filetype=filetype, name=name):
+                    with patch('cdsaxs.loaders.load_data.read_nist_edf',
+                               return_value=(np.ones((2, 2)), 'sample.edf',
+                                             {'sample_phi_deg': -12.35})):
+                        data = load_data.LoadData(
+                            filepath='sample.edf', filetype=filetype,
+                            name=name, user_params={'group': 'A'})
+                    self.assertEqual(data.name, expected)
+
     def test_name(self):
         self.assertEqual(self.data.name, 'Test Load Data')
 
@@ -434,7 +449,8 @@ class TestLoadDataset(unittest.TestCase):
             "W204_F2 0.0",
             "W204_F2 5.0",
         ]
-        self.assertListEqual(
+        # Directory enumeration order varies across filesystems.
+        self.assertCountEqual(
             keys,
             list(self.dataset.datas.keys())
         )

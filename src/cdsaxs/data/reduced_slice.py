@@ -31,6 +31,7 @@ class ReducedData1DSlice(Data1D):
                  slice_width: float,
                  dIq: NDArray = None,
                  mask: NDArray = None,
+                 plotting_data=None,
                  **kwargs):
 
         """
@@ -95,3 +96,4 @@ class ReducedData1DSlice(Data1D):
         self.slice_axis = q_axis
         self.offset_axis = offset_axis
         self.slice_width = slice_width
+        self.plotting_data = plotting_data

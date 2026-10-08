@@ -209,3 +209,33 @@ class TestReducedPlotting(unittest.TestCase):
         self.assertIsNotNone(fig)
         legend_labels = [text.get_text() for text in ax.get_legend().get_texts()]
         self.assertEqual(legend_labels, ['0.3'])
+
+
+    def test_disjoint_q_ranges_keep_both_ranges_and_drop_the_gap(self):
+        slices = [self._make_reduced_slice(
+            q=[.1, .2], iq=[1., 2.], qsx=offset, qsy=[.01, .02])
+            for offset in (.1, .5, .9)]
+        for ranges, expected in (
+                ((0., .2), ['0.1']),
+                ([0., .2], ['0.1']),
+                ([(0., .2), (.8, 1.)], ['0.1', '0.9'])):
+            with self.subTest(ranges=ranges):
+                _, ax = plotting.plot_reduced_slices(
+                    ReducedSlices(slices=slices), filter_by_q={'qsx': ranges},
+                    log_scale=False)
+                self.assertEqual([t.get_text() for t in ax.get_legend().get_texts()], expected)
+
+    def test_plot_reduced_slices_2d_uses_original_coordinates_and_intensities(self):
+        slices = [self._make_reduced_slice(
+            q=[.1, .2], iq=[1., 2.], qsx=.3, qsy=[.01, .02])]
+        slices[0].plotting_data = {'qsx': [.29, .31], 'qsz': [.11, .19], 'Iq': [1., 100.]}
+        for log_scale in (False, True):
+            with self.subTest(log_scale=log_scale):
+                fig = plotting.plot_reduced_slices_2d(
+                    ReducedSlices(slices=slices), log_scale=log_scale, vmin=1., vmax=100.)
+                scatter = fig.axes[0].collections[0]
+                np.testing.assert_allclose(scatter.get_offsets(), [[.29, .11], [.31, .19]])
+                np.testing.assert_allclose(scatter.get_array(), [1., 100.])
+                self.assertEqual(scatter.norm.vmin, 1.)
+                self.assertEqual(scatter.norm.vmax, 100.)
+                self.assertEqual(isinstance(scatter.norm, matplotlib.colors.LogNorm), log_scale)
