@@ -149,6 +149,7 @@ class TestReadSmiH5(unittest.TestCase):
             'baseline': {
                 'energy_energy': np.array([16100.0]),
                 'pil2M_motor_z': np.array([5000.0]),
+                    'time': np.array([1750000000.0]),
             },
             'config': {
                 'pil2M_cam_acquire_time': np.array([0.2]),
@@ -156,6 +157,7 @@ class TestReadSmiH5(unittest.TestCase):
             'primary': {
                 'xbpm3_sumX': np.array([3.0, 1.8]),
                 'stage_phi': np.array([3.3, 2.1]),
+                    'time': np.array([1750000001.0, 1750000002.0]),
                 'seq_num': np.array([1, 3]),
             },
         }
