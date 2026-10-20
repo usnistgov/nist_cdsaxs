@@ -495,6 +495,7 @@ class SiGeModelArray(CDSAXS_Model):
         Currently supports typed layers via `Layer_Type` (case-insensitive), including:
         - 'ellipse'
         - 'curved_sides' (center trapezoid + curved sidewalls; expanded at simulation-time)
+        - 'rounded_corners' (trapezoid with circular-arc rounding at top/bottom corners)
         """
         if trapezoids is None:
             return False
@@ -566,6 +567,123 @@ class SiGeModelArray(CDSAXS_Model):
             segments.append({'width': float(w[i]), 'height': float(dy), 'twidth': float(w[i + 1])})
         return segments
 
+    def _expand_rounded_corners_layer(self, layer_dict):
+        """
+        Expand a single rounded_corners layer into a list of standard trapezoid segments.
+
+        The cross-section width profile follows circular arcs at the top and/or bottom
+        corners, with a linear taper in the middle region:
+
+          w_base(y) = w0 + (w1 - w0) * y / H
+          delta_bot(y) = r_bot - sqrt(r_bot^2 - (r_bot - y)^2)   [y in 0..r_bot]
+          delta_top(y) = r_top - sqrt(r_top^2 - (y-(H-r_top))^2)  [y in H-r_top..H]
+          w(y) = w_base(y) - 2*delta_bot(y) - 2*delta_top(y)
+
+        Expected schema keys:
+        - width:      bottom width (required)
+        - height:     layer height (required)
+        - twidth:     top width (defaults to width)
+        - r_top:      top corner radius >= 0 (default 0)
+        - r_bot:      bottom corner radius >= 0 (default 0)
+        - n_slices:   slices per rounding region (default 8)
+        - nonuniform: use corner-dense one-sided power spacing (default True)
+        - power:      power-law exponent for nonuniform spacing (default 2.0)
+        """
+        w0 = float(layer_dict.get('width', 0.0))
+        H  = float(layer_dict.get('height', 0.0))
+        r_top = float(layer_dict.get('r_top', 0.0))
+        r_bot = float(layer_dict.get('r_bot', 0.0))
+        n_slices   = int(layer_dict.get('n_slices', 8))
+        nonuniform = bool(layer_dict.get('nonuniform', True))
+        power      = float(layer_dict.get('power', 2.0))
+
+        twidth_val = layer_dict.get('twidth', None)
+        w1 = float(twidth_val) if twidth_val is not None else w0
+
+        if n_slices < 1:
+            n_slices = 1
+        if H < 0:
+            raise ValueError("rounded_corners layer height must be non-negative")
+        if w0 <= 0 or w1 <= 0:
+            raise ValueError("rounded_corners layer widths must be positive")
+        w_min = min(w0, w1)
+        if r_bot < 0 or r_top < 0:
+            raise ValueError("rounded_corners radii must be non-negative")
+        if r_bot + r_top > H + 1e-12:
+            raise ValueError(
+                f"rounded_corners: r_bot ({r_bot}) + r_top ({r_top}) exceeds layer height ({H})"
+            )
+        if r_bot >= w_min / 2.0 and r_bot > 0:
+            raise ValueError(
+                f"rounded_corners: r_bot ({r_bot}) must be < min(width, twidth)/2 ({w_min/2:.4g})"
+            )
+        if r_top >= w_min / 2.0 and r_top > 0:
+            raise ValueError(
+                f"rounded_corners: r_top ({r_top}) must be < min(width, twidth)/2 ({w_min/2:.4g})"
+            )
+
+        if H == 0:
+            return [{'width': w0, 'height': 0.0, 'twidth': w1}]
+
+        def w_base(y):
+            return w0 + (w1 - w0) * y / H
+
+        def delta_bot(y):
+            arg = r_bot ** 2 - (r_bot - y) ** 2
+            return r_bot - np.sqrt(max(0.0, arg))
+
+        def delta_top(y):
+            # Arc center is at height H - r_top; distance from center = y - (H - r_top)
+            arg = r_top ** 2 - (y - (H - r_top)) ** 2
+            return r_top - np.sqrt(max(0.0, arg))
+
+        def w_at(y):
+            wb = w_base(y)
+            if r_bot > 0 and y <= r_bot + 1e-12:
+                wb -= 2.0 * delta_bot(y)
+            if r_top > 0 and y >= H - r_top - 1e-12:
+                wb -= 2.0 * delta_top(y)
+            return max(wb, 1e-12)
+
+        def levels_bot(n):
+            # Dense at y=0 (corner): u^p concentrates near u=0
+            u = np.linspace(0.0, 1.0, n + 1)
+            return r_bot * (u ** power) if nonuniform else np.linspace(0.0, r_bot, n + 1)
+
+        def levels_top(n):
+            # Dense at y=H (corner): 1-(1-u)^p concentrates near u=1
+            u = np.linspace(0.0, 1.0, n + 1)
+            y0 = H - r_top
+            return y0 + r_top * (1.0 - (1.0 - u) ** power) if nonuniform else np.linspace(y0, H, n + 1)
+
+        segments = []
+
+        # Bottom rounding region
+        if r_bot > 0:
+            yl = levels_bot(n_slices)
+            for i in range(n_slices):
+                y0, y1 = float(yl[i]), float(yl[i + 1])
+                segments.append({'width': w_at(y0), 'height': y1 - y0, 'twidth': w_at(y1)})
+
+        # Middle (linear) region
+        y_mid_lo = r_bot
+        y_mid_hi = H - r_top
+        if y_mid_hi > y_mid_lo + 1e-12:
+            segments.append({'width': w_at(y_mid_lo), 'height': y_mid_hi - y_mid_lo, 'twidth': w_at(y_mid_hi)})
+
+        # Top rounding region
+        if r_top > 0:
+            yl = levels_top(n_slices)
+            for i in range(n_slices):
+                y0, y1 = float(yl[i]), float(yl[i + 1])
+                segments.append({'width': w_at(y0), 'height': y1 - y0, 'twidth': w_at(y1)})
+
+        # Fallback: emit a single flat segment if nothing was generated
+        if not segments:
+            segments.append({'width': w_at(0.0), 'height': H, 'twidth': w_at(H)})
+
+        return segments
+
     def _expand_typed_layers(self, model_params):
         """
         Expand user-provided (design) layers into a pure trapezoid stack suitable for simulation.
@@ -629,6 +747,12 @@ class SiGeModelArray(CDSAXS_Model):
                 next_trap = design_traps[idx + 1] if idx + 1 < len(design_traps) else None
                 ellipse_segments = self._expand_ellipse_layer(trap, next_layer_dict=next_trap)
                 for seg in ellipse_segments:
+                    expanded_traps.append(seg)
+                    expanded_slds.append(sld_val)
+                    expanded_design_index.append(int(idx))
+            elif layer_type_norm == 'rounded_corners':
+                rc_segments = self._expand_rounded_corners_layer(trap)
+                for seg in rc_segments:
                     expanded_traps.append(seg)
                     expanded_slds.append(sld_val)
                     expanded_design_index.append(int(idx))

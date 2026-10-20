@@ -249,6 +249,19 @@ class TrapezoidModelArray(CDSAXS_Model):
         """
         if not hasattr(self, 'model_params'):
             self.build_model_params_from_traditional()
+
+        def _validate_bounds_tuple(val, key):
+            if val is None:
+                return None
+            if not isinstance(val, (list, tuple)) or len(val) != 2:
+                raise ValueError(f"{key} must be a 2-tuple/list (min,max); got {val!r}")
+            lo, hi = val[0], val[1]
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                raise ValueError(f"{key} bounds must be numeric; got {val!r}")
+            lo, hi = float(lo), float(hi)
+            if not lo < hi:
+                raise ValueError(f"{key} must satisfy min < max; got {val!r}")
+            return lo, hi
             
         # Create default limits if not provided
         if param_limits is None:
@@ -280,6 +293,58 @@ class TrapezoidModelArray(CDSAXS_Model):
                 'max': self.I0 * 1.1,
                 'default': self.I0
             }
+
+            # Override defaults with any inline bounds provided in model_params
+            trapezoids = self.model_params.get('trapezoids', [])
+            if isinstance(trapezoids, list):
+                for i, trap in enumerate(trapezoids):
+                    if not isinstance(trap, dict):
+                        continue
+
+                    if 'width_bounds' in trap:
+                        lo_hi = _validate_bounds_tuple(trap.get('width_bounds'), f"trapezoids[{i}].width_bounds")
+                        if lo_hi is not None:
+                            lo, hi = lo_hi
+                            key = f"trap_{i}_width"
+                            if key in param_limits:
+                                param_limits[key]['min'] = lo
+                                param_limits[key]['max'] = hi
+
+                    if 'height_bounds' in trap:
+                        lo_hi = _validate_bounds_tuple(trap.get('height_bounds'), f"trapezoids[{i}].height_bounds")
+                        if lo_hi is not None:
+                            lo, hi = lo_hi
+                            key = f"trap_{i}_height"
+                            if key in param_limits:
+                                param_limits[key]['min'] = lo
+                                param_limits[key]['max'] = hi
+
+            if 'DW_bounds' in self.model_params:
+                lo_hi = _validate_bounds_tuple(self.model_params.get('DW_bounds'), "DW_bounds")
+                if lo_hi is not None and 'DW' in param_limits:
+                    lo, hi = lo_hi
+                    param_limits['DW']['min'] = lo
+                    param_limits['DW']['max'] = hi
+
+            if 'I0_bounds' in self.model_params:
+                lo_hi = _validate_bounds_tuple(self.model_params.get('I0_bounds'), "I0_bounds")
+                if lo_hi is not None and 'I0' in param_limits:
+                    lo, hi = lo_hi
+                    param_limits['I0']['min'] = lo
+                    param_limits['I0']['max'] = hi
+
+            # Optional: apply Bk_bounds only if Bk is included in optimization params
+            if 'Bk_bounds' in self.model_params:
+                lo_hi = _validate_bounds_tuple(self.model_params.get('Bk_bounds'), "Bk_bounds")
+                if lo_hi is not None:
+                    lo, hi = lo_hi
+                    if 'Bk' in param_limits:
+                        param_limits['Bk']['min'] = lo
+                        param_limits['Bk']['max'] = hi
+                    for k, cfg in list(param_limits.items()):
+                        if isinstance(k, str) and k.startswith('Bk_') and isinstance(cfg, dict):
+                            cfg['min'] = lo
+                            cfg['max'] = hi
         else:
             # Ensure default values are set for all provided parameters
             for param, limits in param_limits.items():
