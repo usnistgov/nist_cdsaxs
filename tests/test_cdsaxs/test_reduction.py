@@ -48,6 +48,7 @@ class TestSliceReducedDataset(unittest.TestCase):
             q_values=[0.1, 0.2],
             q_widths=0.002,
             show_plot=False,
+            mode='mean',
         )
 
         self.assertIsNone(fig)
@@ -140,9 +141,16 @@ class TestSliceReducedDataset(unittest.TestCase):
             show_plot=False,
             mode='sum',
         )
+        reduced_slices_default, _ = slice_reduced_dataset(
+            dataset=dataset,
+            q_values=[0.1],
+            q_widths=0.002,
+            show_plot=False,
+        )
 
         np.testing.assert_allclose(reduced_slices_mean.data[0].Iq, np.array([2.0, 5.0]))
         np.testing.assert_allclose(reduced_slices_sum.data[0].Iq, np.array([6.0, 15.0]))
+        np.testing.assert_allclose(reduced_slices_default.data[0].Iq, np.array([6.0, 15.0]))
 
     def test_slice_metadata_tracks_slice_and_integrated_axes(self):
         reduced_slices, _ = slice_reduced_dataset(
