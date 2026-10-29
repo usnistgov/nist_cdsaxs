@@ -22,7 +22,7 @@ def slice_reduced_dataset(
     offset_axis='qsy',
     show_plot=True,
     plotting_kwargs={},
-    mode: str = 'mean',
+    mode: str = 'sum',
 ) -> ReducedSlices:
     """
     Extracts 1D data slices from a reduced dataset.
@@ -54,7 +54,7 @@ def slice_reduced_dataset(
     mode : str
         Set whether a mean or sum is performed on the intensity over
         the bin width. The q components will always be a mean.
-        Default is 'mean'.
+        Default is 'sum'.
 
     Returns
     -------
