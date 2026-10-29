@@ -215,7 +215,11 @@ def read_als_11_0_1_2(filepath):
     metadata['detector_y_mm'] = header['CCD X']
     metadata['CCD Y'] = header['CCD Y']
     metadata['epu_polarization'] = header['EPU Polarization']
-    metadata['beam_stop_position'] = header['Beam Stop']
+    # print(header.keys())
+    try:
+        metadata['beam_stop_position'] = header['Beam Stop']
+    except:
+        metadata['beam_stop_position'] = header['AI 6 BeamStop']
     date = header['DATE']
     if float(date[:4]) <= 2025:
         metadata['pixel_size_um'] = 27
