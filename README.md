@@ -64,6 +64,11 @@ pip install -e .[dev]
 This is preferred over manually modifying `PYTHONPATH`.
 
 ## Usage
+For agent-assisted or standalone script reductions, use the
+[JSON-configured reduction harness](harness/README.md). It supports staged visual
+review, explicitly authorized automatic batches, and optional additional qy rows
+for circular contact holes. Start with `python -m cdsaxs.harness --init my_run`.
+
 This software is meant to be used in a Jupyter notebook. While some
 aspects of the reduction can be automated as a Python script, currently
 we recommend a notebook as visual checks that the data is integrated 

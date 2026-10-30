@@ -44,6 +44,9 @@ dev = [
     "flake8>=7.1.2",
 ]
 
+[project.scripts]
+cdsaxs-reduce = "cdsaxs.harness.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/usnistgov/nist_cdsaxs"
 Repository = "https://github.com/usnistgov/nist_cdsaxs"

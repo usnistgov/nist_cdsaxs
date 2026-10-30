@@ -1,0 +1,53 @@
+{
+  "experiment": "validation",
+  "sample_name": "W204_F2",
+  "decision_notes": [
+    "Fixture benchmark: known geometry; exposure normalization only, matching the existing validation workflow."
+  ],
+  "input": {
+    "data_directory": "../tests/data/test_load_dataset",
+    "metadata_csv": "../tests/data/test_load_dataset/metadata_load.csv",
+    "filetype": "tif",
+    "metadata": {
+      "exposure_time_s": 2,
+      "pixel_size_um": 172
+    }
+  },
+  "calibration": {
+    "sdd_cm": 504.982,
+    "center_px": [
+      738,
+      492
+    ]
+  },
+  "offsets": {
+    "sample_phi_offset_deg": 0.0,
+    "sample_chi_offset_deg": 0.0,
+    "sample_omega_offset_deg": 0.0
+  },
+  "corrections": {
+    "normalize_by": [
+      "exposure_time_s"
+    ],
+    "substrate_absorption": false,
+    "footprint": false
+  },
+  "integration": {
+    "height_px": 5,
+    "width_px": 884,
+    "search_height_px": 5,
+    "subtract_background": false
+  },
+  "slices": {
+    "centers_qsx_Ainv": [
+      -0.01275,
+      0.01249
+    ],
+    "widths_Ainv": 0.001,
+    "mode": "mean"
+  },
+  "quality": {
+    "max_alignment_residual_px": 5,
+    "min_peak_inside_fraction": 0.8
+  }
+}

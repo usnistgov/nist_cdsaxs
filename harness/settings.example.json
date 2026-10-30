@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "experiment": "experiment",
+  "sample_name": "sample",
+  "sample_kind": null,
+  "samples": [],
+  "sample_profile": null,
+  "mode": "review",
+  "allowed_decisions": [],
+  "refit_known_constants": false,
+  "decision_notes": [],
+  "input": {
+    "data_directory": null,
+    "filenames": null,
+    "filter_substrings": null,
+    "file_extension": null,
+    "filetype": null,
+    "detector_type": null,
+    "metadata_csv": null,
+    "metadata_pattern": null,
+    "metadata_scales": {},
+    "metadata": {},
+    "user_params": {}
+  },
+  "calibration": {
+    "source_file": null,
+    "reference_sample": null,
+    "reference_filenames": null,
+    "reference_pitch_nm": null,
+    "beam_center_guess_px": null,
+    "center_px": null,
+    "sdd_cm": null,
+    "sdd_guess_cm": null,
+    "reference_metadata_pattern": null,
+    "peak_orders": null,
+    "search": {
+      "width_qdy_px": 40,
+      "width_qdx_px": 400,
+      "log_scale": true,
+      "refinement_size": 7,
+      "refinement_method": "gaussian",
+      "min_distance": 10,
+      "threshold_rel": 0.1,
+      "threshold_abs": null
+    }
+  },
+  "offsets": {
+    "sample_phi_offset_deg": null,
+    "sample_chi_offset_deg": null,
+    "sample_omega_offset_deg": null
+  },
+  "corrections": {
+    "normalize_by": [
+      "bpm",
+      "exposure_time_s"
+    ],
+    "substrate_absorption": true,
+    "footprint": true,
+    "substrate_thickness_um": null,
+    "substrate_attenuation_coeff_um-1": null
+  },
+  "phi": {
+    "pitch_nm": null,
+    "angles_deg": null,
+    "angle_range_deg": [
+      -10.0,
+      10.0
+    ],
+    "peak_orders": null,
+    "search": {
+      "width_qdy_px": 40,
+      "width_qdx_px": 400,
+      "log_scale": true,
+      "refinement_size": 7,
+      "refinement_method": "gaussian",
+      "min_distance": 10,
+      "threshold_rel": 0.1,
+      "threshold_abs": null
+    }
+  },
+  "chi": {
+    "search": {
+      "width_qdy_px": 40,
+      "width_qdx_px": 400,
+      "log_scale": true,
+      "refinement_size": 7,
+      "refinement_method": "gaussian",
+      "min_distance": 10,
+      "threshold_rel": 0.1,
+      "threshold_abs": null
+    }
+  },
+  "omega": {
+    "angles_deg": null,
+    "min_abs_phi_deg": 20.0,
+    "max_frames": 8,
+    "search": {
+      "width_qdy_px": 40,
+      "width_qdx_px": 400,
+      "log_scale": true,
+      "refinement_size": 7,
+      "refinement_method": "gaussian",
+      "min_distance": 10,
+      "threshold_rel": 0.1,
+      "threshold_abs": null
+    }
+  },
+  "integration": {
+    "height_px": null,
+    "width_px": null,
+    "background_offsets_px": null,
+    "subtract_background": true,
+    "background_strategy": "auto",
+    "mode": "sum",
+    "search_height_px": 40,
+    "height_bounds_px": [
+      3,
+      40
+    ],
+    "peak_padding_px": 3
+  },
+  "slices": {
+    "centers_qsx_Ainv": null,
+    "widths_Ainv": null,
+    "mode": "sum",
+    "width_bounds_Ainv": [
+      0.0002,
+      0.003
+    ],
+    "prominence_relative": 0.1,
+    "min_distance_px": 5,
+    "exclude_center_px": 8
+  },
+  "additional_qy_rows": {
+    "enabled": false,
+    "offsets_qsy_Ainv": null,
+    "offsets_qdy_px": null,
+    "max_rows": 12,
+    "min_separation_px": 10,
+    "prominence_relative": 0.1,
+    "row_settings": {}
+  },
+  "quality": {
+    "min_valid_phi_points": 5,
+    "max_sdd_relative_scatter": 0.02,
+    "max_phi_fit_relative_rmse": 0.03,
+    "max_phi_offset_abs_deg": 5.0,
+    "max_phi_fit_uncertainty_deg": 1.0,
+    "max_chi_near_zero_deg": 2.0,
+    "max_chi_abs_deg": 5.0,
+    "min_omega_frames": 2,
+    "require_omega_both_signs": true,
+    "max_omega_abs_deg": 5.0,
+    "max_omega_scatter_deg": 1.0,
+    "max_alignment_residual_px": 2.0,
+    "max_background_peak_fraction": 0.3,
+    "min_roi_valid_fraction": 0.2,
+    "min_slice_angle_coverage": 0.6,
+    "min_peak_inside_fraction": 0.95
+  },
+  "export": {
+    "per_row": true,
+    "combine_qy_rows": true,
+    "split_phi": false,
+    "phi_basis": "corrected",
+    "zero_phi": "positive",
+    "zero_tolerance_deg": 1e-09,
+    "export_qr": true,
+    "decimals": 7
+  },
+  "output": {
+    "root": null,
+    "figure_formats": [
+      "png",
+      "pdf"
+    ],
+    "dpi": 300
+  }
+}
