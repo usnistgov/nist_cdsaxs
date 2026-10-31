@@ -59,6 +59,7 @@ DEFAULTS = {
     "integration": {
         "height_px": None, "width_px": None,
         "background_offsets_px": None, "subtract_background": True,
+        "allow_independent_backgrounds": False,
         "background_strategy": "auto", "mode": "sum",
         "search_height_px": 40, "height_bounds_px": [3, 40],
         "peak_padding_px": 3,
@@ -232,6 +233,11 @@ def _known_keys(value, template, prefix=""):
             _known_keys(item, template[key], f"{prefix}{key}.")
 
 
+def is_symmetric_background_pair(offsets):
+    """Two nonzero row displacements with equal magnitude and opposite signs."""
+    return len(offsets) == 2 and offsets[0] != 0 and offsets[0] == -offsets[1]
+
+
 def validate(settings):
     _known_keys(settings, DEFAULTS)
     if settings["schema_version"] != 1:
@@ -251,7 +257,7 @@ def validate(settings):
     for section, keys in (
         (None, ("refit_known_constants",)),
         ("corrections", ("footprint", "substrate_absorption")),
-        ("integration", ("subtract_background",)),
+        ("integration", ("subtract_background", "allow_independent_backgrounds")),
         ("additional_qy_rows", ("enabled",)),
         ("export", ("per_row", "combine_qy_rows", "split_phi", "export_qr")),
     ):
@@ -323,6 +329,11 @@ def validate(settings):
             _number(value, "background_offsets_px")
             if int(value) != value:
                 raise ValueError("Background offsets must be integers")
+        if (not settings["integration"]["allow_independent_backgrounds"]
+                and not is_symmetric_background_pair(backgrounds)):
+            raise ValueError("background_offsets_px must be a symmetric [-d, +d] pair; "
+                             "set integration.allow_independent_backgrounds=true "
+                             "to use independent offsets")
     for section in ("integration", "slices"):
         if settings[section]["mode"] not in {"sum", "mean"}:
             raise ValueError(f"{section}.mode must be sum or mean")

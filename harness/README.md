@@ -66,6 +66,7 @@ repository's CSV loader and should describe the desired sample's files.
 | `*.search` | Native peak-search arguments, including pixel widths, exclusions, thresholds, and refinement; null `threshold_abs` derives a threshold above the measured profile baseline |
 | `integration.height_px`, `width_px` | Box dimensions; `null` requests measured-peak-based proposals |
 | `integration.background_offsets_px` | Background displacement along detector rows; these use the native subtraction convention |
+| `integration.allow_independent_backgrounds` | Default `false`: require a symmetric `[-d, +d]` pair. Set `true` to allow independently placed backgrounds |
 | `slices.centers_qsx_Ainv`, `widths_Ainv` | Slice centers in Å⁻¹ and full widths; widths may be a scalar or a matching list |
 | `integration.mode`, `slices.mode` | Independently choose `sum` or `mean` for detector-box integration and qsx slicing |
 
@@ -178,13 +179,28 @@ box height. For height 14 px, gaps are 0–13 px and displacements are 14–27 p
 `distant` searches displacements of 5–9 box heights. `background_strategy` can
 explicitly select either strategy. Set `background_offsets_px: null` to use the
 automatic search; an explicit list fixes the offsets and overrides the strategy.
+The default search selects a common displacement for both sides, minimizing the
+worse background contrast across both boxes and all checked frames. Ties prefer
+the closest pair. Both boxes must be usable; the default never falls back to a
+single box or unequal displacements. Set `allow_independent_backgrounds: true`
+to select the best usable offset on each side separately. Explicit offsets must
+also form a symmetric `[-d, +d]` pair unless that option is enabled. When resuming
+an older run with unequal saved offsets, set `background_offsets_px: null` to
+request a new symmetric pair, or explicitly enable independent backgrounds.
 `subtract_background: false` explicitly disables subtraction.
 
 Preview and final reduction use identical accepted geometry and background
 offsets. Regions that overlap or leave the detector are rejected. Slice coverage
 uses the library's strict mask rule: an angle point touching any masked bin is
-omitted. `coverage.json` records lost frames and reasons. Automatic mode can skip
-an entire inadequately covered slice only with `skip_gap_slices`; review users
+omitted. An entire slice is rejected if its bin is unavailable in the frame nearest
+corrected φ = 0°, even when its overall angular coverage passes the configured
+minimum. This applies to supplied centers and detected peaks on every requested
+qy row. Missing reference-frame data include masked/nonfinite selections and bins
+outside its integrated q range; finite nonpositive intensity alone is not a veto.
+`coverage.json` records the reference frame and corrected angle, its per-slice
+validity/rejection reason, overall coverage, and `skip_reasons`. Rejected bins are
+excluded from slice overlays and exports. Automatic mode can skip rejected slices
+with `skip_gap_slices`; otherwise the reduction enters `needs_review`. Review users
 remove that center or revise its width. Reduction uses measured, unmasked data.
 
 Additional rows are **disabled by default** and require the user's explicit

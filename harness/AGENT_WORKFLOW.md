@@ -22,9 +22,15 @@ script and scientific decisions available to the user.
    Backgrounds should be peak-free: usually adjacent for contact holes and farther
    away for gratings. Adjacent searches must keep the edge-to-edge gap below one
    integration-box height; set background offsets to null to enable that search.
+   Use equal-magnitude top/bottom offsets by default. Enable
+   `integration.allow_independent_backgrounds` only when the user requests
+   independently placed boxes; do not work around symmetric selection failures
+   by supplying unequal offsets. Select a pair usable on both sides.
    Preview and production must use identical accepted settings.
 6. Inspect bowtie/slice overlays. Narrow slices should capture peaks with little
    background. Read coverage.json to identify missing angle points and detector gaps.
+   Reject a whole slice when its bin is unavailable in the frame nearest corrected
+   phi=0, including supplied centers, even if overall angular coverage passes.
    Notify the user of skipped slices with centers, coverage, and reasons.
 7. Additional qy rows require an explicit user request and circular contact holes.
    An automatic-mode setting or a circular-looking pattern alone does not authorize

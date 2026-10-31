@@ -756,13 +756,23 @@ class ReductionRun:
         skipped = []
         for item in result["slices"]:
             if item["skip"]:
+                reasons = []
+                if "invalid_near_zero_frame" in item["skip_reasons"]:
+                    reasons.append(
+                        f"bin unavailable in near-zero frame at corrected phi "
+                        f"{result['reference_phi_deg']:+.6g} deg "
+                        f"({item['reference_frame_reason']})")
+                if "insufficient_angle_coverage" in item["skip_reasons"]:
+                    reasons.append(f"angle coverage {item['angle_coverage']:.1%} below "
+                                   f"{settings['quality']['min_slice_angle_coverage']:.1%}")
+                explanation = "; ".join(reasons)
                 permitted = (self.settings["mode"] == "automatic"
                              and "skip_gap_slices" in self.settings["allowed_decisions"])
-                check(permitted, f"Slice {item['center_qsx_Ainv']:g} A^-1 has inadequate coverage; "
+                check(permitted, f"Slice {item['center_qsx_Ainv']:g} A^-1 rejected: {explanation}; "
                       "remove it from settings or authorize skip_gap_slices in automatic mode")
                 skipped.append(item)
                 self.event(f"Skipped {row['row_id']} slice {item['center_qsx_Ainv']:g} A^-1: "
-                           f"coverage {item['angle_coverage']:.1%}")
+                           f"{explanation}; overall coverage {item['angle_coverage']:.1%}")
             else:
                 accepted.append(item)
                 missing = sum(not point["valid"] for point in item["coverage"])
@@ -785,14 +795,14 @@ class ReductionRun:
         q_bins = [(item["center_qsx_Ainv"] - item["width_Ainv"] / 2,
                    item["center_qsx_Ainv"],
                    item["center_qsx_Ainv"] + item["width_Ainv"] / 2)
-                  for item in result["slices"]]
+                  for item in result["slices"] if not item["skip"]]
         figure = plotting.plot_slice_reduced_dataset(
             integrated, q_bins=q_bins, interpolated_data=False, s=2,
             slice_color="#D55E00", slice_lw=0.8)
         axis = figure.axes[0]
         skipped = [f"{item['center_qsx_Ainv']:.4g}" for item in result["slices"] if item["skip"]]
-        suffix = "; insufficient coverage at " + ", ".join(skipped) if skipped else ""
-        axis.set_title(f"{row['row_id']}: proposed slices{suffix}")
+        suffix = "; rejected: " + ", ".join(skipped) if skipped else ""
+        axis.set_title(f"{row['row_id']}: retained slice proposals{suffix}")
         self.figures(figure, f"07_{row['row_id']}_slices")
         # Measured profiles retain gaps; waterfall is a separate diagnostic.
         fig, ax = plt.subplots(figsize=(7, 5))

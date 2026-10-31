@@ -7,6 +7,7 @@ from scipy.signal import peak_widths
 
 from .. import tools
 from ..reduction import slice_reduced_dataset
+from .config import is_symmetric_background_pair
 
 
 class NeedsReview(ValueError):
@@ -205,10 +206,16 @@ def geometry_proposal(dataset, row, settings):
 
 
 def choose_backgrounds(measurements, row, geometry, settings):
-    """Score native background profiles; adjacent edge gaps are less than height."""
+    """Score native backgrounds as symmetric pairs unless independence is allowed."""
     cfg = settings["integration"]
     h = geometry["height_px"]
     offsets = cfg["background_offsets_px"]
+    independent = cfg["allow_independent_backgrounds"]
+    if offsets is not None and not independent:
+        check(is_symmetric_background_pair(offsets),
+              "Background offsets must be a symmetric [-d, +d] pair; "
+              "set integration.allow_independent_backgrounds=true "
+              "to use independent offsets")
     if offsets is None:
         strategy = cfg["background_strategy"]
         if strategy == "auto":
@@ -248,11 +255,23 @@ def choose_backgrounds(measurements, row, geometry, settings):
             raise NeedsReview(f"Background offset {offset} is outside usable detector coverage")
     check(scored, "No usable background regions; specify different offsets")
     if cfg["background_offsets_px"] is None:
-        selected = []
-        for sign in (-1, 1):
-            side = [item for item in scored if np.sign(item[0]) == sign]
-            if side:
-                selected.append(min(side, key=lambda item: item[1]))
+        if independent:
+            selected = []
+            for sign in (-1, 1):
+                side = [item for item in scored if np.sign(item[0]) == sign]
+                check(side, "No usable background region on one side; "
+                      "specify different offsets")
+                selected.append(min(side, key=lambda item: (item[1], abs(item[0]))))
+        else:
+            scores_by_offset = dict(scored)
+            pairs = [(max(score, scores_by_offset[-distance]), distance)
+                     for distance, score in scored
+                     if distance > 0 and -distance in scores_by_offset]
+            check(pairs, "No usable symmetric background pair; adjust the search "
+                  "or explicitly allow independent backgrounds")
+            _, distance = min(pairs)
+            selected = [(-distance, scores_by_offset[-distance]),
+                        (distance, scores_by_offset[distance])]
     else:
         selected = scored
     return [item[0] for item in selected], float(max(item[1] for item in selected))
@@ -308,7 +327,9 @@ def slice_coverage(dataset, center, width, native_slice=None):
 
 def slice_proposal(integrated, settings):
     cfg = settings["slices"]
-    reference = min(integrated.datas, key=lambda d: abs(d.sample_phi_deg))
+    reference_index = min(range(len(integrated.datas)),
+                          key=lambda index: abs(integrated.datas[index].sample_phi_deg))
+    reference = integrated.datas[reference_index]
     centers = cfg["centers_qsx_Ainv"]
     detected_widths = None
     if centers is None:
@@ -348,10 +369,19 @@ def slice_proposal(integrated, settings):
             check(width < min(neighbors), "A slice width reaches an adjacent peak center")
         coverage = slice_coverage(integrated, center, width, native_slice=native_slice)
         fraction = sum(item["valid"] for item in coverage) / len(coverage)
+        reference_coverage = coverage[reference_index]
+        skip_reasons = []
+        if not reference_coverage["valid"]:
+            skip_reasons.append("invalid_near_zero_frame")
+        if fraction < settings["quality"]["min_slice_angle_coverage"]:
+            skip_reasons.append("insufficient_angle_coverage")
         proposals.append({"center_qsx_Ainv": float(center), "width_Ainv": float(width),
                           "angle_coverage": fraction, "coverage": coverage,
-                          "skip": fraction < settings["quality"]["min_slice_angle_coverage"]})
-    return {"slices": proposals, "reference_frame": reference.data2d.name, "mode": cfg["mode"]}
+                          "reference_frame_valid": reference_coverage["valid"],
+                          "reference_frame_reason": reference_coverage["reason"],
+                          "skip_reasons": skip_reasons, "skip": bool(skip_reasons)})
+    return {"slices": proposals, "reference_frame": reference.data2d.name,
+            "reference_phi_deg": float(reference.sample_phi_deg), "mode": cfg["mode"]}
 
 
 def phi_figure(result):

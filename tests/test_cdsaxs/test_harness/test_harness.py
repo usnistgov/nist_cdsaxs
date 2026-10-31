@@ -13,6 +13,7 @@ import tifffile
 from cdsaxs.harness.config import DEFAULTS, load_settings, validate, write_json
 from cdsaxs.harness.diagnostics import (
     NeedsReview, box_ranges, choose_backgrounds, fit_phi, row_center, slice_coverage,
+    slice_proposal,
 )
 from cdsaxs.harness.runner import (
     ReductionRun, apply_intensity_corrections, integrate_row, load_dataset,
@@ -69,6 +70,7 @@ def test_json_profiles_paths_null_and_zero(tmp_path):
     cfg = load_settings(tmp_path / "config.json")
     assert cfg["offsets"]["sample_phi_offset_deg"] == 0.0
     assert cfg["integration"]["height_px"] is None
+    assert cfg["integration"]["allow_independent_backgrounds"] is False
     assert cfg["input"]["data_directory"] == str(tmp_path / "raw")
     (tmp_path / "bad.json").write_text('{"calibration":{"sdd_cm":NaN}}')
     with pytest.raises(ValueError, match="Nonfinite"):
@@ -141,6 +143,75 @@ def test_gap_coverage_and_background_boundaries(settings):
     assert report[0]["reason"] == "masked_or_nonfinite_selection"
     with pytest.raises(NeedsReview, match="leaves detector"):
         integrate_row(dataset, row, {**geometry, "background_offsets_px": [50]})
+
+
+@pytest.mark.parametrize("phi_offset,masked_nominal,expected_skip", [
+    (0.0, 0, True), (0.0, -10, False),
+    (9.9, -10, True), (9.9, 0, False),
+])
+def test_near_zero_slice_veto_uses_corrected_phi_and_native_mask(
+        settings, phi_offset, masked_nominal, expected_skip):
+    write_images(settings, angles=(-30, -10, 0, 10, 30))
+    settings["offsets"]["sample_phi_offset_deg"] = phi_offset
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    masked = next(data for data in dataset.datas.values()
+                  if data.metadata["sample_phi_deg"] == masked_nominal)
+    masked.mask[:, 80] = True
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    geometry = {"height_px": 7, "width_px": 100,
+                "background_offsets_px": None, "mode": "sum"}
+    integrated = integrate_row(dataset, row, geometry)
+    reference = min(integrated.datas, key=lambda data: abs(data.sample_phi_deg))
+    center = float(reference.qsx[80 - reference.limits_axis1[0]])
+    settings["slices"].update(centers_qsx_Ainv=[center], widths_Ainv=0.001)
+    proposal = slice_proposal(integrated, settings)
+    item = proposal["slices"][0]
+    assert proposal["reference_frame"] == reference.data2d.name
+    assert proposal["reference_phi_deg"] == pytest.approx(reference.sample_phi_deg)
+    assert item["angle_coverage"] == pytest.approx(0.8)
+    assert item["skip"] is expected_skip
+    assert item["reference_frame_valid"] is not expected_skip
+    assert item["skip_reasons"] == (["invalid_near_zero_frame"] if expected_skip else [])
+    assert item["reference_frame_reason"] == (
+        "masked_or_nonfinite_selection" if expected_skip else None)
+    # Intensity sign is a later export filter, rather than geometric coverage.
+    if not expected_skip:
+        reference.Iq[:] = -1.0
+        assert not slice_proposal(integrated, settings)["slices"][0]["skip"]
+
+
+def test_near_zero_slice_veto_removes_supplied_center_from_every_export(
+        settings, tmp_path):
+    write_images(settings, angles=(-30, -10, 0, 10, 30))
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    reference = min(dataset.datas.values(), key=lambda data: abs(data.sample_phi_deg))
+    reference.mask[:, 80] = True
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    geometry = {"height_px": 7, "width_px": 100,
+                "background_offsets_px": None, "mode": "sum"}
+    integrated = integrate_row(dataset, row, geometry)
+    central = min(integrated.datas, key=lambda data: abs(data.sample_phi_deg))
+    gap_center, valid_center = (float(central.qsx[x - central.limits_axis1[0]])
+                                for x in (80, 95))
+    settings["slices"].update(centers_qsx_Ainv=[gap_center, valid_center], widths_Ainv=0.001)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["skip_gap_slices"]
+    settings["export"]["split_phi"] = True
+    run = ReductionRun(settings, tmp_path / "central_veto")
+    items, proposal = run.choose_slices(integrated, row)
+    assert [item["center_qsx_Ainv"] for item in items] == [valid_center]
+    assert run.state["skipped_slices"]["qy0"][0]["skip_reasons"] == ["invalid_near_zero_frame"]
+    assert any("near-zero frame" in event and "80.0%" in event for event in run.state["events"])
+    run.export(dataset, [(row, geometry, integrated, items, proposal)])
+    for group in ("all", "posPhi", "negPhi"):
+        path = run.directory / f"csv/sample_{group}.csv"
+        with path.open(newline="") as handle:
+            assert len(next(csv.reader(handle))) == 5
+        records = np.atleast_2d(np.genfromtxt(path, delimiter=",", skip_header=1))
+        np.testing.assert_allclose(records[:, 0], round(valid_center, 4))
+    reported = json.loads((run.directory / "coverage.json").read_text())["qy0"]
+    assert reported["slices"][0]["reference_frame_valid"] is False
+    assert reported["slices"][0]["skip_reasons"] == ["invalid_near_zero_frame"]
 
 
 def test_box_bounds_use_native_fractional_center_and_reject_clipping(settings):
@@ -223,6 +294,114 @@ def test_explicit_background_offsets_override_adjacent_search(settings):
         [(data, [])], {"row_id": "qy0", "offset_qdy_px": 0},
         {"height_px": 7, "width_px": 100}, settings)
     assert offsets == [-21, 21]
+
+
+@pytest.fixture
+def asymmetric_background_scene(settings):
+    """One side is clean only farther away; the other is clean only nearby."""
+    write_images(settings, angles=(0,))
+    settings["integration"].update(background_offsets_px=None, background_strategy="adjacent")
+    data = next(iter(load_dataset(
+        settings, settings["calibration"], settings["offsets"]).datas.values()))
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    geometry = {"height_px": 7, "width_px": 100}
+    yr, _ = box_ranges(data, row, geometry)
+    data.image[:] = 30
+    data.image[yr[0]:yr[1], 80] += 2000
+    data.image[yr[0] - 4, 80] += 300  # Contaminates negative offsets 7–10.
+    data.image[yr[1] + 9, 80] += 100  # Contaminates positive offsets 10–13.
+    return data, row, geometry
+
+
+@pytest.mark.parametrize("independent,expected", [
+    (False, [-11, 11]), (True, [-11, 7]),
+])
+def test_background_pairing_uses_common_offset_unless_allowed(
+        settings, asymmetric_background_scene, independent, expected):
+    data, row, geometry = asymmetric_background_scene
+    settings["integration"]["allow_independent_backgrounds"] = independent
+    offsets, score = choose_backgrounds([(data, [])], row, geometry, settings)
+    assert offsets == expected
+    # The symmetric choice tolerates the weaker 100-count contaminant, rather
+    # than the 300-count feature. Independently placed boxes avoid both.
+    assert score == pytest.approx(0 if independent else 100 / 7 / 2000)
+
+
+def test_symmetric_background_pair_checks_all_representative_frames(
+        settings, asymmetric_background_scene):
+    data, row, geometry = asymmetric_background_scene
+    second = deepcopy(data)
+    yr, _ = box_ranges(data, row, geometry)
+    second.image[yr[0] - 4, 80] = 30 + 150
+    second.image[yr[1] + 9, 80] = 30 + 600
+    # The farther pair preferred in the first frame contains a stronger feature
+    # in the second. Equal worst-case scores at nearby distances prefer touching.
+    offsets, score = choose_backgrounds([(data, []), (second, [])], row, geometry, settings)
+    assert offsets == [-7, 7]
+    assert score == pytest.approx(300 / 7 / 2000)
+
+
+@pytest.mark.parametrize("independent", [False, True])
+def test_background_pairing_with_no_common_unmasked_distance(
+        settings, asymmetric_background_scene, independent):
+    data, row, geometry = asymmetric_background_scene
+    settings["integration"]["allow_independent_backgrounds"] = independent
+    settings["quality"]["min_roi_valid_fraction"] = 1.0
+    yr, xr = box_ranges(data, row, geometry)
+    data.mask[yr[0] - 4, xr[0]:xr[1]] = True
+    data.mask[yr[1] + 9, xr[0]:xr[1]] = True
+    if independent:
+        offsets, _ = choose_backgrounds([(data, [])], row, geometry, settings)
+        assert offsets == [-11, 7]
+    else:
+        with pytest.raises(NeedsReview, match="No usable symmetric background pair"):
+            choose_backgrounds([(data, [])], row, geometry, settings)
+
+
+@pytest.mark.parametrize("independent", [False, True])
+def test_automatic_backgrounds_require_both_sides(
+        settings, asymmetric_background_scene, independent):
+    data, row, geometry = asymmetric_background_scene
+    settings["integration"]["allow_independent_backgrounds"] = independent
+    yr, xr = box_ranges(data, row, geometry)
+    data.mask[yr[0] - 13:yr[0], xr[0]:xr[1]] = True
+    with pytest.warns(RuntimeWarning, match="Mean of empty slice"):
+        with pytest.raises(NeedsReview, match="No usable (symmetric background pair|background region on one side)"):
+            choose_backgrounds([(data, [])], row, geometry, settings)
+
+
+def test_distant_backgrounds_also_default_to_a_symmetric_pair(
+        settings, asymmetric_background_scene):
+    data, row, geometry = asymmetric_background_scene
+    settings["integration"]["background_strategy"] = "distant"
+    offsets, _ = choose_backgrounds([(data, [])], row, geometry, settings)
+    assert offsets == [-35, 35]
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "false"])
+def test_background_independence_setting_requires_boolean(settings, value):
+    settings["integration"]["allow_independent_backgrounds"] = value
+    with pytest.raises(ValueError, match="allow_independent_backgrounds.*boolean"):
+        validate(settings)
+
+
+@pytest.mark.parametrize("offsets", [[-9, 7], [-9], [-9, 7, 9], [0, 0]])
+def test_explicit_backgrounds_require_symmetry_by_default(settings, offsets):
+    settings["integration"]["background_offsets_px"] = offsets
+    with pytest.raises(ValueError, match="symmetric.*allow_independent_backgrounds"):
+        validate(settings)
+
+
+def test_explicit_asymmetric_backgrounds_require_and_honor_opt_in(
+        settings, asymmetric_background_scene):
+    data, row, geometry = asymmetric_background_scene
+    settings["integration"]["background_offsets_px"] = [-13, 9]
+    with pytest.raises(NeedsReview, match="symmetric.*allow_independent_backgrounds"):
+        choose_backgrounds([(data, [])], row, geometry, settings)
+    settings["integration"]["allow_independent_backgrounds"] = True
+    validate(settings)
+    offsets, _ = choose_backgrounds([(data, [])], row, geometry, settings)
+    assert offsets == [-13, 9]
 
 
 def test_native_waterfall_does_not_reset_after_eight_slices(settings, tmp_path, monkeypatch):

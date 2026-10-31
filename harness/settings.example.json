@@ -109,6 +109,7 @@
     "height_px": null,
     "width_px": null,
     "background_offsets_px": null,
+    "allow_independent_backgrounds": false,
     "subtract_background": true,
     "background_strategy": "auto",
     "mode": "sum",
