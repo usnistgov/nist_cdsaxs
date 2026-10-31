@@ -14,6 +14,7 @@ import numpy as np
 
 from ..data.dataset import Dataset, ReducedDataset, ReducedSlices
 from ..loaders import load_data as loaders
+from ..plotting import plotting
 from ..reduction import slice_reduced_dataset
 from .config import fingerprint, merge, read_json, sample_settings, slug, write_json
 from .diagnostics import (
@@ -172,19 +173,18 @@ def search_arguments(data, settings):
     as peaks. The automatic absolute threshold sits above the measured baseline.
     """
     arguments = {key: value for key, value in settings.items() if value is not None}
-    reserved = {"show_plot", "update", "beam_center_guess", "pitch_nm", "peak_orders"}
+    reserved = {"show_plot", "update", "beam_center_guess", "pitch_nm", "peak_orders",
+                "return_diagnostics"}
     check(not reserved.intersection(arguments), "Peak search contains harness-controlled arguments")
     box_keys = {"width_qdy_px", "width_qdx_px", "range_qdy_px", "range_qdx_px",
                 "center_qdy", "center_qdx", "shift_box_qdy_px", "shift_box_qdx_px"}
     yr, xr = data.get_box_dims(**{key: value for key, value in arguments.items() if key in box_keys})
-    image = np.where(data.mask[yr[0]:yr[1], xr[0]:xr[1]], np.nan,
-                     data.image[yr[0]:yr[1], xr[0]:xr[1]])
     axis = arguments.get("peak_axis", 1 if xr[1] - xr[0] >= yr[1] - yr[0] else 0)
     axis = {"qdx": 1, "qdy": 0}.get(axis, axis)
     check(axis in (0, 1), "Peak axis must be qdx, qdy, 0, or 1")
-    profile = (np.nanmean(image, axis=1 - axis) if arguments.get("integration_mode") == "mean"
-               else np.nansum(image, axis=1 - axis))
-    profile[np.isnan(image).any(axis=1 - axis)] = np.nan
+    profile, _, _ = data.slice_box(
+        limits_axis0=yr, limits_axis1=xr, axis=1 - axis,
+        mode=arguments.get("integration_mode", "sum"))
     values = profile[np.isfinite(profile)]
     if arguments.get("log_scale", True):
         values = np.log10(values[values > 0])
@@ -249,7 +249,10 @@ def phi_groups(dataset, settings):
 class ReductionRun:
     def __init__(self, settings, directory, accept=()):
         self.settings = deepcopy(settings)
-        self.resolved = deepcopy(settings)
+        # Preserve compatibility with saved configurations requesting PDF/SVG,
+        # while recording the PNG-only output used by the harness.
+        self.settings["output"]["figure_formats"] = ["png"]
+        self.resolved = deepcopy(self.settings)
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.accept = set(accept)
@@ -261,7 +264,7 @@ class ReductionRun:
               "This resume directory belongs to a different sample")
         self.state["status"] = "running"
         self.state["sample"] = settings["sample_name"]
-        generate(self.directory, settings)
+        generate(self.directory, self.settings)
         write_json(self.directory / "invocation_settings.json", settings)
         try:
             self.files = selected_files(settings)
@@ -363,11 +366,10 @@ class ReductionRun:
             for index, item in enumerate(figure):
                 self.figures(item, f"{stem}_{index + 1}")
             return
-        for extension in self.settings["output"]["figure_formats"]:
-            path = self.directory / "figures" / f"{slug(stem)}.{extension}"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            figure.savefig(path, dpi=self.settings["output"]["dpi"], bbox_inches="tight")
-            self.state["artifacts"].append(str(path.relative_to(self.directory)))
+        path = self.directory / "figures" / f"{slug(stem)}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(path, dpi=self.settings["output"]["dpi"], bbox_inches="tight")
+        self.state["artifacts"].append(str(path.relative_to(self.directory)))
         plt.close(figure)
 
     def checkpoint(self, name, relevant, compute, decisions=(), supplied=False):
@@ -521,24 +523,19 @@ class ReductionRun:
             for data in frames:
                 try:
                     search = search_arguments(data, cfg["search"])
-                    orders = cfg["peak_orders"]
-                    if orders is None:
-                        check(search.get("peak_axis", 1) in (1, "qdx"),
+                    sdd, scatter, figure, diagnostic = data.find_sdd_from_reference_peaks(
+                        cfg["pitch_nm"], peak_orders=cfg["peak_orders"],
+                        show_plot=True, update=False, return_diagnostics=True, **search)
+                    self.figures(figure, f"01_phi_peaks_{slug(data.name)}")
+                    orders = diagnostic["peak_orders"]
+                    if cfg["peak_orders"] is None:
+                        check(diagnostic["peak_axis"] == 1,
                               "Phi order inference requires horizontal peaks")
-                        peaks, _, _, _ = data.find_peaks2D_one_axis(show_plot=False, **search)
-                        peaks = peaks[np.argsort(peaks[:, 1])]
-                        peak_q = np.interp(peaks[:, 1], np.arange(len(data.qbx_1d)), data.qbx_1d)
-                        fundamental_q = 2 * np.pi / (cfg["pitch_nm"] * 10)
-                        orders = np.abs(np.rint(peak_q / fundamental_q)).astype(int).tolist()
                         check(orders and all(order > 0 for order in orders),
                               "Inferred zero peak order; exclude direct beam or supply phi.peak_orders")
                         if inferred_orders:
                             check(orders == inferred_orders[0]["orders"],
                                   "Detected peak orders changed across phi; tune search or supply fixed orders")
-                    sdd, scatter, figure = data.find_sdd_from_reference_peaks(
-                        cfg["pitch_nm"], peak_orders=orders,
-                        show_plot=True, update=False, **search)
-                    self.figures(figure, f"01_phi_peaks_{slug(data.name)}")
                     if not np.isfinite(sdd) or not np.isfinite(scatter):
                         raise ValueError("nonfinite peak estimate")
                     angles.append(float(data.metadata["sample_phi_deg"]))
@@ -785,14 +782,17 @@ class ReductionRun:
 
     def slice_overlay(self, integrated, result, row):
         import matplotlib.pyplot as plt
-        figure = integrated.plot_data(interpolated_data=False, s=2)
+        q_bins = [(item["center_qsx_Ainv"] - item["width_Ainv"] / 2,
+                   item["center_qsx_Ainv"],
+                   item["center_qsx_Ainv"] + item["width_Ainv"] / 2)
+                  for item in result["slices"]]
+        figure = plotting.plot_slice_reduced_dataset(
+            integrated, q_bins=q_bins, interpolated_data=False, s=2,
+            slice_color="#D55E00", slice_lw=0.8)
         axis = figure.axes[0]
-        for item in result["slices"]:
-            center, width = item["center_qsx_Ainv"], item["width_Ainv"]
-            color = "0.5" if item["skip"] else "#D55E00"
-            axis.axvspan(center - width / 2, center + width / 2, alpha=0.2, color=color)
-            axis.axvline(center, color=color, lw=0.8)
-        axis.set_title(f"{row['row_id']}: proposed slices; grey = insufficient coverage")
+        skipped = [f"{item['center_qsx_Ainv']:.4g}" for item in result["slices"] if item["skip"]]
+        suffix = "; insufficient coverage at " + ", ".join(skipped) if skipped else ""
+        axis.set_title(f"{row['row_id']}: proposed slices{suffix}")
         self.figures(figure, f"07_{row['row_id']}_slices")
         # Measured profiles retain gaps; waterfall is a separate diagnostic.
         fig, ax = plt.subplots(figsize=(7, 5))
@@ -805,8 +805,14 @@ class ReductionRun:
         self.figures(fig, f"07_{row['row_id']}_coverage")
 
     def export(self, dataset, reductions):
-        import matplotlib.pyplot as plt
-        cfg = self.settings["export"]
+        cfg = deepcopy(self.settings["export"])
+        central_only = len(reductions) == 1 and reductions[0][0]["row_id"] == "qy0"
+        if central_only:
+            # A single central row needs one export, regardless of which
+            # native export setting selected it.
+            cfg["combine_qy_rows"] = cfg["combine_qy_rows"] or cfg["per_row"]
+            cfg["per_row"] = False
+        self.resolved["export"] = deepcopy(cfg)
         groups = {"all": set(dataset.datas)}
         if cfg["split_phi"]:
             groups.update(phi_groups(dataset, self.settings))
@@ -830,48 +836,23 @@ class ReductionRun:
                 check(any(np.any(np.isfinite(data.Iq) & (data.Iq > 0)) for data in slices.data),
                       f"No positive intensity measurements remain in {row['row_id']} / {group}")
                 combined.add_slices(slices)
-                stem = f"{slug(self.settings['sample_name'])}_{row['row_id']}_{group}"
+                row_suffix = "" if central_only else f"_{row['row_id']}"
+                stem = f"{slug(self.settings['sample_name'])}{row_suffix}_{group}"
                 if cfg["per_row"]:
                     slices.export_reduced_slices(csv_directory / f"{stem}.csv",
                                                  export_qr=cfg["export_qr"], decimals=cfg["decimals"])
                     exports.append(f"csv/{stem}.csv")
-                # Long table retains nonpositive values and frame/row provenance.
-                long_path = csv_directory / f"{stem}_measurements.csv"
-                with long_path.open("w", newline="", encoding="utf-8") as handle:
-                    writer = csv.writer(handle)
-                    writer.writerow(["row", "frame", "nominal_phi_deg", "corrected_phi_deg",
-                                     "slice_center_qsx_Ainv", "qsx_Ainv", "qsy_Ainv", "qsz_Ainv",
-                                     "qsr_Ainv", "intensity_au"])
-                    for item in items:
-                        for profile in subset.datas:
-                            selection = np.flatnonzero(abs(profile.qsx - item["center_qsx_Ainv"]) <= item["width_Ainv"] / 2)
-                            if not len(selection) or profile.mask[selection].any():
-                                continue
-                            intensity = (np.sum(profile.Iq[selection]) if proposal["mode"] == "sum"
-                                         else np.mean(profile.Iq[selection]))
-                            coordinates = [float(np.mean(getattr(profile, q)[selection]))
-                                           for q in ("qsx", "qsy", "qsz", "qsr")]
-                            writer.writerow([row["row_id"], profile.data2d.name,
-                                             profile.data2d.metadata["sample_phi_deg"], profile.sample_phi_deg,
-                                             item["center_qsx_Ainv"], *coordinates, float(intensity)])
-                exports.append(f"csv/{long_path.name}")
-                fig, ax = plt.subplots(figsize=(7, 5))
-                removed = 0
-                for index, data in enumerate(slices.data):
-                    valid = np.isfinite(data.Iq) & (data.Iq > 0)
-                    removed += int((~valid).sum())
-                    order = np.argsort(data.qsz)
-                    ax.plot(data.qsz[order], data.Iq[order] * 10.0 ** (index % 8),
-                            ".-", ms=2, lw=0.6, label=f"{data.qsx:g}")
-                ax.set(xlabel=r"$q_{s,z}$ (Å$^{-1}$)", ylabel="Offset normalized intensity (a.u.)",
-                       yscale="log", title=f"{row['row_id']} / {group}")
+                fig, ax = plotting.plot_reduced_slices(slices, offset_order=2)
+                ax.set_title(f"{row['row_id']} / {group}")
                 self.figures(fig, f"08_{stem}_reduced")
+                removed = sum(int((~(np.isfinite(data.Iq) & (data.Iq > 0))).sum())
+                              for data in slices.data)
                 if removed:
-                    self.event(f"{stem}: native CSV excludes {removed} nonpositive/nonfinite points; "
-                               "measurements CSV preserves finite nonpositive intensities")
+                    self.event(f"{stem}: native CSV excludes {removed} nonpositive/nonfinite points")
                 coverage[row["row_id"]] = proposal
             if cfg["combine_qy_rows"] and combined.data:
-                stem = f"{slug(self.settings['sample_name'])}_qyall_{group}"
+                row_suffix = "" if central_only else "_qyall"
+                stem = f"{slug(self.settings['sample_name'])}{row_suffix}_{group}"
                 combined.export_reduced_slices(csv_directory / f"{stem}.csv",
                                                export_qr=cfg["export_qr"], decimals=cfg["decimals"])
                 exports.append(f"csv/{stem}.csv")

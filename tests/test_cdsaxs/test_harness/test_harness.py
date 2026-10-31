@@ -11,7 +11,9 @@ import pytest
 import tifffile
 
 from cdsaxs.harness.config import DEFAULTS, load_settings, validate, write_json
-from cdsaxs.harness.diagnostics import NeedsReview, fit_phi, row_center, slice_coverage
+from cdsaxs.harness.diagnostics import (
+    NeedsReview, box_ranges, choose_backgrounds, fit_phi, row_center, slice_coverage,
+)
 from cdsaxs.harness.runner import (
     ReductionRun, apply_intensity_corrections, integrate_row, load_dataset,
     phi_groups, run_batch,
@@ -141,6 +143,121 @@ def test_gap_coverage_and_background_boundaries(settings):
         integrate_row(dataset, row, {**geometry, "background_offsets_px": [50]})
 
 
+def test_box_bounds_use_native_fractional_center_and_reject_clipping(settings):
+    write_images(settings, angles=(0,))
+    settings["calibration"]["center_px"] = [40.2, 60.2]
+    data = next(iter(load_dataset(
+        settings, settings["calibration"], settings["offsets"]).datas.values()))
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    geometry = {"height_px": 6, "width_px": 100}
+    expected = data.get_box_dims_size(6, 100, center=(40.2, 60.2))
+    assert box_ranges(data, row, geometry) == expected
+    assert expected == ((38, 44), (11, 111))
+    with pytest.raises(NeedsReview, match="exceeds"):
+        box_ranges(data, row, {"height_px": 1000, "width_px": 100})
+
+
+@pytest.mark.parametrize("height", [7, 14])
+@pytest.mark.parametrize("strategy,sample_kind", [
+    ("adjacent", None), ("auto", "contact_holes"), ("auto", "circular_contact_holes"),
+])
+def test_adjacent_background_gap_is_less_than_box_height(
+        settings, height, strategy, sample_kind, monkeypatch):
+    write_images(settings, angles=(0,))
+    settings["calibration"]["center_px"] = [40.2, 60.2]
+    settings["sample_kind"] = sample_kind
+    settings["integration"].update(background_offsets_px=None, background_strategy=strategy)
+    data = next(iter(load_dataset(
+        settings, settings["calibration"], settings["offsets"]).datas.values()))
+    # Background contrast decreases with distance: cleaner far boxes must not
+    # escape the adjacent gap limit, including at a fractional beam center.
+    amplitude = np.maximum(40 - abs(np.arange(81) - 40.2), 0)
+    pattern = np.zeros(121)
+    pattern[80] = 100
+    data.image[:] = 30 + amplitude[:, None] * pattern
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    geometry = {"height_px": height, "width_px": 100}
+    yr, xr = box_ranges(data, row, geometry)
+    visited_gaps = []
+    native_mean = data.mean_box
+
+    def record_mean(limits_axis0, limits_axis1, axis):
+        if limits_axis0 != yr:
+            lo, hi = limits_axis0
+            assert hi - lo == height
+            assert limits_axis1 == xr
+            gap = yr[0] - hi if hi <= yr[0] else lo - yr[1]
+            assert 0 <= gap < height
+            visited_gaps.append(gap)
+        return native_mean(limits_axis0, limits_axis1, axis)
+
+    monkeypatch.setattr(data, "mean_box", record_mean)
+    offsets, score = choose_backgrounds([(data, [])], row, geometry, settings)
+    assert offsets == [-(2 * height - 1), 2 * height - 1]
+    assert min(visited_gaps) == 0
+    assert max(visited_gaps) == height - 1
+    assert score > 0  # Cleaner far boxes exist but were excluded.
+
+
+def test_adjacent_background_search_holds_when_nearby_regions_are_masked(settings):
+    write_images(settings, angles=(0,))
+    settings["integration"].update(background_offsets_px=None, background_strategy="adjacent")
+    data = next(iter(load_dataset(
+        settings, settings["calibration"], settings["offsets"]).datas.values()))
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    geometry = {"height_px": 7, "width_px": 100}
+    yr, xr = box_ranges(data, row, geometry)
+    data.mask[yr[0] - 13:yr[0], xr[0]:xr[1]] = True
+    data.mask[yr[1]:yr[1] + 13, xr[0]:xr[1]] = True
+    with pytest.warns(RuntimeWarning, match="Mean of empty slice"):
+        with pytest.raises(NeedsReview, match="No usable background regions"):
+            choose_backgrounds([(data, [])], row, geometry, settings)
+
+
+def test_explicit_background_offsets_override_adjacent_search(settings):
+    write_images(settings, angles=(0,))
+    settings["integration"].update(background_offsets_px=[-21, 21], background_strategy="adjacent")
+    data = next(iter(load_dataset(
+        settings, settings["calibration"], settings["offsets"]).datas.values()))
+    offsets, _ = choose_backgrounds(
+        [(data, [])], {"row_id": "qy0", "offset_qdy_px": 0},
+        {"height_px": 7, "width_px": 100}, settings)
+    assert offsets == [-21, 21]
+
+
+def test_native_waterfall_does_not_reset_after_eight_slices(settings, tmp_path, monkeypatch):
+    from cdsaxs.plotting import plotting
+    write_images(settings, angles=(0,))
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    row = {"row_id": "qy0", "target_qsy_Ainv": 0.0, "offset_qdy_px": None}
+    geometry = {"height_px": 7, "width_px": 100,
+                "background_offsets_px": None, "mode": "sum"}
+    integrated = integrate_row(dataset, row, geometry)
+    centers = integrated.datas[0].qsx[np.linspace(0, 99, 12, dtype=int)]
+    items = [{"center_qsx_Ainv": float(center), "width_Ainv": 1e-7} for center in centers]
+    settings["export"]["split_phi"] = False
+    observed = []
+    native = plotting.plot_reduced_slices
+
+    def capture(slices, **kwargs):
+        before = [data.Iq.copy() for data in slices.data]
+        figure, axes = native(slices, **kwargs)
+        ordered = sorted(slices.data, key=lambda data: float(data.qsx))
+        np.testing.assert_allclose(axes.lines[8].get_ydata(), ordered[8].Iq * 1e-16)
+        assert axes.get_legend() is not None
+        for old, data in zip(before, slices.data):
+            np.testing.assert_array_equal(old, data.Iq)
+        observed.append(axes)
+        return figure, axes
+
+    monkeypatch.setattr(plotting, "plot_reduced_slices", capture)
+    run = ReductionRun(settings, tmp_path / "native_waterfall")
+    run.export(dataset, [(row, geometry, integrated, items, {"mode": "sum"})])
+    assert len(observed) == 1
+    assert len(observed[0].lines) == 12
+    assert (run.directory / "csv/sample_all.csv").is_file()
+
+
 @pytest.mark.parametrize("policy", ["positive", "negative", "separate", "exclude"])
 def test_phi_partition_disjoint_and_corrected(settings, policy):
     write_images(settings, angles=(-1, 0, 1))
@@ -182,7 +299,11 @@ def test_automatic_permissions_and_quality(settings, tmp_path):
         authorized.checkpoint("slices:qy0", {}, lambda: {"failures": ["bad fit"]}, supplied=True)
 
 
-def test_end_to_end_automatic_rows_and_native_csv(settings, tmp_path):
+@pytest.mark.parametrize(
+    "per_row,combine_qy_rows", [(True, True), (True, False), (False, True)],
+)
+def test_end_to_end_automatic_rows_and_native_csv(
+        settings, tmp_path, per_row, combine_qy_rows):
     write_images(settings, extra_rows=True)
     settings["mode"] = "automatic"
     settings["allowed_decisions"] = [
@@ -191,26 +312,33 @@ def test_end_to_end_automatic_rows_and_native_csv(settings, tmp_path):
     settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
     settings["integration"]["search_height_px"] = 12
     settings["export"]["split_phi"] = True
+    settings["export"].update(per_row=per_row, combine_qy_rows=combine_qy_rows)
     run = ReductionRun(settings, tmp_path / "run")
     result = run.run()
     assert result["status"] == "complete", run.state["events"]
     rows = json.loads((tmp_path / "run" / "row_reductions.json").read_text())
     assert len(rows) == 3
-    combined = tmp_path / "run" / "csv" / "sample_qyall_all.csv"
-    assert combined.is_file()
-    with combined.open(newline="") as handle:
+    row_ids = [row["row"]["row_id"] for row in rows] if per_row else []
+    if combine_qy_rows:
+        row_ids.append("qyall")
+    expected = {f"sample_{row_id}_{group}.csv"
+                for row_id in row_ids for group in ("all", "posPhi", "negPhi")}
+    csv_directory = tmp_path / "run" / "csv"
+    assert {path.name for path in csv_directory.glob("*.csv")} == expected
+    exported = csv_directory / f"sample_{row_ids[-1]}_all.csv"
+    with exported.open(newline="") as handle:
         headers = next(csv.reader(handle))
     assert len(headers) > 5
-    measurements = tmp_path / "run" / "csv" / "sample_qy_001_all_measurements.csv"
-    with measurements.open(newline="") as handle:
-        records = list(csv.DictReader(handle))
-    assert records
-    assert all(float(record["qsr_Ainv"]) > 0 for record in records)
+    records = np.atleast_2d(np.genfromtxt(exported, delimiter=",", skip_header=1))
+    radial = records[:, 3::5]
+    assert np.isfinite(radial).any()
+    assert np.all(radial[np.isfinite(radial)] > 0)
     # A resumed full reduction reproduces CSV values without accumulating corrections.
-    original = combined.read_bytes()
+    original = exported.read_bytes()
     resumed = ReductionRun(settings, tmp_path / "run")
     assert resumed.run()["status"] == "complete"
-    assert combined.read_bytes() == original
+    assert exported.read_bytes() == original
+    assert {path.name for path in csv_directory.glob("*.csv")} == expected
 
 
 def test_detect_additional_qy_rows(settings):
@@ -221,6 +349,39 @@ def test_detect_additional_qy_rows(settings):
     result = detect_qy_rows(data, settings)
     expected = sorted([float(data.qsy[25, 60]), float(data.qsy[55, 60])])
     np.testing.assert_allclose(result["offsets_qsy_Ainv"], expected)
+
+
+@pytest.mark.parametrize(
+    "per_row,combine_qy_rows", [(True, True), (True, False), (False, True)],
+)
+@pytest.mark.parametrize("split_phi", [False, True])
+def test_central_only_exports_once_without_qy_labels(
+        settings, tmp_path, per_row, combine_qy_rows, split_phi):
+    # Visible extra rows and permission to choose offsets do not enable them.
+    write_images(settings, extra_rows=True)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = [
+        "choose_slice_locations_and_widths", "skip_gap_slices", "choose_qy_offsets",
+    ]
+    settings["export"].update(
+        per_row=per_row, combine_qy_rows=combine_qy_rows, split_phi=split_phi,
+    )
+    run = ReductionRun(settings, tmp_path / "central_only")
+    assert run.run()["status"] == "complete", run.state["events"]
+    rows = json.loads((run.directory / "row_reductions.json").read_text())
+    assert [row["row"]["row_id"] for row in rows] == ["qy0"]
+    assert run.resolved["additional_qy_rows"]["enabled"] is False
+    assert run.state["export_settings"]["per_row"] is False
+    assert run.state["export_settings"]["combine_qy_rows"] is True
+    groups = ("all", "posPhi", "negPhi") if split_phi else ("all",)
+    expected = {f"sample_{group}.csv" for group in groups}
+    assert {p.name for p in (run.directory / "csv").glob("*.csv")} == expected
+    original = {name: (run.directory / "csv" / name).read_bytes() for name in expected}
+    independent = ReductionRun(run.resolved, tmp_path / "independent_central")
+    assert independent.run()["status"] == "complete", independent.state["events"]
+    assert {p.name for p in (independent.directory / "csv").glob("*.csv")} == expected
+    assert {name: (independent.directory / "csv" / name).read_bytes()
+            for name in expected} == original
 
 
 def test_batch_continues_after_missing_sample(settings):
@@ -252,14 +413,14 @@ def test_calibration_file_and_stale_exports_preserved(settings, tmp_path):
     settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
     run = ReductionRun(settings, tmp_path / "run")
     assert run.run()["status"] == "complete"
-    original = (run.directory / "csv" / "sample_qyall_all.csv").read_bytes()
+    original = (run.directory / "csv" / "sample_all.csv").read_bytes()
     settings["calibration"]["sdd_cm"] = 301
     settings["slices"]["centers_qsx_Ainv"] = [99]
     settings["slices"]["widths_Ainv"] = 0.001
     failed = ReductionRun(settings, tmp_path / "run")
     assert failed.run()["status"] == "needs_review"
     assert not (run.directory / "csv").exists()
-    archived = list((run.directory / "archives").glob("*/csv/sample_qyall_all.csv"))
+    archived = list((run.directory / "archives").glob("*/csv/sample_all.csv"))
     assert archived and archived[0].read_bytes() == original
 
 
@@ -311,7 +472,7 @@ def test_actual_tiff_fixture_normalization_and_export(settings, tmp_path):
     settings["quality"].update(max_alignment_residual_px=5, min_peak_inside_fraction=0.8)
     run = ReductionRun(settings, tmp_path / "fixture_run")
     assert run.run()["status"] == "complete", run.state["events"]
-    assert (run.directory / "csv" / "sample_qyall_all.csv").is_file()
+    assert (run.directory / "csv" / "sample_all.csv").is_file()
 
 
 def test_native_phi_estimation_and_restart(settings, tmp_path, monkeypatch):

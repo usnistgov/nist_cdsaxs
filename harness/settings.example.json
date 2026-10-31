@@ -171,8 +171,7 @@
   "output": {
     "root": null,
     "figure_formats": [
-      "png",
-      "pdf"
+      "png"
     ],
     "dpi": 300
   }

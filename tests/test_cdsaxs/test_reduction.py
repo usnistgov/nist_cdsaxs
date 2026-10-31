@@ -94,6 +94,32 @@ class TestSliceReducedDataset(unittest.TestCase):
         self.assertEqual(reduced_slices.data[0].Iq.size, 0)
         self.assertEqual(reduced_slices.data[0].q.size, 0)
 
+    def test_source_provenance_follows_native_boundary_and_mask_selection(self):
+        dataset = self._make_multi_selection_dataset()
+        dataset.datas[1].mask[1] = True
+        slices, _ = slice_reduced_dataset(
+            dataset, q_values=[0.1], q_widths=0.002, show_plot=False)
+        data = slices.data[0]
+        np.testing.assert_array_equal(data.source_indices, [0])
+        np.testing.assert_array_equal(data.selected_pixel_counts, [3, 3])
+        # Finite nonpositive intensities are measurements; CSV filtering is later.
+        dataset.datas[0].Iq[:] = -1
+        slices, _ = slice_reduced_dataset(
+            dataset, q_values=[0.1], q_widths=0.002, show_plot=False)
+        np.testing.assert_array_equal(slices.data[0].source_indices, [0])
+        np.testing.assert_allclose(slices.data[0].Iq, [-3])
+
+    def test_source_provenance_records_empty_and_closed_endpoint_selections(self):
+        dataset = self._make_dataset()
+        # Use exactly representable values to test inclusive endpoints.
+        dataset.datas[0].qsx[:] = [0.0, 0.5, 1.0]
+        slices, _ = slice_reduced_dataset(
+            dataset, q_values=[0.5, 9], q_widths=[1.0, 0.1], show_plot=False)
+        np.testing.assert_array_equal(slices.data[0].selected_pixel_counts, [3, 3])
+        np.testing.assert_array_equal(slices.data[0].source_indices, [0, 1])
+        np.testing.assert_array_equal(slices.data[1].selected_pixel_counts, [0, 0])
+        self.assertEqual(slices.data[1].source_indices.size, 0)
+
     def test_nan_intensity_selection_is_skipped(self):
         dataset = self._make_dataset()
         dataset.datas[0].Iq[1] = np.nan

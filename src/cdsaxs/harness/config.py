@@ -98,7 +98,7 @@ DEFAULTS = {
         "export_qr": True, "decimals": 7,
     },
     "output": {
-        "root": None, "figure_formats": ["png", "pdf"], "dpi": 300,
+        "root": None, "figure_formats": ["png"], "dpi": 300,
     },
 }
 

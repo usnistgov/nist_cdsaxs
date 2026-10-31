@@ -63,6 +63,12 @@ def slice_reduced_dataset(
     fig : matplotlib.figure.Figure | None
         Figure showing the selected slice regions when show_plot is True;
         otherwise None.
+
+    Notes
+    -----
+    Each returned slice records ``source_indices`` (indices into dataset.datas
+    for accepted measurements) and ``selected_pixel_counts`` (one count per
+    input profile). These describe the native selection before CSV filtering.
     """
 
     if not isinstance(q_widths, list):
@@ -90,19 +96,23 @@ def slice_reduced_dataset(
         }
         # q_offset = []
         Iq = []
+        source_indices = []
+        selected_pixel_counts = []
         plotting_data = {
             'qsx': [],
             'qsz': [],
             'Iq': [],
         }
-        for data in dataset.datas:
+        for source_index, data in enumerate(dataset.datas):
             selection = np.where(
                     (getattr(data, integrated_axis) >= qmin) &
                     (getattr(data, integrated_axis) <= qmax)
                 )[0]
+            selected_pixel_counts.append(len(selection))
             if len(selection) > 0\
                     and not data.mask[selection].any()\
                     and not np.isnan(data.Iq[selection]).any():
+                source_indices.append(source_index)
                 for qstr, qlist in q_components.items():
                     qlist.append(
                         np.nanmean(getattr(data, qstr)[selection]))
@@ -123,6 +133,8 @@ def slice_reduced_dataset(
             slice_width=qmax-qmin,
             plotting_data=plotting_data,
         )
+        reduced_slice.source_indices = np.asarray(source_indices, dtype=int)
+        reduced_slice.selected_pixel_counts = np.asarray(selected_pixel_counts, dtype=int)
         # TODO: removing rounding to maintain data integrity
         setattr(reduced_slice, integrated_axis,
                 np.round(np.mean([qmin, qmax]), 4)) #TODO: removing rounding to maintain data integrity

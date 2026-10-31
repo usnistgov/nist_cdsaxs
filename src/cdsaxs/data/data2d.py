@@ -2702,6 +2702,7 @@ class Data2D(DataImage):
             zoom_plot=True,
             ignore_orders=[],
             refinement_size=7,
+            return_diagnostics=False,
             **kwargs
     ):
         """
@@ -2750,6 +2751,10 @@ class Data2D(DataImage):
         ignore_orders : list[int], optional
             Peak orders to ignore when estimating the sample detector
             distance.
+        return_diagnostics : bool, optional
+            Append the selected peak orders, pixel coordinates, peak axis,
+            and per-order SDD estimates to the usual three results.
+            Default is False.
 
         Parameters for Box Refinement
         -----------------------------
@@ -2823,6 +2828,10 @@ class Data2D(DataImage):
         Figure | None
             Matplotlib figure generated for the SDD result when
             show_plot is True, otherwise None.
+        dict, optional
+            When return_diagnostics=True, an additional result contains the
+            peak axis, selected peak orders, pixel positions, and per-order
+            SDD estimates. The default three-result API is unchanged.
         """
 
         box_dims = self.get_box_dims(
@@ -2908,6 +2917,14 @@ class Data2D(DataImage):
         else:
             fig = None
 
+        if return_diagnostics:
+            diagnostic = {
+                "peak_axis": int(peak_axis),
+                "peak_orders": peak_orders.tolist(),
+                "peaks_px": peaks.tolist(),
+                "sdd_cm_orders": sdd_cm_orders.tolist(),
+            }
+            return average_sdd, std_sdd, fig, diagnostic
         return average_sdd, std_sdd, fig
 
     def find_chi_from_peaks(

@@ -171,9 +171,13 @@ Known constants are not refitted merely because automatic mode is enabled.
 ## Integration, gaps, and extra qy rows
 
 `sample_kind` is `contact_holes`, `circular_contact_holes`, or `line_grating`.
-Automatic backgrounds start adjacent for contact holes and farther away for line
-gratings, then evaluate measured background peak contrast. `background_strategy`
-can explicitly select `adjacent` or `distant`; offsets can also be supplied.
+Automatic backgrounds use `adjacent` for contact holes and `distant` for line
+gratings, then evaluate measured background peak contrast. `adjacent` searches
+each side with an edge-to-edge gap from zero to one pixel less than the integration
+box height. For height 14 px, gaps are 0–13 px and displacements are 14–27 px.
+`distant` searches displacements of 5–9 box heights. `background_strategy` can
+explicitly select either strategy. Set `background_offsets_px: null` to use the
+automatic search; an explicit list fixes the offsets and overrides the strategy.
 `subtract_background: false` explicitly disables subtraction.
 
 Preview and final reduction use identical accepted geometry and background
@@ -230,18 +234,43 @@ also be resumed explicitly with `--resume RUN_DIRECTORY`.
 
 Run files include original `settings.json`, latest `invocation_settings.json`,
 `resolved_settings.json`, reusable `calibration.json`, stage state, figures,
-coverage, row settings, CSVs, and `report.md`. Figures default to PNG and PDF.
+coverage, row settings, CSVs, and `report.md`. Figures are saved as PNG only, at
+`output.dpi`. Older `figure_formats` settings remain loadable; their effective
+value is recorded as `["png"]` in the resolved settings.
 
-`export.per_row` controls native per-row CSVs; `combine_qy_rows` adds a larger
-combined native CSV. `split_phi` adds positive/negative outputs using native
+With only the central qy=0 row, the harness exports one combined CSV per φ group,
+without a qy label: `<sample>_all.csv`, and optionally `<sample>_posPhi.csv` and
+`<sample>_negPhi.csv`. It does not duplicate the central row in separate qy0 and
+qyall files. This applies whenever either native CSV export setting is enabled.
+
+Offset qy rows require an explicit user request. When they are included,
+`export.per_row` controls the row-labeled CSVs and `combine_qy_rows` adds the
+combined `<sample>_qyall_<group>.csv`. The resolved settings record the effective
+export choices.
+
+`split_phi` adds positive/negative outputs using native
 metadata selection before slicing. `phi_basis` selects `nominal` or `corrected`;
 `zero_phi` selects `positive`, `negative`, `separate`, or `exclude`, with a
 configurable zero tolerance. Groups are disjoint. The all-angle export is retained.
 
-Native CSVs preserve the analysis-compatible wide format and exclude nonpositive
-intensities. Companion `*_measurements.csv` tables retain finite nonpositive
-intensities and original frame, row, φ, qsx, qsy, qsz, and qsr values. Each native
-export reports discarded points. Intensities are arbitrary normalized units.
+CSV exports use the existing reduction code's analysis-compatible wide format
+and exclude nonpositive intensities. Each export reports discarded points.
+Intensities are arbitrary normalized units.
+
+Waterfalls use `cdsaxs.plotting.plotting.plot_reduced_slices(..., offset_order=2)`
+for every angle group, matching the example reduction's native waterfall. Slice
+centers determine the order and successive curves are scaled by `10**(-2*i)`;
+there is no cyclic offset or intensity rescaling in the CSVs. Slice overlays and
+detector images also use the native plotting functions.
+
+The harness delegates peak detection and center-of-mass refinement to `cdsaxs.tools`,
+box bounds to `Data2D.get_box_dims_size`, and profile integration to the native
+box methods. Native fractional-center conventions apply; clipped integration boxes
+are rejected. SDD peak orders come from the native calibration diagnostic, avoiding
+a second peak search. Coverage reports use provenance from `slice_reduced_dataset`,
+so the exported and previewed selections share the same mask and boundary rules.
+Automatic proposal limits, background scoring, fit-quality checks, and review
+checkpoints remain harness responsibilities.
 
 Conditional φ-fit uncertainty and inter-order/inter-angle scatter are reported
 separately from metrological accuracy. Full intensity uncertainty propagation is

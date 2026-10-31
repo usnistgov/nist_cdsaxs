@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import find_peaks, peak_widths
+from scipy.signal import peak_widths
+
+from .. import tools
+from ..reduction import slice_reduced_dataset
 
 
 class NeedsReview(ValueError):
@@ -64,9 +67,10 @@ def measured_peaks(values, prominence_relative=0.1, min_distance=5):
     contrast = float(np.max(profile) - np.median(profile))
     if contrast <= 0:
         return np.array([], dtype=int), np.array([])
-    peaks, _ = find_peaks(profile, prominence=contrast * prominence_relative,
-                          distance=max(1, int(min_distance)))
-    peaks = peaks[valid[peaks]]
+    peaks = tools.find_peaks_1D(
+        profile, log_scale=False, refinement=False, mask=~valid,
+        algorithm="scipy", prominence=contrast * prominence_relative,
+        distance=max(1, int(min_distance))).astype(int)
     widths = peak_widths(profile, peaks, rel_height=0.5)[0] if len(peaks) else np.array([])
     return peaks, widths
 
@@ -97,14 +101,12 @@ def row_center(data, row):
 
 def box_ranges(data, row, geometry):
     height, width = geometry["height_px"], geometry["width_px"]
-    y = round(row_center(data, row))
-    x = round(data.metadata["center_px_detector"][1])
-    ymin, xmin = y - height // 2, x - width // 2
-    ymax, xmax = ymin + height, xmin + width
-    check(0 <= ymin < ymax <= data.image.shape[0]
-          and 0 <= xmin < xmax <= data.image.shape[1],
+    yr, xr = data.get_box_dims_size(
+        height, width,
+        center=(row_center(data, row), data.metadata["center_px_detector"][1]))
+    check(yr[1] - yr[0] == height and xr[1] - xr[0] == width,
           f"Integration box exceeds the detector for {data.name}")
-    return (int(ymin), int(ymax)), (int(xmin), int(xmax))
+    return yr, xr
 
 
 def row_peaks(data, row, settings):
@@ -138,7 +140,8 @@ def row_peaks(data, row, settings):
         if weights.sum() <= 0:
             continue
         axis = np.arange(lo, hi)
-        py = float(np.sum(axis * weights) / weights.sum())
+        peak_y, _ = tools.com_refinement(weights[:, None])
+        py = float(lo + peak_y)
         sigma = float(np.sqrt(np.sum((axis - py) ** 2 * weights) / weights.sum()))
         points.append({"x_px": int(x), "y_px": py,
                        "sigma_y_px": sigma, "fwhm_x_px": float(width)})
@@ -202,6 +205,7 @@ def geometry_proposal(dataset, row, settings):
 
 
 def choose_backgrounds(measurements, row, geometry, settings):
+    """Score native background profiles; adjacent edge gaps are less than height."""
     cfg = settings["integration"]
     h = geometry["height_px"]
     offsets = cfg["background_offsets_px"]
@@ -211,8 +215,9 @@ def choose_backgrounds(measurements, row, geometry, settings):
             check(settings["sample_kind"] is not None,
                   "Specify sample_kind or background_strategy for background selection")
             strategy = "distant" if settings["sample_kind"] == "line_grating" else "adjacent"
-        start = 5 if strategy == "distant" else 2
-        offsets = [sign * multiple * h for multiple in range(start, start + 5)
+        # A displacement h touches the signal box; 2*h would leave a gap h.
+        distances = range(5 * h, 10 * h, h) if strategy == "distant" else range(h, 2 * h)
+        offsets = [sign * distance for distance in distances
                    for sign in (-1, 1)]
     scored = []
     for offset in offsets:
@@ -225,16 +230,15 @@ def choose_backgrounds(measurements, row, geometry, settings):
             if lo < 0 or hi > data.image.shape[0]:
                 usable = False
                 break
-            bg = np.where(data.mask[lo:hi, xr[0]:xr[1]], np.nan,
-                          data.image[lo:hi, xr[0]:xr[1]])
-            sig = np.where(data.mask[yr[0]:yr[1], xr[0]:xr[1]], np.nan,
-                           data.image[yr[0]:yr[1], xr[0]:xr[1]])
-            if np.mean(np.isfinite(bg)) < settings["quality"]["min_roi_valid_fraction"]:
+            bg_profile, bg, bg_mask = data.mean_box((lo, hi), xr, axis=0)
+            sig_profile, _, _ = data.mean_box(yr, xr, axis=0)
+            if np.mean(~bg_mask & np.isfinite(bg)) < settings["quality"]["min_roi_valid_fraction"]:
                 usable = False
                 break
             # Compare peak contrast per pixel, independently of box height.
-            bg_profile = np.nanmean(bg, axis=0)
-            sig_profile = np.nanmean(sig, axis=0)
+            if not np.isfinite(bg_profile).any() or not np.isfinite(sig_profile).any():
+                usable = False
+                break
             signal_contrast = float(np.nanmax(sig_profile) - np.nanmedian(sig_profile))
             bg_contrast = float(np.nanmax(bg_profile) - np.nanmedian(bg_profile))
             scores.append(max(0.0, bg_contrast) / max(signal_contrast, 1e-30))
@@ -270,7 +274,8 @@ def detect_qy_rows(data, settings):
     for peak in kept:
         lo, hi = max(0, peak - 3), min(len(profile), peak + 4)
         weights = np.maximum(np.nan_to_num(profile[lo:hi], nan=0) - np.nanmedian(profile), 0)
-        position = float(np.sum(np.arange(lo, hi) * weights) / weights.sum())
+        position, _ = tools.com_refinement(weights[:, None])
+        position += lo
         valid = np.flatnonzero(np.isfinite(data.qsy[:, x]))
         if len(valid):
             offsets.append(float(np.interp(position, valid, data.qsy[valid, x])))
@@ -281,20 +286,22 @@ def detect_qy_rows(data, settings):
             "reference_frame": data.name}
 
 
-def slice_coverage(dataset, center, width):
-    """Match the library's strict mask rule, also rejecting nonfinite coordinates."""
+def slice_coverage(dataset, center, width, native_slice=None):
+    """Report provenance from the native slicer, without repeating its selection rule."""
+    if native_slice is None:
+        slices, _ = slice_reduced_dataset(dataset, [center], q_widths=width, show_plot=False)
+        native_slice = slices.data[0]
+    accepted = set(native_slice.source_indices)
     coverage = []
-    for data in dataset.datas:
-        selection = np.flatnonzero(abs(data.qsx - center) <= width / 2)
-        valid = (len(selection) > 0 and not data.mask[selection].any()
-                 and all(np.isfinite(getattr(data, key)[selection]).all()
-                         for key in ("Iq", "qsx", "qsy", "qsz", "qsr", "qs")))
+    for index, data in enumerate(dataset.datas):
+        selected_pixels = int(native_slice.selected_pixel_counts[index])
+        valid = index in accepted
         reason = None if valid else (
-            "outside_q_range" if not len(selection) else "masked_or_nonfinite_selection"
+            "outside_q_range" if not selected_pixels else "masked_or_nonfinite_selection"
         )
         coverage.append({"frame": data.data2d.name,
                          "phi_deg": float(data.sample_phi_deg),
-                         "valid": bool(valid), "selected_pixels": int(len(selection)),
+                         "valid": valid, "selected_pixels": selected_pixels,
                          "reason": reason})
     return coverage
 
@@ -332,12 +339,14 @@ def slice_proposal(integrated, settings):
     elif not isinstance(widths, list):
         widths = [widths] * len(centers)
     check(len(widths) == len(centers), "Slice widths do not match detected centers")
+    slices, _ = slice_reduced_dataset(
+        integrated, centers, q_widths=widths, mode=cfg["mode"], show_plot=False)
     proposals = []
-    for center, width in zip(centers, widths):
+    for center, width, native_slice in zip(centers, widths, slices.data):
         neighbors = [abs(center - other) for other in centers if other != center]
         if neighbors:
             check(width < min(neighbors), "A slice width reaches an adjacent peak center")
-        coverage = slice_coverage(integrated, center, width)
+        coverage = slice_coverage(integrated, center, width, native_slice=native_slice)
         fraction = sum(item["valid"] for item in coverage) / len(coverage)
         proposals.append({"center_qsx_Ainv": float(center), "width_Ainv": float(width),
                           "angle_coverage": fraction, "coverage": coverage,
@@ -365,17 +374,13 @@ def phi_figure(result):
 
 
 def row_figure(data, rows):
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import LogNorm
-    fig, ax = plt.subplots(figsize=(7, 6))
-    values = np.ma.masked_where(data.mask | (data.image <= 0), data.image)
-    artist = ax.imshow(values, cmap="viridis", norm=LogNorm(), origin="upper")
+    fig = data.plot_data(show_q=False)
+    ax = fig.axes[0]
     for row in rows:
         y = row_center(data, row)
         ax.axhline(y, color="#E69F00", lw=1.3)
         ax.text(2, y, row["row_id"], color="white", va="bottom")
     ax.set(xlabel="Detector column (px)", ylabel="Detector row (px)",
            title=f"Selected qy rows: {data.name}")
-    fig.colorbar(artist, ax=ax, label="Normalized intensity (a.u.)")
     fig.tight_layout()
     return fig

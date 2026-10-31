@@ -20,7 +20,9 @@ script and scientific decisions available to the user.
    accepted that existing result, or update their supplied settings with accepted values.
 5. Inspect boxes on representative angles. Peaks should be centered and contained.
    Backgrounds should be peak-free: usually adjacent for contact holes and farther
-   away for gratings. Preview and production must use identical accepted settings.
+   away for gratings. Adjacent searches must keep the edge-to-edge gap below one
+   integration-box height; set background offsets to null to enable that search.
+   Preview and production must use identical accepted settings.
 6. Inspect bowtie/slice overlays. Narrow slices should capture peaks with little
    background. Read coverage.json to identify missing angle points and detector gaps.
    Notify the user of skipped slices with centers, coverage, and reasons.
@@ -29,7 +31,9 @@ script and scientific decisions available to the user.
    enabling them. Translate explicit instruction-based permission into settings and
    save the reason in decision_notes. Detect offsets unless supplied, inspect the row
    overlay, and select boxes/backgrounds/qsx peaks separately for every row. Retain
-   row provenance when constructing the larger radial-coordinate dataset.
+   row provenance when constructing the larger radial-coordinate dataset. Without
+   a request for offset rows, reduce qy=0 and export only the combined result;
+   omit qy0/qyall labels from these single-row CSV filenames.
 8. Automatic batches may proceed without per-sample review only for decisions the
    user authorized in settings or instructions. Record scoped permissions in the
    effective JSON. Use configured sample-family bounds and inspect diagnostic plots;
@@ -37,8 +41,9 @@ script and scientific decisions available to the user.
    threshold changes in decision_notes. Held samples go to the review queue while
    independent samples continue. Report fit consistency, not unsupported absolute
    accuracy or fabricated intensity error bars.
-9. Offer per-row/combined CSVs, optional positive/negative φ splitting, and the
-   consolidated output-root option. Confirm nominal/corrected φ and zero handling
+9. Export one CSV per φ group for a central-only run. Offer per-row/combined CSVs
+   when offset qy rows were requested, optional positive/negative φ splitting, and
+   the consolidated output-root option. Confirm nominal/corrected φ and zero handling
    from settings. Supply links to the generated Python script, settings, report,
    review figures, and exports. Describe assumptions and material limitations briefly.
 

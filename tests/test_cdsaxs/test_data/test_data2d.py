@@ -1527,7 +1527,15 @@ class TestData2D(unittest.TestCase):
                         pitch_nm=pitch, peak_axis=axis, peak_orders=[3, 1],
                         show_plot=False,
                         range_qdy_px=(0, 15), range_qdx_px=(0, 15))
+                    detailed = data.find_sdd_from_reference_peaks(
+                        pitch_nm=pitch, peak_axis=axis, show_plot=False,
+                        return_diagnostics=True,
+                        range_qdy_px=(0, 15), range_qdx_px=(0, 15))
                 self.assertEqual(inferred, explicit)
+                self.assertEqual(detailed[:3], inferred)
+                self.assertEqual(detailed[3]["peak_orders"], [3, 1])
+                self.assertEqual(detailed[3]["peak_axis"], axis)
+                self.assertEqual(len(detailed[3]["sdd_cm_orders"]), 2)
                 self.assertTrue(np.isfinite(inferred[0]))
 
     def test_sdd_rejects_inferred_zero_order(self):
