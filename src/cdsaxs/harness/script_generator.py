@@ -12,9 +12,10 @@ Examples:
     python reduce_sample.py --stage phi
     python reduce_sample.py --accept phi --stage chi
     python reduce_sample.py --stage reduce
-    python reduce_sample.py --config resolved_settings.json
+    python reduce_sample.py --output-profile full
 
 Requires the nist_cdsaxs package (pip install -e /path/to/nist_cdsaxs).
+Compact runs save effective settings, figures, CSVs, and summary.md.
 """
 from pathlib import Path
 from cdsaxs.harness.__main__ import main

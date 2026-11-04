@@ -40,7 +40,7 @@ def settings(tmp_path):
     cfg["corrections"]["substrate_absorption"] = False
     cfg["integration"].update(height_px=7, width_px=100, background_offsets_px=[-10, 10])
     cfg["quality"]["max_alignment_residual_px"] = 3
-    cfg["output"].update(root=str(tmp_path / "outputs"), figure_formats=["png"], dpi=60)
+    cfg["output"].update(root=str(tmp_path / "outputs"), profile="full", figure_formats=["png"], dpi=60)
     return cfg
 
 
@@ -180,8 +180,10 @@ def test_near_zero_slice_veto_uses_corrected_phi_and_native_mask(
         assert not slice_proposal(integrated, settings)["slices"][0]["skip"]
 
 
+@pytest.mark.parametrize("output_profile", ["full", "compact"])
 def test_near_zero_slice_veto_removes_supplied_center_from_every_export(
-        settings, tmp_path):
+        settings, tmp_path, output_profile):
+    settings["output"]["profile"] = output_profile
     write_images(settings, angles=(-30, -10, 0, 10, 30))
     dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
     reference = min(dataset.datas.values(), key=lambda data: abs(data.sample_phi_deg))
@@ -190,6 +192,7 @@ def test_near_zero_slice_veto_removes_supplied_center_from_every_export(
     geometry = {"height_px": 7, "width_px": 100,
                 "background_offsets_px": None, "mode": "sum"}
     integrated = integrate_row(dataset, row, geometry)
+    next(profile for profile in integrated.datas if profile.sample_phi_deg > 20).Iq[:] = -1
     central = min(integrated.datas, key=lambda data: abs(data.sample_phi_deg))
     gap_center, valid_center = (float(central.qsx[x - central.limits_axis1[0]])
                                 for x in (80, 95))
@@ -203,13 +206,26 @@ def test_near_zero_slice_veto_removes_supplied_center_from_every_export(
     assert run.state["skipped_slices"]["qy0"][0]["skip_reasons"] == ["invalid_near_zero_frame"]
     assert any("near-zero frame" in event and "80.0%" in event for event in run.state["events"])
     run.export(dataset, [(row, geometry, integrated, items, proposal)])
+    run.state["status"] = "complete"
+    run.save()
     for group in ("all", "posPhi", "negPhi"):
         path = run.directory / f"csv/sample_{group}.csv"
         with path.open(newline="") as handle:
             assert len(next(csv.reader(handle))) == 5
         records = np.atleast_2d(np.genfromtxt(path, delimiter=",", skip_header=1))
+        records = records[np.isfinite(records[:, 0])]
+        assert len(records) == (4 if group == "all" else 2)
         np.testing.assert_allclose(records[:, 0], round(valid_center, 4))
-    reported = json.loads((run.directory / "coverage.json").read_text())["qy0"]
+    if output_profile == "full":
+        reported = json.loads((run.directory / "coverage.json").read_text())["qy0"]
+    else:
+        reported = run.state["stages"]["slices:qy0"]["result"]
+        summary = (run.directory / "summary.md").read_text()
+        assert "masked/unavailable in the frame nearest corrected φ = 0°" in summary
+        assert "4/5 (80.0%)" in summary
+        assert "`sample_all`: 1 measurements" in summary
+        assert not (run.directory / "coverage.json").exists()
+        assert not (run.directory / "row_reductions.json").exists()
     assert reported["slices"][0]["reference_frame_valid"] is False
     assert reported["slices"][0]["skip_reasons"] == ["invalid_near_zero_frame"]
 
@@ -654,9 +670,11 @@ def test_actual_tiff_fixture_normalization_and_export(settings, tmp_path):
     assert (run.directory / "csv" / "sample_all.csv").is_file()
 
 
-def test_native_phi_estimation_and_restart(settings, tmp_path, monkeypatch):
+@pytest.mark.parametrize("output_profile", ["full", "compact"])
+def test_native_phi_estimation_and_restart(settings, tmp_path, monkeypatch, output_profile):
     from cdsaxs.calculators import energy_to_wavelength
     from cdsaxs.harness import runner
+    settings["output"]["profile"] = output_profile
     settings["calibration"].update(center_px=[100, 300], sdd_cm=300)
     settings["offsets"]["sample_phi_offset_deg"] = None
     settings["phi"].update(pitch_nm=35, peak_orders=None)
@@ -692,6 +710,13 @@ def test_native_phi_estimation_and_restart(settings, tmp_path, monkeypatch):
     assert len(applied) == 2
     np.testing.assert_allclose(np.array(applied[1]) - np.array(applied[0]), estimate)
     assert run.resolved["calibration"]["sdd_cm"] == 300
+    if output_profile == "compact":
+        assert not (run.directory / "phi_measurements.json").exists()
+        assert len(json.loads(run.state_path.read_text())["phi_measurements"]["nominal_phi_deg"]) == 11
+        assert "conditional fit uncertainty" in (run.directory / "summary.md").read_text()
+        assert load_settings(run.directory / "settings.json")["offsets"]["sample_phi_offset_deg"] is None
+    else:
+        assert (run.directory / "phi_measurements.json").is_file()
 
 
 def test_native_chi_omega_correction_signs(settings, tmp_path):
@@ -808,3 +833,128 @@ def test_generated_script_can_choose_consolidated_root(settings, tmp_path):
     assert command.returncode == 0, command.stdout + command.stderr
     assert list(root.glob("experiment/sample/*/calibration.json"))
     assert not (script.parent / "calibration.json").exists()
+
+
+def test_compact_package_saves_effective_settings_and_reproduces_csv(settings, tmp_path):
+    write_images(settings)
+    settings["output"]["profile"] = "compact"
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = [
+        "choose_integration_box", "choose_backgrounds",
+        "choose_slice_locations_and_widths", "skip_gap_slices",
+    ]
+    settings["integration"].update(height_px=None, width_px=None, background_offsets_px=None)
+    run = ReductionRun(settings, tmp_path / "compact")
+    assert run.run()["status"] == "complete", run.state["events"]
+    visible = {path.name for path in run.directory.iterdir() if not path.name.startswith(".")}
+    assert visible == {"settings.json", "reduce_sample.py", "summary.md", "figures", "csv"}
+    assert {str(path.relative_to(run.directory)) for path in run.directory.rglob("*.json")} == {
+        "settings.json", ".harness/state.json",
+    }
+    effective = load_settings(run.directory / "settings.json")
+    assert effective == run.resolved
+    assert effective["integration"]["height_px"] is not None
+    assert effective["integration"]["background_offsets_px"]
+    assert effective["slices"]["centers_qsx_Ainv"]
+    state = json.loads(run.state_path.read_text())
+    assert state["initial_settings"]["integration"]["height_px"] is None
+    assert state["resolved_settings"] == effective
+    original = (run.directory / "csv/sample_all.csv").read_bytes()
+    independent = ReductionRun(effective, tmp_path / "independent")
+    assert independent.run()["status"] == "complete", independent.state["events"]
+    assert (independent.directory / "csv/sample_all.csv").read_bytes() == original
+    # File layout changes do not change native reduction values.
+    full_settings = deepcopy(settings)
+    full_settings["output"]["profile"] = "full"
+    full = ReductionRun(full_settings, tmp_path / "full")
+    assert full.run()["status"] == "complete", full.state["events"]
+    assert (full.directory / "csv/sample_all.csv").read_bytes() == original
+    assert (full.directory / "coverage.json").is_file()
+
+
+def test_compact_review_preserves_requests_and_cached_acceptance(settings, tmp_path):
+    write_images(settings)
+    settings["output"]["profile"] = "compact"
+    settings["offsets"]["sample_phi_offset_deg"] = None
+    run = ReductionRun(settings, tmp_path / "review")
+    relevant = {"known": None}
+    with pytest.raises(NeedsReview, match="summary.md"):
+        run.checkpoint("phi", relevant,
+                       lambda: {"sample_phi_offset_deg": 0.7, "fit_uncertainty_deg": 0.01},
+                       ["accept_angle_corrections"])
+    assert "0.7 ± 0.01" in (run.directory / "summary.md").read_text()
+    pending = load_settings(run.directory / "settings.json")
+    assert pending["offsets"]["sample_phi_offset_deg"] is None
+    resumed = ReductionRun(pending, run.directory, accept=["phi"])
+    result = resumed.checkpoint("phi", relevant, lambda: pytest.fail("Must use unchanged proposal"))
+    assert result["sample_phi_offset_deg"] == 0.7
+    assert resumed.state["stages"]["phi"]["status"] == "accepted_review"
+    assert not (run.directory / "state.json").exists()
+
+
+def test_switching_output_profiles_resumes_latest_state_without_deleting_files(settings, tmp_path):
+    write_images(settings)
+    run = ReductionRun(settings, tmp_path / "switch")
+    with pytest.raises(NeedsReview):
+        run.checkpoint("phi", {}, lambda: {"sample_phi_offset_deg": 0.7}, ["accept_angle_corrections"])
+    original = run.state_path.read_bytes()
+    settings["output"]["profile"] = "compact"
+    compact = ReductionRun(settings, run.directory, accept=["phi"])
+    compact.checkpoint("phi", {}, lambda: pytest.fail("Legacy state should be reused"))
+    assert (run.directory / "state.json").read_bytes() == original
+    assert compact.state_path == run.directory / ".harness/state.json"
+    settings["output"]["profile"] = "full"
+    full = ReductionRun(settings, run.directory)
+    assert full.state["stages"]["phi"]["status"] == "accepted_review"
+
+
+def test_compact_batch_hides_manifest_and_summarizes_missing_input(settings, tmp_path):
+    write_images(settings)
+    settings["output"]["profile"] = "compact"
+    settings["samples"] = [
+        {"name": "missing", "input": {"filenames": ["absent.tif"]}}, {"name": "good"},
+    ]
+    results = run_batch(settings, stage="calibration")
+    assert [item["status"] for item in results] == ["needs_review", "stage_complete"]
+    for item in results:
+        folder = Path(item["directory"])
+        assert (folder / "summary.md").is_file()
+        assert not (folder / "failure.json").exists()
+    assert "missing" in (Path(results[0]["directory"]) / "summary.md").read_text()
+    parent = Path(settings["output"]["root"]) / settings["experiment"]
+    assert not list(parent.glob("batch_*.json"))
+    manifest, = parent.glob(".harness/batch_*.json")
+    resumed = run_batch(settings, stage="calibration", resume=manifest)
+    assert [item["directory"] for item in resumed] == [item["directory"] for item in results]
+
+
+def test_compact_cli_override_discovery_and_single_sample_manifest(settings, tmp_path):
+    write_images(settings)
+    script = generate(tmp_path / "generated", settings)
+    command = subprocess.run([sys.executable, str(script), "--stage", "calibration",
+                              "--output-profile", "compact"], cwd=tmp_path,
+                             capture_output=True, text=True)
+    assert command.returncode == 0, command.stdout + command.stderr
+    assert (script.parent / "summary.md").is_file()
+    assert (script.parent / ".harness/state.json").is_file()
+    assert not (script.parent / "calibration.json").exists()
+    assert not list(Path(settings["output"]["root"]).rglob("batch_*.json"))
+    assert load_settings(script.with_name("settings.json"))["output"]["profile"] == "compact"
+    discover = subprocess.run([sys.executable, str(script), "--stage", "discover"],
+                              cwd=tmp_path, capture_output=True, text=True)
+    assert discover.returncode == 0, discover.stdout + discover.stderr
+    assert '"files"' in discover.stdout
+    assert not (script.parent / "inventory.json").exists()
+    full = subprocess.run([sys.executable, str(script), "--stage", "calibration",
+                           "--output-profile", "full"], cwd=tmp_path,
+                          capture_output=True, text=True)
+    assert full.returncode == 0, full.stdout + full.stderr
+    assert (script.parent / "calibration.json").is_file()
+
+
+@pytest.mark.parametrize("profile", [None, [], "everything", False])
+def test_output_profile_validation_and_default(settings, profile):
+    assert DEFAULTS["output"]["profile"] == "compact"
+    settings["output"]["profile"] = profile
+    with pytest.raises(ValueError, match="output.profile"):
+        validate(settings)

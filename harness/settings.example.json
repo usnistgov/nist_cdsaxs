@@ -171,6 +171,7 @@
   },
   "output": {
     "root": null,
+    "profile": "compact",
     "figure_formats": [
       "png"
     ],

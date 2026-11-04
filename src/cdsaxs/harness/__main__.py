@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+import json
 from pathlib import Path
 
 from .config import DEFAULTS, STAGES, load_settings, write_json
@@ -27,10 +28,14 @@ def main(argv=None, default_config=None, default_resume=None):
                         help="Accept an already inspected, unchanged proposal; repeat as needed")
     parser.add_argument("--sample", help="Process only this named batch sample")
     parser.add_argument("--output-root", type=Path, help="Consolidated output directory")
+    parser.add_argument("--output-profile", choices=("compact", "full"),
+                        help="Compact deliverables (default) or separate diagnostic JSON files")
     args = parser.parse_args(argv)
     try:
         if args.init:
             settings = load_settings(args.config) if args.config else deepcopy(DEFAULTS)
+            if args.output_profile:
+                settings["output"]["profile"] = args.output_profile
             check_path = args.init / "settings.json"
             if check_path.exists():
                 parser.error(f"Settings already exist: {check_path}")
@@ -40,14 +45,19 @@ def main(argv=None, default_config=None, default_resume=None):
         if args.config is None:
             parser.error("Provide --config settings.json or --init DIRECTORY")
         settings = load_settings(args.config)
+        if args.output_profile:
+            settings["output"]["profile"] = args.output_profile
         if args.output_root:
             settings["output"]["root"] = str(args.output_root.resolve())
         from .runner import inventory, run_batch
         if args.stage == "discover":
             result = inventory(settings)
-            target = args.config.resolve().parent / "inventory.json"
-            write_json(target, result)
-            print(f"Inventory: {target}")
+            if settings["output"]["profile"] == "full":
+                target = args.config.resolve().parent / "inventory.json"
+                write_json(target, result)
+                print(f"Inventory: {target}")
+            else:
+                print(json.dumps(result, indent=2))
             print(f"Reference candidates: {result['reference_candidates']}")
             return 0
         resume = args.resume

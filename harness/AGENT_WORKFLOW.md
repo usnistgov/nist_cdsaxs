@@ -2,7 +2,14 @@
 
 Use this guide with the JSON-configured harness in this repository. Read
 [README.md](README.md) for the settings and command interface. Keep the generated
-script and scientific decisions available to the user.
+script and scientific decisions available to the user. Use `output.profile: "compact"`
+for routine reductions. Deliver one full settings file, the generated script,
+native figures, CSVs, and `summary.md`. Do not add separate audit JSONs, environment
+dumps, manifests, duplicate settings snapshots, inspection scripts, or raw profile
+exports to routine run folders. The harness consolidates bookkeeping in its hidden
+state file. Request/use `full` output only when separate diagnostics are needed
+for a specific investigation; place temporary analysis in a development scratch
+directory and put its relevant conclusions in concise `decision_notes`.
 
 1. Discover the user's input data and any supplied constants/configuration. Generate
    a script/settings file if needed. Use the installed package and explicit paths.
@@ -28,7 +35,9 @@ script and scientific decisions available to the user.
    by supplying unequal offsets. Select a pair usable on both sides.
    Preview and production must use identical accepted settings.
 6. Inspect bowtie/slice overlays. Narrow slices should capture peaks with little
-   background. Read coverage.json to identify missing angle points and detector gaps.
+   background. Read `summary.md` for exclusions and missing-angle decisions;
+   detailed per-frame coverage is in the hidden checkpoint state (`coverage.json`
+   is additionally available in the `full` profile).
    Reject a whole slice when its bin is unavailable in the frame nearest corrected
    phi=0, including supplied centers, even if overall angular coverage passes.
    Notify the user of skipped slices with centers, coverage, and reasons.
@@ -50,7 +59,7 @@ script and scientific decisions available to the user.
 9. Export one CSV per φ group for a central-only run. Offer per-row/combined CSVs
    when offset qy rows were requested, optional positive/negative φ splitting, and
    the consolidated output-root option. Confirm nominal/corrected φ and zero handling
-   from settings. Supply links to the generated Python script, settings, report,
+   from settings. Supply links to the generated Python script, full settings, summary,
    review figures, and exports. Describe assumptions and material limitations briefly.
 
 User instructions take precedence over default settings. Persist instruction-based

@@ -99,7 +99,7 @@ DEFAULTS = {
         "export_qr": True, "decimals": 7,
     },
     "output": {
-        "root": None, "figure_formats": ["png"], "dpi": 300,
+        "root": None, "profile": "compact", "figure_formats": ["png"], "dpi": 300,
     },
 }
 
@@ -339,6 +339,9 @@ def validate(settings):
             raise ValueError(f"{section}.mode must be sum or mean")
     if settings["integration"]["background_strategy"] not in {"auto", "adjacent", "distant"}:
         raise ValueError("background_strategy must be auto, adjacent, or distant")
+    if (not isinstance(settings["output"]["profile"], str)
+            or settings["output"]["profile"] not in {"compact", "full"}):
+        raise ValueError("output.profile must be compact or full")
     for section, key in (("integration", "height_bounds_px"),
                          ("slices", "width_bounds_Ainv"), ("phi", "angle_range_deg")):
         bounds = settings[section][key]

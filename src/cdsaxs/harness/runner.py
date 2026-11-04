@@ -22,6 +22,7 @@ from .diagnostics import (
     phi_figure, representative_frames, row_figure, slice_proposal,
 )
 from .script_generator import generate
+from .reporting import compact_summary
 
 
 def file_identity(path):
@@ -256,16 +257,25 @@ class ReductionRun:
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.accept = set(accept)
-        self.state_path = self.directory / "state.json"
-        self.state = read_json(self.state_path) if self.state_path.exists() else {
+        self.compact = self.settings["output"]["profile"] == "compact"
+        self.state_path = self.directory / (".harness/state.json" if self.compact else "state.json")
+        self.report_name = "summary.md" if self.compact else "report.md"
+        state_candidates = [path for path in (self.directory / "state.json",
+                                              self.directory / ".harness/state.json") if path.exists()]
+        previous_state = max(state_candidates, key=lambda path: path.stat().st_mtime_ns) if state_candidates else None
+        self.state = read_json(previous_state) if previous_state else {
             "schema_version": 1, "stages": {}, "events": [], "artifacts": [],
         }
         check(self.state.get("sample", settings["sample_name"]) == settings["sample_name"],
               "This resume directory belongs to a different sample")
         self.state["status"] = "running"
         self.state["sample"] = settings["sample_name"]
+        if self.compact:
+            self.state.setdefault("initial_settings", deepcopy(settings))
+            self.state["invocation_settings"] = deepcopy(settings)
         generate(self.directory, self.settings)
-        write_json(self.directory / "invocation_settings.json", settings)
+        if not self.compact:
+            write_json(self.directory / "invocation_settings.json", settings)
         try:
             self.files = selected_files(settings)
             self.inputs = [file_identity(path) for path in self.files]
@@ -323,7 +333,8 @@ class ReductionRun:
         if not csv_directory.exists():
             return
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
-        destination = self.directory / "archives" / stamp / "csv"
+        archive_root = self.directory / (".harness/archives" if self.compact else "archives")
+        destination = archive_root / stamp / "csv"
         destination.parent.mkdir(parents=True, exist_ok=True)
         csv_directory.rename(destination)
         prefix = str(destination.relative_to(self.directory))
@@ -332,17 +343,29 @@ class ReductionRun:
         self.event(f"{reason}; previous CSVs preserved in {prefix}")
 
     def save(self):
-        for name in ("reduce_sample.py", "settings.json", "invocation_settings.json",
-                     "resolved_settings.json", "calibration.json", "coverage.json",
-                     "row_reductions.json"):
+        names = ("reduce_sample.py", "settings.json") if self.compact else (
+            "reduce_sample.py", "settings.json", "invocation_settings.json",
+            "resolved_settings.json", "calibration.json", "coverage.json", "row_reductions.json")
+        for name in names:
             if (self.directory / name).exists():
                 self.state["artifacts"].append(name)
         self.state["artifacts"] = sorted(set(self.state["artifacts"]))
+        if self.compact:
+            self.state["resolved_settings"] = deepcopy(self.resolved)
+            # Keep requests unchanged while a proposal awaits acceptance. Only
+            # a completed run replaces them with the accepted, rerunnable values.
+            effective = self.resolved if self.state["status"] == "complete" else self.settings
+            write_json(self.directory / "settings.json", effective)
         write_json(self.state_path, self.state)
-        write_json(self.directory / "resolved_settings.json", self.resolved)
+        if not self.compact:
+            write_json(self.directory / "resolved_settings.json", self.resolved)
         self.report()
 
     def report(self):
+        if self.compact:
+            (self.directory / self.report_name).write_text(
+                compact_summary(self.directory, self.settings, self.resolved, self.state), encoding="utf-8")
+            return
         lines = [f"# Reduction: {self.settings['sample_name']}", "",
                  f"Status: **{self.state['status']}**", "",
                  "Q units: Å⁻¹; SDD: cm; beam center: [row, column] pixels; angles: degrees.",
@@ -406,7 +429,8 @@ class ReductionRun:
             record["status"] = "accepted_automatic"
         if not record["status"].startswith("accepted"):
             self.save()
-            raise NeedsReview(f"Review {name} figures and state.json, then rerun with "
+            review_file = self.report_name if self.compact else "state.json"
+            raise NeedsReview(f"Review {name} figures and {review_file}, then rerun with "
                               f"--accept {name.split(':')[0]}, or supply accepted JSON values")
         self.dependencies[name] = signature
         self.save()
@@ -498,7 +522,8 @@ class ReductionRun:
         result = self.checkpoint("calibration", relevant, compute, ["accept_calibration"],
                                  supplied=known and not self.settings["refit_known_constants"])
         self.resolved["calibration"].update({k: result[k] for k in ("sdd_cm", "center_px")})
-        write_json(self.directory / "calibration.json", result)
+        if not self.compact:
+            write_json(self.directory / "calibration.json", result)
         return result
 
     def estimate_phi(self, dataset):
@@ -544,11 +569,15 @@ class ReductionRun:
                     inferred_orders.append({"frame": data.name, "orders": orders})
                 except (ValueError, IndexError, RuntimeError) as error:
                     failures.append({"frame": data.name, "reason": str(error)})
-            write_json(self.directory / "phi_measurements.json", {
+            measurements = {
                 "nominal_phi_deg": angles, "apparent_sdd_cm": sdds,
                 "sdd_peak_order_scatter_cm": scatters, "failed_frames": failures,
-                "peak_orders_by_frame": inferred_orders})
-            self.state["artifacts"].append("phi_measurements.json")
+                "peak_orders_by_frame": inferred_orders}
+            if self.compact:
+                self.state["phi_measurements"] = measurements
+            else:
+                write_json(self.directory / "phi_measurements.json", measurements)
+                self.state["artifacts"].append("phi_measurements.json")
             for failure in failures:
                 self.event(f"Phi diagnostic omitted {failure['frame']}: {failure['reason']}")
             result = fit_phi(angles, sdds, self.settings["quality"])
@@ -777,8 +806,9 @@ class ReductionRun:
                 accepted.append(item)
                 missing = sum(not point["valid"] for point in item["coverage"])
                 if missing:
+                    review_file = self.report_name if self.compact else "coverage.json"
                     self.event(f"{row['row_id']} slice {item['center_qsx_Ainv']:g} A^-1 "
-                               f"omits {missing} angle frames; see coverage.json")
+                               f"omits {missing} angle frames; see {review_file}")
         check(accepted, f"No usable slices remain in {row['row_id']}")
         self.state.setdefault("skipped_slices", {})[row["row_id"]] = skipped
         resolved_slices = {"centers_qsx_Ainv": [item["center_qsx_Ainv"] for item in accepted],
@@ -828,8 +858,10 @@ class ReductionRun:
             groups.update(phi_groups(dataset, self.settings))
         coverage = {}
         exports = []
+        self.state["export_omissions"] = {}
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
-        csv_directory = self.directory / "pending_exports" / stamp
+        pending_root = self.directory / (".harness/pending_exports" if self.compact else "pending_exports")
+        csv_directory = pending_root / stamp
         csv_directory.mkdir(parents=True)
         for group, keys in groups.items():
             combined = ReducedSlices()
@@ -857,6 +889,7 @@ class ReductionRun:
                 self.figures(fig, f"08_{stem}_reduced")
                 removed = sum(int((~(np.isfinite(data.Iq) & (data.Iq > 0))).sum())
                               for data in slices.data)
+                self.state["export_omissions"][stem] = removed
                 if removed:
                     self.event(f"{stem}: native CSV excludes {removed} nonpositive/nonfinite points")
                 coverage[row["row_id"]] = proposal
@@ -871,11 +904,19 @@ class ReductionRun:
         csv_directory.rename(self.directory / "csv")
         self.state["artifacts"].extend(exports)
         self.state["export_settings"] = cfg
-        write_json(self.directory / "coverage.json", coverage)
-        write_json(self.directory / "row_reductions.json", [
-            {"row": row, "integration": geometry, "slices": proposal}
-            for row, geometry, _, _, proposal in reductions])
+        self.record_reductions(reductions, coverage)
         self.event(f"Exported {len(exports)} CSV files")
+
+    def record_reductions(self, reductions, coverage=None):
+        # Geometry and slice coverage already live in their checkpoint records;
+        # compact output needs only the row identities to complete provenance.
+        self.state["rows"] = [row for row, _, _, _, _ in reductions]
+        if not self.compact:
+            write_json(self.directory / "row_reductions.json", [
+                {"row": row, "integration": geometry, "slices": proposal}
+                for row, geometry, _, _, proposal in reductions])
+            if coverage is not None:
+                write_json(self.directory / "coverage.json", coverage)
 
     def run(self, stage="all"):
         import matplotlib.pyplot as plt
@@ -918,9 +959,7 @@ class ReductionRun:
                     items, proposal = self.choose_slices(integrated, row)
                     reductions.append((row, geometry, integrated, items, proposal))
                 if stage == "preview":
-                    write_json(self.directory / "row_reductions.json", [
-                        {"row": row, "integration": geometry, "slices": proposal}
-                        for row, geometry, _, _, proposal in reductions])
+                    self.record_reductions(reductions)
                     return self.finish_stage()
                 self.export(dataset, reductions)
                 self.state["status"] = "complete"
@@ -970,11 +1009,21 @@ def run_batch(settings, stage="all", resume=None, accept=(), sample=None):
             directory.mkdir(parents=True, exist_ok=True)
             result = {"sample": cfg["sample_name"], "status": "needs_review",
                       "directory": str(directory), "reason": str(error)}
-            write_json(directory / "failure.json", result)
+            if cfg["output"]["profile"] == "full":
+                write_json(directory / "failure.json", result)
+            elif not (directory / "summary.md").exists():
+                generate(directory, cfg)
+                (directory / "summary.md").write_text(
+                    f"# Reduction: {cfg['sample_name']}\n\nStatus: **needs_review**\n\n{error}\n",
+                    encoding="utf-8")
             print(f"{cfg['sample_name']}: {error}")
             results.append(result)
     root = Path(settings["output"]["root"] or Path(settings["input"]["data_directory"] or ".") / "Results")
-    manifest = root / slug(settings["experiment"]) / f"batch_{run_id}.json"
-    write_json(manifest, {"results": results, "stage": stage})
-    print(f"Batch manifest: {manifest}")
+    if settings["output"]["profile"] == "full" or len(samples) > 1:
+        parent = root / slug(settings["experiment"])
+        if settings["output"]["profile"] == "compact":
+            parent /= ".harness"
+        manifest = parent / f"batch_{run_id}.json"
+        write_json(manifest, {"results": results, "stage": stage})
+        print(f"Batch manifest: {manifest}")
     return results

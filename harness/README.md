@@ -101,8 +101,9 @@ accepted numerical estimates. `reduce`, `export`, and `all` finish with CSV expo
    representative frames, integrate the bowtie, and inspect slice overlays.
 8. Export accepted reductions.
 
-Review mode holds at estimated choices. Inspect `figures/` and the proposed result
-in `state.json`, then accept that existing result:
+Review mode holds at estimated choices. Inspect `figures/` and the proposed values
+and checks in `summary.md`, then accept that existing result. The `full` output
+profile also exposes the checkpoint details in `state.json`:
 
 ```bash
 python my_run/reduce_sample.py --accept phi --stage chi
@@ -197,7 +198,7 @@ corrected φ = 0°, even when its overall angular coverage passes the configured
 minimum. This applies to supplied centers and detected peaks on every requested
 qy row. Missing reference-frame data include masked/nonfinite selections and bins
 outside its integrated q range; finite nonpositive intensity alone is not a veto.
-`coverage.json` records the reference frame and corrected angle, its per-slice
+The checkpoint state records the reference frame and corrected angle, its per-slice
 validity/rejection reason, overall coverage, and `skip_reasons`. Rejected bins are
 excluded from slice overlays and exports. Automatic mode can skip rejected slices
 with `skip_gap_slices`; otherwise the reduction enters `needs_review`. Review users
@@ -223,7 +224,8 @@ values are in Å⁻¹ and tracked per frame. Legacy `offsets_qdy_px` are integer
 displacements with positive offsets upward, matching the example. Background
 offsets instead follow native array-row subtraction. Do not mix these conventions.
 The central qy0 row is included once. Boxes, backgrounds, and qsx slices are
-selected independently for each row. `row_reductions.json` stores their settings.
+selected independently for each row. The checkpoint state stores their settings;
+the `full` output profile additionally writes `row_reductions.json`.
 Accepted per-row settings also appear under `additional_qy_rows.row_settings` in
 the resolved JSON, keyed by row ID. These integration/slice overrides can be
 supplied directly when rows require different known parameters.
@@ -248,11 +250,44 @@ their own directory; an explicit `--output-root` starts a run at that location
 unless `--resume` is also supplied. `--sample NAME` selects one batch sample. A sample run can
 also be resumed explicitly with `--resume RUN_DIRECTORY`.
 
-Run files include original `settings.json`, latest `invocation_settings.json`,
-`resolved_settings.json`, reusable `calibration.json`, stage state, figures,
-coverage, row settings, CSVs, and `report.md`. Figures are saved as PNG only, at
-`output.dpi`. Older `figure_formats` settings remain loadable; their effective
-value is recorded as `["png"]` in the resolved settings.
+The default `output.profile: "compact"` produces this visible layout:
+
+```text
+settings.json       full settings, with accepted values after completion
+reduce_sample.py    runnable reduction entry point
+summary.md          parameters, exclusions, and decisions requiring review
+figures/            native diagnostic PNGs
+csv/                native reduced-slice exports
+```
+
+Checkpoint state, input identities, software versions, initial/invocation settings,
+and per-frame coverage are consolidated in `.harness/state.json`. Pending and
+superseded CSVs are retained under `.harness/`. They do not clutter the visible
+deliverables. Single-sample compact runs do not create batch manifests. Multi-sample
+runs keep their resume manifest under `<root>/<experiment>/.harness/`.
+
+While a run is paused or only a stage is complete, `settings.json` retains the
+requests used to produce its proposals so `--accept` can resume unchanged results.
+Once the reduction completes, it contains the full accepted settings, including
+calibration, angular offsets, integration/background geometry, per-row overrides,
+slice centers/widths, and effective export options. Initial requests and intermediate
+results remain in the hidden state. The completed settings can reproduce CSVs in
+a new directory. `summary.md` explains rejected slice centers and reasons, retained
+slices with missing angles, excluded diagnostic frames, nonpositive CSV omissions,
+and unresolved quality checks.
+
+Choose `output.profile: "full"` or `--output-profile full` when separate diagnostic
+JSON files are useful. This preserves the original layout: `settings.json`, latest
+`invocation_settings.json`, `resolved_settings.json`, reusable `calibration.json`,
+`state.json`, `phi_measurements.json` when fitted, `coverage.json`,
+`row_reductions.json`, `report.md`, and batch manifests. `--output-profile compact`
+overrides a saved full setting. Profile changes can resume existing checkpoint
+state; existing files are preserved, so use a new run directory for a clean compact
+package. Compact discovery prints the inventory to the console rather than
+creating `inventory.json`.
+
+Figures are saved as PNG only, at `output.dpi`. Older `figure_formats` settings
+remain loadable; the effective value is recorded as `["png"]` in the saved settings.
 
 With only the central qy=0 row, the harness exports one combined CSV per φ group,
 without a qy label: `<sample>_all.csv`, and optionally `<sample>_posPhi.csv` and
