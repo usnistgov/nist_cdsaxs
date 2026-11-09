@@ -36,6 +36,79 @@ Relative data, calibration, profile, and output paths are resolved from the JSON
 file's directory. Generated run settings contain absolute paths. The installed
 package is required; scripts do not modify `sys.path` or assume a working directory.
 
+## Optional start-stop mode
+
+Tell the agent **“Use start-stop mode for this reduction.”** to request that it
+launch the whole reduction in the background, acknowledge launch once, and end
+its turn until Python completes. The default remains `--agent-wait foreground`.
+Lifecycle options are command options, separate from scientific settings and
+checkpoint fingerprints; generated scripts keep the foreground default.
+
+```bash
+python -m cdsaxs.harness --config experiment.json --agent-wait suspend
+# If CODEX_THREAD_ID is not inherited, add --agent-thread-id UUID.
+python -m cdsaxs.harness --agent-job-status /absolute/path/to/job.json
+python -m cdsaxs.harness --agent-job-cancel /absolute/path/to/job.json
+python -m cdsaxs.harness --agent-job-notify /absolute/path/to/job.json
+```
+
+Suspend mode requires a POSIX host and a Codex CLI supporting `queue --resume`
+(verified with 0.167.0). Initialization and discovery use foreground mode. Launch
+validates settings, expands samples, and reserves output directories before
+starting a detached supervisor in the same Python environment. It returns the
+job ID and record path promptly. Records, effective settings/argument snapshots,
+and worker logs live under the launch directory's `.harness/jobs/<job-id>/`.
+The supervisor holds run-directory locks while loading, metadata updates,
+computation, review checkpoints, and exports run in the existing worker. CLI
+foreground runs honor the same locks. Separate new runs can run concurrently;
+resuming a directory already in use is rejected.
+
+Keep the host and originating Codex server running, and establish required
+output/server permissions before detaching. The notifier inherits the launching
+process's Codex configuration and environment; it must already be authorized to
+reach the originating server. CLI capability checks do not verify server access.
+The harness does not elevate permissions, change scientific authority, or accept
+review proposals automatically. See the [agent workflow](AGENT_WORKFLOW.md).
+
+After success, a review stop, or an exception, the supervisor records the exit
+code, sample outcomes, run directories, and summary paths, then invokes
+`codex queue --thread UUID --message TEXT --resume` once. Invocation recordings
+include the job ID and execution mode. Sample summaries include background
+duration and notification outcome. Published token counters retain their existing
+unavailable/reset semantics; this mode makes no guaranteed billing-savings claim.
+
+Execution and notification status are separate. A zero queue exit code with a
+warning is recorded as `pending`, because Codex can queue successfully while
+failing to resume. Results survive notifier failure. Explicit `--agent-job-notify`
+retries notification without rerunning Python, and skips an already delivered
+notification. A pending delivery may already be queued, so there is no automatic
+retry. Cancellation terminates the worker and suppresses continuation; it cannot
+recall an already delivered message. A host/supervisor crash may require manual
+inspection of the record and log; there is no automatic restart of computation.
+
+The authorized live fixture test completed and its queued message reached the
+originating conversation, but Codex reported an `already has an active writer`
+resumption warning. The job correctly remained `pending`. This can occur when
+completion precedes the launching turn becoming idle. Later message delivery
+does not establish that the CLI's automatic resume succeeded; do not requeue
+that message automatically. Clean automatic resumption of an idle conversation
+still needs deployment verification.
+
+The paired benchmark on Codex 0.167.0 also found that its server rejects
+`queue --resume` for unloaded spawned subagents with `direct app-server input
+is not allowed for unloaded spawned sub-agents`. These jobs retain their results
+and record notification as `pending`; a parent-mediated continuation measures
+assisted operation rather than automatic start-stop. A managed tool sandbox can
+also terminate detached children before the supervisor starts. Establish a launch
+environment that permits surviving detached processes before relying on this mode.
+
+Automated tests use a fake notifier. Before relying on automatic continuation in
+a deployment, perform an explicitly authorized live test that resumes the same
+conversation, including completion before the launching agent becomes idle.
+Codex's documented [app-server lifecycle](https://developers.openai.com/codex/app-server/)
+describes thread resumption and turn completion; the installed CLI's
+`codex queue --help` establishes the queue warning behavior.
+
 ## Settings and known constants
 
 Use `null` for an unknown value requiring estimation. `0.0` is a known offset.

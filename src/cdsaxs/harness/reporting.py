@@ -44,6 +44,11 @@ def recording_summary(state):
         elapsed = record.get("elapsed_seconds")
         lines.append(f"| {index} | {record.get('requested_stage') or 'unspecified'} | {record['status']} | "
                      f"{number(elapsed)} | {tokens(record.get('token_delta'))} |")
+    for record in records:
+        if record.get("execution_mode") == "suspend":
+            lines += ["", f"Background job `{record.get('agent_job_id')}`: execution mode suspend; "
+                      f"duration {number(record.get('background_elapsed_seconds'))} s; "
+                      f"notification {record.get('notification_status', 'not_attempted')}."]
     latest = records[-1]
     if latest.get("token_note"):
         lines += ["", f"Token source: {latest['token_note']}."]

@@ -183,3 +183,6 @@ dev_workspace/
 .github/skills/dev-skills
 
 harness_example/
+
+# Detached harness job records and logs
+.harness/jobs/

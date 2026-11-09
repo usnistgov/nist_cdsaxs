@@ -18,12 +18,12 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def session_log_path(explicit=None):
+def session_log_path(explicit=None, thread_id=None):
     """Find this thread's log only; never select an unrelated latest session."""
     explicit = explicit or os.environ.get("CDSAXS_CODEX_SESSION_LOG")
     if explicit:
         return Path(explicit).expanduser().resolve()
-    thread = os.environ.get("CODEX_THREAD_ID")
+    thread = thread_id or os.environ.get("CODEX_THREAD_ID")
     if not thread:
         return None
     # Validate before using an environment value in a glob pattern.
@@ -106,7 +106,7 @@ def measured(recorder, name):
 class RunRecorder:
     """Append invocation/step records to existing state, preserving resume history."""
 
-    def __init__(self, state, session_log=None, persist=None):
+    def __init__(self, state, session_log=None, persist=None, lifecycle=None):
         self.log = CodexUsageLog(session_log) if session_log is not None else None
         self.persist = persist
         self.stack = []
@@ -118,7 +118,10 @@ class RunRecorder:
             "codex_session_log": str(session_log) if session_log is not None else None,
             "token_start": self.snapshot(), "token_end": None, "token_delta": None,
             "between_invocations_token_delta": None, "steps": [],
+            "agent_job_id": None, "execution_mode": "foreground",
         }
+        if lifecycle:
+            self.record.update(lifecycle)
         if history and self.record["codex_session_log"] == history[-1].get("codex_session_log"):
             self.record["between_invocations_token_delta"] = token_delta(
                 history[-1].get("token_end"), self.record["token_start"])

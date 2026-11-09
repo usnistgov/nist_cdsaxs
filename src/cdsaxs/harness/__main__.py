@@ -5,9 +5,9 @@ import argparse
 from copy import deepcopy
 import json
 from pathlib import Path
+import sys
 
 from .config import DEFAULTS, STAGES, load_settings, write_json
-from .diagnostics import NeedsReview
 from .script_generator import generate
 from .recording import RunRecorder, session_log_path
 
@@ -33,8 +33,24 @@ def main(argv=None, default_config=None, default_resume=None):
                         help="Compact deliverables (default) or separate diagnostic JSON files")
     parser.add_argument("--codex-session-log", type=Path, metavar="PATH",
                         help="Optional Codex JSONL log for token snapshots; otherwise detect this thread")
+    parser.add_argument("--agent-wait", choices=("foreground", "suspend"), default="foreground",
+                        help="Suspend: detach the whole reduction and notify the originating Codex thread")
+    parser.add_argument("--agent-thread-id", help="Originating conversation UUID; defaults to CODEX_THREAD_ID")
+    recovery = parser.add_mutually_exclusive_group()
+    recovery.add_argument("--agent-job-status", type=Path, metavar="PATH", help="Read a job.json record")
+    recovery.add_argument("--agent-job-cancel", type=Path, metavar="PATH", help="Cancel a job and suppress continuation")
+    recovery.add_argument("--agent-job-notify", type=Path, metavar="PATH", help="Explicitly retry completion notification without rerunning Python")
     args = parser.parse_args(argv)
     try:
+        for action in ("status", "cancel", "notify"):
+            target = getattr(args, f"agent_job_{action}")
+            if target:
+                from . import jobs
+                result = getattr(jobs, action)(target)
+                print(json.dumps(result, indent=2))
+                return 2 if action == "notify" and result["notification_status"] == "pending" else 0
+        if args.agent_wait == "suspend" and (args.init or args.stage == "discover"):
+            parser.error("Use foreground mode for initialization/discovery; suspend a reduction stage")
         if args.init:
             settings = load_settings(args.config) if args.config else deepcopy(DEFAULTS)
             if args.output_profile:
@@ -52,8 +68,8 @@ def main(argv=None, default_config=None, default_resume=None):
             settings["output"]["profile"] = args.output_profile
         if args.output_root:
             settings["output"]["root"] = str(args.output_root.resolve())
-        from .runner import inventory, run_batch
         if args.stage == "discover":
+            from .runner import inventory
             recording_state = {}
             recorder = RunRecorder(recording_state, session_log_path(args.codex_session_log))
             recorder.record["requested_stage"] = "discover"
@@ -72,12 +88,20 @@ def main(argv=None, default_config=None, default_resume=None):
         resume = args.resume
         if resume is None and args.output_root is None:
             resume = default_resume
+        if args.agent_wait == "suspend":
+            from .jobs import launch
+            result = launch(settings, args.stage, resume, args.accept, args.sample,
+                            args.codex_session_log, args.agent_thread_id,
+                            command_args=list(argv) if argv is not None else sys.argv[1:])
+            print(json.dumps(result, indent=2))
+            return 0
+        from .runner import run_batch
         results = run_batch(settings, args.stage, resume, args.accept, args.sample,
                             codex_session_log=args.codex_session_log)
         for result in results:
             print(f"{result['sample']}: {result['status']} — {result['directory']}")
         return 2 if any(result["status"] == "needs_review" for result in results) else 0
-    except (ValueError, OSError, NeedsReview) as error:
+    except (ValueError, OSError) as error:
         print(f"Harness configuration/reduction needs attention: {error}")
         return 2
 

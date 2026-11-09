@@ -7,6 +7,7 @@ import csv
 import hashlib
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -16,7 +17,8 @@ from ..data.dataset import Dataset, ReducedDataset, ReducedSlices
 from ..loaders import load_data as loaders
 from ..plotting import plotting
 from ..reduction import slice_reduced_dataset
-from .config import fingerprint, merge, read_json, sample_settings, slug, write_json
+from .config import fingerprint, merge, read_json, slug, write_json
+from .jobs import close_locks, plan_batch, reserve
 from .diagnostics import (
     NeedsReview, box_ranges, check, detect_qy_rows, fit_phi, geometry_proposal,
     phi_figure, representative_frames, row_figure, slice_proposal,
@@ -263,7 +265,7 @@ def phi_groups(dataset, settings):
 
 
 class ReductionRun:
-    def __init__(self, settings, directory, accept=(), codex_session_log=None):
+    def __init__(self, settings, directory, accept=(), codex_session_log=None, lifecycle=None):
         self.settings = deepcopy(settings)
         # Preserve compatibility with saved configurations requesting PDF/SVG,
         # while recording the PNG-only output used by the harness.
@@ -287,7 +289,7 @@ class ReductionRun:
         self.state["sample"] = settings["sample_name"]
         self.recorder = RunRecorder(
             self.state, session_log_path(codex_session_log),
-            persist=lambda: write_json(self.state_path, self.state))
+            persist=lambda: write_json(self.state_path, self.state), lifecycle=lifecycle)
         if self.compact:
             self.state.setdefault("initial_settings", deepcopy(settings))
             self.state["invocation_settings"] = deepcopy(settings)
@@ -1050,26 +1052,24 @@ class ReductionRun:
                 "directory": str(self.directory)}
 
 
-def run_batch(settings, stage="all", resume=None, accept=(), sample=None, codex_session_log=None):
-    samples = list(sample_settings(settings))
-    if sample is not None:
-        samples = [cfg for cfg in samples if cfg["sample_name"] == sample]
-        check(samples, f"Sample {sample} is not in settings")
-    mapping = {}
-    if resume and Path(resume).is_file():
-        previous = read_json(resume)
-        mapping = {item["sample"]: item["directory"] for item in previous["results"]}
-    elif resume:
-        check(len(samples) == 1, "Resume a batch using its batch JSON manifest")
-        mapping[samples[0]["sample_name"]] = str(Path(resume).resolve())
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+def run_batch(settings, stage="all", resume=None, accept=(), sample=None, codex_session_log=None,
+              *, _plan=None, _locks_held=False, lifecycle=None):
+    plan = _plan or plan_batch(settings, resume, sample)
+    handles = [] if _locks_held or os.name != "posix" else reserve(plan)
+    try:
+        return _run_batch(settings, stage, accept, codex_session_log, plan, lifecycle)
+    finally:
+        close_locks(handles)
+
+
+def _run_batch(settings, stage, accept, codex_session_log, plan, lifecycle):
+    run_id = plan["run_id"]
     results = []
-    for cfg in samples:
-        root = Path(cfg["output"]["root"] or Path(cfg["input"]["data_directory"] or ".") / "Results")
-        default_directory = root / slug(cfg["experiment"]) / slug(cfg["sample_name"]) / run_id
-        directory = Path(mapping.get(cfg["sample_name"], default_directory))
+    for entry in plan["entries"]:
+        cfg, directory = entry["settings"], Path(entry["directory"])
         try:
-            run = ReductionRun(cfg, directory, accept, codex_session_log=codex_session_log)
+            run = ReductionRun(cfg, directory, accept, codex_session_log=codex_session_log,
+                               lifecycle=lifecycle)
             results.append(run.run(stage))
         except (NeedsReview, OSError, ValueError) as error:
             directory.mkdir(parents=True, exist_ok=True)
@@ -1085,7 +1085,7 @@ def run_batch(settings, stage="all", resume=None, accept=(), sample=None, codex_
             print(f"{cfg['sample_name']}: {error}")
             results.append(result)
     root = Path(settings["output"]["root"] or Path(settings["input"]["data_directory"] or ".") / "Results")
-    if settings["output"]["profile"] == "full" or len(samples) > 1:
+    if settings["output"]["profile"] == "full" or len(plan["entries"]) > 1:
         parent = root / slug(settings["experiment"])
         if settings["output"]["profile"] == "compact":
             parent /= ".harness"

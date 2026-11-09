@@ -20,6 +20,42 @@ or nested steps to parent totals. Agent work after a command returns is captured
 only at a later boundary; same-session resume records the intervening activity,
 which may include other work. Do not add separate usage audit files to run folders.
 
+When the user says **“Use start-stop mode for this reduction.”**, use
+`--agent-wait suspend` on subsequent reduction commands for that task. This
+applies to the whole command, including input loading, metadata, and computation.
+Initialization and discovery remain foreground commands. Pass the originating
+conversation UUID with `--agent-thread-id UUID` if `CODEX_THREAD_ID` is unavailable.
+Resolve required output and notifier/server permissions before launching; do not
+detach a command that still needs an interactive permission prompt. The host,
+Codex server, and the Python environment must remain available. The notifier must
+already have authorized access to the originating server through the inherited
+Codex configuration/environment. The harness checks the UUID, CLI capability,
+and output reservations; it cannot prove that server resumption will be authorized.
+Codex 0.167.0 rejects direct queue/resume input to unloaded spawned subagents.
+Do not promise unattended continuation for that route; parent-assisted recovery
+must be identified separately in timing and token comparisons. Ensure the tool
+environment permits detached processes to survive after the launching call ends.
+
+After launch returns a job ID and `job.json` path, give **one launch acknowledgment
+and end the turn**. Do not poll, sleep in a tool loop, send progress commentary,
+or keep the turn open during Python execution. The detached supervisor queues
+one completion message and requests resumption of the same conversation on
+success, a review stop, or failure. On continuation, read that job record and
+the listed summaries, inspect relevant figures, and continue the original task.
+Existing user acceptance is still required for review checkpoints; suspend mode
+grants no additional scientific authority.
+
+If continuation fails, completed results remain available. Use
+`--agent-job-status PATH` for an explicitly requested status check and
+`--agent-job-notify PATH` for explicit notification recovery without rerunning
+Python. A pending notification may already have been queued: do not automatically
+retry or launch the reduction again. `--agent-job-cancel PATH` requests cancellation
+and suppresses automatic continuation; cancellation cannot recall a message already
+delivered. Read the job record and log after an interrupted host or supervisor.
+Keep job bookkeeping in `.harness/jobs/`, outside scientific run packages.
+Compare recorded durations and published usage when useful; do not claim
+guaranteed token or billing savings.
+
 1. Discover the user's input data and any supplied constants/configuration. Generate
    a script/settings file if needed. Use the installed package and explicit paths.
    Inventory filenames and metadata, including the current loader's angle convention.
