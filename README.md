@@ -67,7 +67,10 @@ This is preferred over manually modifying `PYTHONPATH`.
 For agent-assisted or standalone script reductions, use the
 [JSON-configured reduction harness](harness/README.md). It supports staged visual
 review, explicitly authorized automatic batches, and optional additional qy rows
-for circular contact holes. Start with `python -m cdsaxs.harness --init my_run`.
+for circular contact holes. Background checks focus on the requested slices;
+unaffected peaks near detector gaps can use an opposite-side background with
+recorded notifications and per-frame decision diagnostics.
+Start with `python -m cdsaxs.harness --init my_run`.
 
 This software is meant to be used in a Jupyter notebook. While some
 aspects of the reduction can be automated as a Python script, currently

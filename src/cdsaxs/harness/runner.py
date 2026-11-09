@@ -66,6 +66,12 @@ def inventory(settings):
             "reference_candidates": candidates}
 
 
+def nominal_phi_is_excluded(settings, angle):
+    """Match configured raw sample angles with the harness's 0.05 deg tolerance."""
+    return any(abs(angle - excluded) < 0.05
+               for excluded in settings["input"].get("exclude_nominal_phi_deg", []))
+
+
 def load_dataset(settings, calibration=None, offsets=None, reference=False):
     """Always construct fresh Data2D objects; frame IDs survive repeated angles."""
     cfg = settings["input"]
@@ -109,6 +115,9 @@ def load_dataset(settings, calibration=None, offsets=None, reference=False):
             data.update_user_params({"harness_reference_phi_assumed": True})
         data.update_metadata(cfg["metadata"], overwrite=True)
         data.update_user_params(cfg["user_params"])
+        if (not reference and cfg.get("exclude_nominal_phi_deg")
+                and nominal_phi_is_excluded(settings, data.metadata["sample_phi_deg"])):
+            continue
         frame_id = f"{data.metadata.get('filename', 'frame')}:{index:06d}"
         data.update_metadata({"name": frame_id}, overwrite=True)
         data.name = frame_id
@@ -206,10 +215,11 @@ def search_arguments(data, settings):
 
 def integrate_row(dataset, row, geometry):
     ranges_y, ranges_x = {}, {}
-    backgrounds = geometry["background_offsets_px"]
+    backgrounds = geometry.get("background_offsets_by_frame_px", geometry["background_offsets_px"])
     for key, data in dataset.datas.items():
         yr, xr = box_ranges(data, row, geometry)
-        for offset in backgrounds or []:
+        frame_backgrounds = backgrounds[key] if isinstance(backgrounds, dict) else backgrounds
+        for offset in frame_backgrounds or []:
             check(abs(offset) >= geometry["height_px"], "Background overlaps signal box")
             check(0 <= yr[0] + offset < yr[1] + offset <= data.image.shape[0],
                   f"Background region leaves detector for {data.name}")
@@ -290,6 +300,11 @@ class ReductionRun:
             self.event(str(error))
             self.save()
             raise
+        excluded = settings["input"].get("exclude_nominal_phi_deg", [])
+        if excluded:
+            # Frame selection is part of input identity for every stage cache.
+            self.inputs = [dict(identity, exclude_nominal_phi_deg=deepcopy(excluded))
+                           for identity in self.inputs]
         self.state["inputs"] = self.inputs
         self.state["versions"] = self.versions()
         execution_settings = {key: value for key, value in settings.items()
@@ -411,7 +426,14 @@ class ReductionRun:
                     self.state["stages"].pop(later)
                 self.archive_exports(f"Stage {name} changed")
                 self.event(f"Settings/input change invalidated {name} and subsequent stages")
-            result = compute()
+            try:
+                result = compute()
+            except NeedsReview as error:
+                if hasattr(error, "result"):
+                    self.state["stages"][name] = {
+                        "fingerprint": signature, "status": "failed_quality", "result": error.result}
+                    self.save()
+                raise
             record = {"fingerprint": signature, "status": "proposed", "result": result}
             self.state["stages"][name] = record
         result = record["result"]
@@ -743,7 +765,8 @@ class ReductionRun:
                 profile, _ = data.integrate_box(
                     mode=geometry["mode"], axis=0,
                     range_qdy_px=yrange, range_qdx_px=xrange,
-                    subtract_background_offset=geometry["background_offsets_px"], show_plot=False)
+                    subtract_background_offset=geometry.get("background_offsets_by_frame_px", {}).get(
+                        data.name, geometry["background_offsets_px"]), show_plot=False)
                 positive = bool(np.any(np.isfinite(profile.Iq) & (profile.Iq > 0)))
                 has_positive_measurements |= positive
                 from ..plotting.plotting import plot_data2d_integrate_box
@@ -756,6 +779,17 @@ class ReductionRun:
         geometry = self.checkpoint(f"integration:{row['row_id']}",
                                    {"integration": cfg, "slices": settings["slices"], "row": row},
                                    compute, decisions, supplied=not decisions)
+        for item in geometry.get("background_diagnostics", {}).get("production_frames", []):
+            if item["one_sided_reason"] == "single_background_requested":
+                self.event(f"{row['row_id']}: single background requested at corrected phi "
+                           f"{item['phi_deg']:+.6g} deg ({item['frame']}): "
+                           f"offsets {item['offsets_px']} px; contrast {item['contrast_fraction']:.6g}. "
+                           f"See {self.report_name}")
+            elif item["one_sided_reason"]:
+                self.event(f"{row['row_id']}: one-sided background at corrected phi "
+                           f"{item['phi_deg']:+.6g} deg ({item['frame']}): "
+                           f"kept offsets {item['offsets_px']} px opposite the detector/mask gap; "
+                           f"signal clearance ≥ {item['signal_clearance_px']} px. See {self.report_name}")
         resolved_geometry = {key: geometry[key] for key in ("height_px", "width_px", "background_offsets_px")}
         if row["row_id"] == "qy0":
             self.resolved["integration"].update(resolved_geometry)

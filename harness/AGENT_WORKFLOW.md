@@ -32,7 +32,19 @@ directory and put its relevant conclusions in concise `decision_notes`.
    Use equal-magnitude top/bottom offsets by default. Enable
    `integration.allow_independent_backgrounds` only when the user requests
    independently placed boxes; do not work around symmetric selection failures
-   by supplying unequal offsets. Select a pair usable on both sides.
+   by supplying unequal offsets. Near a detector/mask gap, the default
+   `integration.allow_one_sided_backgrounds` permits one opposite-side background
+   when the signal box at the slice columns has the configured unmasked clearance
+   and the retained background passes coverage and contrast checks. Use the
+   harness's per-frame choice in preview and production. Notify the user of every
+   exception with row, corrected angle, retained/discarded offsets, and clearance;
+   explain the assumption that the opposite-side background represents the signal
+   background. Do not use this exception for bright backgrounds without gap evidence.
+   Default background scoring uses requested qsx windows or measured peak windows.
+   Inspect the integration checkpoint's `background_diagnostics` for candidate
+   offsets, per-frame/per-side scores, mask evidence, and full-box comparison scores.
+   Distinguish a failed row-background check from a rejected individual slice;
+   unrelated features outside requested windows should not veto the entire row.
    Preview and production must use identical accepted settings.
 6. Inspect bowtie/slice overlays. Narrow slices should capture peaks with little
    background. Read `summary.md` for exclusions and missing-angle decisions;
@@ -40,6 +52,8 @@ directory and put its relevant conclusions in concise `decision_notes`.
    is additionally available in the `full` profile).
    Reject a whole slice when its bin is unavailable in the frame nearest corrected
    phi=0, including supplied centers, even if overall angular coverage passes.
+   A gap affecting only a background must first be evaluated with the one-sided
+   rule above; retain the slice if its signal and final native coverage pass.
    Notify the user of skipped slices with centers, coverage, and reasons.
 7. Additional qy rows require an explicit user request and circular contact holes.
    An automatic-mode setting or a circular-looking pattern alone does not authorize

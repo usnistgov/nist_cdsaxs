@@ -553,7 +553,7 @@ class Dataset():
         self,
         mode: str = 'sum',
         axis: str | int = None,
-        subtract_background_offset: int | list[int] = None,
+        subtract_background_offset: int | list[int] | dict = None,
         keys=None,
         width_qdy_px: int | dict = None,
         width_qdx_px: int | dict = None,
@@ -607,6 +607,10 @@ class Dataset():
             direction. A negative value will shift the box in the
             negative qdx direction.
             Default value is 0.
+
+        subtract_background_offset : int, list[int], dict, optional
+            Background row displacement(s). A dictionary maps each selected
+            data key to its displacements, allowing frame-specific backgrounds.
 
         Parameters for Box Refinement
         -----------------------------
@@ -685,7 +689,9 @@ class Dataset():
                 # if a dictionary is provided we will use the data key
                 # to select the correct keyword value otherwise it will
                 # be the same for all data
-                subtract_background_offset=subtract_background_offset,
+                subtract_background_offset=(subtract_background_offset[key]
+                    if isinstance(subtract_background_offset, dict)
+                    else subtract_background_offset),
                 width_qdy_px=width_qdy_px if not isinstance(
                     width_qdy_px, dict) else width_qdy_px[key],
                 width_qdx_px=width_qdx_px if not isinstance(

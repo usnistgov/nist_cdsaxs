@@ -10,6 +10,8 @@ def status(record):
     if not record:
         return "not run"
     value = record.get("status", "")
+    if value == "failed_quality":
+        return "failed quality"
     return "accepted" if value.startswith("accepted") else "proposed"
 
 
@@ -81,6 +83,32 @@ def compact_summary(directory, settings, resolved, state):
                              f"{number(metrics.get('alignment_residual_px'))} px; "
                              f"contained peak fraction {number(metrics.get('peak_inside_fraction'))}; "
                              f"background/signal peak contrast {number(metrics.get('background_peak_fraction'))}.")
+            diagnostics = record["result"].get("background_diagnostics", {})
+            selected = diagnostics.get("selected_frames", [])
+            if selected:
+                worst = max(selected, key=lambda item: item["contrast_fraction"])
+                lines.append(f"- {row}: background scoring scope `{diagnostics['requested_scope']}`; "
+                             f"worst checked frame `{worst['frame']}` at corrected φ "
+                             f"{number(worst['phi_deg'])}°, contrast {number(worst['contrast_fraction'])} "
+                             f"(limit {number(settings['quality']['max_background_peak_fraction'])}). "
+                             "Candidate offsets, sides, mask evidence, and full-box comparison scores "
+                             "are stored in the integration checkpoint's `background_diagnostics`.")
+            exceptions = [item for item in diagnostics.get("production_frames", selected)
+                          if item.get("one_sided_reason")]
+            for item in exceptions:
+                if item["one_sided_reason"] == "single_background_requested":
+                    lines.append(f"- **Single background requested — {row}**, frame `{item['frame']}`, "
+                                 f"corrected φ {number(item['phi_deg'])}°: use offsets "
+                                 f"{item['offsets_px']} px; contrast {number(item['contrast_fraction'])}. "
+                                 "The selected side is assumed to represent the signal background; "
+                                 "signal masks and slice-coverage checks still apply.")
+                    continue
+                lines.append(f"- **One-sided background — {row}**, frame `{item['frame']}`, "
+                             f"corrected φ {number(item['phi_deg'])}°: use offsets {item['offsets_px']} px; "
+                             f"discard {item['discarded_offsets_px']} px on the detector/mask-gap side. "
+                             f"Signal box and slice columns are clear by at least {item['signal_clearance_px']} px; "
+                             f"retained background contrast {number(item['contrast_fraction'])}. "
+                             "This assumes the opposite-side background represents the signal background.")
 
     rejected, partial, kept = [], [], 0
     for name, record in stages.items():

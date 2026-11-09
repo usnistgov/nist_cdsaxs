@@ -28,6 +28,7 @@ DEFAULTS = {
         "filetype": None, "detector_type": None,
         "metadata_csv": None, "metadata_pattern": None,
         "metadata_scales": {}, "metadata": {}, "user_params": {},
+        "exclude_nominal_phi_deg": [],
     },
     "calibration": {
         "source_file": None, "reference_sample": None,
@@ -59,7 +60,10 @@ DEFAULTS = {
     "integration": {
         "height_px": None, "width_px": None,
         "background_offsets_px": None, "subtract_background": True,
+        "background_count": 2,
         "allow_independent_backgrounds": False,
+        "allow_one_sided_backgrounds": True,
+        "background_score_scope": "slice_windows",
         "background_strategy": "auto", "mode": "sum",
         "search_height_px": 40, "height_bounds_px": [3, 40],
         "peak_padding_px": 3,
@@ -91,6 +95,7 @@ DEFAULTS = {
         "min_roi_valid_fraction": 0.2,
         "min_slice_angle_coverage": 0.6,
         "min_peak_inside_fraction": 0.95,
+        "min_signal_gap_clearance_px": 1,
     },
     "export": {
         "per_row": True, "combine_qy_rows": True,
@@ -257,7 +262,8 @@ def validate(settings):
     for section, keys in (
         (None, ("refit_known_constants",)),
         ("corrections", ("footprint", "substrate_absorption")),
-        ("integration", ("subtract_background", "allow_independent_backgrounds")),
+        ("integration", ("subtract_background", "allow_independent_backgrounds",
+                         "allow_one_sided_backgrounds")),
         ("additional_qy_rows", ("enabled",)),
         ("export", ("per_row", "combine_qy_rows", "split_phi", "export_qr")),
     ):
@@ -271,6 +277,13 @@ def validate(settings):
             isinstance(item, str) for item in value
         )):
             raise ValueError(f"input.{key} must be a list of filenames or null")
+    excluded = settings["input"].get("exclude_nominal_phi_deg", [])
+    if not isinstance(excluded, list):
+        raise ValueError("input.exclude_nominal_phi_deg must be a list")
+    for angle in excluded:
+        _number(angle, "input.exclude_nominal_phi_deg")
+    if len(set(excluded)) != len(excluded):
+        raise ValueError("input.exclude_nominal_phi_deg must contain distinct angles")
     normalize = settings["corrections"]["normalize_by"]
     if (not isinstance(normalize, list) or not all(isinstance(key, str) for key in normalize)
             or len(set(normalize)) != len(normalize)):
@@ -321,6 +334,9 @@ def validate(settings):
             _number(value, key, True)
             if int(value) != value:
                 raise ValueError(f"{key} must be an integer")
+    count = settings["integration"].get("background_count", 2)
+    if isinstance(count, bool) or not isinstance(count, int) or count not in (1, 2):
+        raise ValueError("integration.background_count must be 1 or 2")
     backgrounds = settings["integration"]["background_offsets_px"]
     if backgrounds is not None and (not isinstance(backgrounds, list) or not backgrounds):
         raise ValueError("background_offsets_px must be a nonempty list or null")
@@ -329,7 +345,9 @@ def validate(settings):
             _number(value, "background_offsets_px")
             if int(value) != value:
                 raise ValueError("Background offsets must be integers")
-        if (not settings["integration"]["allow_independent_backgrounds"]
+        if count == 1 and len(backgrounds) != 1:
+            raise ValueError("background_count=1 requires exactly one background offset")
+        if (count != 1 and not settings["integration"]["allow_independent_backgrounds"]
                 and not is_symmetric_background_pair(backgrounds)):
             raise ValueError("background_offsets_px must be a symmetric [-d, +d] pair; "
                              "set integration.allow_independent_backgrounds=true "
@@ -337,6 +355,12 @@ def validate(settings):
     for section in ("integration", "slices"):
         if settings[section]["mode"] not in {"sum", "mean"}:
             raise ValueError(f"{section}.mode must be sum or mean")
+    if settings["integration"]["background_score_scope"] not in {"slice_windows", "full_box"}:
+        raise ValueError("integration.background_score_scope must be slice_windows or full_box")
+    clearance = settings["quality"]["min_signal_gap_clearance_px"]
+    _number(clearance, "quality.min_signal_gap_clearance_px")
+    if clearance < 0 or int(clearance) != clearance:
+        raise ValueError("quality.min_signal_gap_clearance_px must be a nonnegative integer")
     if settings["integration"]["background_strategy"] not in {"auto", "adjacent", "distant"}:
         raise ValueError("background_strategy must be auto, adjacent, or distant")
     if (not isinstance(settings["output"]["profile"], str)
@@ -405,7 +429,7 @@ def validate(settings):
             if not isinstance(value, bool):
                 raise ValueError(f"quality.{key} must be boolean")
         else:
-            _number(value, f"quality.{key}", True)
+            _number(value, f"quality.{key}", key != "min_signal_gap_clearance_px")
             if ("fraction" in key or "coverage" in key) and value > 1:
                 raise ValueError(f"quality.{key} must be <= 1")
     exp = settings["export"]
