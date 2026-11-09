@@ -59,6 +59,104 @@ def write_images(cfg, angles=(-30, 0, 30), extra_rows=False):
     return base
 
 
+@pytest.mark.parametrize("output_profile", ["compact", "full"])
+def test_runtime_records_survive_resume_and_identify_cached_steps(
+        settings, tmp_path, monkeypatch, output_profile):
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("CDSAXS_CODEX_SESSION_LOG", raising=False)
+    write_images(settings)
+    settings["output"]["profile"] = output_profile
+    directory = tmp_path / "recorded"
+    first = ReductionRun(settings, directory)
+    assert first.run("phi")["status"] == "stage_complete"
+    previous = deepcopy(first.state["recordings"][0])
+    resumed = ReductionRun(settings, directory)
+    assert resumed.run("chi")["status"] == "stage_complete"
+    state = json.loads(resumed.state_path.read_text())
+    assert state["recordings"][0] == previous
+    assert len(state["recordings"]) == 2
+    latest = state["recordings"][-1]
+    assert latest["requested_stage"] == "chi"
+    assert latest["elapsed_seconds"] > 0
+    assert latest["token_delta"] is None
+    steps = latest["steps"]
+    assert {step["stage"] for step in steps} >= {
+        "load_initial", "read_detector_files", "frame_metadata", "calibration_metadata",
+        "angle_metadata", "reload_accepted_phi", "corrections_accepted_phi", "chi_metadata",
+    }
+    assert all(step["elapsed_seconds"] >= 0 and step["token_delta"] is None for step in steps)
+    assert all(step["cached"] for step in steps if step["stage"] in {"phi", "calibration"})
+    assert any(step["parent_index"] is not None for step in steps)
+    report = (directory / resumed.report_name).read_text()
+    assert "Runtime and token usage" in report
+    assert "reload_accepted_phi" in report
+    assert "unavailable" in report
+    assert "(cached)" in report
+
+
+def test_review_stop_persists_failed_step_record(settings, tmp_path, monkeypatch):
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("CDSAXS_CODEX_SESSION_LOG", raising=False)
+    write_images(settings)
+    settings["offsets"]["sample_phi_offset_deg"] = None
+    settings["phi"]["pitch_nm"] = None
+    run = ReductionRun(settings, tmp_path / "held")
+    assert run.run("phi")["status"] == "needs_review"
+    record = json.loads(run.state_path.read_text())["recordings"][-1]
+    assert record["status"] == "needs_review"
+    assert record["elapsed_seconds"] > 0
+    phi = next(step for step in record["steps"] if step["stage"] == "phi")
+    assert phi["status"] == "failed"
+    assert phi["error_type"] == "NeedsReview"
+
+
+def test_invalid_input_persists_invocation_record(settings, tmp_path, monkeypatch):
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.delenv("CDSAXS_CODEX_SESSION_LOG", raising=False)
+    settings["input"]["filenames"] = ["missing.tif"]
+    settings["output"]["profile"] = "compact"
+    directory = tmp_path / "missing_input"
+    with pytest.raises(NeedsReview, match="missing"):
+        ReductionRun(settings, directory)
+    state = json.loads((directory / ".harness/state.json").read_text())
+    record = state["recordings"][-1]
+    assert record["status"] == "needs_review"
+    assert record["elapsed_seconds"] >= 0
+    assert record["steps"][0]["stage"] == "input_selection"
+    assert record["steps"][0]["status"] == "failed"
+    assert "input_selection" in (directory / "summary.md").read_text()
+
+
+def test_cli_records_explicit_log_in_discovery_and_generated_run(settings, tmp_path):
+    write_images(settings)
+    script = generate(tmp_path / "generated_recording", settings)
+    log = tmp_path / "session.jsonl"
+    log.write_text(json.dumps({
+        "type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": 100, "cached_input_tokens": 60,
+                                  "output_tokens": 10, "total_tokens": 110},
+        }},
+    }) + '\n')
+    command = subprocess.run([sys.executable, str(script), "--stage", "calibration",
+                              "--codex-session-log", str(log)], cwd=tmp_path,
+                             capture_output=True, text=True)
+    assert command.returncode == 0, command.stdout + command.stderr
+    record = json.loads((script.parent / "state.json").read_text())["recordings"][-1]
+    assert record["codex_session_log"] == str(log)
+    assert record["token_start"]["tokens"]["input_tokens"] == 100
+    assert record["token_delta"] == {
+        "input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+    }
+    discovery = subprocess.run([sys.executable, str(script), "--stage", "discover",
+                                "--codex-session-log", str(log)], cwd=tmp_path,
+                               capture_output=True, text=True)
+    assert discovery.returncode == 0, discovery.stdout + discovery.stderr
+    record = json.loads((script.parent / "inventory.json").read_text())["recordings"][-1]
+    assert record["requested_stage"] == "discover"
+    assert record["steps"][0]["stage"] == "discover"
+    assert record["token_delta"]["total_tokens"] == 0
+
+
 def test_json_profiles_paths_null_and_zero(tmp_path):
     write_json(tmp_path / "profile.json", {
         "offsets": {"sample_phi_offset_deg": 0.0}, "integration": {"height_px": 8},

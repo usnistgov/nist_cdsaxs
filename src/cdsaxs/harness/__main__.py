@@ -9,6 +9,7 @@ from pathlib import Path
 from .config import DEFAULTS, STAGES, load_settings, write_json
 from .diagnostics import NeedsReview
 from .script_generator import generate
+from .recording import RunRecorder, session_log_path
 
 
 def main(argv=None, default_config=None, default_resume=None):
@@ -30,6 +31,8 @@ def main(argv=None, default_config=None, default_resume=None):
     parser.add_argument("--output-root", type=Path, help="Consolidated output directory")
     parser.add_argument("--output-profile", choices=("compact", "full"),
                         help="Compact deliverables (default) or separate diagnostic JSON files")
+    parser.add_argument("--codex-session-log", type=Path, metavar="PATH",
+                        help="Optional Codex JSONL log for token snapshots; otherwise detect this thread")
     args = parser.parse_args(argv)
     try:
         if args.init:
@@ -51,7 +54,13 @@ def main(argv=None, default_config=None, default_resume=None):
             settings["output"]["root"] = str(args.output_root.resolve())
         from .runner import inventory, run_batch
         if args.stage == "discover":
-            result = inventory(settings)
+            recording_state = {}
+            recorder = RunRecorder(recording_state, session_log_path(args.codex_session_log))
+            recorder.record["requested_stage"] = "discover"
+            with recorder.stage("discover"):
+                result = inventory(settings)
+            recorder.finish("complete")
+            result["recordings"] = recording_state["recordings"]
             if settings["output"]["profile"] == "full":
                 target = args.config.resolve().parent / "inventory.json"
                 write_json(target, result)
@@ -63,7 +72,8 @@ def main(argv=None, default_config=None, default_resume=None):
         resume = args.resume
         if resume is None and args.output_root is None:
             resume = default_resume
-        results = run_batch(settings, args.stage, resume, args.accept, args.sample)
+        results = run_batch(settings, args.stage, resume, args.accept, args.sample,
+                            codex_session_log=args.codex_session_log)
         for result in results:
             print(f"{result['sample']}: {result['status']} — {result['directory']}")
         return 2 if any(result["status"] == "needs_review" for result in results) else 0

@@ -22,7 +22,8 @@ from .diagnostics import (
     phi_figure, representative_frames, row_figure, slice_proposal,
 )
 from .script_generator import generate
-from .reporting import compact_summary
+from .reporting import compact_summary, recording_summary
+from .recording import RunRecorder, measured, session_log_path
 
 
 def file_identity(path):
@@ -72,7 +73,7 @@ def nominal_phi_is_excluded(settings, angle):
                for excluded in settings["input"].get("exclude_nominal_phi_deg", []))
 
 
-def load_dataset(settings, calibration=None, offsets=None, reference=False):
+def load_dataset(settings, calibration=None, offsets=None, reference=False, recorder=None):
     """Always construct fresh Data2D objects; frame IDs survive repeated angles."""
     cfg = settings["input"]
     metadata = deepcopy(cfg["metadata"])
@@ -82,53 +83,57 @@ def load_dataset(settings, calibration=None, offsets=None, reference=False):
         metadata.update({key: value for key, value in offsets.items() if value is not None})
     files = selected_files(settings)
     dataset = Dataset(name=settings["sample_name"])
-    if cfg["metadata_csv"]:
-        loaded = loaders.LoadDataset_MetadataCSV(
-            settings["sample_name"], cfg["metadata_csv"], verbose=False,
-            filetype=cfg["filetype"], detector_type=cfg["detector_type"])
-        frames = list(loaded.datas.values())
-        requested = set(files)
-        frames = [data for data in frames if str((
-            Path(data.metadata["data_directory"]) / data.metadata["filename"]
-        ).resolve()) in requested]
-    else:
-        frames = []
-        for filepath in files:
-            kind = cfg["filetype"]
-            if kind is None and Path(filepath).suffix.lower() in {".h5", ".hdf5"}:
-                kind = "smi-h5"
-            if kind == "smi-h5":
-                loaded = loaders.LoadData(filepath, metadata=metadata,
-                                          user_params=cfg["user_params"], filetype=kind)
-                frames.extend(loaded if isinstance(loaded, list) else [loaded])
-            else:
-                loaded = loaders.LoadDataset(
-                    settings["sample_name"], str(Path(filepath).parent),
-                    filenames=[Path(filepath).name], metadata=metadata,
-                    user_params=cfg["user_params"], metadata_pattern=cfg["metadata_pattern"],
-                    metadata_scales=cfg["metadata_scales"],
-                    filetype=kind, detector_type=cfg["detector_type"], verbose=False)
-                frames.extend(loaded.datas.values())
-    for index, data in enumerate(frames):
-        if reference and "sample_phi_deg" not in data.metadata:
-            data.update_metadata({"sample_phi_deg": 0.0})
-            data.update_user_params({"harness_reference_phi_assumed": True})
-        data.update_metadata(cfg["metadata"], overwrite=True)
-        data.update_user_params(cfg["user_params"])
-        if (not reference and cfg.get("exclude_nominal_phi_deg")
-                and nominal_phi_is_excluded(settings, data.metadata["sample_phi_deg"])):
-            continue
-        frame_id = f"{data.metadata.get('filename', 'frame')}:{index:06d}"
-        data.update_metadata({"name": frame_id}, overwrite=True)
-        data.name = frame_id
-        data.mask |= ~np.isfinite(data.image)
-        dataset.add_data(data)
+    with measured(recorder, "read_detector_files"):
+        if cfg["metadata_csv"]:
+            loaded = loaders.LoadDataset_MetadataCSV(
+                settings["sample_name"], cfg["metadata_csv"], verbose=False,
+                filetype=cfg["filetype"], detector_type=cfg["detector_type"])
+            frames = list(loaded.datas.values())
+            requested = set(files)
+            frames = [data for data in frames if str((
+                Path(data.metadata["data_directory"]) / data.metadata["filename"]
+            ).resolve()) in requested]
+        else:
+            frames = []
+            for filepath in files:
+                kind = cfg["filetype"]
+                if kind is None and Path(filepath).suffix.lower() in {".h5", ".hdf5"}:
+                    kind = "smi-h5"
+                if kind == "smi-h5":
+                    loaded = loaders.LoadData(filepath, metadata=metadata,
+                                              user_params=cfg["user_params"], filetype=kind)
+                    frames.extend(loaded if isinstance(loaded, list) else [loaded])
+                else:
+                    loaded = loaders.LoadDataset(
+                        settings["sample_name"], str(Path(filepath).parent),
+                        filenames=[Path(filepath).name], metadata=metadata,
+                        user_params=cfg["user_params"], metadata_pattern=cfg["metadata_pattern"],
+                        metadata_scales=cfg["metadata_scales"],
+                        filetype=kind, detector_type=cfg["detector_type"], verbose=False)
+                    frames.extend(loaded.datas.values())
+    with measured(recorder, "frame_metadata"):
+        for index, data in enumerate(frames):
+            if reference and "sample_phi_deg" not in data.metadata:
+                data.update_metadata({"sample_phi_deg": 0.0})
+                data.update_user_params({"harness_reference_phi_assumed": True})
+            data.update_metadata(cfg["metadata"], overwrite=True)
+            data.update_user_params(cfg["user_params"])
+            if (not reference and cfg.get("exclude_nominal_phi_deg")
+                    and nominal_phi_is_excluded(settings, data.metadata["sample_phi_deg"])):
+                continue
+            frame_id = f"{data.metadata.get('filename', 'frame')}:{index:06d}"
+            data.update_metadata({"name": frame_id}, overwrite=True)
+            data.name = frame_id
+            data.mask |= ~np.isfinite(data.image)
+            dataset.add_data(data)
     if calibration:
         metadata = {key: calibration[key] for key in ("sdd_cm", "center_px")}
-        dataset.update_all_metadata(metadata, verbose=False)
+        with measured(recorder, "calibration_metadata"):
+            dataset.update_all_metadata(metadata, verbose=False)
     if offsets:
-        dataset.update_all_metadata({k: v for k, v in offsets.items() if v is not None},
-                                    verbose=False)
+        with measured(recorder, "angle_metadata"):
+            dataset.update_all_metadata({k: v for k, v in offsets.items() if v is not None},
+                                        verbose=False)
     check(dataset.datas, "No detector frames loaded")
     for data in dataset.datas.values():
         check(np.isfinite(data.sample_phi_deg), f"Invalid phi angle in {data.name}")
@@ -258,7 +263,7 @@ def phi_groups(dataset, settings):
 
 
 class ReductionRun:
-    def __init__(self, settings, directory, accept=()):
+    def __init__(self, settings, directory, accept=(), codex_session_log=None):
         self.settings = deepcopy(settings)
         # Preserve compatibility with saved configurations requesting PDF/SVG,
         # while recording the PNG-only output used by the harness.
@@ -280,6 +285,9 @@ class ReductionRun:
               "This resume directory belongs to a different sample")
         self.state["status"] = "running"
         self.state["sample"] = settings["sample_name"]
+        self.recorder = RunRecorder(
+            self.state, session_log_path(codex_session_log),
+            persist=lambda: write_json(self.state_path, self.state))
         if self.compact:
             self.state.setdefault("initial_settings", deepcopy(settings))
             self.state["invocation_settings"] = deepcopy(settings)
@@ -287,17 +295,19 @@ class ReductionRun:
         if not self.compact:
             write_json(self.directory / "invocation_settings.json", settings)
         try:
-            self.files = selected_files(settings)
-            self.inputs = [file_identity(path) for path in self.files]
-            for filepath in self.files:
-                if Path(filepath).suffix == ".bin" and Path(filepath).with_suffix(".info").is_file():
-                    self.inputs.append(file_identity(Path(filepath).with_suffix(".info")))
-            if settings["input"]["metadata_csv"]:
-                self.inputs.append(file_identity(settings["input"]["metadata_csv"]))
+            with self.recorder.stage("input_selection"):
+                self.files = selected_files(settings)
+                self.inputs = [file_identity(path) for path in self.files]
+                for filepath in self.files:
+                    if Path(filepath).suffix == ".bin" and Path(filepath).with_suffix(".info").is_file():
+                        self.inputs.append(file_identity(Path(filepath).with_suffix(".info")))
+                if settings["input"]["metadata_csv"]:
+                    self.inputs.append(file_identity(settings["input"]["metadata_csv"]))
         except (NeedsReview, OSError) as error:
             self.state["status"] = "needs_review"
             self.archive_exports("Input selection is no longer valid")
             self.event(str(error))
+            self.recorder.finish(self.state["status"])
             self.save()
             raise
         excluded = settings["input"].get("exclude_nominal_phi_deg", [])
@@ -392,6 +402,7 @@ class ReductionRun:
         lines += ["", "## Stages", ""]
         for name, record in self.state["stages"].items():
             lines.append(f"- {name}: {record['status']}")
+        lines += recording_summary(self.state)
         lines += ["", "## Artifacts", ""]
         lines += [f"- [{name}]({name})" for name in sorted(set(self.state["artifacts"]))]
         (self.directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -416,6 +427,10 @@ class ReductionRun:
                                  "implementation": self.state["versions"]})
         previous = self.state["stages"].get(name)
         cached = previous is not None and previous["fingerprint"] == signature
+        with self.recorder.stage(name, cached=cached):
+            return self._checkpoint(name, signature, previous, cached, compute, decisions, supplied)
+
+    def _checkpoint(self, name, signature, previous, cached, compute, decisions, supplied):
         if cached:
             record = previous
         else:
@@ -502,7 +517,7 @@ class ReductionRun:
                 filenames=reference_paths, metadata_csv=None, filter_substrings=None,
                 metadata_pattern=cfg["reference_metadata_pattern"],
             )
-            dataset = load_dataset(reference_settings, reference=True)
+            dataset = load_dataset(reference_settings, reference=True, recorder=self.recorder)
             data = min(dataset.datas.values(), key=lambda d: abs(d.sample_phi_deg))
             if cfg["sdd_guess_cm"] is not None:
                 data.update_metadata({"sdd_cm": cfg["sdd_guess_cm"]})
@@ -645,7 +660,8 @@ class ReductionRun:
                                  ["accept_angle_corrections"],
                                  supplied=known is not None and not self.settings["refit_known_constants"])
         self.resolved["offsets"]["sample_chi_offset_deg"] = result["sample_chi_offset_deg"]
-        dataset.update_all_metadata({"sample_chi_offset_deg": result["sample_chi_offset_deg"]}, verbose=False)
+        with self.recorder.stage("chi_metadata"):
+            dataset.update_all_metadata({"sample_chi_offset_deg": result["sample_chi_offset_deg"]}, verbose=False)
 
     def estimate_omega(self, dataset):
         known = self.settings["offsets"]["sample_omega_offset_deg"]
@@ -702,7 +718,8 @@ class ReductionRun:
                                  ["accept_angle_corrections"],
                                  supplied=known is not None and not self.settings["refit_known_constants"])
         self.resolved["offsets"]["sample_omega_offset_deg"] = result["sample_omega_offset_deg"]
-        dataset.update_all_metadata({"sample_omega_offset_deg": result["sample_omega_offset_deg"]}, verbose=False)
+        with self.recorder.stage("omega_metadata"):
+            dataset.update_all_metadata({"sample_omega_offset_deg": result["sample_omega_offset_deg"]}, verbose=False)
 
     def rows(self, dataset):
         cfg = self.settings["additional_qy_rows"]
@@ -796,7 +813,8 @@ class ReductionRun:
         else:
             self.resolved["additional_qy_rows"]["row_settings"].setdefault(row["row_id"], {})[
                 "integration"] = merge(cfg, resolved_geometry)
-        integrated = integrate_row(dataset, row, geometry)
+        with self.recorder.stage(f"integrate:{row['row_id']}"):
+            integrated = integrate_row(dataset, row, geometry)
         self.figures(integrated.plot_data(interpolated_data=False, s=2),
                      f"06_{row['row_id']}_bowtie")
         return geometry, integrated
@@ -954,6 +972,7 @@ class ReductionRun:
 
     def run(self, stage="all"):
         import matplotlib.pyplot as plt
+        self.recorder.record["requested_stage"] = stage
         plot_settings = {"font.size": 11, "figure.dpi": 100, "axes.spines.top": False,
                          "axes.spines.right": False, "savefig.facecolor": "white"}
         with plt.style.context("default"), plt.rc_context(plot_settings):
@@ -963,19 +982,24 @@ class ReductionRun:
                     return self.finish_stage()
                 provisional = {key: value if value is not None else 0.0
                                for key, value in self.settings["offsets"].items()}
-                dataset = load_dataset(self.settings, calibration, provisional)
-                raw = min(dataset.datas.values(), key=lambda d: abs(d.metadata["sample_phi_deg"]))
-                self.figures(raw.plot_data(), "00_raw_data")
+                with self.recorder.stage("load_initial"):
+                    dataset = load_dataset(self.settings, calibration, provisional, recorder=self.recorder)
+                with self.recorder.stage("raw_image"):
+                    raw = min(dataset.datas.values(), key=lambda d: abs(d.metadata["sample_phi_deg"]))
+                    self.figures(raw.plot_data(), "00_raw_data")
                 self.state["raw_image_nominal_phi_deg"] = float(raw.metadata["sample_phi_deg"])
-                apply_intensity_corrections(dataset, self.settings)
+                with self.recorder.stage("corrections_initial"):
+                    apply_intensity_corrections(dataset, self.settings)
                 phi = self.estimate_phi(dataset)
                 del dataset
                 if stage == "phi":
                     return self.finish_stage()
                 # This fresh load is mandatory after phi estimation/acceptance.
                 provisional["sample_phi_offset_deg"] = phi
-                dataset = load_dataset(self.settings, calibration, provisional)
-                apply_intensity_corrections(dataset, self.settings)
+                with self.recorder.stage("reload_accepted_phi"):
+                    dataset = load_dataset(self.settings, calibration, provisional, recorder=self.recorder)
+                with self.recorder.stage("corrections_accepted_phi"):
+                    apply_intensity_corrections(dataset, self.settings)
                 self.event("Reloaded raw data and reapplied intensity corrections with accepted phi offset")
                 self.estimate_chi(dataset)
                 if stage == "chi":
@@ -983,9 +1007,10 @@ class ReductionRun:
                 self.estimate_omega(dataset)
                 if stage == "omega":
                     return self.finish_stage()
-                dataset.apply_rotation_correction_all_data(verbose=False)
-                for data in dataset.datas.values():
-                    data.mask |= ~np.isfinite(data.image)
+                with self.recorder.stage("rotation_correction"):
+                    dataset.apply_rotation_correction_all_data(verbose=False)
+                    for data in dataset.datas.values():
+                        data.mask |= ~np.isfinite(data.image)
                 rows = self.rows(dataset)
                 reductions = []
                 for row in rows:
@@ -995,7 +1020,8 @@ class ReductionRun:
                 if stage == "preview":
                     self.record_reductions(reductions)
                     return self.finish_stage()
-                self.export(dataset, reductions)
+                with self.recorder.stage("export"):
+                    self.export(dataset, reductions)
                 self.state["status"] = "complete"
                 self.save()
             except NeedsReview as error:
@@ -1008,6 +1034,12 @@ class ReductionRun:
                 self.archive_exports("Current reduction requires review")
                 self.event(f"Reduction error ({type(error).__name__}): {error}")
                 self.save()
+            except BaseException as error:
+                self.state["status"] = "interrupted" if isinstance(error, (KeyboardInterrupt, SystemExit)) else "failed"
+                raise
+            finally:
+                self.recorder.finish(self.state["status"])
+                self.save()
         return {"sample": self.settings["sample_name"], "status": self.state["status"],
                 "directory": str(self.directory)}
 
@@ -1018,7 +1050,7 @@ class ReductionRun:
                 "directory": str(self.directory)}
 
 
-def run_batch(settings, stage="all", resume=None, accept=(), sample=None):
+def run_batch(settings, stage="all", resume=None, accept=(), sample=None, codex_session_log=None):
     samples = list(sample_settings(settings))
     if sample is not None:
         samples = [cfg for cfg in samples if cfg["sample_name"] == sample]
@@ -1037,7 +1069,7 @@ def run_batch(settings, stage="all", resume=None, accept=(), sample=None):
         default_directory = root / slug(cfg["experiment"]) / slug(cfg["sample_name"]) / run_id
         directory = Path(mapping.get(cfg["sample_name"], default_directory))
         try:
-            run = ReductionRun(cfg, directory, accept)
+            run = ReductionRun(cfg, directory, accept, codex_session_log=codex_session_log)
             results.append(run.run(stage))
         except (NeedsReview, OSError, ValueError) as error:
             directory.mkdir(parents=True, exist_ok=True)

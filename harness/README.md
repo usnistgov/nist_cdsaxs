@@ -132,6 +132,49 @@ When a changed or failed resumed run requires review, previous CSVs are preserve
 under `archives/` rather than left as current results. New exports are assembled
 in a pending directory and installed together after successful reduction.
 
+## Runtime and token recordings
+
+Every reduction invocation records UTC start/end times, elapsed seconds, and a
+step breakdown in the checkpoint state (`.harness/state.json` for compact output,
+`state.json` for full output). `summary.md`/`report.md` includes invocation totals
+and the latest step table. Resumes append to the history, including review stops,
+failed steps, and cached checkpoints. Console messages identify the active step
+and print its timing and token delta on completion. Loading separates detector
+reads, frame metadata, calibration metadata, and angle metadata; detector reads
+also include any metadata/q calculations performed inside the native loader.
+Corrections, angular fits, rotation, row integration, and export are also timed.
+Parent timings include their nested steps; do not sum both. Recording does not
+change scientific settings or checkpoint acceptance.
+
+Token snapshots are optional and require no API calls. When `CODEX_THREAD_ID` is
+available, the harness finds that thread's JSONL log under `CODEX_HOME` (default
+`~/.codex`). It never chooses an unrelated latest session. An external runner can
+pass a specific log:
+
+```bash
+python my_run/reduce_sample.py --stage phi --codex-session-log /path/to/rollout.jsonl
+```
+
+Alternatively set `CDSAXS_CODEX_SESSION_LOG` to its path. The explicit CLI path
+takes precedence. Each step and invocation saves the latest published cumulative
+input, cached-input, output, and total counters at both boundaries, their event
+timestamps, and their differences. Only token-count events are retained, not
+prompts or tool output. After the initial read, only appended log lines are read.
+Missing, unreadable, or reset counters produce unavailable deltas (`null` in
+state), rather than an assumed zero. Partially appended events are retried at
+the next boundary; until then the latest complete valid counters remain in use.
+Unchanged valid counters produce zero. Cached-input tokens are already included
+in input tokens.
+
+These deltas describe published activity in the shared Codex session, not billing
+or exact attribution to numerical computation. Python computation itself uses no
+model tokens, and counts may remain unchanged throughout a long command. Usage
+published after the command returns cannot appear in that invocation's end
+snapshot. On resume in the same session, the record also captures activity since
+the previous invocation ended; that interval includes any other work in the
+session. It is unavailable when the log changes. Discovery prints recordings
+with its inventory; the full profile additionally saves them in `inventory.json`.
+
 ## Automatic batches
 
 Set `mode` to `automatic` and list the decisions the runner may make:

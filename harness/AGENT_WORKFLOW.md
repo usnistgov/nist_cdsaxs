@@ -11,6 +11,15 @@ state file. Request/use `full` output only when separate diagnostics are needed
 for a specific investigation; place temporary analysis in a development scratch
 directory and put its relevant conclusions in concise `decision_notes`.
 
+The harness automatically records invocation/step runtimes and optional published
+Codex token deltas in that state and the summary. Let it detect `CODEX_THREAD_ID`,
+or pass `--codex-session-log PATH` when the runner does not inherit the thread.
+Use loading/metadata timings to diagnose computational delays. Distinguish
+unavailable counters from zero usage, and do not add cached input to input totals
+or nested steps to parent totals. Agent work after a command returns is captured
+only at a later boundary; same-session resume records the intervening activity,
+which may include other work. Do not add separate usage audit files to run folders.
+
 1. Discover the user's input data and any supplied constants/configuration. Generate
    a script/settings file if needed. Use the installed package and explicit paths.
    Inventory filenames and metadata, including the current loader's angle convention.

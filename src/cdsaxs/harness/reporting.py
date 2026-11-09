@@ -24,6 +24,49 @@ def lost_frames(item):
                      for reason, count in sorted(counts.items(), key=lambda pair: str(pair[0])))
 
 
+def recording_summary(state):
+    """Report invocation totals and the latest step breakdown without double counting."""
+    records = state.get("recordings", [])
+    if not records:
+        return []
+
+    def tokens(delta):
+        fields = ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens")
+        return " | ".join(str(delta[key]) if delta is not None else "unavailable" for key in fields)
+
+    lines = ["", "## Runtime and token usage", "",
+             "Elapsed times are in seconds. Token deltas use published Codex session counters.",
+             "Cached input is included in input tokens. Nested steps are included in their parents;",
+             "do not add nested times or token deltas to their parent totals.", "",
+             "| Invocation | Requested stage | Status | Elapsed (s) | Input Δ | Cached input Δ | Output Δ | Total Δ |",
+             "|---|---|---|---:|---:|---:|---:|---:|"]
+    for index, record in enumerate(records, 1):
+        elapsed = record.get("elapsed_seconds")
+        lines.append(f"| {index} | {record.get('requested_stage') or 'unspecified'} | {record['status']} | "
+                     f"{number(elapsed)} | {tokens(record.get('token_delta'))} |")
+    latest = records[-1]
+    if latest.get("token_note"):
+        lines += ["", f"Token source: {latest['token_note']}."]
+    between = latest.get("between_invocations_token_delta")
+    if between is not None:
+        lines += ["", "Session activity between the previous invocation and this invocation:", "",
+                  "| Input Δ | Cached input Δ | Output Δ | Total Δ |", "|---:|---:|---:|---:|",
+                  f"| {tokens(between)} |"]
+    lines += ["", "Counters may stay unchanged during Python computation. They update when Codex publishes usage;",
+              "agent work after the command returns is excluded. Between-invocation deltas include any other",
+              "work in the same Codex session and are unavailable when the session changes."]
+    if latest["steps"]:
+        lines += ["", "Latest invocation steps:", "",
+                  "| Step | Stage | Parent step | Status | Elapsed (s) | Input Δ | Cached input Δ | Output Δ | Total Δ |",
+                  "|---:|---|---:|---|---:|---:|---:|---:|---:|"]
+        for index, step in enumerate(latest["steps"], 1):
+            parent = step["parent_index"]
+            outcome = step["status"] + (" (cached)" if step["cached"] else "")
+            lines.append(f"| {index} | {step['stage']} | {parent + 1 if parent is not None else '—'} | "
+                         f"{outcome} | {number(step['elapsed_seconds'])} | {tokens(step['token_delta'])} |")
+    return lines
+
+
 def compact_summary(directory, settings, resolved, state):
     """Summarize accepted parameters, proposed choices, and actual exclusions."""
     stages = state.get("stages", {})
@@ -158,6 +201,7 @@ def compact_summary(directory, settings, resolved, state):
         lines += ["", "## Supplied decision notes", ""]
         lines += [f"- {note}" for note in settings["decision_notes"]]
 
+    lines += recording_summary(state)
     lines += ["", "## Outputs", "", "- [Full settings](settings.json)",
               "- [Rerun script](reduce_sample.py)"]
     if (directory / "figures").is_dir():

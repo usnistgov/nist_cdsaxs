@@ -71,6 +71,8 @@ for circular contact holes. Background checks focus on the requested slices;
 unaffected peaks near detector gaps can use an opposite-side background with
 recorded notifications and per-frame decision diagnostics.
 Start with `python -m cdsaxs.harness --init my_run`.
+The harness records step runtimes and optional Codex token usage in its checkpoint
+state and summary; see [runtime and token recordings](harness/README.md#runtime-and-token-recordings).
 
 This software is meant to be used in a Jupyter notebook. While some
 aspects of the reduction can be automated as a Python script, currently
