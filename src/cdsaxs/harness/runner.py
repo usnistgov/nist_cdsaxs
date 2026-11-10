@@ -20,7 +20,7 @@ from ..reduction import slice_reduced_dataset
 from .config import fingerprint, merge, read_json, slug, write_json
 from .jobs import close_locks, plan_batch, reserve
 from .diagnostics import (
-    NeedsReview, box_ranges, check, detect_qy_rows, fit_phi, geometry_proposal,
+    NeedsReview, box_ranges, check, common_slice_width, detect_qy_rows, fit_phi, geometry_proposal,
     phi_figure, representative_frames, row_figure, shared_geometry_proposal, slice_proposal,
 )
 from .script_generator import generate, publish_standalone, restore_harness
@@ -883,7 +883,7 @@ class ReductionRun:
                      f"06_{row['row_id']}_bowtie")
         return geometry, integrated
 
-    def choose_slices(self, integrated, row):
+    def choose_slices(self, integrated, row, shared_width_Ainv=None):
         settings = self.row_settings(row)
         cfg = settings["slices"]
         decisions = []
@@ -891,11 +891,12 @@ class ReductionRun:
             decisions.append("choose_slice_locations_and_widths")
 
         def compute():
-            result = slice_proposal(integrated, settings)
+            result = slice_proposal(integrated, settings, shared_width_Ainv=shared_width_Ainv)
             self.slice_overlay(integrated, result, row)
             return result
 
-        result = self.checkpoint(f"slices:{row['row_id']}", {"slices": cfg, "row": row},
+        result = self.checkpoint(f"slices:{row['row_id']}",
+                                 {"slices": cfg, "row": row, "shared_width_Ainv": shared_width_Ainv},
                                  compute, decisions, supplied=not decisions)
         accepted = []
         skipped = []
@@ -1077,10 +1078,16 @@ class ReductionRun:
                         data.mask |= ~np.isfinite(data.image)
                 rows = self.rows(dataset)
                 shared = self.shared_geometry(dataset, rows) if len(rows) > 1 else None
-                reductions = []
+                integrations = []
                 for row in rows:
                     geometry, integrated = self.preview(dataset, row, shared)
-                    items, proposal = self.choose_slices(integrated, row)
+                    integrations.append((row, geometry, integrated))
+                with self.recorder.stage("common_slice_width"):
+                    shared_width = common_slice_width([
+                        (integrated, self.row_settings(row)) for row, _, integrated in integrations])
+                reductions = []
+                for row, geometry, integrated in integrations:
+                    items, proposal = self.choose_slices(integrated, row, shared_width)
                     reductions.append((row, geometry, integrated, items, proposal))
                 if stage == "preview":
                     self.record_reductions(reductions)

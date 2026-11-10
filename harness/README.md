@@ -143,7 +143,7 @@ repository's CSV loader and should describe the desired sample's files.
 | `integration.allow_one_sided_backgrounds` | Default `true`: if a detector/mask gap affects one background, use the opposite side for that frame when the signal is clear and the remaining background passes the contrast limit |
 | `integration.background_score_scope` | Default `slice_windows`: score supplied qsx windows, or measured peak windows when slices are being detected. `full_box` restores the earlier whole-profile score |
 | `quality.min_signal_gap_clearance_px` | Default `1` px: required unmasked margin around the signal box at the slice columns for a one-sided gap exception |
-| `slices.centers_qsx_Ainv`, `widths_Ainv` | Slice centers in Å⁻¹ and full widths; widths may be a scalar or a matching list |
+| `slices.centers_qsx_Ainv`, `widths_Ainv` | Slice centers and full widths in Å⁻¹; null widths choose one common automatic width across peaks/rows. A scalar or matching list supplies explicit widths |
 | `integration.mode`, `slices.mode` | Independently choose `sum` or `mean` for detector-box integration and qsx slicing |
 
 Reference candidates named `srm` or `AgBh` are listed by discovery. An unambiguous
@@ -349,6 +349,17 @@ excluded from slice overlays and exports. Automatic mode can skip rejected slice
 with `skip_gap_slices`; otherwise the reduction enters `needs_review`. Review users
 remove that center or revise its width. Reduction uses measured, unmasked data.
 
+By default, `slices.widths_Ainv: null` selects one equal qsx width for all peaks
+and requested qy rows. Each row's frame nearest corrected φ=0 supplies measured
+peak widths; multiply by 1.5, convert to Å⁻¹, apply `width_bounds_Ainv`
+(default 0.0002–0.003 Å⁻¹), and use the largest estimate everywhere. This preserves
+the widest automatic proposal. The selected q width stays fixed across φ frames;
+the number of included detector pixels may vary. If the common width reaches a
+neighboring peak center or violates a row's width bounds, the harness requests
+review. Supply a scalar for a fixed equal width, or a list/row override to request
+explicit widths. Accepted widths are exported as constant lists; the standalone
+script performs no width estimation.
+
 Additional rows are **disabled by default** and require the user's explicit
 request for circular contact holes:
 
@@ -374,7 +385,8 @@ dimensions are chosen to contain measured peaks across all rows and production
 frames. Background candidates must pass every row/frame using that row's slice
 windows. A failure requests review; multirow reductions never drop a background
 on individual frames. The single-row detector-gap fallback remains available.
-Qsx slices are selected independently for each row. The checkpoint state stores their settings;
+Qsx slice centers are selected independently for each row; automatic widths are
+shared across all rows. The checkpoint state stores their settings;
 the `full` output profile additionally writes `row_reductions.json`.
 Accepted per-row settings also appear under `additional_qy_rows.row_settings` in
 the resolved JSON, keyed by row ID. Slice overrides can be supplied directly.

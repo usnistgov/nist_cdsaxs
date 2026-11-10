@@ -12,8 +12,8 @@ import tifffile
 
 from cdsaxs.harness.config import DEFAULTS, load_settings, validate, write_json
 from cdsaxs.harness.diagnostics import (
-    NeedsReview, box_ranges, choose_backgrounds, fit_phi, row_center, slice_coverage,
-    slice_proposal,
+    NeedsReview, box_ranges, choose_backgrounds, common_slice_width, fit_phi,
+    row_center, slice_coverage, slice_parameters, slice_proposal,
 )
 from cdsaxs.harness.runner import (
     ReductionRun, apply_intensity_corrections, integrate_row, load_dataset,
@@ -62,6 +62,78 @@ def write_images(cfg, angles=(-30, 0, 30), extra_rows=False):
         files.append(name)
     cfg["input"]["filenames"] = files
     return base
+
+
+def unequal_peak_integrations(settings, *, extra_rows=False):
+    """Measured Gaussian peaks with different qx widths, including broader offset rows."""
+    yy, xx = np.mgrid[:81, :121]
+    image = np.full((81, 121), 30.0)
+    for y in ([25, 40, 55] if extra_rows else [40]):
+        for index, x in enumerate((25, 40, 80, 95)):
+            sigma_x = (0.45 + index * 0.2) if y == 40 else (1.1 + index * 0.35)
+            image += 2000 * np.exp(-((yy - y) ** 2 / 2 + (xx - x) ** 2 / (2 * sigma_x ** 2)))
+    write_images(settings, extra_rows=extra_rows)
+    for name in settings["input"]["filenames"]:
+        tifffile.imwrite(Path(settings["input"]["data_directory"]) / name, image)
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    rows = ReductionRun.make_rows({"offsets_qdy_px": [-15, 15] if extra_rows else []})
+    return [(row, integrate_row(dataset, row, settings["integration"])) for row in rows]
+
+
+@pytest.mark.parametrize("supplied_centers", [False, True])
+def test_default_equal_qsx_slice_widths_for_unequal_peaks(settings, supplied_centers):
+    row, integrated = unequal_peak_integrations(settings)[0]
+    centers, estimates, _ = slice_parameters(integrated, settings)
+    assert max(estimates) - min(estimates) > 0.0002
+    if supplied_centers:
+        settings["slices"]["centers_qsx_Ainv"] = centers
+    result = slice_proposal(integrated, settings)
+    widths = [item["width_Ainv"] for item in result["slices"]]
+    assert len(widths) == 4
+    assert len(set(widths)) == 1
+    assert widths[0] == max(estimates)
+    assert 0.0002 <= widths[0] <= 0.003
+
+
+def test_default_equal_qsx_width_is_shared_across_rows(settings, tmp_path):
+    integrations = unequal_peak_integrations(settings, extra_rows=True)
+    estimates = [slice_parameters(integrated, settings)[1] for _, integrated in integrations]
+    assert max(estimates[0]) < max(estimates[1])
+    width = common_slice_width([(integrated, settings) for _, integrated in integrations])
+    assert width == max(value for values in estimates for value in values)
+    for row, integrated in integrations:
+        result = slice_proposal(integrated, settings, shared_width_Ainv=width)
+        assert all(item["width_Ainv"] == width for item in result["slices"])
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
+    settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
+    settings["integration"]["search_height_px"] = 12
+    settings["output"].update(script_mode="standalone", profile="compact")
+    run = ReductionRun(settings, tmp_path / "run")
+    assert run.run()["status"] == "complete", run.state["events"]
+    portable = json.loads((run.directory / "settings.json").read_text())
+    exported_widths = [value for row in portable["rows"] for value in row["slices"]["widths_Ainv"]]
+    assert len(portable["rows"]) == 3
+    assert len(set(exported_widths)) == 1
+    assert exported_widths[0] == width
+
+
+@pytest.mark.parametrize("widths", [0.001, [0.0005, 0.001, 0.0015, 0.002]])
+def test_explicit_qsx_widths_override_common_auto_width(settings, widths):
+    _, integrated = unequal_peak_integrations(settings)[0]
+    settings["slices"]["widths_Ainv"] = widths
+    assert common_slice_width([(integrated, settings)]) is None
+    result = slice_proposal(integrated, settings, shared_width_Ainv=0.003)
+    expected = widths if isinstance(widths, list) else [widths] * 4
+    assert [item["width_Ainv"] for item in result["slices"]] == expected
+
+
+def test_common_qsx_width_rejects_conflicting_auto_bounds(settings):
+    integrations = unequal_peak_integrations(settings, extra_rows=True)
+    constrained = deepcopy(settings)
+    constrained["slices"]["width_bounds_Ainv"] = [0.0002, 0.001]
+    with pytest.raises(NeedsReview, match="row's configured bounds"):
+        common_slice_width([(integrations[0][1], constrained), (integrations[1][1], settings)])
 
 
 @pytest.mark.parametrize("profile", ["compact", "full"])

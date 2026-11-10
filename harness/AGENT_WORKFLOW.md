@@ -91,7 +91,9 @@ guaranteed token or billing savings.
    Distinguish a failed row-background check from a rejected individual slice;
    unrelated features outside requested windows should not veto the entire row.
    Preview and production must use identical accepted settings.
-6. Inspect bowtie/slice overlays. Narrow slices should capture peaks with little
+6. Inspect bowtie/slice overlays. Default automatic qsx widths are equal across
+   all peaks and requested qy rows, using the largest bounded measured proposal.
+   Preserve explicitly supplied scalar/list widths. Narrow slices should capture peaks with little
    background. Read `summary.md` for exclusions and missing-angle decisions;
    detailed per-frame coverage is in the hidden checkpoint state (`coverage.json`
    is additionally available in the `full` profile).
@@ -107,7 +109,8 @@ guaranteed token or billing savings.
    overlay, and select one shared signal/background box size and one fixed
    background-offset list against every row and production frame. Do not vary
    backgrounds by row/frame or use the single-row gap fallback for multiple rows.
-   Request review if a shared choice fails. Select qsx slices separately for each row. Retain
+   Request review if a shared choice fails. Select qsx centers separately for each
+   row while keeping automatic slice widths common across rows. Retain
    row provenance when constructing the larger radial-coordinate dataset. Without
    a request for offset rows, reduce qy=0 and export only the combined result;
    omit qy0/qyall labels from these single-row CSV filenames.

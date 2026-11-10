@@ -570,7 +570,8 @@ def slice_coverage(dataset, center, width, native_slice=None):
     return coverage
 
 
-def slice_proposal(integrated, settings):
+def slice_parameters(integrated, settings):
+    """Find centers and per-peak width estimates before choosing a common width."""
     cfg = settings["slices"]
     reference_index = min(range(len(integrated.datas)),
                           key=lambda index: abs(integrated.datas[index].sample_phi_deg))
@@ -605,6 +606,36 @@ def slice_proposal(integrated, settings):
     elif not isinstance(widths, list):
         widths = [widths] * len(centers)
     check(len(widths) == len(centers), "Slice widths do not match detected centers")
+    return centers, widths, reference_index
+
+
+def common_slice_width(row_integrations):
+    """Choose the largest bounded automatic estimate across all qy rows.
+
+    Explicit scalar/list widths are preserved and do not participate in
+    automatic selection. Conflicting row-specific bounds require review.
+    """
+    automatic = [(integrated, settings) for integrated, settings in row_integrations
+                 if settings["slices"]["widths_Ainv"] is None]
+    if not automatic:
+        return None
+    width = max(value for integrated, settings in automatic
+                for value in slice_parameters(integrated, settings)[1])
+    for _, settings in automatic:
+        low, high = settings["slices"]["width_bounds_Ainv"]
+        check(low <= width <= high,
+              "Shared automatic qsx width exceeds a row's configured bounds; "
+              "align width bounds or supply explicit slice widths")
+    return float(width)
+
+
+def slice_proposal(integrated, settings, *, shared_width_Ainv=None):
+    cfg = settings["slices"]
+    centers, widths, reference_index = slice_parameters(integrated, settings)
+    reference = integrated.datas[reference_index]
+    if cfg["widths_Ainv"] is None:
+        width = max(widths) if shared_width_Ainv is None else shared_width_Ainv
+        widths = [width] * len(centers)
     slices, _ = slice_reduced_dataset(
         integrated, centers, q_widths=widths, mode=cfg["mode"], show_plot=False)
     proposals = []
