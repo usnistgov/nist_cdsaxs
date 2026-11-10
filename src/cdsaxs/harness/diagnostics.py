@@ -6,7 +6,8 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import peak_widths
 
 from .. import tools
-from ..reduction import slice_reduced_dataset
+from ..reduction import qy_row_center, slice_reduced_dataset
+from copy import deepcopy
 from .config import is_symmetric_background_pair
 
 
@@ -95,9 +96,7 @@ def row_center(data, row):
     target = row["target_qsy_Ainv"]
     check(np.nanmin(axis) <= target <= np.nanmax(axis),
           f"qy row {target:g} A^-1 is outside the detector")
-    # Interpolation locates a center only; integration uses detector pixels.
-    order = valid[np.argsort(axis[valid])]
-    return float(np.interp(target, axis[order], order))
+    return qy_row_center(data, target)
 
 
 def box_ranges(data, row, geometry):
@@ -149,8 +148,9 @@ def row_peaks(data, row, settings):
     return points
 
 
-def geometry_proposal(dataset, row, settings):
-    frames = representative_frames(dataset)
+def geometry_proposal(dataset, row, settings, *, all_frames=False,
+                      select_backgrounds=True):
+    frames = list(dataset.datas.values()) if all_frames else representative_frames(dataset)
     measurements = [(data, row_peaks(data, row, settings)) for data in frames]
     points = [point for _, peaks in measurements for point in peaks]
     check(points, "No peaks found for integration-box selection; tune the search")
@@ -193,7 +193,7 @@ def geometry_proposal(dataset, row, settings):
         failures.append("Integration box does not contain enough detected peaks")
     if min(valid_fractions) < q["min_roi_valid_fraction"]:
         failures.append("Integration region has insufficient unmasked coverage")
-    if cfg["subtract_background"]:
+    if cfg["subtract_background"] and select_backgrounds:
         try:
             background_measurements = measurements
             if cfg.get("background_count", 2) == 1:
@@ -237,9 +237,61 @@ def geometry_proposal(dataset, row, settings):
             raise
         if background_metric > q["max_background_peak_fraction"]:
             failures.append("Background regions contain excessive peak signal")
-    else:
+    elif not cfg["subtract_background"]:
         geometry["background_offsets_px"] = None
     geometry["failures"] = failures
+    return geometry
+
+
+def shared_geometry_proposal(dataset, row_configs):
+    """Choose one geometry against every requested row and production frame."""
+    proposals = [geometry_proposal(dataset, row, settings, all_frames=True,
+                                   select_backgrounds=False)
+                 for row, settings in row_configs]
+    settings = deepcopy(row_configs[0][1])
+    cfg = settings["integration"]
+    cfg["height_px"] = max(item["height_px"] for item in proposals)
+    cfg["width_px"] = max(item["width_px"] for item in proposals)
+    cfg["allow_one_sided_backgrounds"] = False
+    geometry = {key: cfg[key] for key in (
+        "height_px", "width_px", "mode", "background_offsets_px")}
+    geometry["failures"] = []
+    geometry["rows"] = {}
+    contexts = []
+    for row, original in row_configs:
+        fixed = deepcopy(original)
+        fixed["integration"] = deepcopy(cfg)
+        proposal = geometry_proposal(dataset, row, fixed, all_frames=True,
+                                     select_backgrounds=False)
+        geometry["rows"][row["row_id"]] = proposal["metrics"]
+        geometry["failures"].extend(
+            f"{row['row_id']}: {failure}" for failure in proposal["failures"])
+        if cfg["subtract_background"]:
+            for data in dataset.datas.values():
+                peaks = row_peaks(data, row, fixed)
+                context = background_context(data, row, geometry, fixed, peaks)
+                context["row_id"] = row["row_id"]
+                contexts.append(context)
+    if cfg["subtract_background"]:
+        try:
+            offsets, score = choose_backgrounds(
+                [], row_configs[0][0], geometry, settings, contexts=contexts,
+                require_complete=True)
+            geometry["background_offsets_px"] = offsets
+            geometry["background_diagnostics"]["production_frames"] = deepcopy(
+                geometry["background_diagnostics"]["selected_frames"])
+            for row_id, metrics in geometry["rows"].items():
+                metrics["background_peak_fraction"] = max(
+                    item["contrast_fraction"] for item in geometry["background_diagnostics"]["selected_frames"]
+                    if item["row_id"] == row_id)
+            if score > settings["quality"]["max_background_peak_fraction"]:
+                geometry["failures"].append("Shared backgrounds contain excessive peak signal")
+        except NeedsReview as error:
+            geometry["failures"].append(str(error))
+            error.result = geometry
+            raise
+    else:
+        geometry["background_offsets_px"] = None
     return geometry
 
 
@@ -302,6 +354,8 @@ def background_candidate(data, offset, context, settings):
               "signal_clear_of_gap": context["signal_clear_of_gap"],
               "gap_overlap": outside, "reason": "outside_detector" if outside else None,
               "contrast_fraction": None, "full_box_contrast_fraction": None}
+    if "row_id" in context:
+        result["row_id"] = context["row_id"]
     if outside:
         return result
     profile, image, mask = data.mean_box((lo, hi), xr, axis=0)
@@ -365,7 +419,8 @@ def background_frame_choice(candidates, context, settings):
                                      if item not in retained]}
 
 
-def choose_backgrounds(measurements, row, geometry, settings):
+def choose_backgrounds(measurements, row, geometry, settings, *, contexts=None,
+                       require_complete=False):
     """Select common offsets; a gap can require one opposite-side box in a frame."""
     cfg = settings["integration"]
     h = geometry["height_px"]
@@ -389,8 +444,9 @@ def choose_backgrounds(measurements, row, geometry, settings):
         distances = range(5 * h, 10 * h, h) if strategy == "distant" else range(h, 2 * h)
         offsets = [sign * distance for distance in distances
                    for sign in (-1, 1)]
-    contexts = [background_context(data, row, geometry, settings, peaks)
-                for data, peaks in measurements]
+    if contexts is None:
+        contexts = [background_context(data, row, geometry, settings, peaks)
+                    for data, peaks in measurements]
     records = {}
     for offset in offsets:
         check(abs(offset) >= h, "Background regions overlap the integration box")
@@ -399,15 +455,29 @@ def choose_backgrounds(measurements, row, geometry, settings):
     geometry["background_diagnostics"] = {"requested_scope": cfg["background_score_scope"],
         "background_count_requested": count,
         "candidates": [item for frame_records in records.values() for item in frame_records]}
+    def complete_candidate(item):
+        return (item["usable"] and not item["gap_overlap"]
+                and item["scored_valid_column_count"] > 0
+                and item["scored_valid_column_count"] / max(item["scored_column_count"], 1)
+                >= settings["quality"]["min_roi_valid_fraction"]
+                and item["contrast_fraction"] <= settings["quality"]["max_background_peak_fraction"])
+
     scored = [(offset, max(item["contrast_fraction"] for item in items))
-              for offset, items in records.items() if all(item["usable"] for item in items)]
+              for offset, items in records.items()
+              if all(complete_candidate(item) if require_complete else item["usable"] for item in items)]
     check(any(item["usable"] for items in records.values() for item in items),
           "No usable background regions; specify different offsets")
 
     def choices(selected):
+        if require_complete and any(not complete_candidate(records[offset][i])
+                for offset in selected for i in range(len(contexts))):
+            return None
         result = [background_frame_choice([records[offset][i] for offset in selected],
                                           context, settings)
                   for i, context in enumerate(contexts)]
+        for context, item in zip(contexts, result):
+            if item is not None and "row_id" in context:
+                item["row_id"] = context["row_id"]
         return result if all(item is not None for item in result) else None
 
     if cfg["background_offsets_px"] is None:

@@ -3,7 +3,7 @@
 Use this guide with the JSON-configured harness in this repository. Read
 [README.md](README.md) for the settings and command interface. Keep the generated
 script and scientific decisions available to the user. Use `output.profile: "compact"`
-for routine reductions. Deliver one full settings file, the generated script,
+for routine reductions. Deliver the constants-only settings file and native script,
 native figures, CSVs, and `summary.md`. Do not add separate audit JSONs, environment
 dumps, manifests, duplicate settings snapshots, inspection scripts, or raw profile
 exports to routine run folders. The harness consolidates bookkeeping in its hidden
@@ -104,7 +104,10 @@ guaranteed token or billing savings.
    An automatic-mode setting or a circular-looking pattern alone does not authorize
    enabling them. Translate explicit instruction-based permission into settings and
    save the reason in decision_notes. Detect offsets unless supplied, inspect the row
-   overlay, and select boxes/backgrounds/qsx peaks separately for every row. Retain
+   overlay, and select one shared signal/background box size and one fixed
+   background-offset list against every row and production frame. Do not vary
+   backgrounds by row/frame or use the single-row gap fallback for multiple rows.
+   Request review if a shared choice fails. Select qsx slices separately for each row. Retain
    row provenance when constructing the larger radial-coordinate dataset. Without
    a request for offset rows, reduce qy=0 and export only the combined result;
    omit qy0/qyall labels from these single-row CSV filenames.
@@ -118,8 +121,18 @@ guaranteed token or billing savings.
 9. Export one CSV per φ group for a central-only run. Offer per-row/combined CSVs
    when offset qy rows were requested, optional positive/negative φ splitting, and
    the consolidated output-root option. Confirm nominal/corrected φ and zero handling
-   from settings. Supply links to the generated Python script, full settings, summary,
+   from settings. Supply links to the generated Python script, reduction settings, summary,
    review figures, and exports. Describe assumptions and material limitations briefly.
 
 User instructions take precedence over default settings. Persist instruction-based
 changes in the effective settings so an independent rerun reproduces the decisions.
+
+The default `output.script_mode` is `standalone`. Complete harness review before publishing
+the root script and constants-only JSON. Deliver both files for copying and manual
+editing; they run native reduction without harness checks or fitting. Export
+`.harness/settings.json` only when the user requests it, using
+`--export-harness-settings` or `output.export_harness_settings: true`. The default
+is false, for both output profiles. Select `--script-mode harness` only when a
+staged rerun script is requested. Native masks and CSV filtering remain
+active; users review suitability of copied reductions. Run implementation tests
+in the `cdsaxs_dev` conda environment, including generated-script subprocesses.

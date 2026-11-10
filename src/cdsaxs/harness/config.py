@@ -104,7 +104,9 @@ DEFAULTS = {
         "export_qr": True, "decimals": 7,
     },
     "output": {
-        "root": None, "profile": "compact", "figure_formats": ["png"], "dpi": 300,
+        "root": None, "profile": "compact", "script_mode": "standalone",
+        "export_harness_settings": False,
+        "figure_formats": ["png"], "dpi": 300,
     },
 }
 
@@ -266,6 +268,7 @@ def validate(settings):
                          "allow_one_sided_backgrounds")),
         ("additional_qy_rows", ("enabled",)),
         ("export", ("per_row", "combine_qy_rows", "split_phi", "export_qr")),
+        ("output", ("export_harness_settings",)),
     ):
         for key in keys:
             value = settings[key] if section is None else settings[section][key]
@@ -313,6 +316,11 @@ def validate(settings):
         if not isinstance(row_id, str) or not isinstance(overrides, dict):
             raise ValueError("row_settings must map row IDs to settings objects")
         _known_keys(overrides, {"integration": DEFAULTS["integration"], "slices": DEFAULTS["slices"]})
+        if rows["enabled"]:
+            for key, value in overrides.get("integration", {}).items():
+                if value != settings["integration"][key]:
+                    raise ValueError(
+                        f"{row_id}: row integration overrides must match shared integration.{key}")
         child = merge(settings, overrides)
         child["additional_qy_rows"]["row_settings"] = {}
         validate(child)
@@ -366,6 +374,8 @@ def validate(settings):
     if (not isinstance(settings["output"]["profile"], str)
             or settings["output"]["profile"] not in {"compact", "full"}):
         raise ValueError("output.profile must be compact or full")
+    if settings["output"]["script_mode"] not in {"harness", "standalone"}:
+        raise ValueError("output.script_mode must be harness or standalone")
     for section, key in (("integration", "height_bounds_px"),
                          ("slices", "width_bounds_Ainv"), ("phi", "angle_range_deg")):
         bounds = settings[section][key]

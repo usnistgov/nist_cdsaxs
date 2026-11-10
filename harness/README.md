@@ -368,12 +368,18 @@ Both lists null means detect additional peak rows; review them or authorize
 values are in Å⁻¹ and tracked per frame. Legacy `offsets_qdy_px` are integer pixel
 displacements with positive offsets upward, matching the example. Background
 offsets instead follow native array-row subtraction. Do not mix these conventions.
-The central qy0 row is included once. Boxes, backgrounds, and qsx slices are
-selected independently for each row. The checkpoint state stores their settings;
+The central qy0 row is included once. All rows use the same signal/background box
+height and width and the same background-offset list across every frame. Unspecified
+dimensions are chosen to contain measured peaks across all rows and production
+frames. Background candidates must pass every row/frame using that row's slice
+windows. A failure requests review; multirow reductions never drop a background
+on individual frames. The single-row detector-gap fallback remains available.
+Qsx slices are selected independently for each row. The checkpoint state stores their settings;
 the `full` output profile additionally writes `row_reductions.json`.
 Accepted per-row settings also appear under `additional_qy_rows.row_settings` in
-the resolved JSON, keyed by row ID. These integration/slice overrides can be
-supplied directly when rows require different known parameters.
+the resolved JSON, keyed by row ID. Slice overrides can be supplied directly.
+Row integration overrides must match the shared integration settings; redundant
+overrides are removed from resolved multirow settings.
 
 Combined data include the library's radial in-plane coordinate
 `qsr = sqrt(qsx**2 + qsy**2)`. Measurements and row identities are retained;
@@ -390,7 +396,7 @@ python -m cdsaxs.harness --config experiment.json --resume /path/to/batch_TIMEST
 ```
 
 The layout is `<root>/<experiment>/<sample>/<UTC-run-id>/`. Without an output
-root, new runs use `Results` beside the input data. Generated scripts resume in
+root, new runs use `Results` beside the input data. Staged harness scripts resume in
 their own directory; an explicit `--output-root` starts a run at that location
 unless `--resume` is also supplied. `--sample NAME` selects one batch sample. A sample run can
 also be resumed explicitly with `--resume RUN_DIRECTORY`.
@@ -398,8 +404,8 @@ also be resumed explicitly with `--resume RUN_DIRECTORY`.
 The default `output.profile: "compact"` produces this visible layout:
 
 ```text
-settings.json       full settings, with accepted values after completion
-reduce_sample.py    runnable reduction entry point
+settings.json       accepted reduction constants after completion
+reduce_sample.py    standalone native reduction script after completion
 summary.md          parameters, exclusions, and decisions requiring review
 figures/            native diagnostic PNGs
 csv/                native reduced-slice exports
@@ -413,8 +419,8 @@ runs keep their resume manifest under `<root>/<experiment>/.harness/`.
 
 While a run is paused or only a stage is complete, `settings.json` retains the
 requests used to produce its proposals so `--accept` can resume unchanged results.
-Once the reduction completes, it contains the full accepted settings, including
-calibration, angular offsets, integration/background geometry, per-row overrides,
+Once the reduction completes, the default standalone output contains accepted
+calibration, angular offsets, integration/background geometry, fixed rows and
 slice centers/widths, and effective export options. Initial requests and intermediate
 results remain in the hidden state. The completed settings can reproduce CSVs in
 a new directory. `summary.md` explains rejected slice centers and reasons, retained
@@ -422,17 +428,82 @@ slices with missing angles, excluded diagnostic frames, nonpositive CSV omission
 and unresolved quality checks.
 
 Choose `output.profile: "full"` or `--output-profile full` when separate diagnostic
-JSON files are useful. This preserves the original layout: `settings.json`, latest
-`invocation_settings.json`, `resolved_settings.json`, reusable `calibration.json`,
+JSON files are useful. This adds reusable `calibration.json`,
 `state.json`, `phi_measurements.json` when fitted, `coverage.json`,
 `row_reductions.json`, `report.md`, and batch manifests. `--output-profile compact`
 overrides a saved full setting. Profile changes can resume existing checkpoint
 state; existing files are preserved, so use a new run directory for a clean compact
-package. Compact discovery prints the inventory to the console rather than
+package. Full invocation/resolved settings snapshots are included only when
+`output.export_harness_settings` is enabled or staged `harness` script mode is
+explicitly selected. Compact discovery prints the inventory to the console rather than
 creating `inventory.json`.
 
 Figures are saved as PNG only, at `output.dpi`. Older `figure_formats` settings
 remain loadable; the effective value is recorded as `["png"]` in the saved settings.
+
+### Standalone rerun script
+
+The default is `output.script_mode: "standalone"`:
+
+```bash
+python -m cdsaxs.harness --config experiment.json
+```
+
+Successful completion replaces root `reduce_sample.py` and `settings.json` with a
+native reduction script and resolved constants only, for either output profile.
+Before completion, those files remain the harness entry point and its settings.
+The constants include explicit input filenames, calibration, angular offsets,
+corrections, common geometry, fixed rows and slices, and output choices. Searches,
+quality thresholds, permissions, fitting configuration, and checkpoint state are
+excluded. Full harness settings are not exported by default, including in the
+`full` output profile. Internal checkpoint state remains available. Select
+`--script-mode harness` or `output.script_mode: "harness"` explicitly to retain
+the staged script and its full root settings.
+
+Copy the two root files, edit paths and constants, then run:
+
+```bash
+python reduce_sample.py
+```
+
+The installed `nist_cdsaxs` package is required. Relative paths use the JSON
+directory; `output.root` defaults to `.` and writes `csv/` and `figures/` there.
+The script loads fresh data, applies accepted offsets and intensity corrections
+once, corrects rotation, integrates fixed rows, extracts fixed slices, and exports.
+It imports no harness code, fits nothing, and performs no harness quality checks
+or automatic reselection. High backgrounds and peak-free slices do not stop the
+script for review. Native masks, ordinary API/file errors, and CSV omission of
+nonpositive intensities still apply. Linear figures allow inspection of negative
+background-subtracted intensities. Review copied reductions manually.
+For a single-row run using an accepted detector-gap exception, any frame-specific
+background list is saved as explicit constants, without rerunning gap decisions.
+Update those frame IDs and offsets when changing input filenames.
+
+To also export `.harness/settings.json` for resume, explicitly request
+`--export-harness-settings` or set `output.export_harness_settings: true`:
+
+```bash
+python -m cdsaxs.harness --config experiment.json --export-harness-settings
+```
+
+Resume using that exported configuration:
+
+```bash
+python -m cdsaxs.harness --config RUN/.harness/settings.json --resume RUN
+```
+
+Portable settings are not harness configuration. Ordinary harness saves preserve
+edits to the portable files; publishing changed accepted constants preserves edited
+files under `archives/` before replacement. `--no-export-harness-settings` overrides
+an inherited export request. Previously exported files are preserved but are not
+updated when export is disabled. Without a settings export, resume with the
+original harness configuration and `--resume RUN`.
+
+Run development tests in the `cdsaxs_dev` conda environment:
+
+```bash
+conda run -n cdsaxs_dev python -m pytest
+```
 
 With only the central qy=0 row, the harness exports one combined CSV per φ group,
 without a qy label: `<sample>_all.csv`, and optionally `<sample>_posPhi.csv` and

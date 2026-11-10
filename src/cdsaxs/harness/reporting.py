@@ -207,8 +207,14 @@ def compact_summary(directory, settings, resolved, state):
         lines += [f"- {note}" for note in settings["decision_notes"]]
 
     lines += recording_summary(state)
-    lines += ["", "## Outputs", "", "- [Full settings](settings.json)",
+    settings_label = "Reduction constants" if state.get("standalone_published") else "Full settings"
+    lines += ["", "## Outputs", "", f"- [{settings_label}](settings.json)",
               "- [Rerun script](reduce_sample.py)"]
+    if state.get("standalone_published"):
+        if settings["output"]["export_harness_settings"]:
+            lines.append("- [Harness settings for resume](.harness/settings.json)")
+        lines += ["", "The rerun script uses fixed native reduction steps without harness quality checks. "
+                  "Native masks and CSV omission of nonpositive intensities still apply."]
     if (directory / "figures").is_dir():
         lines.append("- [Diagnostic figures](figures/)")
     csv_files = sorted((directory / "csv").glob("*.csv"))

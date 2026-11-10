@@ -178,6 +178,8 @@
     "figure_formats": [
       "png"
     ],
-    "dpi": 300
+    "dpi": 300,
+    "script_mode": "standalone",
+    "export_harness_settings": false
   }
 }

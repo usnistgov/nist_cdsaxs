@@ -31,6 +31,10 @@ def main(argv=None, default_config=None, default_resume=None):
     parser.add_argument("--output-root", type=Path, help="Consolidated output directory")
     parser.add_argument("--output-profile", choices=("compact", "full"),
                         help="Compact deliverables (default) or separate diagnostic JSON files")
+    parser.add_argument("--script-mode", choices=("harness", "standalone"),
+                        help="Publish a fixed native reduction script (default) or harness entry point")
+    parser.add_argument("--export-harness-settings", action=argparse.BooleanOptionalAction,
+                        default=None, help="Also export full harness settings for resume (default: off)")
     parser.add_argument("--codex-session-log", type=Path, metavar="PATH",
                         help="Optional Codex JSONL log for token snapshots; otherwise detect this thread")
     parser.add_argument("--agent-wait", choices=("foreground", "suspend"), default="foreground",
@@ -53,6 +57,10 @@ def main(argv=None, default_config=None, default_resume=None):
             parser.error("Use foreground mode for initialization/discovery; suspend a reduction stage")
         if args.init:
             settings = load_settings(args.config) if args.config else deepcopy(DEFAULTS)
+            if args.script_mode:
+                settings["output"]["script_mode"] = args.script_mode
+            if args.export_harness_settings is not None:
+                settings["output"]["export_harness_settings"] = args.export_harness_settings
             if args.output_profile:
                 settings["output"]["profile"] = args.output_profile
             check_path = args.init / "settings.json"
@@ -64,6 +72,10 @@ def main(argv=None, default_config=None, default_resume=None):
         if args.config is None:
             parser.error("Provide --config settings.json or --init DIRECTORY")
         settings = load_settings(args.config)
+        if args.script_mode:
+            settings["output"]["script_mode"] = args.script_mode
+        if args.export_harness_settings is not None:
+            settings["output"]["export_harness_settings"] = args.export_harness_settings
         if args.output_profile:
             settings["output"]["profile"] = args.output_profile
         if args.output_root:

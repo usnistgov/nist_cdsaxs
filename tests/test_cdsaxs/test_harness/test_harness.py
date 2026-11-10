@@ -20,6 +20,9 @@ from cdsaxs.harness.runner import (
     phi_groups, run_batch,
 )
 from cdsaxs.harness.script_generator import generate
+from cdsaxs.harness.script_generator import publish_standalone, restore_harness, standalone_settings
+from cdsaxs.harness.diagnostics import shared_geometry_proposal
+from cdsaxs.reduction import integrate_qy_row
 
 
 @pytest.fixture
@@ -40,7 +43,9 @@ def settings(tmp_path):
     cfg["corrections"]["substrate_absorption"] = False
     cfg["integration"].update(height_px=7, width_px=100, background_offsets_px=[-10, 10])
     cfg["quality"]["max_alignment_residual_px"] = 3
-    cfg["output"].update(root=str(tmp_path / "outputs"), profile="full", figure_formats=["png"], dpi=60)
+    # Existing staged/review tests explicitly exercise the optional harness mode.
+    cfg["output"].update(root=str(tmp_path / "outputs"), profile="full", script_mode="harness",
+                          figure_formats=["png"], dpi=60)
     return cfg
 
 
@@ -57,6 +62,278 @@ def write_images(cfg, angles=(-30, 0, 30), extra_rows=False):
         files.append(name)
     cfg["input"]["filenames"] = files
     return base
+
+
+@pytest.mark.parametrize("profile", ["compact", "full"])
+@pytest.mark.parametrize("export_resume", [False, True])
+def test_default_standalone_output_and_optional_resume_settings(
+        settings, tmp_path, profile, export_resume):
+    from cdsaxs.harness.__main__ import main
+    write_images(settings)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
+    settings["output"].update(profile=profile)
+    settings["output"].pop("script_mode")
+    settings["output"].pop("export_harness_settings")
+    config = tmp_path / "input_settings.json"
+    write_json(config, settings)
+    loaded = load_settings(config)
+    assert loaded["output"]["script_mode"] == "standalone"
+    assert loaded["output"]["export_harness_settings"] is False
+    directory = tmp_path / "run"
+    arguments = ["--config", str(config), "--resume", str(directory)]
+    if export_resume:
+        arguments.append("--export-harness-settings")
+    assert main(arguments) == 0
+    portable = json.loads((directory / "settings.json").read_text())
+    assert "quality" not in portable and "rows" in portable
+    assert "from cdsaxs.harness" not in (directory / "reduce_sample.py").read_text()
+    resume = directory / ".harness/settings.json"
+    assert resume.exists() == export_resume
+    if export_resume:
+        assert load_settings(resume)["output"]["export_harness_settings"] is True
+    for name in ("invocation_settings.json", "resolved_settings.json"):
+        assert (directory / name).exists() == (profile == "full" and export_resume)
+    state_path = directory / (".harness/state.json" if profile == "compact" else "state.json")
+    state = json.loads(state_path.read_text())
+    assert (".harness/settings.json" in state["artifacts"]) == export_resume
+    report = (directory / ("summary.md" if profile == "compact" else "report.md")).read_text()
+    assert (".harness/settings.json" in report) == export_resume
+    # Requesting an export later does not rewrite edited portable settings.
+    if not export_resume:
+        path = directory / "settings.json"
+        path.write_text(path.read_text() + "\n")
+        previous = path.read_bytes()
+        loaded["output"]["export_harness_settings"] = True
+        run = ReductionRun(loaded, directory)
+        run.resolved = deepcopy(state["resolved_settings"] if profile == "compact" else loaded)
+        run.resolved["output"]["export_harness_settings"] = True
+        run.state["status"] = "complete"
+        if profile == "full":
+            # This assertion concerns saving an already resolved result.
+            run.resolved["slices"] = {**loaded["slices"], **portable["rows"][0]["slices"]}
+            run.resolved["export"] = deepcopy(portable["export"])
+        run.save()
+        assert resume.is_file()
+        assert path.read_bytes() == previous
+
+
+@pytest.mark.parametrize("value", [None, 0, "true"])
+def test_export_harness_settings_requires_boolean(settings, value):
+    settings["output"]["export_harness_settings"] = value
+    with pytest.raises(ValueError, match="export_harness_settings must be boolean"):
+        validate(settings)
+
+
+def test_cli_can_disable_inherited_resume_settings_export(settings, tmp_path):
+    from cdsaxs.harness.__main__ import main
+    settings["output"].update(script_mode="standalone", export_harness_settings=True)
+    config = tmp_path / "input_settings.json"
+    write_json(config, settings)
+    directory = tmp_path / "starter"
+    assert main(["--config", str(config), "--init", str(directory),
+                 "--no-export-harness-settings"]) == 0
+    assert load_settings(directory / "settings.json")["output"]["export_harness_settings"] is False
+
+
+@pytest.mark.parametrize("profile", ["compact", "full"])
+@pytest.mark.parametrize("extra_rows", [False, True])
+def test_standalone_export_copied_without_harness(settings, tmp_path, profile, extra_rows):
+    """Only two copied files reproduce native CSVs with harness imports blocked."""
+    import shutil
+    write_images(settings, angles=(-30, 0, 0.5, 30), extra_rows=extra_rows)
+    settings["output"].update(profile=profile, script_mode="standalone", export_harness_settings=True)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
+    settings["additional_qy_rows"].update(enabled=extra_rows, offsets_qdy_px=[-15, 15] if extra_rows else None)
+    settings["integration"]["search_height_px"] = 12
+    settings["offsets"].update(sample_phi_offset_deg=0.2, sample_chi_offset_deg=0.1,
+                               sample_omega_offset_deg=0.1)
+    settings["export"].update(split_phi=True, zero_phi="separate")
+    run = ReductionRun(settings, tmp_path / "run")
+    assert run.run()["status"] == "complete", run.state["events"]
+    assert (run.directory / ".harness/settings.json").is_file()
+    portable = json.loads((run.directory / "settings.json").read_text())
+    assert set(portable) == {"sample_name", "input", "calibration", "offsets", "corrections",
+                             "integration", "rows", "export", "output"}
+    assert "quality" not in portable and "search" not in portable["calibration"]
+    copied = tmp_path / "copied"
+    copied.mkdir()
+    for name in ("reduce_sample.py", "settings.json"):
+        shutil.copy2(run.directory / name, copied / name)
+    # Change sample location and relative output without retaining harness state.
+    inputs = copied / "inputs"
+    inputs.mkdir()
+    for name in settings["input"]["filenames"]:
+        shutil.copy2(tmp_path / name, inputs / name)
+    portable["input"]["data_directory"] = "inputs"
+    portable["output"]["root"] = "results"
+    write_json(copied / "settings.json", portable)
+    blocker = """import sys, runpy
+class BlockHarness:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith('cdsaxs.harness'):
+            raise AssertionError('Standalone script imported the harness')
+sys.meta_path.insert(0, BlockHarness())
+runpy.run_path(sys.argv[1], run_name='__main__')
+"""
+    command = subprocess.run([sys.executable, "-c", blocker, str(copied / "reduce_sample.py")],
+                             cwd=tmp_path, capture_output=True, text=True)
+    assert command.returncode == 0, command.stdout + command.stderr
+    original = {path.name: path.read_bytes() for path in (run.directory / "csv").glob("*.csv")}
+    replay = {path.name: path.read_bytes() for path in (copied / "results/csv").glob("*.csv")}
+    assert original == replay
+    assert not (copied / ".harness").exists()
+    # Ordinary saves retain user edits to both deliverables.
+    script = run.directory / "reduce_sample.py"
+    script.write_text(script.read_text() + "\n# user edit\n")
+    edited = script.read_bytes()
+    run.save()
+    assert script.read_bytes() == edited
+    # The hidden configuration still supports harness resume.
+    resolved = load_settings(run.directory / ".harness/settings.json")
+    assert ReductionRun(resolved, run.directory).run()["status"] == "complete"
+
+
+@pytest.mark.parametrize("bad_result", ["negative_intensity", "empty_slice"])
+def test_standalone_runs_unreviewed_results(settings, tmp_path, bad_result):
+    write_images(settings)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
+    settings["output"]["script_mode"] = "standalone"
+    run = ReductionRun(settings, tmp_path / "run")
+    assert run.run()["status"] == "complete"
+    path = run.directory / "settings.json"
+    portable = json.loads(path.read_text())
+    if bad_result == "empty_slice":
+        for row in portable["rows"]:
+            row["slices"]["centers_qsx_Ainv"] = [99.0]
+            row["slices"]["widths_Ainv"] = [0.001]
+    else:
+        for name in settings["input"]["filenames"]:
+            image = tifffile.imread(tmp_path / name)
+            image[27:34, :] = 1e6
+            image[47:54, :] = 1e6
+            tifffile.imwrite(tmp_path / name, image)
+    portable["output"]["root"] = "unreviewed"
+    write_json(path, portable)
+    command = subprocess.run([sys.executable, str(run.directory / "reduce_sample.py")],
+                             cwd=tmp_path, capture_output=True, text=True)
+    assert command.returncode == 0, command.stdout + command.stderr
+    exported = list((run.directory / "unreviewed/csv").glob("*.csv"))
+    assert exported
+    assert "needs_review" not in command.stdout
+
+
+def test_standalone_not_published_before_completion(settings, tmp_path):
+    write_images(settings)
+    settings["output"]["script_mode"] = "standalone"
+    run = ReductionRun(settings, tmp_path / "run")
+    assert run.run("phi")["status"] == "stage_complete"
+    assert "cdsaxs.harness" in (run.directory / "reduce_sample.py").read_text()
+    assert "quality" in json.loads((run.directory / "settings.json").read_text())
+    assert not (run.directory / ".harness/settings.json").exists()
+
+
+def test_shared_geometry_measures_all_rows_and_frames(settings, tmp_path):
+    write_images(settings, angles=(-30, -20, -10, 0, 10, 20, 30), extra_rows=True)
+    settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
+    settings["integration"].update(height_px=None, width_px=None, search_height_px=12,
+                                     subtract_background=False)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["choose_integration_box", "choose_slice_locations_and_widths",
+                                      "skip_gap_slices"]
+    # A broad peak in a nonrepresentative frame must affect the common height.
+    yy, xx = np.mgrid[:81, :121]
+    image = tifffile.imread(tmp_path / "sample_-10.tif")
+    image += 4000 * np.exp(-((yy - 25) ** 2 / 8 + (xx - 25) ** 2 / 3))
+    tifffile.imwrite(tmp_path / "sample_-10.tif", image)
+    run = ReductionRun(settings, tmp_path / "run")
+    assert run.run()["status"] == "complete", run.state["events"]
+    geometry = run.state["stages"]["integration:shared"]["result"]
+    assert geometry["height_px"] >= 10
+    assert len(geometry["rows"]) == 3
+    assert all(len(metrics["frames_checked"]) == 7 for metrics in geometry["rows"].values())
+    assert all("integration" not in override
+               for override in run.resolved["additional_qy_rows"]["row_settings"].values())
+    assert all(record["result"]["height_px"] == geometry["height_px"]
+               for name, record in run.state["stages"].items() if name.startswith("integration:"))
+
+
+@pytest.mark.parametrize("failure", ["contamination", "mask_gap"])
+def test_shared_background_failure_requires_review(settings, tmp_path, failure):
+    write_images(settings, extra_rows=True)
+    settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
+    settings["integration"].update(search_height_px=12)
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    rows = ReductionRun.make_rows({"offsets_qdy_px": [-15, 15]})
+    frame = list(dataset.datas.values())[-1]
+    row = rows[1]
+    yr, xr = box_ranges(frame, row, settings["integration"])
+    if failure == "mask_gap":
+        frame.mask[yr[0] + 10:yr[1] + 10, xr[0]:xr[1]] = True
+    else:
+        frame.image[yr[0] + 10:yr[1] + 10, 25] = 1e7
+    with pytest.raises(NeedsReview):
+        shared_geometry_proposal(dataset, [(row, settings) for row in rows])
+
+
+def test_row_integration_overrides_must_match_shared(settings):
+    settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[15])
+    settings["additional_qy_rows"]["row_settings"] = {"qy_001": {"integration": {"height_px": 9}}}
+    with pytest.raises(ValueError, match="must match shared"):
+        validate(settings)
+    settings["additional_qy_rows"]["row_settings"]["qy_001"]["integration"]["height_px"] = 7
+    validate(settings)
+
+
+@pytest.mark.parametrize("pixel_offset", [None, 15, -15])
+def test_native_qy_row_helper_matches_harness(settings, pixel_offset):
+    write_images(settings, extra_rows=True)
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    row = {"row_id": "test", "target_qsy_Ainv": 0.0, "offset_qdy_px": pixel_offset}
+    geometry = {key: settings["integration"][key] for key in (
+        "height_px", "width_px", "mode", "background_offsets_px")}
+    expected = integrate_row(dataset, row, geometry)
+    actual = integrate_qy_row(dataset, **geometry, **row)
+    for before, after in zip(expected.datas, actual.datas):
+        np.testing.assert_allclose(before.Iq, after.Iq)
+        np.testing.assert_allclose(before.qsy, after.qsy)
+        np.testing.assert_array_equal(before.mask, after.mask)
+
+
+def test_standalone_publication_archives_edits(settings, tmp_path):
+    settings["slices"].update(centers_qsx_Ainv=[0.01], widths_Ainv=[0.001])
+    row = {"row_id": "qy0", "target_qsy_Ainv": 0.0, "offset_qdy_px": None}
+    state = {"rows": [row], "artifacts": []}
+    generate(tmp_path, settings)
+    publish_standalone(tmp_path, settings, state)
+    script = tmp_path / "reduce_sample.py"
+    script.write_text(script.read_text() + "\n# preserve me\n")
+    settings["integration"]["height_px"] += 1
+    publish_standalone(tmp_path, settings, state)
+    assert any("# preserve me" in path.read_text()
+               for path in (tmp_path / "archives").glob("*/reduce_sample.py"))
+    settings["offsets"]["sample_phi_offset_deg"] = None
+    with pytest.raises(ValueError, match="requires resolved"):
+        standalone_settings(settings, [row])
+
+
+def test_standalone_freezes_single_row_gap_choices_and_mode_switch(settings, tmp_path):
+    settings["slices"].update(centers_qsx_Ainv=[0.01], widths_Ainv=0.001)
+    row = {"row_id": "qy0", "target_qsy_Ainv": 0.0, "offset_qdy_px": None}
+    choices = {"frame:000000": [10], "frame:000001": [-10]}
+    state = {"rows": [row], "artifacts": [], "stages": {
+        "integration:qy0": {"result": {"background_offsets_by_frame_px": choices}}}}
+    generate(tmp_path, settings)
+    publish_standalone(tmp_path, settings, state)
+    portable = json.loads((tmp_path / "settings.json").read_text())
+    assert portable["integration"]["background_offsets_by_frame_px"] == choices
+    restore_harness(tmp_path, settings, state)
+    assert "cdsaxs.harness" in (tmp_path / "reduce_sample.py").read_text()
+    assert not state.get("standalone_published")
+    assert "quality" in json.loads((tmp_path / "settings.json").read_text())
+    assert len(list((tmp_path / "archives").glob("*/reduce_sample.py"))) == 1
 
 
 @pytest.mark.parametrize("output_profile", ["compact", "full"])

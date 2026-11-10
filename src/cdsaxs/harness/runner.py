@@ -21,9 +21,9 @@ from .config import fingerprint, merge, read_json, slug, write_json
 from .jobs import close_locks, plan_batch, reserve
 from .diagnostics import (
     NeedsReview, box_ranges, check, detect_qy_rows, fit_phi, geometry_proposal,
-    phi_figure, representative_frames, row_figure, slice_proposal,
+    phi_figure, representative_frames, row_figure, shared_geometry_proposal, slice_proposal,
 )
-from .script_generator import generate
+from .script_generator import generate, publish_standalone, restore_harness
 from .reporting import compact_summary, recording_summary
 from .recording import RunRecorder, measured, session_log_path
 
@@ -294,7 +294,7 @@ class ReductionRun:
             self.state.setdefault("initial_settings", deepcopy(settings))
             self.state["invocation_settings"] = deepcopy(settings)
         generate(self.directory, self.settings)
-        if not self.compact:
+        if not self.compact and self.exports_full_settings:
             write_json(self.directory / "invocation_settings.json", settings)
         try:
             with self.recorder.stage("input_selection"):
@@ -369,22 +369,42 @@ class ReductionRun:
                                    for name in self.state["artifacts"]]
         self.event(f"{reason}; previous CSVs preserved in {prefix}")
 
+    @property
+    def exports_full_settings(self):
+        return (self.settings["output"]["export_harness_settings"]
+                or self.settings["output"]["script_mode"] == "harness")
+
     def save(self):
         names = ("reduce_sample.py", "settings.json") if self.compact else (
             "reduce_sample.py", "settings.json", "invocation_settings.json",
             "resolved_settings.json", "calibration.json", "coverage.json", "row_reductions.json")
         for name in names:
+            if name in {"invocation_settings.json", "resolved_settings.json"} and not self.exports_full_settings:
+                continue
             if (self.directory / name).exists():
                 self.state["artifacts"].append(name)
         self.state["artifacts"] = sorted(set(self.state["artifacts"]))
+        standalone = self.settings["output"]["script_mode"] == "standalone"
+        if self.settings["output"]["export_harness_settings"]:
+            write_json(self.directory / ".harness/settings.json", self.resolved
+                       if self.state["status"] == "complete" else self.settings)
+            self.state["artifacts"] = sorted(set(self.state["artifacts"]) | {".harness/settings.json"})
+        else:
+            self.state["artifacts"] = [name for name in self.state["artifacts"]
+                                       if name != ".harness/settings.json"]
         if self.compact:
             self.state["resolved_settings"] = deepcopy(self.resolved)
             # Keep requests unchanged while a proposal awaits acceptance. Only
             # a completed run replaces them with the accepted, rerunnable values.
             effective = self.resolved if self.state["status"] == "complete" else self.settings
-            write_json(self.directory / "settings.json", effective)
+            if not self.state.get("standalone_published"):
+                write_json(self.directory / "settings.json", effective)
+        if standalone and self.state["status"] == "complete":
+            publish_standalone(self.directory, self.resolved, self.state)
+        elif not standalone and self.state.get("standalone_published") and self.state["status"] == "complete":
+            restore_harness(self.directory, self.resolved, self.state)
         write_json(self.state_path, self.state)
-        if not self.compact:
+        if not self.compact and self.exports_full_settings:
             write_json(self.directory / "resolved_settings.json", self.resolved)
         self.report()
 
@@ -767,7 +787,37 @@ class ReductionRun:
         overrides = self.settings["additional_qy_rows"]["row_settings"].get(row["row_id"], {})
         return merge(self.settings, overrides)
 
-    def preview(self, dataset, row):
+    def shared_geometry(self, dataset, rows):
+        cfg = self.settings["integration"]
+        decisions = []
+        if cfg["height_px"] is None or cfg["width_px"] is None:
+            decisions.append("choose_integration_box")
+        if cfg["subtract_background"] and cfg["background_offsets_px"] is None:
+            decisions.append("choose_backgrounds")
+        row_configs = [(row, self.row_settings(row)) for row in rows]
+        def compute():
+            geometry = shared_geometry_proposal(dataset, row_configs)
+            for row in rows:
+                for index, data in enumerate(representative_frames(dataset, 3)):
+                    yr, xr = box_ranges(data, row, geometry)
+                    profile, _ = data.integrate_box(
+                        mode=geometry["mode"], axis=0, range_qdy_px=yr, range_qdx_px=xr,
+                        subtract_background_offset=geometry["background_offsets_px"], show_plot=False)
+                    from ..plotting.plotting import plot_data2d_integrate_box
+                    self.figures(plot_data2d_integrate_box(profile, log_scale=False),
+                                 f"05_{row['row_id']}_integration_{index}")
+            return geometry
+        geometry = self.checkpoint(
+            "integration:shared", {"integration": cfg, "rows": rows,
+                                   "slices": [s["slices"] for _, s in row_configs]},
+            compute, decisions, supplied=not decisions)
+        self.resolved["integration"].update({key: geometry[key] for key in (
+            "height_px", "width_px", "background_offsets_px")})
+        for overrides in self.resolved["additional_qy_rows"]["row_settings"].values():
+            overrides.pop("integration", None)
+        return geometry
+
+    def preview(self, dataset, row, shared=None):
         settings = self.row_settings(row)
         cfg = settings["integration"]
         decisions = []
@@ -777,7 +827,17 @@ class ReductionRun:
             decisions.append("choose_backgrounds")
 
         def compute():
-            geometry = geometry_proposal(dataset, row, settings)
+            geometry = deepcopy(shared) if shared is not None else geometry_proposal(dataset, row, settings)
+            if shared is not None:
+                geometry["metrics"] = geometry["rows"][row["row_id"]]
+                diagnostics = geometry.get("background_diagnostics", {})
+                for key in ("selected_frames", "production_frames"):
+                    if key in diagnostics:
+                        diagnostics[key] = [item for item in diagnostics[key]
+                                            if item["row_id"] == row["row_id"]]
+                if "candidates" in diagnostics:
+                    diagnostics["candidates"] = [item for item in diagnostics["candidates"]
+                                                 if item["row_id"] == row["row_id"]]
             has_positive_measurements = False
             for index, data in enumerate(representative_frames(dataset, 3)):
                 yrange, xrange = box_ranges(data, row, geometry)
@@ -795,6 +855,8 @@ class ReductionRun:
                   f"No positive intensity measurements remain in {row['row_id']}; inspect backgrounds")
             return geometry
 
+        if shared is not None:
+            decisions = []
         geometry = self.checkpoint(f"integration:{row['row_id']}",
                                    {"integration": cfg, "slices": settings["slices"], "row": row},
                                    compute, decisions, supplied=not decisions)
@@ -812,7 +874,7 @@ class ReductionRun:
         resolved_geometry = {key: geometry[key] for key in ("height_px", "width_px", "background_offsets_px")}
         if row["row_id"] == "qy0":
             self.resolved["integration"].update(resolved_geometry)
-        else:
+        elif shared is None:
             self.resolved["additional_qy_rows"]["row_settings"].setdefault(row["row_id"], {})[
                 "integration"] = merge(cfg, resolved_geometry)
         with self.recorder.stage(f"integrate:{row['row_id']}"):
@@ -1014,9 +1076,10 @@ class ReductionRun:
                     for data in dataset.datas.values():
                         data.mask |= ~np.isfinite(data.image)
                 rows = self.rows(dataset)
+                shared = self.shared_geometry(dataset, rows) if len(rows) > 1 else None
                 reductions = []
                 for row in rows:
-                    geometry, integrated = self.preview(dataset, row)
+                    geometry, integrated = self.preview(dataset, row, shared)
                     items, proposal = self.choose_slices(integrated, row)
                     reductions.append((row, geometry, integrated, items, proposal))
                 if stage == "preview":
