@@ -21,9 +21,9 @@ from .config import fingerprint, merge, read_json, slug, write_json
 from .jobs import close_locks, plan_batch, reserve
 from .diagnostics import (
     NeedsReview, box_ranges, check, common_slice_width, detect_qy_rows, fit_phi, geometry_proposal,
-    phi_figure, representative_frames, row_figure, shared_geometry_proposal, slice_proposal,
+    phi_figure, representative_frames, row_figure, shared_geometry_proposal, slice_parameters, slice_proposal,
 )
-from .script_generator import generate, publish_standalone, restore_harness
+from .script_generator import compact_widths, generate, publish_standalone, restore_harness
 from .reporting import compact_summary, recording_summary
 from .recording import RunRecorder, measured, session_log_path
 
@@ -783,9 +783,20 @@ class ReductionRun:
                          "offset_qdy_px": value if pixel_mode else None})
         return rows
 
-    def row_settings(self, row):
+    def row_settings(self, row, central_slices=None):
         overrides = self.settings["additional_qy_rows"]["row_settings"].get(row["row_id"], {})
-        return merge(self.settings, overrides)
+        settings = merge(self.settings, overrides)
+        if (row["row_id"] != "qy0" and central_slices is not None
+                and settings["slices"]["inherit_qy0"]):
+            explicit = overrides.get("slices", {})
+            for key in ("centers_qsx_Ainv", "widths_Ainv"):
+                if explicit.get(key) is None:
+                    settings["slices"][key] = deepcopy(central_slices[key])
+                    if key == "widths_Ainv":
+                        widths = settings["slices"][key]
+                        if isinstance(widths, list) and widths and len(set(widths)) == 1:
+                            settings["slices"][key] = widths[0]
+        return settings
 
     def shared_geometry(self, dataset, rows):
         cfg = self.settings["integration"]
@@ -883,8 +894,8 @@ class ReductionRun:
                      f"06_{row['row_id']}_bowtie")
         return geometry, integrated
 
-    def choose_slices(self, integrated, row, shared_width_Ainv=None):
-        settings = self.row_settings(row)
+    def choose_slices(self, integrated, row, shared_width_Ainv=None, central_slices=None):
+        settings = self.row_settings(row, central_slices)
         cfg = settings["slices"]
         decisions = []
         if cfg["centers_qsx_Ainv"] is None or cfg["widths_Ainv"] is None:
@@ -929,12 +940,20 @@ class ReductionRun:
         check(accepted, f"No usable slices remain in {row['row_id']}")
         self.state.setdefault("skipped_slices", {})[row["row_id"]] = skipped
         resolved_slices = {"centers_qsx_Ainv": [item["center_qsx_Ainv"] for item in accepted],
-                           "widths_Ainv": [item["width_Ainv"] for item in accepted]}
+                           "widths_Ainv": compact_widths([item["width_Ainv"] for item in accepted])}
         if row["row_id"] == "qy0":
             self.resolved["slices"].update(resolved_slices)
         else:
-            self.resolved["additional_qy_rows"]["row_settings"].setdefault(row["row_id"], {})[
-                "slices"] = merge(cfg, resolved_slices)
+            resolved = merge(cfg, resolved_slices)
+            differences = {key: value for key, value in resolved.items()
+                           if value != self.resolved["slices"][key]}
+            overrides = self.resolved["additional_qy_rows"]["row_settings"].setdefault(row["row_id"], {})
+            if differences:
+                overrides["slices"] = differences
+            else:
+                overrides.pop("slices", None)
+            if not overrides:
+                self.resolved["additional_qy_rows"]["row_settings"].pop(row["row_id"])
         return accepted, result
 
     def slice_overlay(self, integrated, result, row):
@@ -1083,11 +1102,16 @@ class ReductionRun:
                     geometry, integrated = self.preview(dataset, row, shared)
                     integrations.append((row, geometry, integrated))
                 with self.recorder.stage("common_slice_width"):
+                    central_settings = self.row_settings(rows[0])["slices"]
+                    central_centers = slice_parameters(integrations[0][2], self.row_settings(rows[0]))[0]
+                    central_slices = merge(central_settings, {"centers_qsx_Ainv": central_centers})
                     shared_width = common_slice_width([
-                        (integrated, self.row_settings(row)) for row, _, integrated in integrations])
+                        (integrated, self.row_settings(row, central_slices))
+                        for row, _, integrated in integrations])
                 reductions = []
                 for row, geometry, integrated in integrations:
-                    items, proposal = self.choose_slices(integrated, row, shared_width)
+                    items, proposal = self.choose_slices(integrated, row, shared_width,
+                                                        self.resolved["slices"] if reductions else None)
                     reductions.append((row, geometry, integrated, items, proposal))
                 if stage == "preview":
                     self.record_reductions(reductions)

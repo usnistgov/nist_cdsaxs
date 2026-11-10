@@ -72,7 +72,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cdsaxs.loaders import load_data as loaders
 from cdsaxs.data.dataset import Dataset, ReducedDataset, ReducedSlices
-from cdsaxs.reduction import integrate_qy_row, slice_reduced_dataset
+from cdsaxs.reduction import integrate_qy_row_with_slice_backgrounds, slice_reduced_dataset
 from cdsaxs.plotting import plotting
 
 SETTINGS_FILE = Path(__file__).resolve().with_name("settings.json")
@@ -163,13 +163,29 @@ def reduce():
 
     # Integrate every fixed row with the same box and backgrounds.
     geometry = settings["integration"]
-    backgrounds = geometry.get("background_offsets_by_frame_px", geometry["background_offsets_px"])
+    backgrounds = geometry.get("background_choices", geometry.get(
+        "background_offsets_by_frame_px", geometry.get("background_offsets_px")))
+    central = next(row for row in settings["rows"] if row["row_id"] == "qy0")
+    shared_slices = dict(settings.get("slices", {}))
+    shared_slices.update(central.get("slices", {}))
     reductions = []
-    for row in settings["rows"]:
-        integrated = integrate_qy_row(
+    for configured_row in settings["rows"]:
+        row = dict(configured_row)
+        row["slices"] = dict(shared_slices)
+        row["slices"].update(configured_row.get("slices", {}))
+        widths = row["slices"]["widths_Ainv"]
+        if not isinstance(widths, list):
+            widths = [widths] * len(row["slices"]["centers_qsx_Ainv"])
+        row["slices"]["widths_Ainv"] = widths
+        choices = row.get("background_choices", row.get(
+            "background_choices_by_slice_frame_px", backgrounds))
+        integrated = integrate_qy_row_with_slice_backgrounds(
             dataset, height_px=geometry["height_px"], width_px=geometry["width_px"],
             target_qsy_Ainv=row["target_qsy_Ainv"], offset_qdy_px=row["offset_qdy_px"],
-            background_offsets_px=(backgrounds if geometry["subtract_background"] else None),
+            centers_qsx_Ainv=row["slices"]["centers_qsx_Ainv"], widths_Ainv=widths,
+            background_choices=(choices if geometry["subtract_background"] else None),
+            background_offsets_px=(geometry.get("background_offsets_px", backgrounds)
+                                   if geometry["subtract_background"] else None),
             mode=geometry["mode"], row_id=row["row_id"])
         # Native integration outlines show exactly the boxes being used.
         save_figure(plotting.plot_data2d_integrate_box(integrated.datas[0], log_scale=False),
@@ -233,6 +249,38 @@ if __name__ == "__main__":
 '''
 
 
+def compact_widths(widths):
+    """Represent equal widths once while retaining unequal explicit widths."""
+    if isinstance(widths, list) and widths and all(value == widths[0] for value in widths):
+        return deepcopy(widths[0])
+    return deepcopy(widths)
+
+
+def compact_backgrounds(default, *, by_frame=None, by_slice=None):
+    """Keep one common background selection and only genuine fixed exceptions."""
+    def choice(offsets):
+        return offsets[0] if isinstance(offsets, list) and len(offsets) == 1 else deepcopy(offsets)
+
+    default = choice(default)
+    result = {"default": default}
+    if by_frame:
+        values = [choice(offsets) for offsets in by_frame.values()]
+        if all(value == values[0] for value in values) and values[0] is not None:
+            result["default"] = values[0]
+        else:
+            differences = {frame: choice(offsets) for frame, offsets in by_frame.items()
+                           if choice(offsets) != default}
+            if differences:
+                result["by_frame_px"] = differences
+    if by_slice:
+        differences = [{frame: choice(offsets) for frame, offsets in choices.items()
+                        if choice(offsets) != result.get("by_frame_px", {}).get(frame, result["default"])}
+                       for choices in by_slice]
+        if any(differences):
+            result["by_slice_frame_px"] = differences
+    return result if len(result) > 1 else result["default"]
+
+
 def standalone_settings(settings, rows):
     """Project accepted settings into constants needed by native reduction."""
     cfg = settings["input"]
@@ -271,10 +319,13 @@ def standalone_settings(settings, rows):
                               for key in ("center_px", "sdd_cm")},
               "offsets": deepcopy(settings["offsets"]), "corrections": corrections,
               "integration": {key: deepcopy(settings["integration"][key]) for key in (
-                  "height_px", "width_px", "background_offsets_px", "subtract_background", "mode")},
-              "rows": [], "export": deepcopy(settings["export"]),
+                  "height_px", "width_px", "subtract_background", "mode")},
+              "slices": {}, "rows": [], "export": deepcopy(settings["export"]),
               "output": {"root": ".", "figure_formats": deepcopy(settings["output"]["figure_formats"]),
                          "dpi": settings["output"]["dpi"]}}
+    result["integration"]["background_choices"] = compact_backgrounds(
+        settings["integration"]["background_offsets_px"])
+    row_slices = {}
     for row in rows:
         row_cfg = merge(settings["slices"], settings["additional_qy_rows"]["row_settings"].get(
             row["row_id"], {}).get("slices", {}))
@@ -282,10 +333,22 @@ def standalone_settings(settings, rows):
         if centers is None or widths is None:
             raise ValueError(f"Standalone export requires resolved slices for {row['row_id']}")
         item = deepcopy(row)
-        item["slices"] = {"centers_qsx_Ainv": deepcopy(centers),
-                          "widths_Ainv": deepcopy(widths if isinstance(widths, list)
-                                                  else [widths] * len(centers)), "mode": row_cfg["mode"]}
+        row_slices[row["row_id"]] = {"centers_qsx_Ainv": deepcopy(centers),
+                                     "widths_Ainv": compact_widths(widths), "mode": row_cfg["mode"]}
+        legacy_choices = item.pop("background_choices_by_slice_frame_px", None)
+        if legacy_choices is not None:
+            choices = compact_backgrounds(settings["integration"]["background_offsets_px"],
+                                          by_slice=legacy_choices)
+            if choices != result["integration"]["background_choices"]:
+                item["background_choices"] = choices
         result["rows"].append(item)
+    result["slices"] = row_slices["qy0"]
+    for item in result["rows"]:
+        differences = {key: value for key, value in row_slices[item["row_id"]].items()
+                       if value != result["slices"][key]}
+        item.pop("slices", None)
+        if differences:
+            item["slices"] = differences
     return result
 
 
@@ -298,9 +361,9 @@ def publish_standalone(directory, settings, state):
         row_id = state["rows"][0]["row_id"]
         geometry = state.get("stages", {}).get(f"integration:{row_id}", {}).get("result", {})
         choices = geometry.get("background_offsets_by_frame_px", {})
-        if any(offsets != portable["integration"]["background_offsets_px"]
-               for offsets in choices.values()):
-            portable["integration"]["background_offsets_by_frame_px"] = deepcopy(choices)
+        if choices:
+            portable["integration"]["background_choices"] = compact_backgrounds(
+                settings["integration"]["background_offsets_px"], by_frame=choices)
     signature = fingerprint({"settings": portable, "script": STANDALONE_SCRIPT})
     if signature == state.get("standalone_signature"):
         return

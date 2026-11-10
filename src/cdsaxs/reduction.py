@@ -3,6 +3,7 @@ Reduction tools for processing the cdsaxs Dataset class.
 """
 from __future__ import annotations
 
+from copy import copy
 import numpy as np
 
 from .data.reduced_slice import ReducedData1DSlice
@@ -36,7 +37,8 @@ def integrate_qy_row(dataset, height_px, width_px, target_qsy_Ainv=0.0,
 
     Unlike the harness, this helper does not validate containment, background
     contrast, or peak presence. Box dimensions and displacements are pixels.
-    Backgrounds may also be a fixed dictionary keyed by dataset frame IDs.
+    Backgrounds may be one signed pixel offset, a list of offsets to average,
+    or a fixed dictionary keyed by dataset frame IDs.
     """
     ranges_y, ranges_x = {}, {}
     for key, data in dataset.datas.items():
@@ -52,6 +54,64 @@ def integrate_qy_row(dataset, height_px, width_px, target_qsy_Ainv=0.0,
         for component in ("Iq", "qsx", "qsy", "qsz", "qsr", "qs"):
             profile.mask |= ~np.isfinite(getattr(profile, component))
     return reduced
+
+
+def integrate_qy_row_with_slice_backgrounds(dataset, centers_qsx_Ainv, widths_Ainv,
+                                           background_choices, **integration_options):
+    """Replay fixed background constants, including legacy slice/frame choices.
+
+    A scalar is one signed pixel offset; a list of offsets is averaged. Compact
+    overrides use ``default``, ``by_frame_px`` and ``by_slice_frame_px``. The
+    legacy list of frame dictionaries (one per slice) is also supported. A null
+    slice/frame override masks that bin, preserving an explicit saved omission.
+    No backgrounds are selected or checked for scientific quality here.
+    """
+    default = integration_options.pop("background_offsets_px", None)
+    overrides = None
+    if isinstance(background_choices, dict) and "default" in background_choices:
+        default = background_choices["default"]
+        frame_choices = background_choices.get("by_frame_px", {})
+        overrides = background_choices.get("by_slice_frame_px")
+    elif (isinstance(background_choices, list) and background_choices
+          and isinstance(background_choices[0], dict)):
+        frame_choices = {}
+        overrides = background_choices
+    elif isinstance(background_choices, dict):
+        frame_choices = background_choices
+    else:
+        default, frame_choices = background_choices, {}
+    backgrounds = ({key: frame_choices.get(key, default) for key in dataset.datas}
+                   if frame_choices else default)
+    reduced = integrate_qy_row(dataset, background_offsets_px=backgrounds, **integration_options)
+    if overrides is None:
+        return reduced
+    widths = widths_Ainv if isinstance(widths_Ainv, list) else [widths_Ainv] * len(centers_qsx_Ainv)
+    cache = {}
+
+    def profile_for(offsets, index):
+        offsets = offsets if isinstance(offsets, list) else [offsets]
+        key = tuple(offsets)
+        if key not in cache:
+            cache[key] = integrate_qy_row(dataset, background_offsets_px=offsets, **integration_options)
+        return cache[key].datas[index]
+
+    profiles = []
+    for index, original in enumerate(reduced.datas):
+        result = copy(original)
+        result.Iq, result.mask = original.Iq.copy(), original.mask.copy()
+        for center, width, choices in zip(centers_qsx_Ainv, widths, overrides):
+            frame = original.data2d.name
+            if frame not in choices:
+                continue
+            window = np.abs(original.qsx - center) <= width / 2
+            offsets = choices[frame]
+            if offsets is None:
+                result.mask[window] = True
+            else:
+                chosen = profile_for(offsets, index)
+                result.Iq[window], result.mask[window] = chosen.Iq[window], chosen.mask[window]
+        profiles.append(result)
+    return ReducedDataset(profiles)
 
 
 def slice_reduced_dataset(

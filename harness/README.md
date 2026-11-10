@@ -357,8 +357,8 @@ the widest automatic proposal. The selected q width stays fixed across φ frames
 the number of included detector pixels may vary. If the common width reaches a
 neighboring peak center or violates a row's width bounds, the harness requests
 review. Supply a scalar for a fixed equal width, or a list/row override to request
-explicit widths. Accepted widths are exported as constant lists; the standalone
-script performs no width estimation.
+explicit widths. Equal accepted widths are exported as one scalar; unequal
+explicit widths remain a list. The standalone script performs no width estimation.
 
 Additional rows are **disabled by default** and require the user's explicit
 request for circular contact holes:
@@ -385,11 +385,16 @@ dimensions are chosen to contain measured peaks across all rows and production
 frames. Background candidates must pass every row/frame using that row's slice
 windows. A failure requests review; multirow reductions never drop a background
 on individual frames. The single-row detector-gap fallback remains available.
-Qsx slice centers are selected independently for each row; automatic widths are
-shared across all rows. The checkpoint state stores their settings;
+Offset rows inherit the accepted qy0 qsx centers and widths by default. Supply
+`additional_qy_rows.row_settings.<row_id>.slices.centers_qsx_Ainv` or
+`widths_Ainv` to override either constant. Set `slices.inherit_qy0: false` for
+an offset row to request independent automatic peak centers; automatic widths
+remain shared across rows unless explicitly supplied. Normal harness coverage
+checks and authorized slice omissions still apply to each row.
+The checkpoint state stores their settings;
 the `full` output profile additionally writes `row_reductions.json`.
-Accepted per-row settings also appear under `additional_qy_rows.row_settings` in
-the resolved JSON, keyed by row ID. Slice overrides can be supplied directly.
+Accepted per-row differences appear under `additional_qy_rows.row_settings` in
+the resolved harness JSON, keyed by row ID. Redundant inherited settings are omitted.
 Row integration overrides must match the shared integration settings; redundant
 overrides are removed from resolved multirow settings.
 
@@ -488,8 +493,47 @@ script for review. Native masks, ordinary API/file errors, and CSV omission of
 nonpositive intensities still apply. Linear figures allow inspection of negative
 background-subtracted intensities. Review copied reductions manually.
 For a single-row run using an accepted detector-gap exception, any frame-specific
-background list is saved as explicit constants, without rerunning gap decisions.
+background choice is saved as explicit constants, without rerunning gap decisions.
 Update those frame IDs and offsets when changing input filenames.
+
+Standalone settings store shared constants once. `slices` contains the qy0 centers,
+widths in Å⁻¹, and mode. Offset rows inherit these settings; an optional row `slices`
+object overrides only the specified keys. Editing the shared centers or width
+therefore updates all rows that inherit them. For example:
+
+```json
+{
+  "integration": {
+    "height_px": 6,
+    "width_px": 1400,
+    "background_choices": [-9, 9],
+    "subtract_background": true,
+    "mode": "sum"
+  },
+  "slices": {
+    "centers_qsx_Ainv": [-0.026, 0.026],
+    "widths_Ainv": 0.003,
+    "mode": "sum"
+  },
+  "rows": [
+    {"row_id": "qy0", "target_qsy_Ainv": 0.0, "offset_qdy_px": null},
+    {"row_id": "qy_001", "target_qsy_Ainv": null, "offset_qdy_px": 15}
+  ]
+}
+```
+
+`background_choices` is one selection shared across slices and frames. A scalar
+such as `-9` requests one signed pixel offset; a list such as `[-9, 9]` averages
+those background boxes. Thus a symmetric pair remains a two-element list.
+Equal widths are exported as a scalar; different widths may be a list with one
+value per center. Explicit background exceptions use
+`{"default": [-9, 9], "by_frame_px": {"frame_id": -9}}` or
+`by_slice_frame_px`, a list of sparse frame overrides, one dictionary per slice.
+A null slice/frame override preserves a saved masked bin. A row may supply its
+own `background_choices`. Existing row-local slice lists,
+`background_offsets_px`, `background_offsets_by_frame_px`, and detailed
+`background_choices_by_slice_frame_px` settings remain supported by newly
+generated scripts.
 
 To also export `.harness/settings.json` for resume, explicitly request
 `--export-harness-settings` or set `output.export_harness_settings: true`:

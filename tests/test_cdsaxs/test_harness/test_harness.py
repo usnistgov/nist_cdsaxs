@@ -20,9 +20,11 @@ from cdsaxs.harness.runner import (
     phi_groups, run_batch,
 )
 from cdsaxs.harness.script_generator import generate
-from cdsaxs.harness.script_generator import publish_standalone, restore_harness, standalone_settings
+from cdsaxs.harness.script_generator import (
+    STANDALONE_SCRIPT, compact_backgrounds, publish_standalone, restore_harness, standalone_settings,
+)
 from cdsaxs.harness.diagnostics import shared_geometry_proposal
-from cdsaxs.reduction import integrate_qy_row
+from cdsaxs.reduction import integrate_qy_row, integrate_qy_row_with_slice_backgrounds
 
 
 @pytest.fixture
@@ -112,10 +114,9 @@ def test_default_equal_qsx_width_is_shared_across_rows(settings, tmp_path):
     run = ReductionRun(settings, tmp_path / "run")
     assert run.run()["status"] == "complete", run.state["events"]
     portable = json.loads((run.directory / "settings.json").read_text())
-    exported_widths = [value for row in portable["rows"] for value in row["slices"]["widths_Ainv"]]
     assert len(portable["rows"]) == 3
-    assert len(set(exported_widths)) == 1
-    assert exported_widths[0] == width
+    assert portable["slices"]["widths_Ainv"] == width
+    assert all("slices" not in row for row in portable["rows"])
 
 
 @pytest.mark.parametrize("widths", [0.001, [0.0005, 0.001, 0.0015, 0.002]])
@@ -134,6 +135,129 @@ def test_common_qsx_width_rejects_conflicting_auto_bounds(settings):
     constrained["slices"]["width_bounds_Ainv"] = [0.0002, 0.001]
     with pytest.raises(NeedsReview, match="row's configured bounds"):
         common_slice_width([(integrations[0][1], constrained), (integrations[1][1], settings)])
+
+
+@pytest.mark.parametrize("override", [None, "centers", "widths", "independent"])
+def test_offset_rows_inherit_qy0_slices_unless_overridden(settings, tmp_path, override):
+    integrations = unequal_peak_integrations(settings, extra_rows=True)
+    # Move offset peaks so independent detection would produce different centers.
+    for filename in settings["input"]["filenames"]:
+        path = Path(settings["input"]["data_directory"]) / filename
+        image = tifffile.imread(path)
+        image[:33] = np.roll(image[:33], 3, axis=1)
+        image[48:] = np.roll(image[48:], 3, axis=1)
+        tifffile.imwrite(path, image)
+    settings["mode"] = "automatic"
+    settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
+    settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
+    settings["integration"]["search_height_px"] = 12
+    settings["output"].update(script_mode="standalone", profile="compact")
+    if override:
+        cfg = {}
+        if override == "centers":
+            centers = slice_parameters(integrations[0][1], settings)[0]
+            cfg["centers_qsx_Ainv"] = [center + 0.002 for center in centers]
+        elif override == "widths":
+            cfg["widths_Ainv"] = 0.001
+        else:
+            cfg["inherit_qy0"] = False
+        settings["additional_qy_rows"]["row_settings"] = {"qy_001": {"slices": cfg}}
+    run = ReductionRun(settings, tmp_path / "run")
+    assert run.run()["status"] == "complete", run.state["events"]
+    portable = json.loads((run.directory / "settings.json").read_text())
+    assert "slices" not in portable["rows"][0]
+    assert "slices" not in portable["rows"][2]
+    row = portable["rows"][1]
+    if override is None:
+        assert "slices" not in row
+    elif override == "widths":
+        assert row["slices"] == {"widths_Ainv": 0.001}
+    else:
+        assert row["slices"]["centers_qsx_Ainv"] != portable["slices"]["centers_qsx_Ainv"]
+
+
+def test_compact_backgrounds_preserve_legacy_slice_frame_choices(settings):
+    write_images(settings)
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    options = dict(height_px=7, width_px=100, background_offsets_px=[-10, 10])
+    raw = integrate_qy_row(dataset, **options)
+    centers = slice_parameters(raw, settings)[0]
+    choices = [{key: [-10, 10] for key in dataset.datas} for _ in centers]
+    frames = list(dataset.datas)
+    choices[0][frames[0]] = None
+    choices[1][frames[1]] = [-10]
+    compact = compact_backgrounds([-10, 10], by_slice=choices)
+    assert compact == {"default": [-10, 10], "by_slice_frame_px": [
+        {frames[0]: None}, {frames[1]: -10}, {}, {}]}
+    old = integrate_qy_row_with_slice_backgrounds(dataset, centers, 0.001, choices, **options)
+    new = integrate_qy_row_with_slice_backgrounds(dataset, centers, [0.001] * len(centers),
+                                                compact, **options)
+    for original, replay in zip(old.datas, new.datas):
+        np.testing.assert_array_equal(original.mask, replay.mask)
+        np.testing.assert_allclose(original.Iq, replay.Iq)
+    window = abs(raw.datas[0].qsx - centers[0]) <= 0.0005
+    assert window.any() and old.datas[0].mask[window].all()
+    single = integrate_qy_row_with_slice_backgrounds(dataset, centers, 0.001, -10, **options)
+    native = integrate_qy_row(dataset, height_px=7, width_px=100, background_offsets_px=[-10])
+    for a, b in zip(single.datas, native.datas):
+        np.testing.assert_allclose(a.Iq, b.Iq)
+        np.testing.assert_array_equal(a.mask, b.mask)
+
+
+@pytest.mark.parametrize("format", ["legacy", "legacy_slice_frames", "scalar", "lists"])
+def test_generated_script_accepts_compact_and_existing_settings(settings, tmp_path, format):
+    write_images(settings)
+    settings["corrections"]["footprint"] = False
+    settings["output"]["figure_formats"] = []
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    centers = slice_parameters(integrate_qy_row(dataset, height_px=7, width_px=100), settings)[0]
+    settings["slices"].update(centers_qsx_Ainv=centers, widths_Ainv=[0.001] * len(centers))
+    settings["integration"]["background_offsets_px"] = [-10]
+    rows = ReductionRun.make_rows({"offsets_qdy_px": []})
+    portable = standalone_settings(settings, rows)
+    assert portable["slices"]["widths_Ainv"] == 0.001
+    assert portable["integration"]["background_choices"] == -10
+    script = tmp_path / "reduce_sample.py"
+    script.write_text(STANDALONE_SCRIPT)
+    write_json(tmp_path / "settings.json", portable)
+    baseline = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    original = {path.name: path.read_bytes() for path in (tmp_path / "csv").glob("*.csv")}
+    if format.startswith("legacy"):
+        portable["rows"][0]["slices"] = portable.pop("slices")
+        portable["rows"][0]["slices"]["widths_Ainv"] = [0.001] * len(centers)
+        portable["integration"]["background_offsets_px"] = [-10]
+        portable["integration"].pop("background_choices")
+        if format == "legacy_slice_frames":
+            portable["rows"][0]["background_choices_by_slice_frame_px"] = [
+                {frame: [-10] for frame in dataset.datas} for _ in centers]
+    elif format == "lists":
+        portable["slices"]["widths_Ainv"] = [0.001] * len(centers)
+        portable["integration"]["background_choices"] = [-10]
+    portable["output"]["root"] = "replay"
+    write_json(tmp_path / "settings.json", portable)
+    replay = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    assert original == {path.name: path.read_bytes() for path in (tmp_path / "replay/csv").glob("*.csv")}
+
+
+def test_standalone_settings_compact_repeated_values_and_preserve_overrides(settings):
+    settings["slices"].update(centers_qsx_Ainv=[-0.01, 0.01], widths_Ainv=[0.001, 0.001])
+    rows = ReductionRun.make_rows({"offsets_qdy_px": [-15, 15]})
+    for row in rows:
+        row["background_choices_by_slice_frame_px"] = [
+            {f"frame:{index:06d}": [-10, 10] for index in range(100)} for _ in range(2)]
+    settings["additional_qy_rows"]["row_settings"] = {"qy_001": {
+        "slices": {"centers_qsx_Ainv": [-0.02, 0.02], "widths_Ainv": [0.0005, 0.0015]}}}
+    portable = standalone_settings(settings, rows)
+    assert portable["slices"]["widths_Ainv"] == 0.001
+    assert portable["integration"]["background_choices"] == [-10, 10]
+    assert "slices" not in portable["rows"][0]
+    assert "slices" not in portable["rows"][2]
+    assert portable["rows"][1]["slices"] == {
+        "centers_qsx_Ainv": [-0.02, 0.02], "widths_Ainv": [0.0005, 0.0015]}
+    assert all("background_choices" not in row for row in portable["rows"])
+    assert len(json.dumps(portable)) < 3000
 
 
 @pytest.mark.parametrize("profile", ["compact", "full"])
@@ -183,7 +307,7 @@ def test_default_standalone_output_and_optional_resume_settings(
         run.state["status"] = "complete"
         if profile == "full":
             # This assertion concerns saving an already resolved result.
-            run.resolved["slices"] = {**loaded["slices"], **portable["rows"][0]["slices"]}
+            run.resolved["slices"] = {**loaded["slices"], **portable["slices"]}
             run.resolved["export"] = deepcopy(portable["export"])
         run.save()
         assert resume.is_file()
@@ -227,7 +351,7 @@ def test_standalone_export_copied_without_harness(settings, tmp_path, profile, e
     assert (run.directory / ".harness/settings.json").is_file()
     portable = json.loads((run.directory / "settings.json").read_text())
     assert set(portable) == {"sample_name", "input", "calibration", "offsets", "corrections",
-                             "integration", "rows", "export", "output"}
+                             "integration", "slices", "rows", "export", "output"}
     assert "quality" not in portable and "search" not in portable["calibration"]
     copied = tmp_path / "copied"
     copied.mkdir()
@@ -278,9 +402,8 @@ def test_standalone_runs_unreviewed_results(settings, tmp_path, bad_result):
     path = run.directory / "settings.json"
     portable = json.loads(path.read_text())
     if bad_result == "empty_slice":
-        for row in portable["rows"]:
-            row["slices"]["centers_qsx_Ainv"] = [99.0]
-            row["slices"]["widths_Ainv"] = [0.001]
+        portable["slices"]["centers_qsx_Ainv"] = [99.0]
+        portable["slices"]["widths_Ainv"] = [0.001]
     else:
         for name in settings["input"]["filenames"]:
             image = tifffile.imread(tmp_path / name)
@@ -400,7 +523,8 @@ def test_standalone_freezes_single_row_gap_choices_and_mode_switch(settings, tmp
     generate(tmp_path, settings)
     publish_standalone(tmp_path, settings, state)
     portable = json.loads((tmp_path / "settings.json").read_text())
-    assert portable["integration"]["background_offsets_by_frame_px"] == choices
+    assert portable["integration"]["background_choices"] == {
+        "default": [-10, 10], "by_frame_px": {"frame:000000": 10, "frame:000001": -10}}
     restore_harness(tmp_path, settings, state)
     assert "cdsaxs.harness" in (tmp_path / "reduce_sample.py").read_text()
     assert not state.get("standalone_published")
@@ -1179,7 +1303,7 @@ def test_calibration_file_and_stale_exports_preserved(settings, tmp_path):
     assert archived and archived[0].read_bytes() == original
 
 
-def test_row_specific_resolved_settings_reproduce(settings, tmp_path):
+def test_inherited_resolved_settings_reproduce(settings, tmp_path):
     write_images(settings, extra_rows=True)
     settings["mode"] = "automatic"
     settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
@@ -1188,7 +1312,7 @@ def test_row_specific_resolved_settings_reproduce(settings, tmp_path):
     run = ReductionRun(settings, tmp_path / "run")
     assert run.run()["status"] == "complete"
     resolved = load_settings(run.directory / "resolved_settings.json")
-    assert resolved["additional_qy_rows"]["row_settings"]["qy_001"]["slices"]["centers_qsx_Ainv"]
+    assert resolved["additional_qy_rows"]["row_settings"] == {}
     original = (run.directory / "csv" / "sample_qyall_all.csv").read_bytes()
     independent = ReductionRun(resolved, tmp_path / "independent")
     assert independent.run()["status"] == "complete", independent.state["events"]

@@ -125,6 +125,7 @@
   "slices": {
     "centers_qsx_Ainv": null,
     "widths_Ainv": null,
+    "inherit_qy0": true,
     "mode": "sum",
     "width_bounds_Ainv": [
       0.0002,

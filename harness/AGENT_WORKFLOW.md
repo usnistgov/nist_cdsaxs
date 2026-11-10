@@ -93,6 +93,8 @@ guaranteed token or billing savings.
    Preview and production must use identical accepted settings.
 6. Inspect bowtie/slice overlays. Default automatic qsx widths are equal across
    all peaks and requested qy rows, using the largest bounded measured proposal.
+   Offset rows inherit qy0 centers and widths unless explicitly overridden;
+   `slices.inherit_qy0: false` requests independent automatic centers for a row.
    Preserve explicitly supplied scalar/list widths. Narrow slices should capture peaks with little
    background. Read `summary.md` for exclusions and missing-angle decisions;
    detailed per-frame coverage is in the hidden checkpoint state (`coverage.json`
@@ -109,11 +111,14 @@ guaranteed token or billing savings.
    overlay, and select one shared signal/background box size and one fixed
    background-offset list against every row and production frame. Do not vary
    backgrounds by row/frame or use the single-row gap fallback for multiple rows.
-   Request review if a shared choice fails. Select qsx centers separately for each
-   row while keeping automatic slice widths common across rows. Retain
+   Request review if a shared choice fails. Reuse accepted qy0 qsx centers and widths
+   for offset rows unless the user requests an override. Retain
    row provenance when constructing the larger radial-coordinate dataset. Without
    a request for offset rows, reduce qy=0 and export only the combined result;
    omit qy0/qyall labels from these single-row CSV filenames.
+   Standalone JSON stores shared slices once, equal widths as a scalar, one common
+   background choice, and only differing row/frame/slice overrides. A scalar
+   background is one signed offset; a list specifies the boxes to average.
 8. Automatic batches may proceed without per-sample review only for decisions the
    user authorized in settings or instructions. Record scoped permissions in the
    effective JSON. Use configured sample-family bounds and inspect diagnostic plots;

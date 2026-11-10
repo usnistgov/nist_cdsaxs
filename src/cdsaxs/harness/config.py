@@ -70,6 +70,7 @@ DEFAULTS = {
     },
     "slices": {
         "centers_qsx_Ainv": None, "widths_Ainv": None,
+        "inherit_qy0": True,
         "mode": "sum",
         "width_bounds_Ainv": [0.0002, 0.003],
         "prominence_relative": 0.1, "min_distance_px": 5,
@@ -264,6 +265,7 @@ def validate(settings):
     for section, keys in (
         (None, ("refit_known_constants",)),
         ("corrections", ("footprint", "substrate_absorption")),
+        ("slices", ("inherit_qy0",)),
         ("integration", ("subtract_background", "allow_independent_backgrounds",
                          "allow_one_sided_backgrounds")),
         ("additional_qy_rows", ("enabled",)),
