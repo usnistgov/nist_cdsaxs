@@ -222,11 +222,10 @@ def search_arguments(data, settings):
 
 def integrate_row(dataset, row, geometry):
     ranges_y, ranges_x = {}, {}
-    backgrounds = geometry.get("background_offsets_by_frame_px", geometry["background_offsets_px"])
+    backgrounds = geometry["background_offsets_px"]
     for key, data in dataset.datas.items():
         yr, xr = box_ranges(data, row, geometry)
-        frame_backgrounds = backgrounds[key] if isinstance(backgrounds, dict) else backgrounds
-        for offset in frame_backgrounds or []:
+        for offset in backgrounds or []:
             check(abs(offset) >= geometry["height_px"], "Background overlaps signal box")
             check(0 <= yr[0] + offset < yr[1] + offset <= data.image.shape[0],
                   f"Background region leaves detector for {data.name}")
@@ -479,12 +478,19 @@ class ReductionRun:
             record["status"] = "failed_quality"
             self.save()
             raise NeedsReview("; ".join(failures))
+        gap_fallback = (name.startswith("integration:")
+                        and result.get("background_diagnostics", {}).get("gap_fallback"))
+        remaining_decisions = set(decisions)
+        if gap_fallback:
+            remaining_decisions.discard("choose_backgrounds")
         if supplied:
             record["status"] = "accepted_supplied"
+        elif gap_fallback and not remaining_decisions:
+            record["status"] = "accepted_gap_fallback"
         elif name.split(":")[0] in self.accept:
             check(cached, f"Inspect {name} diagnostics before accepting this new result")
             record["status"] = "accepted_review"
-        elif self.settings["mode"] == "automatic" and set(decisions) <= set(self.settings["allowed_decisions"]):
+        elif self.settings["mode"] == "automatic" and remaining_decisions <= set(self.settings["allowed_decisions"]):
             record["status"] = "accepted_automatic"
         if not record["status"].startswith("accepted"):
             self.save()
@@ -824,9 +830,20 @@ class ReductionRun:
             compute, decisions, supplied=not decisions)
         self.resolved["integration"].update({key: geometry[key] for key in (
             "height_px", "width_px", "background_offsets_px")})
+        if geometry.get("background_diagnostics", {}).get("gap_fallback"):
+            self.resolved["integration"]["background_count"] = 1
+            self.notify_background_gap_fallback(geometry, "all qy rows")
         for overrides in self.resolved["additional_qy_rows"]["row_settings"].values():
             overrides.pop("integration", None)
         return geometry
+
+    def notify_background_gap_fallback(self, geometry, scope):
+        fallback = geometry.get("background_diagnostics", {}).get("gap_fallback")
+        if fallback:
+            self.event(f"{scope}: background detector/mask gap; omitted offsets "
+                       f"{fallback['omitted_offsets_px']} px throughout the dataset. "
+                       f"Using fixed offsets {fallback['retained_offsets_px']} px for every frame "
+                       f"and qy row; continuing without background approval. See {self.report_name}")
 
     def preview(self, dataset, row, shared=None):
         settings = self.row_settings(row)
@@ -855,8 +872,7 @@ class ReductionRun:
                 profile, _ = data.integrate_box(
                     mode=geometry["mode"], axis=0,
                     range_qdy_px=yrange, range_qdx_px=xrange,
-                    subtract_background_offset=geometry.get("background_offsets_by_frame_px", {}).get(
-                        data.name, geometry["background_offsets_px"]), show_plot=False)
+                    subtract_background_offset=geometry["background_offsets_px"], show_plot=False)
                 positive = bool(np.any(np.isfinite(profile.Iq) & (profile.Iq > 0)))
                 has_positive_measurements |= positive
                 from ..plotting.plotting import plot_data2d_integrate_box
@@ -871,18 +887,17 @@ class ReductionRun:
         geometry = self.checkpoint(f"integration:{row['row_id']}",
                                    {"integration": cfg, "slices": settings["slices"], "row": row},
                                    compute, decisions, supplied=not decisions)
+        if shared is None:
+            self.notify_background_gap_fallback(geometry, row["row_id"])
         for item in geometry.get("background_diagnostics", {}).get("production_frames", []):
-            if item["one_sided_reason"] == "single_background_requested":
+            if item["single_background_requested"]:
                 self.event(f"{row['row_id']}: single background requested at corrected phi "
                            f"{item['phi_deg']:+.6g} deg ({item['frame']}): "
                            f"offsets {item['offsets_px']} px; contrast {item['contrast_fraction']:.6g}. "
                            f"See {self.report_name}")
-            elif item["one_sided_reason"]:
-                self.event(f"{row['row_id']}: one-sided background at corrected phi "
-                           f"{item['phi_deg']:+.6g} deg ({item['frame']}): "
-                           f"kept offsets {item['offsets_px']} px opposite the detector/mask gap; "
-                           f"signal clearance ≥ {item['signal_clearance_px']} px. See {self.report_name}")
         resolved_geometry = {key: geometry[key] for key in ("height_px", "width_px", "background_offsets_px")}
+        if geometry.get("background_diagnostics", {}).get("gap_fallback"):
+            resolved_geometry["background_count"] = 1
         if row["row_id"] == "qy0":
             self.resolved["integration"].update(resolved_geometry)
         elif shared is None:

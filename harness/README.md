@@ -140,9 +140,7 @@ repository's CSV loader and should describe the desired sample's files.
 | `integration.height_px`, `width_px` | Box dimensions; `null` requests measured-peak-based proposals |
 | `integration.background_offsets_px` | Background displacement along detector rows; these use the native subtraction convention |
 | `integration.allow_independent_backgrounds` | Default `false`: require a symmetric `[-d, +d]` pair. Set `true` to allow independently placed backgrounds |
-| `integration.allow_one_sided_backgrounds` | Default `true`: if a detector/mask gap affects one background, use the opposite side for that frame when the signal is clear and the remaining background passes the contrast limit |
 | `integration.background_score_scope` | Default `slice_windows`: score supplied qsx windows, or measured peak windows when slices are being detected. `full_box` restores the earlier whole-profile score |
-| `quality.min_signal_gap_clearance_px` | Default `1` px: required unmasked margin around the signal box at the slice columns for a one-sided gap exception |
 | `slices.centers_qsx_Ainv`, `widths_Ainv` | Slice centers and full widths in Å⁻¹; null widths choose one common automatic width across peaks/rows. A scalar or matching list supplies explicit widths |
 | `integration.mode`, `slices.mode` | Independently choose `sum` or `mean` for detector-box integration and qsx slicing |
 
@@ -298,7 +296,8 @@ each side with an edge-to-edge gap from zero to one pixel less than the integrat
 box height. For height 14 px, gaps are 0–13 px and displacements are 14–27 px.
 `distant` searches displacements of 5–9 box heights. `background_strategy` can
 explicitly select either strategy. Set `background_offsets_px: null` to use the
-automatic search; an explicit list fixes the offsets and overrides the strategy.
+automatic search; an explicit list fixes the candidate offsets and overrides the
+strategy, with the detector/mask-gap omission described below.
 The default search selects a common displacement for both sides, minimizing the
 worse background contrast across the retained boxes and all checked frames. Ties
 prefer the closest pair. Set `allow_independent_backgrounds: true`
@@ -321,22 +320,20 @@ identifies the scoring scope and worst checked frame. A failed background check 
 a row-geometry rejection before slice selection; inspect that checkpoint separately
 from individual slice coverage decisions.
 
-Near a detector gap, retain unaffected signal and use one background on the
-opposite side when `allow_one_sided_backgrounds` is true. The gap must overlap a
-background at the usable slice columns (or that box must leave the detector),
-while the signal box and those columns, expanded by `min_signal_gap_clearance_px`,
-remain unmasked and finite. The retained background must pass coverage and contrast
-checks. A bright background without gap evidence cannot trigger this exception.
-The selected offsets are checked on every production frame; per-frame choices are
-used identically in preview and integration and saved in the checkpoint. Console
-notifications and the summary list every one-sided frame, its corrected angle,
-retained/discarded side, and clearance. Set the option to false to require both
-backgrounds throughout. One-sided subtraction assumes the opposite-side background
-represents the background under the signal; spatial gradients can limit that assumption.
+Background offsets are fixed across every production frame and requested qy row.
+If one side of a background pair intersects a detector/mask gap and the other
+side passes coverage and contrast checks across all frames and rows, the harness
+automatically omits the gap-affected side throughout the dataset and continues
+without requesting background approval, including in review mode. The output
+reports the omitted offset, affected frames/rows, and retained fixed offset.
+Automatic searches prefer a usable pair before falling back to one side; explicit
+pairs retain their supplied usable offset. Offsets never switch by frame or row.
+If neither side is usable throughout the dataset, or another quality check fails,
+the harness still requests review. A deliberate single background can also be
+requested with `integration.background_count: 1`.
 
 Preview and final reduction use identical accepted geometry and background
-choices. Regions that overlap or leave the detector are rejected unless a gap-side
-background is omitted under the rule above. Slice coverage
+offsets. Regions that overlap or leave the detector are rejected. Slice coverage
 uses the library's strict mask rule: an angle point touching any masked bin is
 omitted. An entire slice is rejected if its bin is unavailable in the frame nearest
 corrected φ = 0°, even when its overall angular coverage passes the configured
@@ -382,9 +379,10 @@ offsets instead follow native array-row subtraction. Do not mix these convention
 The central qy0 row is included once. All rows use the same signal/background box
 height and width and the same background-offset list across every frame. Unspecified
 dimensions are chosen to contain measured peaks across all rows and production
-frames. Background candidates must pass every row/frame using that row's slice
-windows. A failure requests review; multirow reductions never drop a background
-on individual frames. The single-row detector-gap fallback remains available.
+frames. Retained backgrounds must pass every row/frame using that row's slice
+windows. A detector/mask gap on one side uses the shared single-side fallback
+without approval; no shared usable selection requests review. Backgrounds are
+never dropped on individual frames. Single-row reductions also use one fixed selection throughout.
 Offset rows inherit the accepted qy0 qsx centers and widths by default. Supply
 `additional_qy_rows.row_settings.<row_id>.slices.centers_qsx_Ainv` or
 `widths_Ainv` to override either constant. Set `slices.inherit_qy0: false` for
@@ -492,9 +490,6 @@ or automatic reselection. High backgrounds and peak-free slices do not stop the
 script for review. Native masks, ordinary API/file errors, and CSV omission of
 nonpositive intensities still apply. Linear figures allow inspection of negative
 background-subtracted intensities. Review copied reductions manually.
-For a single-row run using an accepted detector-gap exception, any frame-specific
-background choice is saved as explicit constants, without rerunning gap decisions.
-Update those frame IDs and offsets when changing input filenames.
 
 Standalone settings store shared constants once. `slices` contains the qy0 centers,
 widths in Å⁻¹, and mode. Offset rows inherit these settings; an optional row `slices`
@@ -526,14 +521,17 @@ therefore updates all rows that inherit them. For example:
 such as `-9` requests one signed pixel offset; a list such as `[-9, 9]` averages
 those background boxes. Thus a symmetric pair remains a two-element list.
 Equal widths are exported as a scalar; different widths may be a list with one
-value per center. Explicit background exceptions use
-`{"default": [-9, 9], "by_frame_px": {"frame_id": -9}}` or
-`by_slice_frame_px`, a list of sparse frame overrides, one dictionary per slice.
-A null slice/frame override preserves a saved masked bin. A row may supply its
-own `background_choices`. Existing row-local slice lists,
-`background_offsets_px`, `background_offsets_by_frame_px`, and detailed
-`background_choices_by_slice_frame_px` settings remain supported by newly
-generated scripts.
+value per center. Backgrounds accept only one signed integer offset or one list
+of integer offsets; there are no row, slice, or frame background overrides.
+Existing row-local slice lists and the global `background_offsets_px` name remain
+supported. Replace dictionary and slice/frame background settings with one explicit
+global integer offset or list of integer offsets before reuse, then regenerate the
+reduction script using the updated harness. Native detector masks still apply.
+Old harness configurations must remove the retired
+`integration.allow_one_sided_backgrounds` and `quality.min_signal_gap_clearance_px`
+settings. Source fingerprints invalidate previous integration and slice checkpoints
+when rerunning the updated harness; stale frame-specific checkpoints cannot be
+published as standalone settings.
 
 To also export `.harness/settings.json` for resume, explicitly request
 `--export-harness-settings` or set `output.export_harness_settings: true`:
@@ -590,8 +588,8 @@ The harness delegates peak detection and center-of-mass refinement to `cdsaxs.to
 box bounds to `Data2D.get_box_dims_size`, and profile integration to the native
 box methods. Native fractional-center conventions apply; clipped integration boxes
 are rejected. SDD peak orders come from the native calibration diagnostic, avoiding
-a second peak search. Coverage reports use provenance from `slice_reduced_dataset`,
-so the exported and previewed selections share the same mask and boundary rules.
+a second peak search. Harness coverage reports apply the native slice mask and
+boundary rules, so exported and previewed selections use the same criteria.
 Automatic proposal limits, background scoring, fit-quality checks, and review
 checkpoints remain harness responsibilities.
 
@@ -603,13 +601,24 @@ are review references; exact reproduction requires its original raw scans.
 
 ### Requesting one background box
 
-Set `integration.background_count` to `1` to request one background box for a row. The default is `2`, retaining symmetric two-background selection and the existing detector-gap fallback. An explicit list such as `background_offsets_px: [-24]` fixes that offset relative to the signal box for every frame. Independent backgrounds need not be enabled for a single box.
+Set `integration.background_count` to `1` to request one background box. The default
+is `2`, preferring a shared symmetric pair and automatically retaining one side
+when the other intersects a detector/mask gap. An explicit list such as
+`background_offsets_px: [-24]` with count `1` fixes that offset relative to the
+signal box for every frame. Independent backgrounds need not be enabled for a single box.
 
 With count `1`, `background_offsets_px: null` selects one constant offset from the configured search range, using every production frame. It first preserves the greatest minimum unmasked support for the requested signal columns, then minimizes the worst background contrast across frames. Ties use smallest absolute offset, then signed offset. If no common offset passes every frame, the harness requests review rather than switching offsets between phi frames. Resolved settings record the selected fixed offset.
 
 Every production frame must pass background contrast and coverage checks. An offset with no measured background under the requested slice columns is rejected, even when unrelated detector columns are valid. Signal masks and slice-coverage limits still apply; no masked signal is filled.
 
-`allow_one_sided_backgrounds` controls the existing gap fallback from a two-background request. A deliberate `background_count: 1` request does not require a gap or claim that the signal is clear of gaps. Reports identify it as a requested single background and record its fixed offset, frame and contrast. This assumes the selected side represents the background under the signal.
+A deliberate `background_count: 1` request does not require a gap. Reports identify
+it as a requested single background and record the common fixed offset plus its
+per-frame scores. The selected side is assumed to represent the background under
+the signal. Background offsets never switch between frames.
+For an automatic gap fallback, resolved harness settings record count `1` and
+the retained offset. Standalone settings export `background_choices` as one signed
+integer; the generated native script subtracts only that box and performs no gap
+selection or harness checks.
 
 ### Excluding nominal phi frames
 

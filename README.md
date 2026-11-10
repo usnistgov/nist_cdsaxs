@@ -67,9 +67,10 @@ This is preferred over manually modifying `PYTHONPATH`.
 For agent-assisted or standalone script reductions, use the
 [JSON-configured reduction harness](harness/README.md). It supports staged visual
 review, explicitly authorized automatic batches, and optional additional qy rows
-for circular contact holes. Background checks focus on the requested slices;
-unaffected peaks near detector gaps can use an opposite-side background with
-recorded notifications and per-frame decision diagnostics.
+for circular contact holes. Background checks focus on the requested slices.
+When one background intersects a detector/mask gap, the harness retains a usable
+opposite-side offset across every frame and qy row, reports the omission, and
+continues without requesting background approval.
 Start with `python -m cdsaxs.harness --init my_run`.
 The harness records step runtimes and optional Codex token usage in its checkpoint
 state and summary; see [runtime and token recordings](harness/README.md#runtime-and-token-recordings).

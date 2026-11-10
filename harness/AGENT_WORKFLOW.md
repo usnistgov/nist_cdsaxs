@@ -77,14 +77,14 @@ guaranteed token or billing savings.
    Use equal-magnitude top/bottom offsets by default. Enable
    `integration.allow_independent_backgrounds` only when the user requests
    independently placed boxes; do not work around symmetric selection failures
-   by supplying unequal offsets. Near a detector/mask gap, the default
-   `integration.allow_one_sided_backgrounds` permits one opposite-side background
-   when the signal box at the slice columns has the configured unmasked clearance
-   and the retained background passes coverage and contrast checks. Use the
-   harness's per-frame choice in preview and production. Notify the user of every
-   exception with row, corrected angle, retained/discarded offsets, and clearance;
-   explain the assumption that the opposite-side background represents the signal
-   background. Do not use this exception for bright backgrounds without gap evidence.
+   by supplying unequal offsets. Use one shared background selection throughout
+   every frame and requested qy row. When a detector/mask gap affects one side,
+   automatically omit that side throughout the dataset and use the other side if
+   it passes coverage and contrast checks across all frames and rows. Notify the
+   user in the output and continue without requesting approval for this fallback.
+   Never switch sides or omit backgrounds separately by frame. Request review only
+   if no shared usable selection remains or another check fails. A deliberate
+   single background can also be requested with `integration.background_count: 1`.
    Default background scoring uses requested qsx windows or measured peak windows.
    Inspect the integration checkpoint's `background_diagnostics` for candidate
    offsets, per-frame/per-side scores, mask evidence, and full-box comparison scores.
@@ -101,8 +101,8 @@ guaranteed token or billing savings.
    is additionally available in the `full` profile).
    Reject a whole slice when its bin is unavailable in the frame nearest corrected
    phi=0, including supplied centers, even if overall angular coverage passes.
-   A gap affecting only a background must first be evaluated with the one-sided
-   rule above; retain the slice if its signal and final native coverage pass.
+   A gap affecting one background uses the shared single-side fallback above;
+   report the omitted side and continue without a background review stop.
    Notify the user of skipped slices with centers, coverage, and reasons.
 7. Additional qy rows require an explicit user request and circular contact holes.
    An automatic-mode setting or a circular-looking pattern alone does not authorize
@@ -110,14 +110,16 @@ guaranteed token or billing savings.
    save the reason in decision_notes. Detect offsets unless supplied, inspect the row
    overlay, and select one shared signal/background box size and one fixed
    background-offset list against every row and production frame. Do not vary
-   backgrounds by row/frame or use the single-row gap fallback for multiple rows.
-   Request review if a shared choice fails. Reuse accepted qy0 qsx centers and widths
+   backgrounds by row/frame or drop them for individual slices.
+   If one side intersects a detector/mask gap, retain the other side throughout
+   every row and frame when usable, notify the user, and continue without approval.
+   Request review if no shared choice remains. Reuse accepted qy0 qsx centers and widths
    for offset rows unless the user requests an override. Retain
    row provenance when constructing the larger radial-coordinate dataset. Without
    a request for offset rows, reduce qy=0 and export only the combined result;
    omit qy0/qyall labels from these single-row CSV filenames.
    Standalone JSON stores shared slices once, equal widths as a scalar, one common
-   background choice, and only differing row/frame/slice overrides. A scalar
+   background choice, and only differing row slice-center/width overrides. A scalar
    background is one signed offset; a list specifies the boxes to average.
 8. Automatic batches may proceed without per-sample review only for decisions the
    user authorized in settings or instructions. Record scoped permissions in the

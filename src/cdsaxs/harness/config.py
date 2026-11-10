@@ -62,7 +62,6 @@ DEFAULTS = {
         "background_offsets_px": None, "subtract_background": True,
         "background_count": 2,
         "allow_independent_backgrounds": False,
-        "allow_one_sided_backgrounds": True,
         "background_score_scope": "slice_windows",
         "background_strategy": "auto", "mode": "sum",
         "search_height_px": 40, "height_bounds_px": [3, 40],
@@ -96,7 +95,6 @@ DEFAULTS = {
         "min_roi_valid_fraction": 0.2,
         "min_slice_angle_coverage": 0.6,
         "min_peak_inside_fraction": 0.95,
-        "min_signal_gap_clearance_px": 1,
     },
     "export": {
         "per_row": True, "combine_qy_rows": True,
@@ -266,8 +264,7 @@ def validate(settings):
         (None, ("refit_known_constants",)),
         ("corrections", ("footprint", "substrate_absorption")),
         ("slices", ("inherit_qy0",)),
-        ("integration", ("subtract_background", "allow_independent_backgrounds",
-                         "allow_one_sided_backgrounds")),
+        ("integration", ("subtract_background", "allow_independent_backgrounds")),
         ("additional_qy_rows", ("enabled",)),
         ("export", ("per_row", "combine_qy_rows", "split_phi", "export_qr")),
         ("output", ("export_harness_settings",)),
@@ -367,10 +364,6 @@ def validate(settings):
             raise ValueError(f"{section}.mode must be sum or mean")
     if settings["integration"]["background_score_scope"] not in {"slice_windows", "full_box"}:
         raise ValueError("integration.background_score_scope must be slice_windows or full_box")
-    clearance = settings["quality"]["min_signal_gap_clearance_px"]
-    _number(clearance, "quality.min_signal_gap_clearance_px")
-    if clearance < 0 or int(clearance) != clearance:
-        raise ValueError("quality.min_signal_gap_clearance_px must be a nonnegative integer")
     if settings["integration"]["background_strategy"] not in {"auto", "adjacent", "distant"}:
         raise ValueError("background_strategy must be auto, adjacent, or distant")
     if (not isinstance(settings["output"]["profile"], str)
@@ -441,7 +434,7 @@ def validate(settings):
             if not isinstance(value, bool):
                 raise ValueError(f"quality.{key} must be boolean")
         else:
-            _number(value, f"quality.{key}", key != "min_signal_gap_clearance_px")
+            _number(value, f"quality.{key}", True)
             if ("fraction" in key or "coverage" in key) and value > 1:
                 raise ValueError(f"quality.{key} must be <= 1")
     exp = settings["export"]

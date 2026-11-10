@@ -24,7 +24,7 @@ from cdsaxs.harness.script_generator import (
     STANDALONE_SCRIPT, compact_backgrounds, publish_standalone, restore_harness, standalone_settings,
 )
 from cdsaxs.harness.diagnostics import shared_geometry_proposal
-from cdsaxs.reduction import integrate_qy_row, integrate_qy_row_with_slice_backgrounds
+from cdsaxs.reduction import integrate_qy_row, slice_reduced_dataset
 
 
 @pytest.fixture
@@ -176,35 +176,30 @@ def test_offset_rows_inherit_qy0_slices_unless_overridden(settings, tmp_path, ov
         assert row["slices"]["centers_qsx_Ainv"] != portable["slices"]["centers_qsx_Ainv"]
 
 
-def test_compact_backgrounds_preserve_legacy_slice_frame_choices(settings):
-    write_images(settings)
-    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
-    options = dict(height_px=7, width_px=100, background_offsets_px=[-10, 10])
-    raw = integrate_qy_row(dataset, **options)
-    centers = slice_parameters(raw, settings)[0]
-    choices = [{key: [-10, 10] for key in dataset.datas} for _ in centers]
-    frames = list(dataset.datas)
-    choices[0][frames[0]] = None
-    choices[1][frames[1]] = [-10]
-    compact = compact_backgrounds([-10, 10], by_slice=choices)
-    assert compact == {"default": [-10, 10], "by_slice_frame_px": [
-        {frames[0]: None}, {frames[1]: -10}, {}, {}]}
-    old = integrate_qy_row_with_slice_backgrounds(dataset, centers, 0.001, choices, **options)
-    new = integrate_qy_row_with_slice_backgrounds(dataset, centers, [0.001] * len(centers),
-                                                compact, **options)
-    for original, replay in zip(old.datas, new.datas):
-        np.testing.assert_array_equal(original.mask, replay.mask)
-        np.testing.assert_allclose(original.Iq, replay.Iq)
-    window = abs(raw.datas[0].qsx - centers[0]) <= 0.0005
-    assert window.any() and old.datas[0].mask[window].all()
-    single = integrate_qy_row_with_slice_backgrounds(dataset, centers, 0.001, -10, **options)
-    native = integrate_qy_row(dataset, height_px=7, width_px=100, background_offsets_px=[-10])
-    for a, b in zip(single.datas, native.datas):
-        np.testing.assert_allclose(a.Iq, b.Iq)
-        np.testing.assert_array_equal(a.mask, b.mask)
+@pytest.mark.parametrize("choice", [{"frame0": [-10, 10]}, {"default": [-10, 10]}, [{"frame0": -10}]])
+def test_compact_backgrounds_reject_mapped_choices(choice):
+    with pytest.raises(TypeError, match="Background choices must be an int"):
+        compact_backgrounds(choice)
 
 
-@pytest.mark.parametrize("format", ["legacy", "legacy_slice_frames", "scalar", "lists"])
+@pytest.mark.parametrize("invalid", ["frame", "slice", "row"])
+def test_generated_script_requires_mapped_background_settings_to_be_converted(tmp_path, invalid):
+    settings = {"integration": {}, "rows": [{"row_id": "qy0"}]}
+    if invalid == "frame":
+        settings["integration"]["background_offsets_by_frame_px"] = {"frame0": [10]}
+    elif invalid == "slice":
+        settings["rows"][0]["background_choices_by_slice_frame_px"] = [{"frame0": [10]}]
+    else:
+        settings["rows"][0]["background_choices"] = 10
+    write_json(tmp_path / "settings.json", settings)
+    script = tmp_path / "reduce_sample.py"
+    script.write_text(STANDALONE_SCRIPT)
+    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "Convert background overrides to one global int or list of ints" in result.stderr
+
+
+@pytest.mark.parametrize("format", ["legacy", "scalar", "lists"])
 def test_generated_script_accepts_compact_and_existing_settings(settings, tmp_path, format):
     write_images(settings)
     settings["corrections"]["footprint"] = False
@@ -228,9 +223,6 @@ def test_generated_script_accepts_compact_and_existing_settings(settings, tmp_pa
         portable["rows"][0]["slices"]["widths_Ainv"] = [0.001] * len(centers)
         portable["integration"]["background_offsets_px"] = [-10]
         portable["integration"].pop("background_choices")
-        if format == "legacy_slice_frames":
-            portable["rows"][0]["background_choices_by_slice_frame_px"] = [
-                {frame: [-10] for frame in dataset.datas} for _ in centers]
     elif format == "lists":
         portable["slices"]["widths_Ainv"] = [0.001] * len(centers)
         portable["integration"]["background_choices"] = [-10]
@@ -244,9 +236,6 @@ def test_generated_script_accepts_compact_and_existing_settings(settings, tmp_pa
 def test_standalone_settings_compact_repeated_values_and_preserve_overrides(settings):
     settings["slices"].update(centers_qsx_Ainv=[-0.01, 0.01], widths_Ainv=[0.001, 0.001])
     rows = ReductionRun.make_rows({"offsets_qdy_px": [-15, 15]})
-    for row in rows:
-        row["background_choices_by_slice_frame_px"] = [
-            {f"frame:{index:06d}": [-10, 10] for index in range(100)} for _ in range(2)]
     settings["additional_qy_rows"]["row_settings"] = {"qy_001": {
         "slices": {"centers_qsx_Ainv": [-0.02, 0.02], "widths_Ainv": [0.0005, 0.0015]}}}
     portable = standalone_settings(settings, rows)
@@ -455,7 +444,7 @@ def test_shared_geometry_measures_all_rows_and_frames(settings, tmp_path):
                for name, record in run.state["stages"].items() if name.startswith("integration:"))
 
 
-@pytest.mark.parametrize("failure", ["contamination", "mask_gap"])
+@pytest.mark.parametrize("failure", ["contamination", "both_sides_masked"])
 def test_shared_background_failure_requires_review(settings, tmp_path, failure):
     write_images(settings, extra_rows=True)
     settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
@@ -465,8 +454,9 @@ def test_shared_background_failure_requires_review(settings, tmp_path, failure):
     frame = list(dataset.datas.values())[-1]
     row = rows[1]
     yr, xr = box_ranges(frame, row, settings["integration"])
-    if failure == "mask_gap":
-        frame.mask[yr[0] + 10:yr[1] + 10, xr[0]:xr[1]] = True
+    if failure == "both_sides_masked":
+        for offset in (-10, 10):
+            frame.mask[yr[0] + offset:yr[1] + offset, xr[0]:xr[1]] = True
     else:
         frame.image[yr[0] + 10:yr[1] + 10, 25] = 1e7
     with pytest.raises(NeedsReview):
@@ -514,17 +504,18 @@ def test_standalone_publication_archives_edits(settings, tmp_path):
         standalone_settings(settings, [row])
 
 
-def test_standalone_freezes_single_row_gap_choices_and_mode_switch(settings, tmp_path):
+def test_standalone_rejects_obsolete_background_checkpoint_and_switches_mode(settings, tmp_path):
     settings["slices"].update(centers_qsx_Ainv=[0.01], widths_Ainv=0.001)
     row = {"row_id": "qy0", "target_qsy_Ainv": 0.0, "offset_qdy_px": None}
     choices = {"frame:000000": [10], "frame:000001": [-10]}
     state = {"rows": [row], "artifacts": [], "stages": {
         "integration:qy0": {"result": {"background_offsets_by_frame_px": choices}}}}
     generate(tmp_path, settings)
+    with pytest.raises(ValueError, match="obsolete frame-specific background checkpoints"):
+        publish_standalone(tmp_path, settings, state)
+    state["stages"] = {}
     publish_standalone(tmp_path, settings, state)
-    portable = json.loads((tmp_path / "settings.json").read_text())
-    assert portable["integration"]["background_choices"] == {
-        "default": [-10, 10], "by_frame_px": {"frame:000000": 10, "frame:000001": -10}}
+    assert json.loads((tmp_path / "settings.json").read_text())["integration"]["background_choices"] == [-10, 10]
     restore_harness(tmp_path, settings, state)
     assert "cdsaxs.harness" in (tmp_path / "reduce_sample.py").read_text()
     assert not state.get("standalone_published")
@@ -697,6 +688,39 @@ def test_physical_qy_rows_and_pixel_offsets(settings):
     target = float(data.qsy[25, 60])
     assert row_center(data, {"target_qsy_Ainv": target}) == pytest.approx(25)
     assert row_center(data, {"offset_qdy_px": 15}) == 25
+
+
+@pytest.mark.parametrize("case", ["normal", "masked", "nan", "negative", "empty", "endpoints"])
+def test_harness_coverage_matches_native_slicer_without_metadata(settings, case):
+    write_images(settings, angles=(-10, 0, 10))
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    row = {"row_id": "qy0", "offset_qdy_px": 0}
+    integrated = integrate_row(dataset, row, {**settings["integration"], "background_offsets_px": None})
+    reference = integrated.datas[0]
+    center = float(reference.qsx[80 - reference.limits_axis1[0]])
+    width = 0.001
+    for profile in integrated.datas:
+        if case == "endpoints":
+            profile.qsx[:] = np.arange(len(profile.Iq)) * 0.5
+            center, width = 0.5, 1.0
+        elif case == "negative":
+            profile.Iq[:] = -1
+    selection = np.flatnonzero((reference.qsx >= center - width / 2) &
+                              (reference.qsx <= center + width / 2))
+    if case == "masked":
+        reference.mask[selection[0]] = True
+    elif case == "nan":
+        reference.Iq[selection[0]] = np.nan
+    elif case == "empty":
+        center = 99.0
+    report = slice_coverage(integrated, center, width)
+    from cdsaxs.data.dataset import ReducedDataset
+    for profile, coverage in zip(integrated.datas, report):
+        native, _ = slice_reduced_dataset(ReducedDataset([profile]), [center], width, show_plot=False)
+        assert coverage["valid"] == bool(len(native.data[0].Iq))
+        expected_count = np.count_nonzero((profile.qsx >= center - width / 2) &
+                                         (profile.qsx <= center + width / 2))
+        assert coverage["selected_pixels"] == expected_count
 
 
 def test_gap_coverage_and_background_boundaries(settings):
@@ -933,7 +957,6 @@ def test_background_pairing_with_no_common_unmasked_distance(
         settings, asymmetric_background_scene, independent):
     data, row, geometry = asymmetric_background_scene
     settings["integration"]["allow_independent_backgrounds"] = independent
-    settings["integration"]["allow_one_sided_backgrounds"] = False
     settings["quality"]["min_roi_valid_fraction"] = 1.0
     yr, xr = box_ranges(data, row, geometry)
     data.mask[yr[0] - 4, xr[0]:xr[1]] = True
@@ -942,20 +965,23 @@ def test_background_pairing_with_no_common_unmasked_distance(
         offsets, _ = choose_backgrounds([(data, [])], row, geometry, settings)
         assert offsets == [-11, 7]
     else:
-        with pytest.raises(NeedsReview, match="No usable symmetric background pair"):
-            choose_backgrounds([(data, [])], row, geometry, settings)
+        offsets, _ = choose_backgrounds([(data, [])], row, geometry, settings)
+        assert offsets == [7]
+        assert geometry["background_diagnostics"]["gap_fallback"]["omitted_offsets_px"] == [-7]
 
 
 @pytest.mark.parametrize("independent", [False, True])
-def test_automatic_backgrounds_require_both_sides(
+def test_automatic_backgrounds_keep_usable_side_when_other_side_has_gap(
         settings, asymmetric_background_scene, independent):
     data, row, geometry = asymmetric_background_scene
     settings["integration"]["allow_independent_backgrounds"] = independent
     yr, xr = box_ranges(data, row, geometry)
     data.mask[yr[0] - 13:yr[0], xr[0]:xr[1]] = True
     with pytest.warns(RuntimeWarning, match="Mean of empty slice"):
-        with pytest.raises(NeedsReview, match="No usable (symmetric background pair|background region on one side)"):
-            choose_backgrounds([(data, [])], row, geometry, settings)
+        offsets, score = choose_backgrounds([(data, [])], row, geometry, settings)
+    assert offsets == [7]
+    assert score == pytest.approx(0)
+    assert geometry["background_diagnostics"]["gap_fallback"]["omitted_offsets_px"] == [-7]
 
 
 def test_distant_backgrounds_also_default_to_a_symmetric_pair(
@@ -1006,58 +1032,149 @@ def one_sided_gap_scene(settings):
 
 
 @pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
-def test_gap_uses_opposite_background_per_frame_and_notifies(
-        settings, one_sided_gap_scene, tmp_path):
-    dataset, data, row, _ = one_sided_gap_scene
+@pytest.mark.parametrize("mode,automatic_offsets", [("review", False), ("review", True),
+                                                   ("automatic", True)])
+def test_gap_uses_one_fixed_background_without_review(
+        settings, one_sided_gap_scene, tmp_path, mode, automatic_offsets):
+    dataset, _, row, _ = one_sided_gap_scene
+    settings["mode"] = mode
+    settings["allowed_decisions"] = []
     settings["output"]["profile"] = "compact"
+    if automatic_offsets:
+        settings["integration"]["background_offsets_px"] = None
     run = ReductionRun(settings, tmp_path / "gap_run")
-    geometry, integrated = run.preview(dataset, row)
-    choices = geometry["background_offsets_by_frame_px"]
-    assert choices[data.name] == [10]
-    assert all(choices[name] == [-10, 10] for name in dataset.datas if name != data.name)
-    yr, xr = box_ranges(data, row, geometry)
-    expected, _ = data.integrate_box(mode="sum", axis=0, range_qdy_px=yr,
-                                     range_qdx_px=xr, subtract_background_offset=[10])
-    actual = next(profile for profile in integrated.datas if profile.data2d.name == data.name)
-    np.testing.assert_allclose(actual.Iq, expected.Iq)
-    assert any("one-sided background" in event and data.name in event for event in run.state["events"])
+    geometry, reduced = run.preview(dataset, row)
+    record = run.state["stages"]["integration:qy0"]
+    assert record["status"].startswith("accepted")
+    assert "background_offsets_by_frame_px" not in record["result"]
+    selected = geometry["background_offsets_px"]
+    assert len(selected) == 1 and selected[0] > 0
+    if not automatic_offsets:
+        assert selected == [10]
+    assert run.resolved["integration"]["background_count"] == 1
+    validate(run.resolved)
+    assert all(item["offsets_px"] == selected
+               for item in geometry["background_diagnostics"]["production_frames"])
+    assert any("background detector/mask gap" in event and "continuing without background approval" in event
+               for event in run.state["events"])
+    # Every frame subtracts precisely the same retained box, including frames
+    # where the omitted background was usable.
+    for frame, profile in zip(dataset.datas.values(), reduced.datas):
+        yr, xr = box_ranges(frame, row, geometry)
+        expected, _ = frame.integrate_box(mode="sum", axis=0, range_qdy_px=yr,
+            range_qdx_px=xr, subtract_background_offset=selected[0], show_plot=False)
+        np.testing.assert_allclose(profile.Iq, expected.Iq)
+    run.save()
     summary = (run.directory / "summary.md").read_text()
-    assert "One-sided background" in summary and "discard [-10]" in summary
-    assert "clear by at least 1 px" in summary
+    assert "Background detector/mask gap" in summary
+    assert "Continued without background approval" in summary
+    settings_for_export = deepcopy(run.resolved)
+    settings_for_export["slices"].update(centers_qsx_Ainv=[0.01], widths_Ainv=0.001)
+    portable = standalone_settings(settings_for_export, [row])
+    assert portable["integration"]["background_choices"] == selected[0]
 
 
 @pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
-@pytest.mark.parametrize("failure", ["disabled", "insufficient_clearance", "dirty_opposite"])
-def test_gap_exception_requires_permission_clearance_and_clean_opposite(
-        settings, one_sided_gap_scene, failure):
-    _, data, row, geometry = one_sided_gap_scene
-    yr, xr = box_ranges(data, row, geometry)
-    if failure == "disabled":
-        settings["integration"]["allow_one_sided_backgrounds"] = False
-    elif failure == "insufficient_clearance":
-        data.mask[yr[0] - 1, xr[0]:xr[1]] = True
-    else:
-        data.image[yr[0] + 10:yr[1] + 10, 80] += 10000
-    with pytest.raises(NeedsReview, match="gap exception requires clear signal"):
-        choose_backgrounds([(data, [])], row, geometry, settings)
+def test_gap_fallback_does_not_accept_other_unresolved_integration_choices(
+        settings, one_sided_gap_scene, tmp_path):
+    dataset, _, row, _ = one_sided_gap_scene
+    settings["integration"].update(width_px=None, background_offsets_px=None)
+    run = ReductionRun(settings, tmp_path / "gap_box_review")
+    with pytest.raises(NeedsReview, match="Review integration:qy0"):
+        run.preview(dataset, row)
+    record = run.state["stages"]["integration:qy0"]
+    assert record["status"] == "proposed"
+    assert record["result"]["background_diagnostics"]["gap_fallback"]
 
 
 @pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
-def test_gap_can_change_sides_between_frames(settings, one_sided_gap_scene):
-    dataset, data, row, geometry = one_sided_gap_scene
-    second = next(item for item in dataset.datas.values() if item.name != data.name)
+@pytest.mark.parametrize("automatic_offsets", [False, True])
+def test_gap_fallback_is_shared_across_every_qy_row_and_frame(settings, tmp_path, automatic_offsets):
+    write_images(settings, extra_rows=True)
+    settings["additional_qy_rows"].update(enabled=True, offsets_qdy_px=[-15, 15])
+    settings["integration"]["search_height_px"] = 12
+    if automatic_offsets:
+        settings["integration"]["background_offsets_px"] = None
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    rows = ReductionRun.make_rows({"offsets_qdy_px": [-15, 15]})
+    frame = list(dataset.datas.values())[-1]
+    # Only the lowest row on one frame loses its positive side. The negative
+    # side remains clear for every requested row on every frame.
+    yr, xr = box_ranges(frame, rows[1], settings["integration"])
+    frame.mask[yr[0] + 7:yr[1] + 13, xr[0]:xr[1]] = True
+    run = ReductionRun(settings, tmp_path / "shared_gap")
+    geometry = run.shared_geometry(dataset, rows)
+    selected = geometry["background_offsets_px"]
+    assert len(selected) == 1 and selected[0] < 0
+    assert run.resolved["integration"]["background_count"] == 1
+    validate(run.resolved)
+    diagnostics = geometry["background_diagnostics"]
+    assert len(diagnostics["production_frames"]) == len(rows) * len(dataset.datas)
+    assert all(item["offsets_px"] == selected for item in diagnostics["production_frames"])
+    assert diagnostics["gap_fallback"]["affected_frames"][0]["row_id"] == rows[1]["row_id"]
+    assert any("background detector/mask gap" in event for event in run.state["events"])
+
+
+@pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
+def test_gap_cannot_change_background_sides_between_frames(settings, one_sided_gap_scene):
+    dataset, first, row, geometry = one_sided_gap_scene
+    second = next(data for data in dataset.datas.values() if data.name != first.name)
     yr, xr = box_ranges(second, row, geometry)
     second.mask[yr[0] + 10:yr[1] + 10, xr[0]:xr[1]] = True
-    offsets, _ = choose_backgrounds([(data, []), (second, [])], row, geometry, settings)
-    assert offsets == [-10, 10]
-    assert [item["offsets_px"] for item in geometry["background_diagnostics"]["selected_frames"]] == [[10], [-10]]
+    with pytest.raises(NeedsReview, match="shared detector coverage"):
+        choose_backgrounds([(first, []), (second, [])], row, geometry, settings)
+
+
+@pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
+def test_gap_fallback_rejects_contamination_in_the_retained_background(settings, one_sided_gap_scene):
+    dataset, data, row, geometry = one_sided_gap_scene
+    yr, _ = box_ranges(data, row, geometry)
+    data.image[yr[0] + 10:yr[1] + 10, 80] += 10000
+    with pytest.raises(NeedsReview, match="shared detector coverage or contrast"):
+        choose_backgrounds([(frame, []) for frame in dataset.datas.values()],
+                           row, geometry, settings, require_complete=True)
+
+
+@pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
+def test_gap_fallback_exports_and_replays_one_native_background(settings, tmp_path):
+    write_images(settings)
+    row = {"row_id": "qy0", "target_qsy_Ainv": 0.0, "offset_qdy_px": None}
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    data = min(dataset.datas.values(), key=lambda item: abs(item.sample_phi_deg))
+    yr, xr = box_ranges(data, row, settings["integration"])
+    image_path = tmp_path / data.metadata["filename"]
+    image = tifffile.imread(image_path)
+    image[yr[0] - 10:yr[1] - 10, xr[0]:xr[1]] = np.nan
+    tifffile.imwrite(image_path, image)
+    integrated = integrate_row(dataset, row, {**settings["integration"], "background_offsets_px": [10]})
+    centers, widths, _ = slice_parameters(integrated, settings)
+    settings["slices"].update(centers_qsx_Ainv=centers, widths_Ainv=max(widths))
+    settings["mode"] = "review"
+    settings["allowed_decisions"] = []
+    settings["output"].update(profile="compact", script_mode="standalone", export_harness_settings=True)
+    run = ReductionRun(settings, tmp_path / "gap_native_export")
+    assert run.run()["status"] == "complete", run.state["events"]
+    portable = json.loads((run.directory / "settings.json").read_text())
+    assert portable["integration"]["background_choices"] == 10
+    resume = load_settings(run.directory / ".harness/settings.json")
+    assert resume["integration"]["background_count"] == 1
+    assert resume["integration"]["background_offsets_px"] == [10]
+    csv_before = {path.name: path.read_bytes() for path in (run.directory / "csv").glob("*.csv")}
+    assert csv_before
+    script = run.directory / "reduce_sample.py"
+    assert script.read_text() == STANDALONE_SCRIPT
+    replay = subprocess.run([sys.executable, str(script)], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    assert {path.name: path.read_bytes() for path in (run.directory / "csv").glob("*.csv")} == csv_before
 
 
 @pytest.mark.filterwarnings("ignore:Mean of empty slice:RuntimeWarning")
 def test_failed_background_selection_keeps_candidate_evidence(
         settings, one_sided_gap_scene, tmp_path):
-    dataset, _, row, _ = one_sided_gap_scene
-    settings["integration"]["allow_one_sided_backgrounds"] = False
+    dataset, data, row, geometry = one_sided_gap_scene
+    yr, xr = box_ranges(data, row, geometry)
+    data.mask[yr[0] + 10:yr[1] + 10, xr[0]:xr[1]] = True
     run = ReductionRun(settings, tmp_path / "failed_gap_run")
     with pytest.raises(NeedsReview):
         run.preview(dataset, row)
@@ -1663,11 +1780,10 @@ def test_single_background_auto_selects_clean_side_and_subtracts_once(
         settings, asymmetric_background_scene):
     data, row, geometry = asymmetric_background_scene
     settings["integration"]["background_count"] = 1
-    settings["integration"]["allow_one_sided_backgrounds"] = False
     offsets, score = choose_backgrounds([(data, [])], row, geometry, settings)
     assert offsets == [7] and score == pytest.approx(0)
     record = geometry["background_diagnostics"]["selected_frames"][0]
-    assert record["one_sided_reason"] == "single_background_requested"
+    assert record["single_background_requested"]
     from cdsaxs.data.dataset import Dataset
     dataset = Dataset(name="single");dataset.add_data(data)
     geometry.update(background_offsets_px=offsets, mode="sum")
@@ -1686,7 +1802,6 @@ def test_requested_single_background_preserves_signal_masks(settings, one_sided_
     data.mask[yr[0], xr[0]:xr[0] + 5] = True
     offsets, _ = choose_backgrounds([(data, [])], row, geometry, settings)
     assert offsets == [10]
-    assert geometry["background_diagnostics"]["selected_frames"][0]["signal_clearance_px"] == 1
     assert data.mask[yr[0], xr[0]:xr[0] + 5].all()
 
 
@@ -1755,8 +1870,8 @@ def test_automatic_single_background_resolves_one_fixed_offset(
     selected = geometry["background_offsets_px"]
     assert len(selected) == 1
     assert run.resolved["integration"]["background_offsets_px"] == selected
-    assert all(offsets == selected for offsets in geometry["background_offsets_by_frame_px"].values())
-    assert all(item["one_sided_reason"] == "single_background_requested"
+    assert all(item["offsets_px"] == selected for item in geometry["background_diagnostics"]["production_frames"])
+    assert all(item["single_background_requested"]
                for item in geometry["background_diagnostics"]["production_frames"])
     assert any("single background requested" in event for event in run.state["events"])
 

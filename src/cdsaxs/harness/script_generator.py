@@ -72,7 +72,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cdsaxs.loaders import load_data as loaders
 from cdsaxs.data.dataset import Dataset, ReducedDataset, ReducedSlices
-from cdsaxs.reduction import integrate_qy_row_with_slice_backgrounds, slice_reduced_dataset
+from cdsaxs.reduction import integrate_qy_row, slice_reduced_dataset
 from cdsaxs.plotting import plotting
 
 SETTINGS_FILE = Path(__file__).resolve().with_name("settings.json")
@@ -81,6 +81,10 @@ SETTINGS_FILE = Path(__file__).resolve().with_name("settings.json")
 def reduce():
     with SETTINGS_FILE.open(encoding="utf-8") as handle:
         settings = json.load(handle)
+    legacy = ("background_offsets_by_frame_px", "background_choices_by_slice_frame_px")
+    if (any(key in settings["integration"] for key in legacy)
+            or any(key in row for row in settings["rows"] for key in (*legacy, "background_choices"))):
+        raise TypeError("Convert background overrides to one global int or list of ints before reduction")
     base = SETTINGS_FILE.parent
     cfg = settings["input"]
     data_directory = (base / Path(cfg["data_directory"]).expanduser()).resolve()
@@ -163,8 +167,7 @@ def reduce():
 
     # Integrate every fixed row with the same box and backgrounds.
     geometry = settings["integration"]
-    backgrounds = geometry.get("background_choices", geometry.get(
-        "background_offsets_by_frame_px", geometry.get("background_offsets_px")))
+    backgrounds = geometry.get("background_choices", geometry.get("background_offsets_px"))
     central = next(row for row in settings["rows"] if row["row_id"] == "qy0")
     shared_slices = dict(settings.get("slices", {}))
     shared_slices.update(central.get("slices", {}))
@@ -177,15 +180,10 @@ def reduce():
         if not isinstance(widths, list):
             widths = [widths] * len(row["slices"]["centers_qsx_Ainv"])
         row["slices"]["widths_Ainv"] = widths
-        choices = row.get("background_choices", row.get(
-            "background_choices_by_slice_frame_px", backgrounds))
-        integrated = integrate_qy_row_with_slice_backgrounds(
+        integrated = integrate_qy_row(
             dataset, height_px=geometry["height_px"], width_px=geometry["width_px"],
             target_qsy_Ainv=row["target_qsy_Ainv"], offset_qdy_px=row["offset_qdy_px"],
-            centers_qsx_Ainv=row["slices"]["centers_qsx_Ainv"], widths_Ainv=widths,
-            background_choices=(choices if geometry["subtract_background"] else None),
-            background_offsets_px=(geometry.get("background_offsets_px", backgrounds)
-                                   if geometry["subtract_background"] else None),
+            background_offsets_px=(backgrounds if geometry["subtract_background"] else None),
             mode=geometry["mode"], row_id=row["row_id"])
         # Native integration outlines show exactly the boxes being used.
         save_figure(plotting.plot_data2d_integrate_box(integrated.datas[0], log_scale=False),
@@ -256,29 +254,14 @@ def compact_widths(widths):
     return deepcopy(widths)
 
 
-def compact_backgrounds(default, *, by_frame=None, by_slice=None):
-    """Keep one common background selection and only genuine fixed exceptions."""
-    def choice(offsets):
-        return offsets[0] if isinstance(offsets, list) and len(offsets) == 1 else deepcopy(offsets)
-
-    default = choice(default)
-    result = {"default": default}
-    if by_frame:
-        values = [choice(offsets) for offsets in by_frame.values()]
-        if all(value == values[0] for value in values) and values[0] is not None:
-            result["default"] = values[0]
-        else:
-            differences = {frame: choice(offsets) for frame, offsets in by_frame.items()
-                           if choice(offsets) != default}
-            if differences:
-                result["by_frame_px"] = differences
-    if by_slice:
-        differences = [{frame: choice(offsets) for frame, offsets in choices.items()
-                        if choice(offsets) != result.get("by_frame_px", {}).get(frame, result["default"])}
-                       for choices in by_slice]
-        if any(differences):
-            result["by_slice_frame_px"] = differences
-    return result if len(result) > 1 else result["default"]
+def compact_backgrounds(offsets):
+    """Store one signed offset or one shared list of integer offsets."""
+    if offsets is None or type(offsets) is int:
+        return offsets
+    if (not isinstance(offsets, list) or not offsets
+            or any(type(offset) is not int for offset in offsets)):
+        raise TypeError("Background choices must be an int, a nonempty list of ints, or None")
+    return offsets[0] if len(offsets) == 1 else deepcopy(offsets)
 
 
 def standalone_settings(settings, rows):
@@ -335,12 +318,9 @@ def standalone_settings(settings, rows):
         item = deepcopy(row)
         row_slices[row["row_id"]] = {"centers_qsx_Ainv": deepcopy(centers),
                                      "widths_Ainv": compact_widths(widths), "mode": row_cfg["mode"]}
-        legacy_choices = item.pop("background_choices_by_slice_frame_px", None)
-        if legacy_choices is not None:
-            choices = compact_backgrounds(settings["integration"]["background_offsets_px"],
-                                          by_slice=legacy_choices)
-            if choices != result["integration"]["background_choices"]:
-                item["background_choices"] = choices
+        if any(key in item for key in (
+                "background_choices", "background_offsets_by_frame_px", "background_choices_by_slice_frame_px")):
+            raise ValueError("Convert row/frame/slice background overrides to shared constants before export")
         result["rows"].append(item)
     result["slices"] = row_slices["qy0"]
     for item in result["rows"]:
@@ -356,14 +336,9 @@ def publish_standalone(directory, settings, state):
     """Publish once per accepted result, preserving edits on later saves."""
     directory = Path(directory)
     portable = standalone_settings(settings, state["rows"])
-    # Single-row harness gap choices are accepted constants, not replay logic.
-    if len(state["rows"]) == 1:
-        row_id = state["rows"][0]["row_id"]
-        geometry = state.get("stages", {}).get(f"integration:{row_id}", {}).get("result", {})
-        choices = geometry.get("background_offsets_by_frame_px", {})
-        if choices:
-            portable["integration"]["background_choices"] = compact_backgrounds(
-                settings["integration"]["background_offsets_px"], by_frame=choices)
+    for record in state.get("stages", {}).values():
+        if "background_offsets_by_frame_px" in record.get("result", {}):
+            raise ValueError("Rerun the harness to replace obsolete frame-specific background checkpoints")
     signature = fingerprint({"settings": portable, "script": STANDALONE_SCRIPT})
     if signature == state.get("standalone_signature"):
         return

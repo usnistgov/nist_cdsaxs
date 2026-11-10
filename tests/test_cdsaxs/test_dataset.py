@@ -557,6 +557,24 @@ class TestDataset(unittest.TestCase):
         )
         data2.integrate_box.assert_not_called()
 
+    def test_integrate_dataset_uses_shared_background_offsets(self):
+        for offsets in (None, -3, [-3], [-3, 3]):
+            with self.subTest(offsets=offsets):
+                self.dataset = Dataset(name='shared-backgrounds')
+                data1, data2, _, _ = self._make_dataset_with_mocked_integrations()
+                self.dataset.integrate_dataset(axis=0, subtract_background_offset=offsets)
+                for data in (data1, data2):
+                    self.assertEqual(data.integrate_box.call_args.kwargs['subtract_background_offset'], offsets)
+
+    def test_integrate_dataset_rejects_background_mappings_before_integration(self):
+        data1, data2, _, _ = self._make_dataset_with_mocked_integrations()
+        for offsets in ({'data-1': -3, 'data-2': 3}, {'data-1': [-3, 3], 'data-2': [-3, 3]}):
+            with self.subTest(offsets=offsets):
+                with self.assertRaisesRegex(TypeError, 'subtract_background_offset must be an int'):
+                    self.dataset.integrate_dataset(subtract_background_offset=offsets)
+        data1.integrate_box.assert_not_called()
+        data2.integrate_box.assert_not_called()
+
     def test_integrate_dataset_dispatches_dict_parameters_per_key(self):
         data1, data2, qslice1, qslice2 = self._make_dataset_with_mocked_integrations()
 

@@ -110,7 +110,6 @@
     "width_px": null,
     "background_offsets_px": null,
     "allow_independent_backgrounds": false,
-    "allow_one_sided_backgrounds": true,
     "background_score_scope": "slice_windows",
     "subtract_background": true,
     "background_strategy": "auto",
@@ -160,8 +159,7 @@
     "max_background_peak_fraction": 0.3,
     "min_roi_valid_fraction": 0.2,
     "min_slice_angle_coverage": 0.6,
-    "min_peak_inside_fraction": 0.95,
-    "min_signal_gap_clearance_px": 1
+    "min_peak_inside_fraction": 0.95
   },
   "export": {
     "per_row": true,

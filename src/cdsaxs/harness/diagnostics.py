@@ -6,7 +6,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import peak_widths
 
 from .. import tools
-from ..reduction import qy_row_center, slice_reduced_dataset
+from ..reduction import qy_row_center
 from copy import deepcopy
 from .config import is_symmetric_background_pair
 
@@ -195,42 +195,16 @@ def geometry_proposal(dataset, row, settings, *, all_frames=False,
         failures.append("Integration region has insufficient unmasked coverage")
     if cfg["subtract_background"] and select_backgrounds:
         try:
-            background_measurements = measurements
-            if cfg.get("background_count", 2) == 1:
-                # Select one constant offset using every production frame.
-                measured = (cfg["background_score_scope"] == "slice_windows"
-                            and settings["slices"]["centers_qsx_Ainv"] is None)
-                background_measurements = [(data, row_peaks(data, row, settings) if measured else [])
-                                           for data in dataset.datas.values()]
+            # Evaluate one fixed selection against every production frame.
+            measured = (cfg["background_score_scope"] == "slice_windows"
+                        and settings["slices"]["centers_qsx_Ainv"] is None)
+            background_measurements = [(data, row_peaks(data, row, settings) if measured else [])
+                                       for data in dataset.datas.values()]
             geometry["background_offsets_px"], background_metric = choose_backgrounds(
-                background_measurements, row, geometry, settings)
+                background_measurements, row, geometry, settings, require_complete=True)
             geometry["metrics"]["background_peak_fraction"] = background_metric
-            if cfg["allow_one_sided_backgrounds"] or cfg.get("background_count", 2) == 1:
-                # Validate the fixed background geometry on every frame.
-                frame_choices = []
-                geometry["background_diagnostics"]["production_frames"] = frame_choices
-                for data in dataset.datas.values():
-                    measured = (cfg["background_score_scope"] == "slice_windows"
-                                and settings["slices"]["centers_qsx_Ainv"] is None)
-                    peaks = row_peaks(data, row, settings) if measured else []
-                    context = background_context(data, row, geometry, settings, peaks)
-                    candidates = [background_candidate(data, offset, context, settings)
-                                  for offset in geometry["background_offsets_px"]]
-                    choice = background_frame_choice(candidates, context, settings)
-                    if choice is None:
-                        geometry["background_diagnostics"]["failed_frame_candidates"] = candidates
-                    message = (f"No usable fixed single background for {data.name}; check contrast and coverage"
-                               if cfg.get("background_count", 2) == 1 else
-                               f"No usable backgrounds for {data.name}; "
-                               "a gap exception requires clear signal and a clean opposite side")
-                    check(choice is not None, message)
-                    frame_choices.append(choice)
-                geometry["background_offsets_by_frame_px"] = {
-                    item["frame"]: item["offsets_px"] for item in frame_choices}
-                if cfg.get("background_count", 2) == 1:
-                    geometry["background_diagnostics"]["selected_frames"] = frame_choices
-                    background_metric = max(item["contrast_fraction"] for item in frame_choices)
-                    geometry["metrics"]["background_peak_fraction"] = background_metric
+            geometry["background_diagnostics"]["production_frames"] = deepcopy(
+                geometry["background_diagnostics"]["selected_frames"])
         except NeedsReview as error:
             geometry["failures"] = failures + [str(error)]
             error.result = geometry
@@ -252,7 +226,6 @@ def shared_geometry_proposal(dataset, row_configs):
     cfg = settings["integration"]
     cfg["height_px"] = max(item["height_px"] for item in proposals)
     cfg["width_px"] = max(item["width_px"] for item in proposals)
-    cfg["allow_one_sided_backgrounds"] = False
     geometry = {key: cfg[key] for key in (
         "height_px", "width_px", "mode", "background_offsets_px")}
     geometry["failures"] = []
@@ -325,20 +298,9 @@ def background_context(data, row, geometry, settings, peaks):
                 if columns.any() else 0.0)
     global_contrast = (max(0.0, float(np.nanmax(signal) - baseline))
                        if np.isfinite(signal).any() else 0.0)
-    clearance = int(settings["quality"]["min_signal_gap_clearance_px"])
-    support_columns = np.flatnonzero(columns) + xr[0]
-    expanded = np.unique((support_columns[:, None]
-                          + np.arange(-clearance, clearance + 1)).ravel())
-    lo, hi = yr[0] - clearance, yr[1] + clearance
-    safe = bool(len(expanded) and lo >= 0 and hi <= data.image.shape[0]
-                and expanded.min() >= 0 and expanded.max() < data.image.shape[1])
-    if safe:
-        invalid = data.mask[lo:hi, expanded] | ~np.isfinite(data.image[lo:hi, expanded])
-        safe = not bool(invalid.any())
     return {"data": data, "yr": yr, "xr": xr, "columns": columns,
             "scope": scope, "signal_contrast": contrast,
-            "global_signal_contrast": global_contrast,
-            "signal_clear_of_gap": safe, "clearance_px": clearance}
+            "global_signal_contrast": global_contrast}
 
 
 def background_candidate(data, offset, context, settings):
@@ -351,7 +313,6 @@ def background_candidate(data, offset, context, settings):
               "score_scope": context["scope"], "usable": False,
               "signal_rows_px": [int(value) for value in yr],
               "scored_column_count": int(columns.sum()), "scored_valid_column_count": 0,
-              "signal_clear_of_gap": context["signal_clear_of_gap"],
               "gap_overlap": outside, "reason": "outside_detector" if outside else None,
               "contrast_fraction": None, "full_box_contrast_fraction": None}
     if "row_id" in context:
@@ -383,45 +344,29 @@ def background_candidate(data, offset, context, settings):
     return result
 
 
-def background_frame_choice(candidates, context, settings):
-    """Validate a fixed single background or the existing two-side gap fallback."""
+def background_frame_diagnostics(candidates, context, settings):
+    """Score a fixed background selection without changing offsets by frame."""
     single_requested = settings["integration"].get("background_count", 2) == 1
     if single_requested and len(candidates) != 1:
         return None
-    retained = candidates
-    reason = "single_background_requested" if single_requested else None
-    paired = len(candidates) == 2 and candidates[0]["offset_px"] * candidates[1]["offset_px"] < 0
-    if settings["integration"]["allow_one_sided_backgrounds"] and paired:
-        blocked = [item for item in candidates if item["gap_overlap"]]
-        if blocked:
-            retained = [item for item in candidates if not item["gap_overlap"]]
-            if (len(retained) != 1 or not context["signal_clear_of_gap"]
-                    or not retained[0]["usable"]
-                    or retained[0]["contrast_fraction"]
-                    > settings["quality"]["max_background_peak_fraction"]):
-                return None
-            reason = "opposite_background_overlaps_detector_or_mask_gap"
-    if not retained or not all(item["usable"] for item in retained):
+    if not candidates or not all(item["usable"] and not item["gap_overlap"] for item in candidates):
         return None
     support = min(item.get("scored_valid_column_count", item["scored_column_count"])
-                  / max(item["scored_column_count"], 1) for item in retained)
-    if single_requested and (support <= 0
-            or support < settings["quality"]["min_roi_valid_fraction"]
+                  / max(item["scored_column_count"], 1) for item in candidates)
+    if single_requested and (support <= 0 or support < settings["quality"]["min_roi_valid_fraction"]
             or any(item["contrast_fraction"] > settings["quality"]["max_background_peak_fraction"]
-                   for item in retained)):
+                   for item in candidates)):
         return None
     return {"frame": candidates[0]["frame"], "phi_deg": candidates[0]["phi_deg"],
-            "offsets_px": [item["offset_px"] for item in retained],
-            "contrast_fraction": max(item["contrast_fraction"] for item in retained),
-            "one_sided_reason": reason, "signal_clearance_px": context["clearance_px"],
-            "signal_column_support_fraction": support,
-            "discarded_offsets_px": [item["offset_px"] for item in candidates
-                                     if item not in retained]}
+            "offsets_px": [item["offset_px"] for item in candidates],
+            "contrast_fraction": max(item["contrast_fraction"] for item in candidates),
+            "single_background_requested": single_requested,
+            "signal_column_support_fraction": support}
 
 
 def choose_backgrounds(measurements, row, geometry, settings, *, contexts=None,
                        require_complete=False):
-    """Select common offsets; a gap can require one opposite-side box in a frame."""
+    """Select one common offset list that passes the checked frames."""
     cfg = settings["integration"]
     h = geometry["height_px"]
     offsets = cfg["background_offsets_px"]
@@ -468,17 +413,53 @@ def choose_backgrounds(measurements, row, geometry, settings, *, contexts=None,
     check(any(item["usable"] for items in records.values() for item in items),
           "No usable background regions; specify different offsets")
 
-    def choices(selected):
-        if require_complete and any(not complete_candidate(records[offset][i])
+    def choices(selected, *, strict=False):
+        if (require_complete or strict) and any(not complete_candidate(records[offset][i])
                 for offset in selected for i in range(len(contexts))):
             return None
-        result = [background_frame_choice([records[offset][i] for offset in selected],
+        result = [background_frame_diagnostics([records[offset][i] for offset in selected],
                                           context, settings)
                   for i, context in enumerate(contexts)]
         for context, item in zip(contexts, result):
             if item is not None and "row_id" in context:
                 item["row_id"] = context["row_id"]
         return result if all(item is not None for item in result) else None
+
+    def finish(selected, frame_choices, *, omitted=None):
+        diagnostics = geometry["background_diagnostics"]
+        diagnostics["selected_frames"] = frame_choices
+        if omitted is not None:
+            affected = [{key: item[key] for key in (
+                "frame", "phi_deg", "offset_px", "rows_px", "row_id") if key in item}
+                for item in records[omitted] if item["gap_overlap"]]
+            diagnostics["gap_fallback"] = {
+                "retained_offsets_px": [int(offset) for offset in selected],
+                "omitted_offsets_px": [int(omitted)],
+                "affected_frames": affected,
+                "reason": "detector_mask_gap",
+            }
+        return [int(offset) for offset in selected], float(max(
+            item["contrast_fraction"] for item in frame_choices))
+
+    def gap_fallback(pairs):
+        # Drop a gap-affected side for the whole dataset, never by frame/row.
+        # The retained side must independently pass coverage and contrast checks.
+        candidates = []
+        for negative, positive in pairs:
+            for retained, omitted in ((negative, positive), (positive, negative)):
+                if not any(item["gap_overlap"] and item["reason"] != "outside_detector"
+                           for item in records[omitted]):
+                    continue
+                frames = choices([retained], strict=True)
+                if frames is not None:
+                    candidates.append((retained, omitted, frames))
+        if not candidates:
+            return None
+        retained, omitted, frames = min(candidates, key=lambda item: (
+            -min(frame["signal_column_support_fraction"] for frame in item[2]),
+            max(frame["contrast_fraction"] for frame in item[2]),
+            abs(item[0]), item[0], abs(item[1])))
+        return finish([retained], frames, omitted=omitted)
 
     if cfg["background_offsets_px"] is None:
         if count == 1:
@@ -489,15 +470,20 @@ def choose_backgrounds(measurements, row, geometry, settings, *, contexts=None,
             offset, frame_choices = min(fixed, key=lambda item: (
                 -min(frame["signal_column_support_fraction"] for frame in item[1]),
                 max(frame["contrast_fraction"] for frame in item[1]), abs(item[0]), item[0]))
-            geometry["background_diagnostics"]["selected_frames"] = frame_choices
-            return [int(offset)], float(max(frame["contrast_fraction"] for frame in frame_choices))
+            return finish([offset], frame_choices)
         elif independent:
             selected = []
             for sign in (-1, 1):
-                side = [item for item in scored if np.sign(item[0]) == sign]
-                check(side, "No usable background region on one side; "
-                      "specify different offsets")
-                selected.append(min(side, key=lambda item: (item[1], abs(item[0])))[0])
+                side = [item for item in scored if np.sign(item[0]) == sign
+                        and choices([item[0]]) is not None]
+                if side:
+                    selected.append(min(side, key=lambda item: (item[1], abs(item[0])))[0])
+            if len(selected) != 2:
+                fallback = gap_fallback([(negative, positive) for negative in offsets if negative < 0
+                                         for positive in offsets if positive > 0])
+                if fallback is not None:
+                    return fallback
+                check(False, "No usable background region on one side; specify different offsets")
         else:
             pairs = []
             for distance in offsets:
@@ -506,20 +492,26 @@ def choose_backgrounds(measurements, row, geometry, settings, *, contexts=None,
                     if frame_choices is not None:
                         score = max(item["contrast_fraction"] for item in frame_choices)
                         pairs.append((score, distance))
-            check(pairs, "No usable symmetric background pair; adjust the search "
-                  "or explicitly allow independent backgrounds")
+            if not pairs:
+                fallback = gap_fallback([(-distance, distance) for distance in offsets
+                                         if distance > 0 and -distance in records])
+                if fallback is not None:
+                    return fallback
+                check(False, "No usable symmetric background pair; adjust the search "
+                      "or explicitly allow independent backgrounds")
             _, distance = min(pairs)
             selected = [-distance, distance]
     else:
         selected = offsets
     frame_choices = choices(selected)
+    if frame_choices is None and count == 2 and len(selected) == 2 and selected[0] * selected[1] < 0:
+        fallback = gap_fallback([tuple(sorted(selected))])
+        if fallback is not None:
+            return fallback
     message = ("Single background fails contrast or unmasked-coverage requirements" if count == 1
-               else "Background offsets are outside usable detector coverage; "
-                    "a gap exception requires clear signal and a clean opposite side")
+               else "Background offsets fail shared detector coverage or contrast requirements")
     check(frame_choices is not None, message)
-    geometry["background_diagnostics"]["selected_frames"] = frame_choices
-    return [int(offset) for offset in selected], float(max(
-        item["contrast_fraction"] for item in frame_choices))
+    return finish(selected, frame_choices)
 
 
 def detect_qy_rows(data, settings):
@@ -550,16 +542,15 @@ def detect_qy_rows(data, settings):
             "reference_frame": data.name}
 
 
-def slice_coverage(dataset, center, width, native_slice=None):
-    """Report provenance from the native slicer, without repeating its selection rule."""
-    if native_slice is None:
-        slices, _ = slice_reduced_dataset(dataset, [center], q_widths=width, show_plot=False)
-        native_slice = slices.data[0]
-    accepted = set(native_slice.source_indices)
+def slice_coverage(dataset, center, width):
+    """Report coverage in the harness using the native slicer's selection rules."""
+    qmin, qmax = center - width / 2, center + width / 2
     coverage = []
-    for index, data in enumerate(dataset.datas):
-        selected_pixels = int(native_slice.selected_pixel_counts[index])
-        valid = index in accepted
+    for data in dataset.datas:
+        selection = np.flatnonzero((data.qsx >= qmin) & (data.qsx <= qmax))
+        selected_pixels = len(selection)
+        valid = bool(selected_pixels and not data.mask[selection].any()
+                     and not np.isnan(data.Iq[selection]).any())
         reason = None if valid else (
             "outside_q_range" if not selected_pixels else "masked_or_nonfinite_selection"
         )
@@ -636,14 +627,12 @@ def slice_proposal(integrated, settings, *, shared_width_Ainv=None):
     if cfg["widths_Ainv"] is None:
         width = max(widths) if shared_width_Ainv is None else shared_width_Ainv
         widths = [width] * len(centers)
-    slices, _ = slice_reduced_dataset(
-        integrated, centers, q_widths=widths, mode=cfg["mode"], show_plot=False)
     proposals = []
-    for center, width, native_slice in zip(centers, widths, slices.data):
+    for center, width in zip(centers, widths):
         neighbors = [abs(center - other) for other in centers if other != center]
         if neighbors:
             check(width < min(neighbors), "A slice width reaches an adjacent peak center")
-        coverage = slice_coverage(integrated, center, width, native_slice=native_slice)
+        coverage = slice_coverage(integrated, center, width)
         fraction = sum(item["valid"] for item in coverage) / len(coverage)
         reference_coverage = coverage[reference_index]
         skip_reasons = []

@@ -141,22 +141,24 @@ def compact_summary(directory, settings, resolved, state):
                              f"(limit {number(settings['quality']['max_background_peak_fraction'])}). "
                              "Candidate offsets, sides, mask evidence, and full-box comparison scores "
                              "are stored in the integration checkpoint's `background_diagnostics`.")
-            exceptions = [item for item in diagnostics.get("production_frames", selected)
-                          if item.get("one_sided_reason")]
-            for item in exceptions:
-                if item["one_sided_reason"] == "single_background_requested":
-                    lines.append(f"- **Single background requested — {row}**, frame `{item['frame']}`, "
-                                 f"corrected φ {number(item['phi_deg'])}°: use offsets "
-                                 f"{item['offsets_px']} px; contrast {number(item['contrast_fraction'])}. "
-                                 "The selected side is assumed to represent the signal background; "
-                                 "signal masks and slice-coverage checks still apply.")
-                    continue
-                lines.append(f"- **One-sided background — {row}**, frame `{item['frame']}`, "
-                             f"corrected φ {number(item['phi_deg'])}°: use offsets {item['offsets_px']} px; "
-                             f"discard {item['discarded_offsets_px']} px on the detector/mask-gap side. "
-                             f"Signal box and slice columns are clear by at least {item['signal_clearance_px']} px; "
-                             f"retained background contrast {number(item['contrast_fraction'])}. "
-                             "This assumes the opposite-side background represents the signal background.")
+            requested = [item for item in diagnostics.get("production_frames", selected)
+                         if item.get("single_background_requested")]
+            if requested:
+                lines.append(f"- **Single background requested — {row}**: use the fixed offsets "
+                             f"{record['result']['background_offsets_px']} px across every frame. "
+                             "The selected side is assumed to represent the signal background; "
+                             "signal masks and slice-coverage checks still apply.")
+            fallback = diagnostics.get("gap_fallback")
+            if fallback:
+                lines.append(f"- **Background detector/mask gap — {row}**: omitted offsets "
+                             f"{fallback['omitted_offsets_px']} px throughout the dataset; "
+                             f"using fixed offsets {fallback['retained_offsets_px']} px across "
+                             "every frame and requested qy row. Continued without background approval. "
+                             "The retained side is assumed to represent the signal background.")
+                for item in fallback["affected_frames"]:
+                    label = f" / {item['row_id']}" if "row_id" in item else ""
+                    lines.append(f"  - Gap evidence: `{item['frame']}`{label}, corrected φ "
+                                 f"{number(item['phi_deg'])}°, omitted offset {item['offset_px']} px.")
 
     rejected, partial, kept = [], [], 0
     for name, record in stages.items():
