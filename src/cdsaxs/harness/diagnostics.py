@@ -6,6 +6,8 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import peak_widths
 
 from .. import tools
+from ..data.dataset import ReducedDataset
+from ..reduction import slice_reduced_dataset
 from copy import deepcopy
 from .config import is_symmetric_background_pair
 
@@ -542,22 +544,24 @@ def detect_qy_rows(data, settings):
             "reference_frame": data.name}
 
 
-def slice_coverage(dataset, center, width):
-    """Report coverage in the harness using the native slicer's selection rules."""
-    qmin, qmax = center - width / 2, center + width / 2
+def slice_coverage(dataset, center, width, *, mode="sum"):
+    """Report native per-frame slice acceptance without repeating its rules.
+
+    The native slicer exposes selected pixels only for accepted frames and
+    does not distinguish rejection causes. Rejected pixel counts are unknown.
+    """
     coverage = []
     for data in dataset.datas:
-        selection = np.flatnonzero((data.qsx >= qmin) & (data.qsx <= qmax))
-        selected_pixels = len(selection)
-        valid = bool(selected_pixels and not data.mask[selection].any()
-                     and not np.isnan(data.Iq[selection]).any())
-        reason = None if valid else (
-            "outside_q_range" if not selected_pixels else "masked_or_nonfinite_selection"
-        )
+        slices, _ = slice_reduced_dataset(
+            ReducedDataset([data]), [center], q_widths=width,
+            show_plot=False, mode=mode)
+        native_slice = slices.data[0]
+        valid = bool(len(native_slice.Iq))
+        selected_pixels = len(native_slice.plotting_data["qsx"]) if valid else None
         coverage.append({"frame": data.data2d.name,
                          "phi_deg": float(data.sample_phi_deg),
                          "valid": valid, "selected_pixels": selected_pixels,
-                         "reason": reason})
+                         "reason": None if valid else "native_slice_rejected"})
     return coverage
 
 
@@ -632,7 +636,7 @@ def slice_proposal(integrated, settings, *, shared_width_Ainv=None):
         neighbors = [abs(center - other) for other in centers if other != center]
         if neighbors:
             check(width < min(neighbors), "A slice width reaches an adjacent peak center")
-        coverage = slice_coverage(integrated, center, width)
+        coverage = slice_coverage(integrated, center, width, mode=cfg["mode"])
         fraction = sum(item["valid"] for item in coverage) / len(coverage)
         reference_coverage = coverage[reference_index]
         skip_reasons = []

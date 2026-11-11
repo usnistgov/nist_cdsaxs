@@ -340,8 +340,12 @@ corrected φ = 0°, even when its overall angular coverage passes the configured
 minimum. This applies to supplied centers and detected peaks on every requested
 qy row. Missing reference-frame data include masked/nonfinite selections and bins
 outside its integrated q range; finite nonpositive intensity alone is not a veto.
-The checkpoint state records the reference frame and corrected angle, its per-slice
-validity/rejection reason, overall coverage, and `skip_reasons`. Rejected bins are
+Coverage is determined by calling `cdsaxs.reduction.slice_reduced_dataset` for each
+frame. The checkpoint state records the reference frame and corrected angle, its
+per-slice validity, overall coverage, and `skip_reasons`. Rejected frames have reason
+`native_slice_rejected` and `selected_pixels: null`: the native slicer does not expose
+rejection causes or pixel counts for rejected selections. Accepted-frame pixel
+counts come from its returned plotting data. Rejected bins are
 excluded from slice overlays and exports. Automatic mode can skip rejected slices
 with `skip_gap_slices`; otherwise the reduction enters `needs_review`. Review users
 remove that center or revise its width. Reduction uses measured, unmasked data.
@@ -598,8 +602,9 @@ The harness delegates peak detection and center-of-mass refinement to `cdsaxs.to
 box bounds to `Data2D.get_box_dims_size`, and profile integration to the native
 box methods. Native fractional-center conventions apply; clipped integration boxes
 are rejected. SDD peak orders come from the native calibration diagnostic, avoiding
-a second peak search. Harness coverage reports apply the native slice mask and
-boundary rules, so exported and previewed selections use the same criteria.
+a second peak search. Harness coverage reports use the results of
+`cdsaxs.reduction.slice_reduced_dataset`, so exported and previewed selections use
+the same criteria without duplicating slice mask or boundary rules.
 Automatic proposal limits, background scoring, fit-quality checks, and review
 checkpoints remain harness responsibilities.
 

@@ -17,7 +17,8 @@ def status(record):
 
 def lost_frames(item):
     names = {"outside_q_range": "outside q range",
-             "masked_or_nonfinite_selection": "masked/nonfinite"}
+             "masked_or_nonfinite_selection": "masked/nonfinite",
+             "native_slice_rejected": "rejected by native slicer"}
     counts = Counter(point.get("reason") for point in item.get("coverage", [])
                      if not point["valid"])
     return "; ".join(f"{names.get(reason, reason or 'unavailable')}: {count}"

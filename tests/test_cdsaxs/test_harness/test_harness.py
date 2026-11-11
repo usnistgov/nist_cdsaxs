@@ -710,7 +710,8 @@ def test_physical_qy_rows_and_pixel_offsets(settings):
 
 
 @pytest.mark.parametrize("case", ["normal", "masked", "nan", "negative", "empty", "endpoints"])
-def test_harness_coverage_matches_native_slicer_without_metadata(settings, case):
+@pytest.mark.parametrize("mode", ["sum", "mean"])
+def test_harness_coverage_matches_native_slicer_without_metadata(settings, case, mode):
     write_images(settings, angles=(-10, 0, 10))
     dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
     row = {"row_id": "qy0", "offset_qdy_px": 0}
@@ -732,14 +733,42 @@ def test_harness_coverage_matches_native_slicer_without_metadata(settings, case)
         reference.Iq[selection[0]] = np.nan
     elif case == "empty":
         center = 99.0
-    report = slice_coverage(integrated, center, width)
+    report = slice_coverage(integrated, center, width, mode=mode)
     from cdsaxs.data.dataset import ReducedDataset
     for profile, coverage in zip(integrated.datas, report):
-        native, _ = slice_reduced_dataset(ReducedDataset([profile]), [center], width, show_plot=False)
+        native, _ = slice_reduced_dataset(
+            ReducedDataset([profile]), [center], width, show_plot=False, mode=mode)
         assert coverage["valid"] == bool(len(native.data[0].Iq))
-        expected_count = np.count_nonzero((profile.qsx >= center - width / 2) &
-                                         (profile.qsx <= center + width / 2))
+        expected_count = len(native.data[0].plotting_data["qsx"]) if coverage["valid"] else None
         assert coverage["selected_pixels"] == expected_count
+        assert coverage["reason"] == (None if coverage["valid"] else "native_slice_rejected")
+
+
+def test_slice_proposal_follows_native_slicer_acceptance(settings, monkeypatch):
+    from cdsaxs.harness import diagnostics
+
+    write_images(settings, angles=(-10, 0, 10))
+    dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+    integrated = integrate_row(
+        dataset, {"row_id": "qy0", "offset_qdy_px": 0},
+        {**settings["integration"], "background_offsets_px": None})
+    reference = integrated.datas[1]
+    center = float(reference.qsx[80 - reference.limits_axis1[0]])
+    settings["slices"].update(centers_qsx_Ainv=[center], widths_Ainv=0.001)
+    assert not slice_proposal(integrated, settings)["slices"][0]["skip"]
+
+    def reject_slice(*args, **kwargs):
+        slices, figure = slice_reduced_dataset(*args, **kwargs)
+        # A future native acceptance change must govern harness decisions too.
+        for native_slice in slices.data:
+            native_slice.Iq = np.array([])
+        return slices, figure
+
+    monkeypatch.setattr(diagnostics, "slice_reduced_dataset", reject_slice)
+    item = slice_proposal(integrated, settings)["slices"][0]
+    assert item["angle_coverage"] == 0
+    assert item["skip_reasons"] == ["invalid_near_zero_frame", "insufficient_angle_coverage"]
+    assert all(point["reason"] == "native_slice_rejected" for point in item["coverage"])
 
 
 def test_gap_coverage_and_background_boundaries(settings):
@@ -754,7 +783,7 @@ def test_gap_coverage_and_background_boundaries(settings):
     center = float(reduced.datas[0].qsx[80 - reduced.datas[0].limits_axis1[0]])
     report = slice_coverage(reduced, center, 0.001)
     assert report[0]["valid"] is False
-    assert report[0]["reason"] == "masked_or_nonfinite_selection"
+    assert report[0]["reason"] == "native_slice_rejected"
     with pytest.raises(NeedsReview, match="leaves detector"):
         integrate_row(dataset, row, {**geometry, "background_offsets_px": [50]})
 
@@ -787,7 +816,7 @@ def test_near_zero_slice_veto_uses_corrected_phi_and_native_mask(
     assert item["reference_frame_valid"] is not expected_skip
     assert item["skip_reasons"] == (["invalid_near_zero_frame"] if expected_skip else [])
     assert item["reference_frame_reason"] == (
-        "masked_or_nonfinite_selection" if expected_skip else None)
+        "native_slice_rejected" if expected_skip else None)
     # Intensity sign is a later export filter, rather than geometric coverage.
     if not expected_skip:
         reference.Iq[:] = -1.0
