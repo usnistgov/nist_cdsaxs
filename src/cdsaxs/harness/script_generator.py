@@ -72,8 +72,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from cdsaxs.loaders import load_data as loaders
 from cdsaxs.data.dataset import Dataset, ReducedDataset, ReducedSlices
-from cdsaxs.reduction import integrate_qy_row, slice_reduced_dataset
+from cdsaxs.reduction import slice_reduced_dataset
 from cdsaxs.plotting import plotting
+from cdsaxs.tools import default_mask
 
 SETTINGS_FILE = Path(__file__).resolve().with_name("settings.json")
 
@@ -180,11 +181,28 @@ def reduce():
         if not isinstance(widths, list):
             widths = [widths] * len(row["slices"]["centers_qsx_Ainv"])
         row["slices"]["widths_Ainv"] = widths
-        integrated = integrate_qy_row(
-            dataset, height_px=geometry["height_px"], width_px=geometry["width_px"],
-            target_qsy_Ainv=row["target_qsy_Ainv"], offset_qdy_px=row["offset_qdy_px"],
-            background_offsets_px=(backgrounds if geometry["subtract_background"] else None),
-            mode=geometry["mode"], row_id=row["row_id"])
+        integrated = ReducedDataset()
+        for key, data in dataset.datas.items():
+            beam_y, beam_x = data.metadata["center_px_detector"]
+            if row["offset_qdy_px"] is not None:
+                center_y = beam_y - row["offset_qdy_px"]
+            elif "center_qdy_px" in row:
+                centers = row["center_qdy_px"]
+                center_y = centers[key] if isinstance(centers, dict) else centers
+            elif row["target_qsy_Ainv"] == 0:
+                center_y = beam_y
+            else:
+                raise ValueError(f"Row {row['row_id']} requires accepted center_qdy_px settings")
+            yrange, xrange = data.get_box_dims_size(
+                geometry["height_px"], geometry["width_px"], center=(center_y, beam_x))
+            profile, _ = data.integrate_box(
+                mode=geometry["mode"], axis=0, show_plot=False,
+                range_qdy_px=yrange, range_qdx_px=xrange,
+                subtract_background_offset=(backgrounds if geometry["subtract_background"] else None))
+            profile.row_id = row["row_id"]
+            for component in ("Iq", "qsx", "qsy", "qsz", "qsr", "qs"):
+                profile.mask |= default_mask(getattr(profile, component))
+            integrated.add_data(profile)
         # Native integration outlines show exactly the boxes being used.
         save_figure(plotting.plot_data2d_integrate_box(integrated.datas[0], log_scale=False),
                     f"05_{row['row_id']}_integration")
@@ -316,6 +334,9 @@ def standalone_settings(settings, rows):
         if centers is None or widths is None:
             raise ValueError(f"Standalone export requires resolved slices for {row['row_id']}")
         item = deepcopy(row)
+        if (item.get("offset_qdy_px") is None and item["target_qsy_Ainv"] != 0
+                and "center_qdy_px" not in item):
+            raise ValueError(f"Standalone export requires accepted pixel centers for {row['row_id']}")
         row_slices[row["row_id"]] = {"centers_qsx_Ainv": deepcopy(centers),
                                      "widths_Ainv": compact_widths(widths), "mode": row_cfg["mode"]}
         if any(key in item for key in (

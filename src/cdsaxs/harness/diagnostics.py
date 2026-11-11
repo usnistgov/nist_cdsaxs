@@ -6,7 +6,6 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import peak_widths
 
 from .. import tools
-from ..reduction import qy_row_center
 from copy import deepcopy
 from .config import is_symmetric_background_pair
 
@@ -96,7 +95,8 @@ def row_center(data, row):
     target = row["target_qsy_Ainv"]
     check(np.nanmin(axis) <= target <= np.nanmax(axis),
           f"qy row {target:g} A^-1 is outside the detector")
-    return qy_row_center(data, target)
+    order = valid[np.argsort(axis[valid])]
+    return float(np.interp(target, axis[order], order))
 
 
 def box_ranges(data, row, geometry):

@@ -24,7 +24,7 @@ from cdsaxs.harness.script_generator import (
     STANDALONE_SCRIPT, compact_backgrounds, publish_standalone, restore_harness, standalone_settings,
 )
 from cdsaxs.harness.diagnostics import shared_geometry_proposal
-from cdsaxs.reduction import integrate_qy_row, slice_reduced_dataset
+from cdsaxs.reduction import slice_reduced_dataset
 
 
 @pytest.fixture
@@ -205,7 +205,8 @@ def test_generated_script_accepts_compact_and_existing_settings(settings, tmp_pa
     settings["corrections"]["footprint"] = False
     settings["output"]["figure_formats"] = []
     dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
-    centers = slice_parameters(integrate_qy_row(dataset, height_px=7, width_px=100), settings)[0]
+    centers = slice_parameters(dataset.integrate_dataset(
+        axis=0, width_qdy_px=7, width_qdx_px=100), settings)[0]
     settings["slices"].update(centers_qsx_Ainv=centers, widths_Ainv=[0.001] * len(centers))
     settings["integration"]["background_offsets_px"] = [-10]
     rows = ReductionRun.make_rows({"offsets_qdy_px": []})
@@ -322,18 +323,27 @@ def test_cli_can_disable_inherited_resume_settings_export(settings, tmp_path):
 
 
 @pytest.mark.parametrize("profile", ["compact", "full"])
-@pytest.mark.parametrize("extra_rows", [False, True])
-def test_standalone_export_copied_without_harness(settings, tmp_path, profile, extra_rows):
+@pytest.mark.parametrize("row_mode", ["central", "pixels", "qsy"])
+def test_standalone_export_copied_without_harness(settings, tmp_path, profile, row_mode):
     """Only two copied files reproduce native CSVs with harness imports blocked."""
     import shutil
+    extra_rows = row_mode != "central"
     write_images(settings, angles=(-30, 0, 0.5, 30), extra_rows=extra_rows)
     settings["output"].update(profile=profile, script_mode="standalone", export_harness_settings=True)
     settings["mode"] = "automatic"
     settings["allowed_decisions"] = ["choose_slice_locations_and_widths", "skip_gap_slices"]
-    settings["additional_qy_rows"].update(enabled=extra_rows, offsets_qdy_px=[-15, 15] if extra_rows else None)
+    settings["additional_qy_rows"].update(
+        enabled=extra_rows, offsets_qdy_px=[-15, 15] if row_mode == "pixels" else None)
     settings["integration"]["search_height_px"] = 12
     settings["offsets"].update(sample_phi_offset_deg=0.2, sample_chi_offset_deg=0.1,
                                sample_omega_offset_deg=0.1)
+    if row_mode == "qsy":
+        dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
+        dataset.apply_rotation_correction_all_data(verbose=False)
+        reference = min(dataset.datas.values(), key=lambda data: abs(data.sample_phi_deg))
+        column = round(reference.metadata["center_px_detector"][1])
+        settings["additional_qy_rows"]["offsets_qsy_Ainv"] = [
+            float(reference.qsy[y, column]) for y in (25, 55)]
     settings["export"].update(split_phi=True, zero_phi="separate")
     run = ReductionRun(settings, tmp_path / "run")
     assert run.run()["status"] == "complete", run.state["events"]
@@ -342,6 +352,8 @@ def test_standalone_export_copied_without_harness(settings, tmp_path, profile, e
     assert set(portable) == {"sample_name", "input", "calibration", "offsets", "corrections",
                              "integration", "slices", "rows", "export", "output"}
     assert "quality" not in portable and "search" not in portable["calibration"]
+    assert all("center_qdy_px" in row for row in portable["rows"]
+               if row["offset_qdy_px"] is None)
     copied = tmp_path / "copied"
     copied.mkdir()
     for name in ("reduce_sample.py", "settings.json"):
@@ -473,15 +485,22 @@ def test_row_integration_overrides_must_match_shared(settings):
 
 
 @pytest.mark.parametrize("pixel_offset", [None, 15, -15])
-def test_native_qy_row_helper_matches_harness(settings, pixel_offset):
+def test_native_box_integration_matches_harness(settings, pixel_offset):
     write_images(settings, extra_rows=True)
     dataset = load_dataset(settings, settings["calibration"], settings["offsets"])
     row = {"row_id": "test", "target_qsy_Ainv": 0.0, "offset_qdy_px": pixel_offset}
     geometry = {key: settings["integration"][key] for key in (
         "height_px", "width_px", "mode", "background_offsets_px")}
     expected = integrate_row(dataset, row, geometry)
-    actual = integrate_qy_row(dataset, **geometry, **row)
-    for before, after in zip(expected.datas, actual.datas):
+    for before, data in zip(expected.datas, dataset.datas.values()):
+        beam_y, beam_x = data.metadata["center_px_detector"]
+        yrange, xrange = data.get_box_dims_size(
+            geometry["height_px"], geometry["width_px"],
+            center=(beam_y - (pixel_offset or 0), beam_x))
+        after, _ = data.integrate_box(
+            axis=0, mode=geometry["mode"], show_plot=False,
+            range_qdy_px=yrange, range_qdx_px=xrange,
+            subtract_background_offset=geometry["background_offsets_px"])
         np.testing.assert_allclose(before.Iq, after.Iq)
         np.testing.assert_allclose(before.qsy, after.qsy)
         np.testing.assert_array_equal(before.mask, after.mask)

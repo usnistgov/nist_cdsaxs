@@ -17,11 +17,13 @@ from ..data.dataset import Dataset, ReducedDataset, ReducedSlices
 from ..loaders import load_data as loaders
 from ..plotting import plotting
 from ..reduction import slice_reduced_dataset
+from ..tools import default_mask
 from .config import fingerprint, merge, read_json, slug, write_json
 from .jobs import close_locks, plan_batch, reserve
 from .diagnostics import (
     NeedsReview, box_ranges, check, common_slice_width, detect_qy_rows, fit_phi, geometry_proposal,
-    phi_figure, representative_frames, row_figure, shared_geometry_proposal, slice_parameters, slice_proposal,
+    phi_figure, representative_frames, row_center, row_figure, shared_geometry_proposal,
+    slice_parameters, slice_proposal,
 )
 from .script_generator import compact_widths, generate, publish_standalone, restore_harness
 from .reporting import compact_summary, recording_summary
@@ -236,7 +238,7 @@ def integrate_row(dataset, row, geometry):
     for profile in reduced.datas:
         profile.row_id = row["row_id"]
         for component in ("Iq", "qsx", "qsy", "qsz", "qsr", "qs"):
-            profile.mask |= ~np.isfinite(getattr(profile, component))
+            profile.mask |= default_mask(getattr(profile, component))
     return reduced
 
 
@@ -1059,9 +1061,18 @@ class ReductionRun:
         self.event(f"Exported {len(exports)} CSV files")
 
     def record_reductions(self, reductions, coverage=None):
-        # Geometry and slice coverage already live in their checkpoint records;
-        # compact output needs only the row identities to complete provenance.
-        self.state["rows"] = [row for row, _, _, _, _ in reductions]
+        # Resolve physical qsy targets here so standalone scripts need only
+        # accepted pixel centers and the existing native box APIs.
+        self.state["rows"] = []
+        for row, _, integrated, _, _ in reductions:
+            resolved_row = deepcopy(row)
+            if row.get("offset_qdy_px") is None:
+                centers = {profile.data2d.name: row_center(profile.data2d, row)
+                           for profile in integrated.datas}
+                values = list(centers.values())
+                resolved_row["center_qdy_px"] = (values[0] if all(
+                    value == values[0] for value in values) else centers)
+            self.state["rows"].append(resolved_row)
         if not self.compact:
             write_json(self.directory / "row_reductions.json", [
                 {"row": row, "integration": geometry, "slices": proposal}

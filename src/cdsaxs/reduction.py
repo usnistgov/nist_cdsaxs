@@ -13,48 +13,6 @@ from .data.dataset import (
 from .plotting import plotting
 
 
-def qy_row_center(data, target_qsy_Ainv=0.0, offset_qdy_px=None):
-    """Locate a row numerically; positive pixel offsets point upward.
-
-    No peak detection or scientific quality checks are performed. Sample-qsy
-    targets use interpolation at the calibrated beam column, in A^-1.
-    """
-    beam_y, beam_x = data.metadata["center_px_detector"]
-    if offset_qdy_px is not None:
-        return float(beam_y - offset_qdy_px)
-    column = int(np.clip(round(beam_x), 0, data.image.shape[1] - 1))
-    axis = data.qsy[:, column]
-    valid = np.flatnonzero(np.isfinite(axis))
-    order = valid[np.argsort(axis[valid])]
-    return float(np.interp(target_qsy_Ainv, axis[order], order))
-
-
-def integrate_qy_row(dataset, height_px, width_px, target_qsy_Ainv=0.0,
-                     offset_qdy_px=None, background_offsets_px=None,
-                     mode="sum", row_id="qy0"):
-    """Integrate a fixed qy row using native masks and fixed backgrounds.
-
-    Unlike the harness, this helper does not validate containment, background
-    contrast, or peak presence. Box dimensions and displacements are pixels.
-    Backgrounds are one signed pixel offset or a list of offsets to average,
-    applied equally to every frame.
-    """
-    ranges_y, ranges_x = {}, {}
-    for key, data in dataset.datas.items():
-        center = qy_row_center(data, target_qsy_Ainv, offset_qdy_px)
-        ranges_y[key], ranges_x[key] = data.get_box_dims_size(
-            height_px, width_px,
-            center=(center, data.metadata["center_px_detector"][1]))
-    reduced = dataset.integrate_dataset(
-        mode=mode, axis=0, range_qdy_px=ranges_y, range_qdx_px=ranges_x,
-        subtract_background_offset=background_offsets_px)
-    for profile in reduced.datas:
-        profile.row_id = row_id
-        for component in ("Iq", "qsx", "qsy", "qsz", "qsr", "qs"):
-            profile.mask |= ~np.isfinite(getattr(profile, component))
-    return reduced
-
-
 def slice_reduced_dataset(
     dataset: ReducedDataset,
     q_values,

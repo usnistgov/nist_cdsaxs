@@ -527,6 +527,16 @@ Existing row-local slice lists and the global `background_offsets_px` name remai
 supported. Replace dictionary and slice/frame background settings with one explicit
 global integer offset or list of integer offsets before reuse, then regenerate the
 reduction script using the updated harness. Native detector masks still apply.
+
+Physical qsy rows include an accepted `center_qdy_px` in standalone settings: a
+detector-row coordinate, or a mapping from frame ID to coordinate when it varies
+across frames. The harness resolves these positions before export. The script
+passes them to `Data2D.get_box_dims_size` and `Data2D.integrate_box`; it does no
+qsy-to-pixel interpolation. Edit these pixel centers to change standalone row
+positions, or regenerate settings when changing physical qsy targets, calibration,
+angular corrections, or frames.
+Pixel-offset rows retain their beam-relative `offset_qdy_px` settings.
+
 Old harness configurations must remove the retired
 `integration.allow_one_sided_backgrounds` and `quality.min_signal_gap_clearance_px`
 settings. Source fingerprints invalidate previous integration and slice checkpoints
