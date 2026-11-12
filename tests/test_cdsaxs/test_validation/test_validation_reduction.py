@@ -103,6 +103,7 @@ def _build_refactored_slices():
         q_values=Q_VALUES,
         q_widths=0.001,
         show_plot=False,
+        mode='mean',
     )
 
     refactored_slices = {}

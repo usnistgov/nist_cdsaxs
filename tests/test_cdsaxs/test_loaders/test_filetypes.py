@@ -147,6 +147,7 @@ class TestReadSmiH5(unittest.TestCase):
                 ])
             },
             'baseline': {
+                'time': np.array([1783555200.0]),
                 'energy_energy': np.array([16100.0]),
                 'pil2M_motor_z': np.array([5000.0]),
             },
@@ -154,6 +155,7 @@ class TestReadSmiH5(unittest.TestCase):
                 'pil2M_cam_acquire_time': np.array([0.2]),
             },
             'primary': {
+                'time': np.array([1783555200.0, 1783555201.0]),
                 'xbpm3_sumX': np.array([3.0, 1.8]),
                 'stage_phi': np.array([3.3, 2.1]),
                 'seq_num': np.array([1, 3]),
@@ -200,3 +202,31 @@ class TestReadSmiH5(unittest.TestCase):
         self.assertEqual(middle_metadata['sample_phi_deg'], -1.3)
         self.assertAlmostEqual(last_metadata['bpm'], 1.8599068901587745)
         self.assertEqual(last_metadata['sample_phi_deg'], -61.3)
+
+
+class TestReadNistEdf(unittest.TestCase):
+
+    def test_wavelength_spellings_units_and_phi_rounding(self):
+        image = np.arange(4, dtype=float).reshape(2, 2)
+        header = {
+            'ExposureTime': '2', 'PSize_1': '0.000172',
+            'CD_Ry': '1', 'CD_Rx': '2', 'Center_2': '3',
+            'Center_1': '4', 'SampleDistance': '5.42',
+            'Date': '2026-10-07', 'x': '1.5', 'z': '2.5',
+        }
+        for spelling in ('WaveLength', 'Wavelength'):
+            for phi, expected in (('12.3456', -12.35), ('-12.3456', 12.35)):
+                with self.subTest(spelling=spelling, phi=phi):
+                    with patch('cdsaxs.loaders.filetypes.fabio.open') as reader:
+                        opened = reader.return_value.__enter__.return_value
+                        opened.data = image
+                        opened.header = dict(header, CD_Phi=phi, **{spelling: '7e-11'})
+                        actual, filepath, metadata = filetypes.read_nist_edf('sample.edf')
+                    np.testing.assert_array_equal(actual, image)
+                    self.assertTrue(filepath.endswith('sample.edf'))
+                    self.assertAlmostEqual(metadata['wavelength_nm'], .07)
+                    self.assertAlmostEqual(metadata['pixel_size_um'], 172)
+                    self.assertAlmostEqual(metadata['sdd_cm'], 542)
+                    self.assertEqual(metadata['exposure_time_s'], 2)
+                    self.assertEqual(metadata['center_px'], (3., 4.))
+                    self.assertEqual(metadata['sample_phi_deg'], expected)

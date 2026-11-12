@@ -48,6 +48,7 @@ class TestSliceReducedDataset(unittest.TestCase):
             q_values=[0.1, 0.2],
             q_widths=0.002,
             show_plot=False,
+            mode='mean',
         )
 
         self.assertIsNone(fig)
@@ -89,6 +90,7 @@ class TestSliceReducedDataset(unittest.TestCase):
         )
 
         self.assertEqual(len(reduced_slices.data), 1)
+        self.assertEqual(reduced_slices.data[0].plotting_data, {'qsx': [], 'qsz': [], 'Iq': []})
         self.assertEqual(reduced_slices.data[0].Iq.size, 0)
         self.assertEqual(reduced_slices.data[0].q.size, 0)
 
@@ -104,6 +106,7 @@ class TestSliceReducedDataset(unittest.TestCase):
         )
 
         self.assertEqual(len(reduced_slices.data), 1)
+        self.assertEqual(reduced_slices.data[0].plotting_data, {'qsx': [], 'qsz': [], 'Iq': []})
         self.assertEqual(reduced_slices.data[0].Iq.size, 0)
         self.assertEqual(reduced_slices.data[0].q.size, 0)
 
@@ -116,6 +119,7 @@ class TestSliceReducedDataset(unittest.TestCase):
         )
 
         self.assertEqual(len(reduced_slices.data), 1)
+        self.assertEqual(reduced_slices.data[0].plotting_data, {'qsx': [], 'qsz': [], 'Iq': []})
         self.assertEqual(reduced_slices.data[0].Iq.size, 0)
         self.assertEqual(reduced_slices.data[0].q.size, 0)
         self.assertAlmostEqual(reduced_slices.data[0].qsx, 0.5)
@@ -137,9 +141,16 @@ class TestSliceReducedDataset(unittest.TestCase):
             show_plot=False,
             mode='sum',
         )
+        reduced_slices_default, _ = slice_reduced_dataset(
+            dataset=dataset,
+            q_values=[0.1],
+            q_widths=0.002,
+            show_plot=False,
+        )
 
         np.testing.assert_allclose(reduced_slices_mean.data[0].Iq, np.array([2.0, 5.0]))
         np.testing.assert_allclose(reduced_slices_sum.data[0].Iq, np.array([6.0, 15.0]))
+        np.testing.assert_allclose(reduced_slices_default.data[0].Iq, np.array([6.0, 15.0]))
 
     def test_slice_metadata_tracks_slice_and_integrated_axes(self):
         reduced_slices, _ = slice_reduced_dataset(
@@ -201,3 +212,16 @@ class TestSliceReducedDataset(unittest.TestCase):
         self.assertEqual(call_kwargs['q_bins'], [(0.099, 0.1, 0.101), (0.199, 0.2, 0.201)])
         self.assertTrue(call_kwargs['interpolated_data'])
         self.assertEqual(call_kwargs['slice_color'], 'cyan')
+
+
+    def test_plotting_data_retains_original_points_for_mean_and_sum(self):
+        dataset = self._make_multi_selection_dataset()
+        for mode in ('mean', 'sum'):
+            with self.subTest(mode=mode):
+                slices, _ = slice_reduced_dataset(
+                    dataset, q_values=[0.1], q_widths=0.002,
+                    mode=mode, show_plot=False)
+                points = slices.data[0].plotting_data
+                for key in ('qsx', 'qsz', 'Iq'):
+                    np.testing.assert_allclose(
+                        points[key], np.concatenate([getattr(d, key) for d in dataset.datas]))
