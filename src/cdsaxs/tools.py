@@ -3,6 +3,7 @@ import inspect
 import warnings
 
 import csv
+import re
 import numpy as np
 from PIL import Image
 from scipy.optimize import curve_fit
@@ -957,7 +958,14 @@ def export_metadata(dataset, timestamp):
             keyslist = []
             for keys in dataset.datas.keys():
                 keyslist.append(keys)
-            keyslist.sort(key=lambda x: float(x))  # Sort keys numerically
+            keyslist.sort(  
+                key=lambda x: [     #fake natural sort without importing natsort
+                    (1, int(part))
+                    if re.fullmatch(r"-?\d+", part)
+                    else (0, part.casefold())
+                    for part in re.split(r"(-?\d+)", str(x))
+                ]
+            )
 
             headers = ["Key"] + keyslist
             writer.writerow(headers)
